@@ -53,9 +53,11 @@ erDiagram
         int roofline_uuid PK
         int kernel_uuid FK
         float total_flops
+        float l0_cache_data
         float l1_cache_data
         float l2_cache_data
         float hbm_cache_data
+        float lds_cache_data
     }
 
     compute_kernel_metric_value {
@@ -78,9 +80,11 @@ erDiagram
         int roofline_uuid PK
         int workload_id FK
         float total_flops
+        float l0_cache_data
         float l1_cache_data
         float l2_cache_data
         float hbm_cache_data
+        float lds_cache_data
     }
 
     compute_metadata {

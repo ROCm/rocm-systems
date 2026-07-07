@@ -78,11 +78,11 @@ struct buffer_tracing_service
 struct dispatch_counter_collection_service
 {
     // Contains a vector of counter collection instances associated with this context.
-    // Each instance is assocated with an agent and a counter collection profile.
+    // Each instance is associated with an agent and a counter collection profile.
     // Contains callback information along with other data needed to collect/process
     // counters.
     std::vector<std::shared_ptr<counters::counter_callback_info>> callbacks{};
-    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
     common::Synchronized<bool> enabled{false};
@@ -94,7 +94,7 @@ struct spm_dispatch_counter_collection_service
     // Contains callback information along with other data needed to collect/process
     // SPM counters.
     std::vector<std::shared_ptr<spm::spm_counter_callback_info>> callbacks{};
-    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
     common::Synchronized<bool> enabled{false};

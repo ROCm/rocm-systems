@@ -26,6 +26,9 @@
 set -e
 
 src_path=$(dirname "$(realpath $0)")/../../
+if [[ "${ASAN}" == true ]]; then
+    export HSA_XNACK=1
+fi
 
 cmake \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
@@ -37,6 +40,7 @@ cmake \
     -DBUILD_PYTHON_TESTS=ON \
     -DBUILD_UNIT_TESTS=OFF \
     -DBUILD_EXAMPLES=ON \
+    -DBUILD_CTESTS=ON \
     -DPROFILE=OFF \
     -DUSE_GDA=OFF \
     -DUSE_RO=OFF \

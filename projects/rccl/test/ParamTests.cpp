@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "graph/topo.h"
 
 namespace RcclUnitTesting {
 TEST(ParamTests, initEnv_ParseValidConfFile) {
@@ -42,15 +43,29 @@ TEST(ParamTests, ncclLoadParam_InvalidParam) {
       []()
       {
           int64_t cache = -1;
+          int8_t noCache = -1; // uninitialized sentinel, matches NCCL_PARAM macro
           const int64_t defaultVal = 12345; // Dummy input value
 
           // Force overflow: value exceeds int64_t max (9223372036854775807)
           setenv("TEST_INVALID_PARAM", "99999999999999999999",
                  1); // Dummy variable and value
-          ncclLoadParam("TEST_INVALID_PARAM", defaultVal, -1, &cache);
+          ncclLoadParam("TEST_INVALID_PARAM", defaultVal, -1, &cache, &noCache);
           unsetenv("TEST_INVALID_PARAM");
 
           ASSERT_EQ(cache, defaultVal); // Cache should be set to default value
+      }
+  );
+}
+
+TEST(ParamTests, ncclPxnC2cParam_DefaultOff) {
+  RUN_ISOLATED_TEST(
+      "ncclPxnC2cParam_DefaultOff",
+      []()
+      {
+          initEnv();
+          // No-op on xGMI; default must stay off.
+          unsetenv("NCCL_PXN_C2C");
+          ASSERT_EQ(ncclParamPxnC2c(), 0);
       }
   );
 }

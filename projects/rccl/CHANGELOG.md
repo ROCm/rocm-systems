@@ -2,42 +2,215 @@
 
 Full documentation for RCCL is available at [https://rccl.readthedocs.io](https://rccl.readthedocs.io)
 
-## Unreleased - RCCL 2.28.3 for ROCm 7.11
+## RCCL 2.30.4 for ROCm 7.14.0
+
+### Added
+* Compatibility with NCCL 2.30.4.
+* Compatibility with NCCL 2.29.7.
+* Compatibility with NCCL 2.28.9.
+* Added proxytrace profiler plugin and core proxy-diagnostics hooks (`RCCL_PROXYTRACE`).
+* Added `ncclBarrierSession` LSA validation for barrier sessions.
+* Added symmetric-memory ReduceScatter kernel (`RailA2A_LsaLD`) on gfx942/gfx950.
+* Added bias (accumulation) AllReduce on gfx1250 (MI450).
+* Added optimized scale-up ReduceScatter, AllGather, and AllToAll kernels.
+* Added ROCProfiler-SDK coverage for `ncclCommGrow` and `ncclCommGetUniqueId`.
+* P2P batching auto-enabled for gfx950 in combination with non-AINIC NICs.
+* Display HIP/ROCm runtime versions in `NCCL_DEBUG` output.
+* Detect ROCm version via core symlink for multi-architecture installs.
+* Skip DDA IPC initialization for directMode and MNNVL topologies.
+* Load versioned `libamd_smi` SONAME instead of an unversioned symlink.
+* Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
+* Added RCCL examples to the repository.
+* Added `RCCL host API` pull-in from NCCL 2.30.
+
+### Changed
+* Enabled WarpSpeed auto mode for grow communicators.
+* Refactored AllGather algorithm selection; hierarchical AllGather now enabled by default for multi-node.
+* Swapped legacy `net_ib` with the `net_ib` implementation from NCCL 2.29.
+* Skip per-warp channel LDS copy when `warpComm` is disabled.
+* Hardened proxy RPC setup against malformed peer input.
+* The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
+* `NCCL_PXN_C2C` is kept default-off (`0`); upstream NCCL defaults it to `1` since 2.28. The C2C PXN routing path is NVIDIA-specific and is not currently applicable on AMD hardware.
+
+### Removed
+* Removed NPKit profiling support (build option ``ENABLE_NPKIT``, headers, device and proxy instrumentation, install script flag ``--npkit-enable``, and related documentation and tooling). Use the profiler plugin API for profiling instead.
+* Removed kernel COLLTRACE support, including the `COLLTRACE` build option, device-side collective trace buffers, debug kernel variants, and related install/CI wiring. The host latency profiler is unchanged.
+* Removed legacy `ENABLE_PROFILING` device profiling support and the `PROFILE` build option. Use the profiler plugin API instead.
+
+### Optimized
+* Tuned symmetric memory kernels.
+* Parallelized communicator destruction across child processes to reduce teardown latency.
+
+### Resolved issues
+* Fixed `ncclCommGrow` channel-count divergence causing incorrect collective routing.
+* Fixed `ncclCommGrow` hang when growing to an 8-rank single-node communicator.
+* Fixed symmetric LDS under-reservation in legacy (non-device-linker) builds.
+* Fixed LL128 protocol correctness for gfx1250 (MI450).
+* Fixed XGMI topology mapping for multi-system (NPS) nodes.
+* Fixed gfx950 collective hang caused by a tuner race condition.
+* Fixed `net_ib_cast`: gate CTS offload path on per-connection state.
+* Fixed `net_ib`: avoid flagging a non-fatal Isend CTS no-match as a fatal error.
+* Fixed acquire-tail polling for gfx950 P2P host staging.
+* Fixed LDS overflow in device-linker builds.
+* Fixed symmetric memory correctness issues.
+* Fixed `ncclCommFree` to free symmetric window objects automatically (NCCL 2.29.7 defect).
+* Fixed DDA IPC initialization skip on architectures that do not run DDA.
+* Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
+* Fixed proxy channel staging buffers ignoring the new GDR mode selection on HIP < 7.12 builds. The legacy `#else` branch in `sendProxyConnect` / `recvProxyConnect` now honors `resources->useDmaBuf`, so peermem-equipped hosts on older HIP no longer fall through to `hsa_amd_portable_export_dmabuf` when peermem was selected in `*ProxySetup`. Workaround for affected RCCL builds: `NCCL_DMABUF_ENABLE=0`.
+* Fixed RCCL initialization failing (`Failed to find ROCm runtime library`) on runtime-only ROCm trees that ship no unversioned `libhsa-runtime64.so` developer symlink (e.g. TheRock multi-arch pip-wheel `/opt/rocm-less` deployments). RCCL no longer `dlopen`s the HSA runtime by name; instead it directly links `hsa-runtime64::hsa-runtime64` (already a hard transitive dependency via the HIP runtime) and binds `hsa_init`, `hsa_system_get_info`, `hsa_status_string`, and `hsa_amd_portable_export_dmabuf` to those symbols. The linker records `DT_NEEDED libhsa-runtime64.so.1` and resolves it through librccl's existing RPATH, removing the SONAME version-string fragility and load-scope (`RTLD_LOCAL`) issues. The `RCCL_ROCR_PATH` override is no longer needed and has been removed.
 
 ### Known issues
+* Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
+
+## RCCL 2.28.3 for ROCm 7.13
+
+### Added
+* Added CAST network transport (`ncclNetCast` / `net_ib_cast`) for AMD AINIC hardware.
+* Added built-in CSV tuner for runtime algorithm/protocol/channel selection without rebuilds.
+* Added multi-node hierarchical AllGather algorithm for MI350. Hierarchical AllGather is enabled by default for 8 or more nodes. The message size threshold is 64MB on 8 nodes and 128MB for more than 8 nodes. Set `RCCL_HIERARCHICAL_ALLGATHER=0` to disable.
+* Initial support for symmetric memory kernels on gfx942 and gfx950.
+* Added `RCCL_IB_SPLIT_DATA_THRESHOLD` to split payload across multiple QPs/NICs in `ncclIbMultiSend`.
+* Round-robin single-QP payload and fifo-head-based QP selection in `ncclIbMultiSend`.
+* Added User Buffer and Graph Registration (`NCCL_NVLS_ENABLE` / CUMEM) gated on Linux kernel version.
+* Added runtime QP tracking with atomic counters in `net_ib` and `net_ib_cast`.
+* Enable Copy Engine (CE) collectives support in RCCL.
+* Added gfx1250 (MI450) GPU target support in RCCL and RCCL-Tests.
+* Strix-Halo (gfx1151) tuning support.
+* Add `amd-smi` wrapper functions for projected scale-up support, fabric capability dumping, and MNNVL fabric checks.
+* Added `RCCL_IB_P2P_DISABLE_CTS` to disable CTS offload for P2P connections on AINIC. Defaults to 1 (disabled). When `RCCL_CTS_OFFLOAD_ENABLED=1` is explicitly set, it overrides this flag and forces CTS on all connections including P2P.
+* Merged `RCCL_CTS_INLINE_DATA` into `RCCL_CTS_OFFLOAD_ENABLED`. CTS offload and CTS inline data are now controlled by a single tri-state variable: `-1` (default, auto-enable on AINIC), `0` (force disable), `1` (force enable for all connections).
+
+### Changed
+* Removed MSCCL and MSCCL++ collective integration; legacy `mscclLoadAlgo`, `mscclRunAlgo`, and `mscclUnloadAlgo` APIs remain as no-ops for link compatibility.
+* Removed roc-obj tools and perl build dependency.
+* Disable P2P batching by default on MI350.
+* Disable AMD-SMI (`amdsmi_init`) by default due to a concurrency issue in `amdsmi_init`; enable explicitly for ROCm 7.0 and above when the issue is addressed.
+* `RCCL_ENABLE_CONTEXT_TRACKING` replaced by `NCCL_LAUNCH_ORDER_IMPLICIT` for controlling launch-order tracking.
+* Moved tuning log messages from `NCCL_INIT` to the `NCCL_TUNING` debug subsystem.
+* Gate multi-node Direct AllGather on PXN enablement.
+* Use 256 threads per block on gfx950 (increased from 512).
+* Set algorithm to Ring for Navi4x (gfx1100/gfx1101) AllReduce.
+* Proxy busy-spin loop replaced with architecture-specific pause instruction on GDA-eligible topologies.
+* RCCL adds a NCCL CMake alias shim layer for CMake-based build compatibility.
+* CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
+
+### Resolved Issues
+* Fixed `netOverride` being skipped when rail-optimized trees are enabled (restores desired NIC mapping for targeted 4-NIC systems).
+* Fixed RCCL Inspector plugin teardown segfault/hang and collective-count correctness.
+* Fixed `ncclGroupSimulateEnd` planner state leak and resource cleanup.
+* Fixed validation errors with `all_reduce_bias` kernel on gfx950.
+* WarpSpeed now errors out with a warning when the requested channel count exceeds the maximum supported.
+* Fixed `--generate-sym-kernels` option when used with the default `--device-linker`.
+* Fixed `CUCHECK` and `CUCHECKGOTO` macros to clear the HIP error state before returning.
+* Fixed `amd-smi`/`rocm-smi` enum mismatch.
+* Fixed CTS-offload corner cases in `net_ib_rocm` and `net_ib_cast` (including mutual dependency enforcement with NIC fusion).
+* Fixed IPC registration incorrect `#ifdef` guard that disabled registration.
+* Fixed symmetric kernels validation errors on gfx942 and gfx950.
+
+## RCCL 2.28.3 for ROCm 7.12
+
+### Added
+* Added gfx1151 (Strix-Halo) GPU target support.
+* Added AMD AINIC support within the RCCL default internal network plugin.
+* Added `RCCL_P2P_SHIFT_SIZE` environment variable for advanced tuning of P2P channel and part mapping.
+* Added Direct Reduce Scatter implementation for improved multi-node performance.
+* Added WarpSpeed support for single-node AllGather and ReduceScatter.
+* Added virtual device enablement support (minimal changes for virtual GPU topology).
+* Added Navi4 (gfx1100) LL protocol enablement and tuning.
+* Added add-smi wrapper for firmware version queries (switched from rocm-smi to amd-smi).
+
+### Changed
+* Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
+* Remove P2P batching node-count cap; P2P batching now applies for all node counts (previously capped at 32 nodes).
+* Halved default CU usage for gfx950 single-node all-reduce for better resource efficiency.
+* Set default maximum channels to 48 for gfx950 multi-node collectives.
+* Set default maximum channels to 48 for MI350 multi-node collectives.
+* WarpSpeed auto-mode handling improved; WarpSpeed enabled for MI350 single-node.
+* `NCCL_LAUNCH_ORDER_IMPLICIT` replaces `RCCL_ENABLE_CONTEXT_TRACKING` for controlling implicit launch ordering.
+* Disable Direct Reduce Scatter automatically when PXN is disabled.
+* Tuning: constant values used for CorrectionFactor tables for improved consistency.
+* DMABUF disabled configurations now correctly respected in `rocm_net_ib`.
+
+### Resolved Issues
+* Fixed shutdown ordering race condition and use-after-free crash in proxy cleanup.
+* Fixed DMABUF support check failure (SWDEV-579889 / ROCM-2855).
+* Fixed `qpIndex` selection in `ncclIbIrecv` for AINIC mode.
+* Fixed per-device UD map indexing for NIC fusion configurations.
+* Fixed potential segfaults from `malloc` failure paths.
+* Fixed bfloat16 reduce kernel bug for ROCm >= 6.0.
+* Fixed memory leak in `ncclCommInitRankFunc`.
+* Fixed memory leaks (ROCM-1721, ROCM-1722).
+
+### Known issues
+* The upstream one-sided RMA subsystem (`src/rma`) was newly synced and uses RCCL's direct-HIP batch memory-operation path (`hipStreamBatchMemOp`, in place of the upstream CUDA `ncclCuStreamBatchMemOp` driver wrapper which is not built on ROCm). It is unverified at scale on ROCm.
+* The upstream Copy-Engine (CE) collective redesign (device-side sequence-number buffer driven by `cuStreamWriteValue32`/`cudaMemcpyAsync`) is not adopted. RCCL retains its existing self-consistent HIP Copy-Engine implementation, which is structurally incompatible with the new upstream path.
+* The Copy-Engine profiler path (`ncclProfiler_v6`) is not enabled; RCCL remains on `ncclProfiler_v5`. The profiler plugin needs to be verified on ROCm.
+* GIN GDAKI host support now uses the shared InfiniBand context (`ibv_context`/`ibv_pd`) rather than opening its own device. The GDAKI path is DOCA/Mellanox-specific and is unverified on AMD NICs.
+* The RCCL InfiniBand GIN proxy backend was ported to the reworked NCCL 2.30.3 `ncclGin_v13_t` interface (opaque per-communicator context with mandatory `createContext`/`destroyContext`), but does not implement GIN GET or FLUSH (`iget`/`iflush` are left unset); the GIN host proxy reports an unsupported-op error if a device kernel requests one.
+* Elastic-buffer support for GIN (multi-segment symmetric memory windows backed by a mix of device and CPU/`HOST_NUMA` memory, exposed through `NCCL_ELASTIC_BUFFER_REGISTER` and `NCCL_SYM_REUSE_SYSMEM_HANDLES`) was newly synced from upstream and compiles on ROCm, but is unverified on AMD hardware.
+
+## RCCL 2.28.3 for ROCm 7.11
+
+### Known issues
+* AllToAllv and AllToAll for a single GPU is hanging.
 * AllGather regression for small message sizes (less than 1 MB) due to the Direct algorithm.
 * ROCTx feature needs to be verified.
 * Profiler plugin needs to be verified.
 
 ### Added
-* Added `RCCL_IB_P2P_DISABLE_CTS` to disable CTS offload for P2P connections on AINIC. Defaults to 1 (disabled). When `RCCL_CTS_OFFLOAD_ENABLED=1` is explicitly set, it overrides this flag and forces CTS on all connections including P2P.
-* Merged `RCCL_CTS_INLINE_DATA` into `RCCL_CTS_OFFLOAD_ENABLED`. CTS offload and CTS inline data are now controlled by a single tri-state variable: `-1` (default, auto-enable on AINIC), `0` (force disable), `1` (force enable for all connections).
-* Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
-
-### Changed
 * Compatibility with NCCL 2.28.3.
-* The MSCCL feature is now disabled by default. The `--disable-msccl-kernel` build flag is replaced with `--enable-msccl-kernel` in the `rccl/install.sh` script.
-* MSCCL and NPKIT are deprecated and will be removed in a future release of RCCL.
-* Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
-* CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
-
-### Resolved Issues
-* Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
-* Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
-
-## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
+* Added `ncclAllReduceWithBias` API for fused all-reduce with elementwise accumulation-bias operations.
+* Added collective latency profiler tool (`--latency-profiler` in `install.sh`) for per-collective timing analysis.
+* Added dynamic pipelining for reduction collectives via the Simple protocol to improve single-node performance.
+* Added `unroll=2` device-code variant for gfx950 multi-node collectives.
+* Enable LL128 protocol for gfx942 with 4-NIC configurations using a unified tuning table.
+* Added reduce/broadcast algorithm and protocol selection tuning table for multi-node gfx940.
+* Pass `NET_OPTIONAL_RECV_COMPLETION` hint to the network plugin to enable potential network-side optimizations.
+* Expose symbols for RCCL algorithm, protocol, and channels selection functions (`rcclOverrideAlgorithm`, `rcclOverrideProtocol`).
+* Added rail-optimized tree topology support for MI3XX nodes with 4 NICs.
+* Added single-node AllGather and ReduceScatter performance optimizations.
+* Enable GDRCopy option for gfx950.
+* Enable single-node one-slice optimization for gfx950 and MI300A.
+* Added environment variable to cap the number of QPs created for send/recv collectives.
+* Added support for additional paths when loading the RCCL DMABUF kernel configuration file.
+* Added `ncclCommDump` API for communicator state inspection.
+* Added rocSHMEM GDA alltoall integration (GDA-accelerated alltoall via rocSHMEM).
 
 ### Changed
-* RCCL error messages have been made more verbose in several cases. RCCL now prints out fatal error messages by default. Fatal error messages can be suppressed by setting `NCCL_DEBUG=NONE`.
-* Disabled `reduceCopyPacks` pipelining for `gfx950`.
+* PIX and PXB are now treated as equivalent GDR distances for more consistent topology detection.
+* Optimized AllToAll for 64 or more GPUs on gfx942.
+* Optimize `threadfence` for the LL64 protocol on the sender side.
+* Disable `__threadfence` on the sender side of the Simple protocol when it is not needed for correctness.
+* Use rocm-smi API instead of CLI invocation for firmware version querying.
+* Adjusted gfx950 thread-block size to improve LL64 and Simple protocol performance for AllReduce, AllGather, and ReduceScatter.
+* `__threadfence` bypass on the multinode gfx950 sender side is now the default.
+* Updated multi-node LL/LL128 tuning for gfx950 to improve large-message bandwidth.
+* Disabled graph mode memory registration and user buffer registration as unsupported features on current hardware.
+* Updated Direct AllGather threshold for single-node and multi-node cases.
 * Experimental support for traffic shaping using warp specialization (also known as WarpSpeed) is now available for the Ring algorithm.
 * Enabling WarpSpeed in auto mode using RCCL_WARP_SPEED_AUTO optimizes performance and reduces the CU count by 50% on a single node for AllReduce, AllGather from 64MB, and ReduceScatter from 256MB.
 * The following configuration knobs control WarpSpeed behavior for debugging purposes: `RCCL_WARP_SPEED_ENABLE`, `RCCL_UNROLL_FACTOR`, `RCCL_WARP_SPEED_CU_COUNT`, and `RCCL_THREADS_PER_BLOCK`. Note that the effective unroll factor is calculated as 2 raised to the value of `RCCL_UNROLL_FACTOR`.
 
+### Resolved Issues
+* Fixed missing memory fence in the LL protocol for gfx950, which caused collective hangs.
+* Fixed segmentation fault in the external profiler plugin on communicator teardown.
+* Fixed LL128 protocol selection to respect the user's explicit protocol override setting.
+* Fixed `rcclNetP2pPolicy` returning incorrect policy for multi-NIC configurations.
+* Fixed missing proxy-counter updates in the proxy loop leading to stalled counters.
+* Fixed P2P batching hang when using batch operations.
+* Fixed P2P self-copy for batched operations to prevent hangs when communicator size exceeds 32 nodes.
+* Fixed WarpSpeed auto mode selection bug.
+
+## RCCL 2.27.7 for ROCm 7.2.0
+
+### Changed
+* RCCL error messages have been made more verbose in several cases. RCCL now prints out fatal error messages by default. Fatal error messages can be suppressed by setting `NCCL_DEBUG=NONE`.
+* Disabled `reduceCopyPacks` pipelining for `gfx950`.
+
 ### Known issues
 * AllToAllv/AlltoAll for single GPU is hanging.
 
-## Unreleased - RCCL 2.27.7 for ROCm 7.1.1
+## RCCL 2.27.7 for ROCm 7.1.1
 
 ### Changed
 * Enabling P2P batching with `RCCL_P2P_BATCH_ENABLE=1` is only applicable up to 32 nodes.

@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include <cstddef>
 #include <mutex>
@@ -15,6 +16,7 @@
 #include "nccl.h"
 #include "utils.h"
 #include "ras_internal.h"
+#include "os.h"
 
 // Type of a notification from a local NCCL thread.
 typedef enum {
@@ -42,7 +44,7 @@ static int rasInitRefCount = 0;
 // The RAS network listening socket of this RAS thread (random port).
 struct ncclSocket rasNetListeningSocket;
 
-static pthread_t rasThread;
+static std::thread rasThread;
 
 // Used for communication from regular NCCL threads to the RAS thread.
 static std::mutex rasNotificationMutex;
@@ -103,7 +105,7 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
 
       SYSCHECKGOTO(pipe(rasNotificationPipe), "pipe", ret, fail);
 
-      PTHREADCHECKGOTO(pthread_create(&rasThread, nullptr, &rasThreadMain, nullptr), "pthread_create", ret, fail);
+      rasThread = std::thread(rasThreadMain, nullptr);
       ncclSetThreadName(rasThread, "NCCL RAS");
 
       rasInitialized = true;
@@ -171,7 +173,7 @@ static void rasTerminate() {
   memset(&msg, '\0', sizeof(msg));
   msg.type = RAS_TERMINATE;
   if (rasLocalNotify(&msg) == ncclSuccess)
-    (void)pthread_join(rasThread, nullptr);
+    rasThread.join();
 }
 
 // Invoked by regular NCCL threads on every (non-split) comm initialization.  Provides info on all the ranks within
@@ -418,15 +420,19 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
   struct rasMsg* newMsg = nullptr;
   int newMsgLen;
   char line[SOCKET_NAME_MAXLEN+1];
+  char versionLocal[16], versionRemote[16];
 
-  INFO(NCCL_RAS, "RAS handling connInit from %s (version %d, listeningAddr %s, peersHash 0x%lx, deadPeersHash 0x%lx)",
-       ncclSocketToString(&sock->sock.addr, rasLine), msg->connInit.ncclVersion,
+  INFO(NCCL_RAS, "RAS handling connInit from %s (version %s, listeningAddr %s, peersHash 0x%lx, deadPeersHash 0x%lx)",
+       ncclSocketToString(&sock->sock.addr, rasLine),
+       ncclVersionToString(msg->connInit.ncclVersion, versionRemote, sizeof(versionRemote)),
        ncclSocketToString(&msg->connInit.listeningAddr, line), msg->connInit.peersHash, msg->connInit.deadPeersHash);
 
   if (msg->connInit.ncclVersion != NCCL_VERSION_CODE) {
     // Close any such sockets immediately!  This is basically unrecoverable...
-    WARN("NCCL version mismatch with remote peer %s (local: %d, remote %d)",
-         ncclSocketToString(&sock->sock.addr, rasLine), NCCL_VERSION_CODE, msg->connInit.ncclVersion);
+    WARN("NCCL version mismatch with remote peer %s (local: %s, remote %s)",
+         ncclSocketToString(&sock->sock.addr, rasLine),
+         ncclVersionToString(NCCL_VERSION_CODE, versionLocal, sizeof(versionLocal)),
+         ncclVersionToString(msg->connInit.ncclVersion, versionRemote, sizeof(versionRemote)));
     rasNetSendNack(sock);
     rasSocketTerminate(sock, /*finalize*/true);
     ret = ncclInvalidUsage;
@@ -477,6 +483,16 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
 
   sock->status = RAS_SOCK_READY;
   // rasConnResume will reset any experiencingDelays, startRetryTime, etc.
+
+  {
+    struct rasEventNotification event = {
+      .eventType = "PEER_CONNECTING",
+      .details = "",
+      .peerInfo = nullptr,
+      .peerAddr = &msg->connInit.listeningAddr
+    };
+    rasClientsNotifyEvent(RAS_EVENT_TRACE, &event);
+  }
 
   conn->sock = sock;
   sock->conn = conn;
@@ -649,7 +665,7 @@ static void* rasThreadMain(void*) {
           struct rasSocket* sock;
           for (sock = rasSocketsHead; sock;) {
             struct rasSocket* sockNext = sock->next;
-            if (rasPfds[pollIdx].fd == sock->sock.fd) {
+            if (rasPfds[pollIdx].fd == sock->sock.socketDescriptor) {
               rasSockEventLoop(sock, pollIdx);
               break;
             }
@@ -692,17 +708,17 @@ exit:
 ncclResult_t rasGetNewPollEntry(int* index) {
   int i;
   for (i = 0; i < nRasPfds; i++)
-    if (rasPfds[i].fd == -1)
+    if (rasPfds[i].fd == NCCL_INVALID_SOCKET)
       break;
   if (i == nRasPfds) {
     NCCLCHECK(ncclRealloc(&rasPfds, nRasPfds, nRasPfds+RAS_INCREMENT));
     nRasPfds += RAS_INCREMENT;
     for (int j = i; j < nRasPfds; j++)
-      rasPfds[j].fd = -1;
+      rasPfds[j].fd = NCCL_INVALID_SOCKET;
   }
 
   memset(rasPfds+i, '\0', sizeof(*rasPfds));
-  rasPfds[i].fd = -1;
+  rasPfds[i].fd = NCCL_INVALID_SOCKET;
 
   *index = i;
   return ncclSuccess;

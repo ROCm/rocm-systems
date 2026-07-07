@@ -338,17 +338,21 @@ template <typename T> void memcpytest2_offsets(size_t maxElem, bool devOffsets, 
 
 // Create multiple threads to stress multi-thread locking behavior in the
 // allocation/deallocation/tracking logic:
-template <typename T> void multiThread_1(bool serialize, bool usePinnedHost) {
+template <typename T> void multiThread_1(bool serialize, bool usePinnedHost,
+                                         bool singleThread = false) {
   DeviceMemory<T> memD(NUM_ELM());
   HostMemory<T> mem1(NUM_ELM(), usePinnedHost);
-  HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
 
   std::thread t1(memcpytest2<T>, &memD, &mem1, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t1.join();
   }
 
+  if (singleThread) {
+    return;
+  }
 
+  HostMemory<T> mem2(NUM_ELM(), usePinnedHost);
   std::thread t2(memcpytest2<T>, &memD, &mem2, NUM_ELM(), 0, 0, 0);
   if (serialize) {
     t2.join();
@@ -482,7 +486,10 @@ HIP_TEST_CASE(Unit_hipMemcpy_MultiThreadWithSerialization) {
   multiThread_1<float>(true, true);
 
   // Serialize, but use unpinned memory to stress the unpinned memory xfer path.
-  multiThread_1<float>(true, false);
+  // At quick level, run single-thread: t2 here only re-exercises "second std::thread
+  // enters HIP" which the pinned call above already covers; keeping t1 preserves the
+  // unpinned host xfer path from a worker thread.
+  multiThread_1<float>(true, false, isQuickLevel());
 }
 
 /*

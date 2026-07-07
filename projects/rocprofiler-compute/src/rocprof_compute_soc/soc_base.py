@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import math
 import os
 import shutil
 import sys
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import config
-from roofline.run_benchmark import run_roofline_benchmark
+from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface
 from utils.logger import (
     console_debug,
@@ -29,6 +28,7 @@ from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
+    canonical_config_arch,
     convert_metric_id_to_panel_info,
     create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,
@@ -40,7 +40,7 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import (
     counter_to_block,
-    extract_counters,
+    extract_counters_and_variables,
 )
 from vendored import yaml
 
@@ -160,7 +160,7 @@ class OmniSoC_Base:
         return self.__compatible_profilers
 
     def populate_mspec(self) -> None:
-        from utils.specs import search, total_sqc
+        from utils.specs import search_pattern, total_sqc
 
         if (
             not hasattr(self._mspec, "rocminfo_lines")
@@ -173,47 +173,58 @@ class OmniSoC_Base:
         self._mspec.gpu_l2 = ""
 
         for linetext in self._mspec.rocminfo_lines:
-            key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l1 = key
                 continue
 
-            key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.gpu_l2 = key
                 continue
 
-            key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
+            key = search_pattern(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
             if key is not None:
                 self._mspec.max_sclk = key
                 continue
 
-            key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.cu_per_gpu = key
                 continue
 
-            key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.simd_per_cu = key
                 continue
 
-            key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.se_per_gpu = key
                 continue
 
-            key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
+            if key is not None:
+                self._mspec.sa_per_se = key
+                continue
+
+            key = search_pattern(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.wave_size = key
                 continue
 
-            key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.workgroup_max_size = key
                 continue
 
-            key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            key = search_pattern(
+                r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext
+            )
             if key is not None:
                 self._mspec.max_waves_per_cu = key
                 break
@@ -242,14 +253,6 @@ class OmniSoC_Base:
 
         if not self._mspec.gpu_model:
             self._mspec.gpu_model = self.detect_gpu_model(self._mspec.gpu_arch)
-
-        self._mspec.num_xcd = str(
-            mi_gpu_specs.get_num_xcds(
-                self._mspec.gpu_arch,
-                self._mspec.gpu_model,
-                self._mspec.compute_partition,
-            )
-        )
 
     @demarcate
     def detect_gpu_model(self, gpu_arch: str) -> Optional[str]:
@@ -399,7 +402,7 @@ class OmniSoC_Base:
             metric_name,
             metric_yaml,
         ) in self._iter_arch_analysis_yaml_metrics():
-            hw = extract_counters(metric_yaml, self._mspec.gpu_series)
+            hw, _ = extract_counters_and_variables(metric_yaml, self._mspec.gpu_series)
             hw = self._expand_tcc_template_counters(hw)
             counters = frozenset(hw & remaining)
             if not counters:
@@ -454,7 +457,8 @@ class OmniSoC_Base:
         args = self.get_args()
 
         # File id dict
-        config_root_dir = f"{args.config_dir}/{self.__arch}"
+        config_arch = canonical_config_arch(self.__arch) or self.__arch
+        config_root_dir = f"{args.config_dir}/{config_arch}"
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
             for filename in Path(config_root_dir).glob("*.yaml")
@@ -495,7 +499,9 @@ class OmniSoC_Base:
                 block_id, config_filename_dict, config_root_dir, texts
             )
 
-        counters = extract_counters("\n".join(texts), self._mspec.gpu_series)
+        counters, _ = extract_counters_and_variables(
+            "\n".join(texts), self._mspec.gpu_series
+        )
         counters = self._expand_tcc_template_counters(counters)
 
         return counters, filter_blocks
@@ -506,7 +512,8 @@ class OmniSoC_Base:
         counters, matching perfmon allocation.
         """
         out = set(counters)
-        num_xcd = int(self._mspec.num_xcd)
+        # num_xcd is absent on single-die gfx115x; default to 1.
+        num_xcd = int(getattr(self._mspec, "num_xcd", 1) or 1)
         l2_banks = int(self._mspec.l2_banks)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
@@ -606,7 +613,7 @@ class OmniSoC_Base:
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / arch
+        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
         if not config_root.is_dir():
             return
         exclude: set[str] = set()
@@ -757,112 +764,52 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files, file_count, accu_file_count = (
-            self._allocate_perfmon_counter_files(counters)
-        )
+        output_files, file_count, _ = self._allocate_perfmon_counter_files(counters)
 
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
-        # TODO: rewrite the above logic for spatial_multiplexing later
-        if self.get_args().spatial_multiplexing:
-            # TODO: more error checking
-            if len(self.get_args().spatial_multiplexing) != 3:
-                console_error(
-                    "profiling",
-                    "multiplexing need provide node_idx node_count and gpu_count",
-                )
+        # Output to files
+        for f in output_files:
+            pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
+            counter_def_filename = workload_perfmon_dir / f"counter_def_{f.name}.yaml"
 
-            node_idx, node_count, gpu_count = map(
-                int, self.get_args().spatial_multiplexing
-            )
+            pmc = []
+            counter_def: dict[str, Any] = {}
 
-            old_group_num = file_count + accu_file_count
-            new_bucket_count = node_count * gpu_count
-            groups_per_bucket = math.ceil(
-                old_group_num / new_bucket_count
-            )  # It equals to file num per node
-            max_groups_per_node = groups_per_bucket * gpu_count
+            for ctr in [
+                ctr for block_name in f.blocks for ctr in f.blocks[block_name].elements
+            ]:
+                pmc.append(ctr)
+                # Add TCC channel counters definitions
+                if is_tcc_channel_counter(ctr):
+                    counter_name = ctr.split("[")[0]
+                    idx = int(ctr.split("[")[1].split("]")[0])
+                    xcd_idx = idx // int(self._mspec.l2_banks)
+                    channel_idx = idx % int(self._mspec.l2_banks)
+                    expression = (
+                        f"select({counter_name},"
+                        f"[DIMENSION_XCC=[{xcd_idx}], "
+                        f"DIMENSION_INSTANCE=[{channel_idx}]])"
+                    )
+                    description = (
+                        f"{counter_name} on {xcd_idx}th XCC and {channel_idx}th channel"
+                    )
+                    counter_def = add_counter_extra_config_input_yaml(
+                        counter_def,
+                        ctr,
+                        description,
+                        expression,
+                        [self.__arch],
+                    )
 
-            group_start = node_idx * max_groups_per_node
-            group_end = min((node_idx + 1) * max_groups_per_node, old_group_num)
+            # Write counters to file
+            with open(pmc_filename, "w", encoding="utf-8") as fd:
+                fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
 
-            console_debug(
-                "profiling",
-                f"spatial_multiplexing node_idx {node_idx}, node_count {node_count}, "
-                f"gpu_count: {gpu_count},\n"
-                f"old_group_num {old_group_num}, new_bucket_count {new_bucket_count}, "
-                f"groups_per_bucket {groups_per_bucket},\n"
-                f"max_groups_per_node {max_groups_per_node}, "
-                f"group_start {group_start}, group_end {group_end}",
-            )
-
-            for f_idx in range(groups_per_bucket):
-                file_name = (
-                    Path(workload_perfmon_dir)
-                    / f"pmc_perf_node_{node_idx}_{f_idx}.yaml"
-                )
-
-                pmc = []
-                for g_idx in range(
-                    group_start + f_idx * gpu_count,
-                    min(group_end, group_start + (f_idx + 1) * gpu_count),
-                ):
-                    gpu_idx = g_idx % gpu_count
-                    for block_name in output_files[g_idx].blocks.keys():
-                        for ctr in output_files[g_idx].blocks[block_name].elements:
-                            pmc.append(f"{ctr}:device={gpu_idx}")
-
-                # Write counters to file
-                with open(file_name, "w", encoding="utf-8") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-        else:
-            # Output to files
-            for f in output_files:
-                pmc_filename = workload_perfmon_dir / f"pmc_perf_{f.name}.yaml"
-                counter_def_filename = (
-                    workload_perfmon_dir / f"counter_def_{f.name}.yaml"
-                )
-
-                pmc = []
-                counter_def: dict[str, Any] = {}
-
-                for ctr in [
-                    ctr
-                    for block_name in f.blocks
-                    for ctr in f.blocks[block_name].elements
-                ]:
-                    pmc.append(ctr)
-                    # Add TCC channel counters definitions
-                    if is_tcc_channel_counter(ctr):
-                        counter_name = ctr.split("[")[0]
-                        idx = int(ctr.split("[")[1].split("]")[0])
-                        xcd_idx = idx // int(self._mspec.l2_banks)
-                        channel_idx = idx % int(self._mspec.l2_banks)
-                        expression = (
-                            f"select({counter_name},"
-                            f"[DIMENSION_XCC=[{xcd_idx}], "
-                            f"DIMENSION_INSTANCE=[{channel_idx}]])"
-                        )
-                        description = (
-                            f"{counter_name} on {xcd_idx}th XCC and "
-                            f"{channel_idx}th channel"
-                        )
-                        counter_def = add_counter_extra_config_input_yaml(
-                            counter_def,
-                            ctr,
-                            description,
-                            expression,
-                            [self.__arch],
-                        )
-
-                # Write counters to file
-                with open(pmc_filename, "w", encoding="utf-8") as fd:
-                    fd.write(yaml.dump({"jobs": [{"pmc": pmc}]}, sort_keys=False))
-
-                # Write counter definitions to file
-                if counter_def:
-                    with open(counter_def_filename, "w", encoding="utf-8") as fp:
-                        fp.write(yaml.dump(counter_def, sort_keys=False))
+            # Write counter definitions to file
+            if counter_def:
+                with open(counter_def_filename, "w", encoding="utf-8") as fp:
+                    fp.write(yaml.dump(counter_def, sort_keys=False))
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
@@ -882,8 +829,7 @@ class OmniSoC_Base:
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
         if (
             self.get_args().no_roof
-            or self.__arch == "gfx908"
-            or self.__arch == "gfx1151"
+            or self.__arch not in BENCHMARKING_SUPPORTED
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks

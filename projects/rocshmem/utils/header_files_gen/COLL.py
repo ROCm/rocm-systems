@@ -169,6 +169,21 @@ def bitwise_reduction_api(T, TNAME):
     operations = ["or", "and", "xor"]
     return "".join([reduction_api(T, TNAME, op) for op in operations])
 
+def reduce_on_stream_api(T, TNAME, Op_API):
+    return (
+        f"ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_on_stream(\n"
+        f"  rocshmem_ctx_t ctx, rocshmem_team_t team,\n"
+        f"  {T} *dest, const {T} *source, int nreduce, hipStream_t stream);\n\n"
+    )
+
+def arith_reduce_on_stream_api(T, TNAME):
+    operations = ["sum", "min", "max", "prod"]
+    return "".join([reduce_on_stream_api(T, TNAME, op) for op in operations])
+
+def bitwise_reduce_on_stream_api(T, TNAME):
+    operations = ["or", "and", "xor"]
+    return "".join([reduce_on_stream_api(T, TNAME, op) for op in operations])
+
 
 def generate_reduction_api():
     expanded_code = """
@@ -211,6 +226,47 @@ def generate_reduction_api():
     return expanded_code
 
 
+def generate_reduce_on_stream_api():
+    expanded_code = """
+/**
+ * @name ROCSHMEM_REDUCE_ON_STREAM
+ * @brief Performs a reduction across all PEs in a team on the specified HIP
+  * stream.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nreduce      Size of the buffer to participate in the reduction.
+ * @param[in] stream       HIP stream on which the reduction is issued.
+ *
+ * @return int (Zero on successful local completion. Nonzero otherwise.)
+ */\n"""
+
+    int_types = [
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong")
+    ]
+
+    float_types = [
+        ("float", "float"),
+        ("double", "double")
+    ]
+
+    for type_, tname_ in int_types:
+        expanded_code += arith_reduce_on_stream_api(type_, tname_)
+        expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
+
+    for type_, tname_ in float_types:
+        expanded_code += arith_reduce_on_stream_api(type_, tname_)
+
+    return expanded_code
+
+
 def write_to_file(filename, content):
     with open(filename, 'w') as file:
         file.write(content)
@@ -230,7 +286,8 @@ namespace rocshmem {
         generate_alltoall_api() +
         generate_broadcast_api() +
         generate_fcollect_api() +
-        generate_reduction_api()
+        generate_reduction_api() +
+        generate_reduce_on_stream_api()
     )
 
     expanded_code += """

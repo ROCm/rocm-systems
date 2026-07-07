@@ -36,7 +36,7 @@
 #include <errno.h>
 #include <assert.h>
 
-static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
+static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gfxv);
 
 /* 1024 doorbells, 4 or 8 bytes each doorbell depending on ASIC generation */
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
@@ -46,7 +46,7 @@ static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
 	(hsakmt_get_vgpr_size_per_cu(gfxv) +	\
 	 hsakmt_get_sgpr_size_per_cu(gfxv) +	\
 	 (node.LDSSizeInKB << 10) +		\
-	 get_hwreg_size_per_cu(gfxv))
+	 get_hwreg_size_per_cu(&node, gfxv))
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
 	((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
@@ -105,16 +105,24 @@ int hsakmt_kfdcontext_init_queue_context(HsaKFDContext *ctx)
 	return 0;
 }
 
-static uint32_t get_hwreg_size_per_cu(uint32_t gfxv)
+static uint32_t get_hwreg_size_per_cu(const HsaNodeProperties *node, uint32_t gfxv)
 {
-	uint32_t hwreg_size = 0;
+	HSAuint32 hwreg_size_bytes;
+	HSAuint32 simd_per_cu = node->NumSIMDPerCU;
+	HSAuint32 num_waves_per_simd = node->MaxWavesPerSIMD;
+	HSAuint32 bytes_per_wave = 128;
 
-	if (gfxv < GFX_VERSION_GFX1250)
-		hwreg_size = 0x1000; /* 128 bytes per wave, 32 waves per CU */
+	if (gfxv < GFX_VERSION_GFX1250) {
+		return 0x1000;
+	}
 
-	assert(hwreg_size);
+	if (gfxv == GFX_VERSION_GFX1250) {
+		bytes_per_wave = 512;  // per HW design; GFX_SHARED__HWREG_SPACE_USED
+	}
 
-	return hwreg_size;
+	hwreg_size_bytes = num_waves_per_simd * simd_per_cu * bytes_per_wave;
+
+	return hwreg_size_bytes;
 }
 
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
@@ -133,6 +141,8 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 		vgpr_size = 0x40000;
 	else if (gfxv <= GFX_VERSION_GFX1201)
 		vgpr_size = 0x60000;
+	else if (gfxv <= GFX_VERSION_GFX1250)
+		vgpr_size = 0x80000;
 
 	assert(vgpr_size);
 
@@ -145,6 +155,8 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
 
 	if (gfxv < GFX_VERSION_GFX1250)
 		sgpr_size = 0x4000;
+	else if (gfxv == GFX_VERSION_GFX1250)
+		sgpr_size = 0x8000;
 
 	assert(sgpr_size);
 
@@ -794,8 +806,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2Ctx(
 	err = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_CREATE_QUEUE, &args);
 
 	if (err == -1) {
+		int saved_errno = errno;
 		free_queue(ctx, q);
-		return HSAKMT_STATUS_ERROR;
+      	
+		/* Return specific error code based on errno */
+      	if (saved_errno == ENOMEM)
+			return HSAKMT_STATUS_NO_MEMORY;
+      	else if (saved_errno == EINVAL)
+			return HSAKMT_STATUS_INVALID_PARAMETER;
+      	else
+			return HSAKMT_STATUS_ERROR;
 	}
 
 	q->queue_id = args.queue_id;

@@ -101,6 +101,7 @@ struct system_info_t {
     bool xnack_enabled;
     bool dmabuf_support;
     bool vmm_support;
+    bool fabric_handle_supported;
 };
 
 // This structure holds agent information acquired through hsa info related
@@ -350,6 +351,11 @@ static hsa_status_t AcquireSystemInfo(system_info_t *sys_info) {
                                                      &sys_info->vmm_support);
   RET_IF_HSA_ERR(err);
 
+  // Get Fabric Handles supported
+  err = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED,
+                                                     &sys_info->fabric_handle_supported);
+  RET_IF_HSA_ERR(err);
+
   return err;
 }
 
@@ -389,6 +395,9 @@ static void DisplaySystemInfo(system_info_t const *sys_info) {
 
   printLabel("VMM Support:");
   printf("%s\n", sys_info->vmm_support ? "YES" : "NO");
+
+  printLabel("Fabric Support:");
+  printf  ("%s\n", sys_info->fabric_handle_supported ? "YES" : "NO");
 
   printf("\n");
 }

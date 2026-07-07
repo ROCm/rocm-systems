@@ -39,16 +39,21 @@ command -v docker &>/dev/null || {
 DOCKER_BUILDKIT=$(docker buildx version >/dev/null 2>&1 && echo 1 || echo 0)
 export DOCKER_BUILDKIT
 
+IMAGE_REF=""
+
 build_docker_image () {
     DOCKER_DIR=$(cd "$DIR/py-interface" && pwd -P)
     DOCKERFILE="$DOCKER_DIR/Dockerfile"
 
-    DOCKERFILE_TIME=$(git log -1 --format=%at -- "$DOCKERFILE")
-    IMAGE_TIME=$(docker inspect "$DOCKER_NAME" --format '{{.Created}}' 2>/dev/null | date +%s -d- || echo 0)
+    # Tag the image by Dockerfile hash; rebuild when no image matches the current one.
+    DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -c1-12)
+    IMAGE_REF="$DOCKER_NAME:$DOCKERFILE_HASH"
 
-    # Build if Dockerfile is newer than image
-    if [ "$DOCKERFILE_TIME" -gt "$IMAGE_TIME" ]; then
-        docker build "$DOCKER_DIR" -f "$DOCKERFILE" -t "$DOCKER_NAME":latest
+    if docker image inspect "$IMAGE_REF" >/dev/null 2>&1; then
+        echo "Reusing up-to-date image: $IMAGE_REF"
+    else
+        echo "Dockerfile changed or image missing -- (re)building $IMAGE_REF"
+        docker build "$DOCKER_DIR" -f "$DOCKERFILE" -t "$IMAGE_REF" -t "$DOCKER_NAME":latest
     fi
 }
 
@@ -56,13 +61,15 @@ build_docker_image
 
 ENABLE_ESMI_LIB=""
 # source ENABLE_ESMI_LIB variable from the previous build if it exists
-if [ -e 'build/CMakeCache.txt' ]; then
+if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     GREP_RESULT=$(grep "ENABLE_ESMI_LIB.*=" "${DIR}/build/CMakeCache.txt" | tail -n 1 | cut -d = -f 2)
     ENABLE_ESMI_LIB="-DENABLE_ESMI_LIB=$GREP_RESULT"
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
-docker run --rm -ti --volume "$DIR":/src:rw "$DOCKER_NAME":latest bash -c "
+DOCKER_TTY_FLAGS=(-i)
+if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
+docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
 cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \

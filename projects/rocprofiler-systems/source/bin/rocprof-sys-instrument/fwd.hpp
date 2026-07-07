@@ -13,7 +13,6 @@
 #include <timemory/tpls/cereal/archives.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/popen.hpp>
 #include <timemory/variadic/macros.hpp>
 

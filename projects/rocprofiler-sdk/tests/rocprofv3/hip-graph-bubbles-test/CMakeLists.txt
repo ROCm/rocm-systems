@@ -27,7 +27,8 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --kernel-trace -d
             ${OUTPUT_DIR} -o out --output-format csv pftrace --
-            $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS} ${NUM_ITERATIONS} 256 25
+            $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS} ${NUM_ITERATIONS}
+            ${NUM_ITERATIONS} 256 25
         DEPENDS hip-graph-bubbles
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"

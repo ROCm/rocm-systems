@@ -20,7 +20,7 @@ add_library(causal-interface-library INTERFACE)
 target_compile_options(causal-interface-library INTERFACE -g3 -fno-omit-frame-pointer)
 target_link_libraries(
     causal-interface-library
-    INTERFACE Threads::Threads ${CMAKE_DL_LIBS}
+    INTERFACE Threads::Threads pthread ${CMAKE_DL_LIBS}
 )
 
 rocprofiler_systems_causal_example_executable(

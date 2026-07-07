@@ -42,7 +42,7 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VReadfirstlaneB32Vop3>()),
       vdst(32, OperandType::OPR_SREG_NOVCC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -223,8 +223,7 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
 }
 
 void VCvtOffF32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_off_f32_i4_vop3(*this, wf);
 }
 
 VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
@@ -1145,8 +1144,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_norm_i16_f16_vop3(*this, wf);
 }
 
 VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
@@ -1161,8 +1159,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
 }
 
 void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_v_cvt_norm_u16_f16_vop3(*this, wf);
 }
 
 VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
@@ -1231,7 +1228,25 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_fp8_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(
+            (amdgpu::vop3_fp8_decode_e5m3(*this))
+                ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(
+                      ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                      ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                     8u)) &
+                       0xFFu)))
+                : util::fp8_e4m3_to_f32(static_cast<uint8_t>(
+                      ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                      ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                     8u)) &
+                       0xFFu)))));
+  }
 }
 
 VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
@@ -1246,7 +1261,17 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cvt_f32_bf8_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(
+                        ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                        ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                       8u)) &
+                         0xFFu)))));
+  }
 }
 
 VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
@@ -1261,8 +1286,20 @@ VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    vdst.write_lane64(wf, lane,
+                      static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
+  }
 }
 
 VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
@@ -1277,8 +1314,20 @@ VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
+    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
+    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
+    vdst.write_lane64(wf, lane,
+                      static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
+  }
 }
 
 VPrngB32Vop3::VPrngB32Vop3(const MachineInst *inst)
@@ -1443,43 +1492,7 @@ VFmacF64Vop3::VFmacF64Vop3(const MachineInst *inst)
 }
 
 void VFmacF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
-                        double v = [&]() {
-                          double v = std::fma(
-                              [&]() {
-                                double sv = std::bit_cast<double>(src0.read_lane64(wf, lane));
-                                if (inst_.abs & (1u << 0))
-                                  sv = std::fabs(sv);
-                                if (inst_.neg & (1u << 0))
-                                  sv = -sv;
-                                return sv;
-                              }(),
-                              [&]() {
-                                double sv = std::bit_cast<double>(src1.read_lane64(wf, lane));
-                                if (inst_.abs & (1u << 1))
-                                  sv = std::fabs(sv);
-                                if (inst_.neg & (1u << 1))
-                                  sv = -sv;
-                                return sv;
-                              }(),
-                              std::bit_cast<double>(vdst.read_lane64(wf, lane)));
-                          if (inst_.omod == 1)
-                            v *= 2.0;
-                          else if (inst_.omod == 2)
-                            v *= 4.0;
-                          else if (inst_.omod == 3)
-                            v *= 0.5;
-                          return v;
-                        }();
-                        if (inst_.clamp)
-                          v = std::clamp(v, 0.0, 1.0);
-                        return v;
-                      }()));
-  }
+  amdgpu::execute_v_fmac_f64_vop3(*this, wf);
 }
 
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
@@ -1843,47 +1856,7 @@ VMacF16Vop3::VMacF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
-                      float v = [&]() {
-                        float v = std::fma(
-                            [&]() {
-                              float sv =
-                                  util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-                              if (inst_.abs & (1u << 0))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 0))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            [&]() {
-                              float sv =
-                                  util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-                              if (inst_.abs & (1u << 1))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 1))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))));
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
-}
+void VMacF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mac_f16_vop3(*this, wf); }
 
 VAddU16Vop3::VAddU16Vop3(const MachineInst *inst)
     : Vop3("v_add_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddU16Vop3>()),
@@ -2159,22 +2132,7 @@ VDot2cF32F16Vop3::VDot2cF32F16Vop3(const MachineInst *inst)
 }
 
 void VDot2cF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a & 0xFFFF));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>((a >> 16) & 0xFFFF));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b & 0xFFFF));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>((b >> 16) & 0xFFFF));
-    float facc = std::bit_cast<float>(static_cast<uint32_t>(acc));
-    facc += a0 * b0 + a1 * b1;
-    acc = static_cast<int32_t>(std::bit_cast<uint32_t>(facc));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_f32_f16_vop3(*this, wf);
 }
 
 VDot2cI32I16Vop3::VDot2cI32I16Vop3(const MachineInst *inst)
@@ -2192,20 +2150,7 @@ VDot2cI32I16Vop3::VDot2cI32I16Vop3(const MachineInst *inst)
 }
 
 void VDot2cI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    int16_t a0 = static_cast<int16_t>(a & 0xFFFF);
-    int16_t a1 = static_cast<int16_t>((a >> 16) & 0xFFFF);
-    int16_t b0 = static_cast<int16_t>(b & 0xFFFF);
-    int16_t b1 = static_cast<int16_t>((b >> 16) & 0xFFFF);
-    acc += static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1;
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot2c_i32_i16_vop3(*this, wf);
 }
 
 VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
@@ -2223,20 +2168,7 @@ VDot4cI32I8Vop3::VDot4cI32I8Vop3(const MachineInst *inst)
 }
 
 void VDot4cI32I8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 4; ++i) {
-      int8_t ea = static_cast<int8_t>((a >> (i * 8)) & 0xFF);
-      int8_t eb = static_cast<int8_t>((b >> (i * 8)) & 0xFF);
-      acc += static_cast<int32_t>(ea) * static_cast<int32_t>(eb);
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot4c_i32_i8_vop3(*this, wf);
 }
 
 VDot8cI32I4Vop3::VDot8cI32I4Vop3(const MachineInst *inst)
@@ -2254,24 +2186,7 @@ VDot8cI32I4Vop3::VDot8cI32I4Vop3(const MachineInst *inst)
 }
 
 void VDot8cI32I4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a = src0.read_lane(wf, lane);
-    uint32_t b = src1.read_lane(wf, lane);
-    int32_t acc = static_cast<int32_t>(vdst.read_lane(wf, lane));
-    for (int i = 0; i < 8; ++i) {
-      int32_t ea = static_cast<int32_t>((a >> (i * 4)) & 0xF);
-      if (ea & 8)
-        ea |= ~0xF;
-      int32_t eb = static_cast<int32_t>((b >> (i * 4)) & 0xF);
-      if (eb & 8)
-        eb |= ~0xF;
-      acc += ea * eb;
-    }
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc));
-  }
+  amdgpu::execute_v_dot8c_i32_i4_vop3(*this, wf);
 }
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
@@ -2288,43 +2203,7 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
 }
 
 void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = std::fma(
-                            [&]() {
-                              float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                              if (inst_.abs & (1u << 0))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 0))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            [&]() {
-                              float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                              if (inst_.abs & (1u << 1))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 1))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            std::bit_cast<float>(vdst.read_lane(wf, lane)));
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_fmac_f32_vop3(*this, wf);
 }
 
 VPkFmacF16Vop3::VPkFmacF16Vop3(const MachineInst *inst)
@@ -2377,16 +2256,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
 }
 
 void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b + static_cast<int32_t>(src2.read_lane(wf, lane)));
-    }());
-  }
+  amdgpu::execute_v_mad_i32_i24_vop3(*this, wf);
 }
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
@@ -2405,15 +2275,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
 }
 
 void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(
-        wf, lane,
-        ((src0.read_lane(wf, lane) & 0x00FFFFFFu) * (src1.read_lane(wf, lane) & 0x00FFFFFFu) +
-         src2.read_lane(wf, lane)));
-  }
+  amdgpu::execute_v_mad_u32_u24_vop3(*this, wf);
 }
 
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
@@ -2604,18 +2466,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
 }
 
 void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = src0.read_lane(wf, lane);
-      auto b = src1.read_lane(wf, lane);
-      auto c = src2.read_lane(wf, lane);
-      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
-      return static_cast<uint32_t>(val >> (c & 31u));
-    }());
-  }
+  amdgpu::execute_v_alignbit_b32_vop3(*this, wf);
 }
 
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
@@ -2634,18 +2485,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
 }
 
 void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = src0.read_lane(wf, lane);
-      auto b = src1.read_lane(wf, lane);
-      auto c = src2.read_lane(wf, lane);
-      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
-      return static_cast<uint32_t>(val >> ((c & 3u) * 8u));
-    }());
-  }
+  amdgpu::execute_v_alignbyte_b32_vop3(*this, wf);
 }
 
 VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
@@ -3697,8 +3537,33 @@ VCvtScalef32PkFp8F32Vop3::VCvtScalef32PkFp8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    float s0 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)))) /
+        scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src1.read_lane(wf, lane)))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp8_e4m3_rne(s0);
+    uint8_t r1 = util::f32_to_fp8_e4m3_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32PkBf8F32Vop3::VCvtScalef32PkBf8F32Vop3(const MachineInst *inst)
@@ -3717,8 +3582,33 @@ VCvtScalef32PkBf8F32Vop3::VCvtScalef32PkBf8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    float s0 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)))) /
+        scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src1.read_lane(wf, lane)))) /
+        scale);
+    uint8_t r0 = util::f32_to_bf8_e5m2_rne(s0);
+    uint8_t r1 = util::f32_to_bf8_e5m2_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32SrFp8F32Vop3::VCvtScalef32SrFp8F32Vop3(const MachineInst *inst)
@@ -3737,8 +3627,26 @@ VCvtScalef32SrFp8F32Vop3::VCvtScalef32SrFp8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    float val = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_fp8_e4m3_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrBf8F32Vop3::VCvtScalef32SrBf8F32Vop3(const MachineInst *inst)
@@ -3757,8 +3665,26 @@ VCvtScalef32SrBf8F32Vop3::VCvtScalef32SrBf8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    float val = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_bf8_e5m2_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkF32Fp8Vop3::VCvtScalef32PkF32Fp8Vop3(const MachineInst *inst)
@@ -3775,8 +3701,29 @@ VCvtScalef32PkF32Fp8Vop3::VCvtScalef32PkF32Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane64(wf, lane, 0x7FC000007FC00000ULL);
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint64_t result = static_cast<uint64_t>(std::bit_cast<uint32_t>(f0)) |
+                      (static_cast<uint64_t>(std::bit_cast<uint32_t>(f1)) << 32);
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VCvtScalef32PkF32Bf8Vop3::VCvtScalef32PkF32Bf8Vop3(const MachineInst *inst)
@@ -3793,8 +3740,29 @@ VCvtScalef32PkF32Bf8Vop3::VCvtScalef32PkF32Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane64(wf, lane, 0x7FC000007FC00000ULL);
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint64_t result = static_cast<uint64_t>(std::bit_cast<uint32_t>(f0)) |
+                      (static_cast<uint64_t>(std::bit_cast<uint32_t>(f1)) << 32);
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VCvtScalef32F32Fp8Vop3::VCvtScalef32F32Fp8Vop3(const MachineInst *inst)
@@ -3811,8 +3779,23 @@ VCvtScalef32F32Fp8Vop3::VCvtScalef32F32Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32F32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, 0x7FC00000u);
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f = static_cast<float>(static_cast<double>(util::fp8_e4m3_to_f32(narrow_val)) * scale);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(f));
+  }
 }
 
 VCvtScalef32F32Bf8Vop3::VCvtScalef32F32Bf8Vop3(const MachineInst *inst)
@@ -3829,8 +3812,23 @@ VCvtScalef32F32Bf8Vop3::VCvtScalef32F32Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32F32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, 0x7FC00000u);
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f = static_cast<float>(static_cast<double>(util::bf8_e5m2_to_f32(narrow_val)) * scale);
+    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(f));
+  }
 }
 
 VCvtScalef32PkFp4F32Vop3::VCvtScalef32PkFp4F32Vop3(const MachineInst *inst)
@@ -3849,8 +3847,31 @@ VCvtScalef32PkFp4F32Vop3::VCvtScalef32PkFp4F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    float s0 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)))) /
+        scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(src1.read_lane(wf, lane)))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_rne(s0);
+    uint8_t r1 = util::f32_to_fp4_e2m1_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrPkFp4F32Vop3::VCvtScalef32SrPkFp4F32Vop3(const MachineInst *inst)
@@ -3869,8 +3890,33 @@ VCvtScalef32SrPkFp4F32Vop3::VCvtScalef32SrPkFp4F32Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrPkFp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed_lo = static_cast<uint32_t>(src1.read_lane(wf, lane));
+    float val0 = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+    float val1 = std::bit_cast<float>(cu.read_vgpr(vb + src0.unified_vgpr_index() + 1, lane));
+    float s0 = static_cast<float>(static_cast<double>(val0) / scale);
+    float s1 = static_cast<float>(static_cast<double>(val1) / scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_sr(s0, seed_lo);
+    uint32_t seed_hi = util::prng_advance(seed_lo);
+    uint8_t r1 = util::f32_to_fp4_e2m1_sr(s1, seed_hi);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkF32Fp4Vop3::VCvtScalef32PkF32Fp4Vop3(const MachineInst *inst)
@@ -3887,8 +3933,29 @@ VCvtScalef32PkF32Fp4Vop3::VCvtScalef32PkF32Fp4Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF32Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane64(wf, lane, 0x7FC000007FC00000ULL);
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t byte_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>(byte_val & 0xF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>((byte_val >> 4) & 0xF))) *
+        scale);
+    uint64_t result = static_cast<uint64_t>(std::bit_cast<uint32_t>(f0)) |
+                      (static_cast<uint64_t>(std::bit_cast<uint32_t>(f1)) << 32);
+    vdst.write_lane64(wf, lane, result);
+  }
 }
 
 VCvtScalef32PkFp8F16Vop3::VCvtScalef32PkFp8F16Vop3(const MachineInst *inst)
@@ -3905,8 +3972,33 @@ VCvtScalef32PkFp8F16Vop3::VCvtScalef32PkFp8F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp8_e4m3_rne(s0);
+    uint8_t r1 = util::f32_to_fp8_e4m3_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32PkBf8F16Vop3::VCvtScalef32PkBf8F16Vop3(const MachineInst *inst)
@@ -3923,8 +4015,33 @@ VCvtScalef32PkBf8F16Vop3::VCvtScalef32PkBf8F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_bf8_e5m2_rne(s0);
+    uint8_t r1 = util::f32_to_bf8_e5m2_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32SrFp8F16Vop3::VCvtScalef32SrFp8F16Vop3(const MachineInst *inst)
@@ -3943,8 +4060,27 @@ VCvtScalef32SrFp8F16Vop3::VCvtScalef32SrFp8F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrFp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_packed = src0.read_lane(wf, lane);
+    float val = util::f16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_fp8_e4m3_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrBf8F16Vop3::VCvtScalef32SrBf8F16Vop3(const MachineInst *inst)
@@ -3963,8 +4099,27 @@ VCvtScalef32SrBf8F16Vop3::VCvtScalef32SrBf8F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrBf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_packed = src0.read_lane(wf, lane);
+    float val = util::f16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_bf8_e5m2_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkFp8Bf16Vop3::VCvtScalef32PkFp8Bf16Vop3(const MachineInst *inst)
@@ -3981,8 +4136,33 @@ VCvtScalef32PkFp8Bf16Vop3::VCvtScalef32PkFp8Bf16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp8_e4m3_rne(s0);
+    uint8_t r1 = util::f32_to_fp8_e4m3_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32PkBf8Bf16Vop3::VCvtScalef32PkBf8Bf16Vop3(const MachineInst *inst)
@@ -3999,8 +4179,33 @@ VCvtScalef32PkBf8Bf16Vop3::VCvtScalef32PkBf8Bf16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_bf8_e5m2_rne(s0);
+    uint8_t r1 = util::f32_to_bf8_e5m2_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (hi)
+      vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
+    else
+      vdst.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));
+  }
 }
 
 VCvtScalef32SrFp8Bf16Vop3::VCvtScalef32SrFp8Bf16Vop3(const MachineInst *inst)
@@ -4019,8 +4224,27 @@ VCvtScalef32SrFp8Bf16Vop3::VCvtScalef32SrFp8Bf16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrFp8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_packed = src0.read_lane(wf, lane);
+    float val = util::bf16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_fp8_e4m3_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrBf8Bf16Vop3::VCvtScalef32SrBf8Bf16Vop3(const MachineInst *inst)
@@ -4039,8 +4263,27 @@ VCvtScalef32SrBf8Bf16Vop3::VCvtScalef32SrBf8Bf16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrBf8Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_packed = src0.read_lane(wf, lane);
+    float val = util::bf16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));
+    float scaled = static_cast<float>(static_cast<double>(val) / scale);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_bf8_e5m2_sr(scaled, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkF16Fp8Vop3::VCvtScalef32PkF16Fp8Vop3(const MachineInst *inst)
@@ -4057,8 +4300,30 @@ VCvtScalef32PkF16Fp8Vop3::VCvtScalef32PkF16Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7E00u) | (static_cast<uint32_t>(0x7E00u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_f16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VCvtScalef32PkF16Bf8Vop3::VCvtScalef32PkF16Bf8Vop3(const MachineInst *inst)
@@ -4075,8 +4340,30 @@ VCvtScalef32PkF16Bf8Vop3::VCvtScalef32PkF16Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7E00u) | (static_cast<uint32_t>(0x7E00u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_f16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VCvtScalef32F16Fp8Vop3::VCvtScalef32F16Fp8Vop3(const MachineInst *inst)
@@ -4093,8 +4380,28 @@ VCvtScalef32F16Fp8Vop3::VCvtScalef32F16Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32F16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (biased_exp == 0xFFu) {
+      uint32_t nv = static_cast<uint32_t>(0x7E00u);
+      vdst.write_lane(wf, lane, hi ? ((old & 0xFFFFu) | (nv << 16)) : ((old & 0xFFFF0000u) | nv));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f = static_cast<float>(static_cast<double>(util::fp8_e4m3_to_f32(narrow_val)) * scale);
+    uint32_t bits = static_cast<uint32_t>(util::f32_to_f16(f));
+    vdst.write_lane(
+        wf, lane, hi ? ((old & 0xFFFFu) | (bits << 16)) : ((old & 0xFFFF0000u) | (bits & 0xFFFFu)));
+  }
 }
 
 VCvtScalef32F16Bf8Vop3::VCvtScalef32F16Bf8Vop3(const MachineInst *inst)
@@ -4111,8 +4418,28 @@ VCvtScalef32F16Bf8Vop3::VCvtScalef32F16Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32F16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    bool hi = (inst_.op_sel >> 3) & 1;
+    uint32_t old = vdst.read_lane(wf, lane);
+    if (biased_exp == 0xFFu) {
+      uint32_t nv = static_cast<uint32_t>(0x7E00u);
+      vdst.write_lane(wf, lane, hi ? ((old & 0xFFFFu) | (nv << 16)) : ((old & 0xFFFF0000u) | nv));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f = static_cast<float>(static_cast<double>(util::bf8_e5m2_to_f32(narrow_val)) * scale);
+    uint32_t bits = static_cast<uint32_t>(util::f32_to_f16(f));
+    vdst.write_lane(
+        wf, lane, hi ? ((old & 0xFFFFu) | (bits << 16)) : ((old & 0xFFFF0000u) | (bits & 0xFFFFu)));
+  }
 }
 
 VCvtScalef32PkFp4F16Vop3::VCvtScalef32PkFp4F16Vop3(const MachineInst *inst)
@@ -4129,8 +4456,31 @@ VCvtScalef32PkFp4F16Vop3::VCvtScalef32PkFp4F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_rne(s0);
+    uint8_t r1 = util::f32_to_fp4_e2m1_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkFp4Bf16Vop3::VCvtScalef32PkFp4Bf16Vop3(const MachineInst *inst)
@@ -4147,8 +4497,31 @@ VCvtScalef32PkFp4Bf16Vop3::VCvtScalef32PkFp4Bf16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkFp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_rne(s0);
+    uint8_t r1 = util::f32_to_fp4_e2m1_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrPkFp4F16Vop3::VCvtScalef32SrPkFp4F16Vop3(const MachineInst *inst)
@@ -4167,8 +4540,33 @@ VCvtScalef32SrPkFp4F16Vop3::VCvtScalef32SrPkFp4F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32SrPkFp4F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    uint32_t seed_lo = src1.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_sr(s0, seed_lo);
+    uint32_t seed_hi = util::prng_advance(seed_lo);
+    uint8_t r1 = util::f32_to_fp4_e2m1_sr(s1, seed_hi);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32SrPkFp4Bf16Vop3::VCvtScalef32SrPkFp4Bf16Vop3(const MachineInst *inst)
@@ -4187,8 +4585,33 @@ VCvtScalef32SrPkFp4Bf16Vop3::VCvtScalef32SrPkFp4Bf16Vop3(const MachineInst *inst
 }
 
 void VCvtScalef32SrPkFp4Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane, vdst.read_lane(wf, lane));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t packed_src = src0.read_lane(wf, lane);
+    uint32_t seed_lo = src1.read_lane(wf, lane);
+    float s0 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);
+    float s1 = static_cast<float>(
+        static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) /
+        scale);
+    uint8_t r0 = util::f32_to_fp4_e2m1_sr(s0, seed_lo);
+    uint32_t seed_hi = util::prng_advance(seed_lo);
+    uint8_t r1 = util::f32_to_fp4_e2m1_sr(s1, seed_hi);
+    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));
+  }
 }
 
 VCvtScalef32PkF16Fp4Vop3::VCvtScalef32PkF16Fp4Vop3(const MachineInst *inst)
@@ -4205,8 +4628,30 @@ VCvtScalef32PkF16Fp4Vop3::VCvtScalef32PkF16Fp4Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkF16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7E00u) | (static_cast<uint32_t>(0x7E00u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t byte_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>(byte_val & 0xF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>((byte_val >> 4) & 0xF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_f16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VCvtScalef32PkBf16Fp4Vop3::VCvtScalef32PkBf16Fp4Vop3(const MachineInst *inst)
@@ -4223,8 +4668,30 @@ VCvtScalef32PkBf16Fp4Vop3::VCvtScalef32PkBf16Fp4Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf16Fp4Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7FC0u) | (static_cast<uint32_t>(0x7FC0u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    uint32_t src_byte = inst_.op_sel & 0x3;
+    uint8_t byte_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>(byte_val & 0xF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp4_e2m1_to_f32(static_cast<uint8_t>((byte_val >> 4) & 0xF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VCvtScalef322xpk16Fp6F32Vop3::VCvtScalef322xpk16Fp6F32Vop3(const MachineInst *inst)
@@ -4243,8 +4710,193 @@ VCvtScalef322xpk16Fp6F32Vop3::VCvtScalef322xpk16Fp6F32Vop3(const MachineInst *in
 }
 
 void VCvtScalef322xpk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[1] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[3] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[5] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[7] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[9] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[11] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[13] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[15] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[17] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[19] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[21] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[23] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[25] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[27] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[29] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[31] = util::f32_to_fp6_e2m3_rne(sv);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef322xpk16Bf6F32Vop3::VCvtScalef322xpk16Bf6F32Vop3(const MachineInst *inst)
@@ -4263,8 +4915,193 @@ VCvtScalef322xpk16Bf6F32Vop3::VCvtScalef322xpk16Bf6F32Vop3(const MachineInst *in
 }
 
 void VCvtScalef322xpk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[1] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[3] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[5] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[7] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[9] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[11] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[13] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[15] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[17] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[19] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[21] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[23] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[25] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[27] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[29] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src1, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[31] = util::f32_to_bf6_e3m2_rne(sv);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Fp6F32Vop3::VCvtScalef32SrPk32Fp6F32Vop3(const MachineInst *inst)
@@ -4283,8 +5120,226 @@ VCvtScalef32SrPk32Fp6F32Vop3::VCvtScalef32SrPk32Fp6F32Vop3(const MachineInst *in
 }
 
 void VCvtScalef32SrPk32Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[1] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[3] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[5] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[7] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[9] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[11] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[13] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[15] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 16));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 17));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[17] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 18));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 19));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[19] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 20));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 21));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[21] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 22));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 23));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[23] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 24));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 25));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[25] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 26));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 27));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[27] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 28));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 29));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[29] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 30));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 31));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[31] = util::f32_to_fp6_e2m3_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Bf6F32Vop3::VCvtScalef32SrPk32Bf6F32Vop3(const MachineInst *inst)
@@ -4303,8 +5358,226 @@ VCvtScalef32SrPk32Bf6F32Vop3::VCvtScalef32SrPk32Bf6F32Vop3(const MachineInst *in
 }
 
 void VCvtScalef32SrPk32Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 0));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 1));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[1] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 2));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 3));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[3] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 4));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 5));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[5] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 6));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 7));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[7] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 8));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 9));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[9] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 10));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 11));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[11] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 12));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 13));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[13] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 14));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 15));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[15] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 16));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 17));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[17] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 18));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 19));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[19] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 20));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 21));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[21] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 22));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 23));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[23] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 24));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 25));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[25] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 26));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 27));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[27] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 28));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 29));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[29] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 30));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      float v = std::bit_cast<float>(rd(src0, lane, 31));
+      float sv = static_cast<float>(static_cast<double>(v) / scale);
+      vals[31] = util::f32_to_bf6_e3m2_sr(sv, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32Pk32F32Fp6Vop3::VCvtScalef32Pk32F32Fp6Vop3(const MachineInst *inst)
@@ -4321,8 +5594,129 @@ VCvtScalef32Pk32F32Fp6Vop3::VCvtScalef32Pk32F32Fp6Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    wr(vdst, lane, 0,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[0])) * scale)));
+    wr(vdst, lane, 1,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[1])) * scale)));
+    wr(vdst, lane, 2,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[2])) * scale)));
+    wr(vdst, lane, 3,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[3])) * scale)));
+    wr(vdst, lane, 4,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[4])) * scale)));
+    wr(vdst, lane, 5,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[5])) * scale)));
+    wr(vdst, lane, 6,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[6])) * scale)));
+    wr(vdst, lane, 7,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[7])) * scale)));
+    wr(vdst, lane, 8,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[8])) * scale)));
+    wr(vdst, lane, 9,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[9])) * scale)));
+    wr(vdst, lane, 10,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[10])) * scale)));
+    wr(vdst, lane, 11,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[11])) * scale)));
+    wr(vdst, lane, 12,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[12])) * scale)));
+    wr(vdst, lane, 13,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[13])) * scale)));
+    wr(vdst, lane, 14,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[14])) * scale)));
+    wr(vdst, lane, 15,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[15])) * scale)));
+    wr(vdst, lane, 16,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[16])) * scale)));
+    wr(vdst, lane, 17,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[17])) * scale)));
+    wr(vdst, lane, 18,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[18])) * scale)));
+    wr(vdst, lane, 19,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[19])) * scale)));
+    wr(vdst, lane, 20,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[20])) * scale)));
+    wr(vdst, lane, 21,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[21])) * scale)));
+    wr(vdst, lane, 22,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[22])) * scale)));
+    wr(vdst, lane, 23,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[23])) * scale)));
+    wr(vdst, lane, 24,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[24])) * scale)));
+    wr(vdst, lane, 25,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[25])) * scale)));
+    wr(vdst, lane, 26,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[26])) * scale)));
+    wr(vdst, lane, 27,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[27])) * scale)));
+    wr(vdst, lane, 28,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[28])) * scale)));
+    wr(vdst, lane, 29,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[29])) * scale)));
+    wr(vdst, lane, 30,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[30])) * scale)));
+    wr(vdst, lane, 31,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[31])) * scale)));
+  }
 }
 
 VCvtScalef32Pk32F32Bf6Vop3::VCvtScalef32Pk32F32Bf6Vop3(const MachineInst *inst)
@@ -4339,8 +5733,129 @@ VCvtScalef32Pk32F32Bf6Vop3::VCvtScalef32Pk32F32Bf6Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    wr(vdst, lane, 0,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[0])) * scale)));
+    wr(vdst, lane, 1,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[1])) * scale)));
+    wr(vdst, lane, 2,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[2])) * scale)));
+    wr(vdst, lane, 3,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[3])) * scale)));
+    wr(vdst, lane, 4,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[4])) * scale)));
+    wr(vdst, lane, 5,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[5])) * scale)));
+    wr(vdst, lane, 6,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[6])) * scale)));
+    wr(vdst, lane, 7,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[7])) * scale)));
+    wr(vdst, lane, 8,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[8])) * scale)));
+    wr(vdst, lane, 9,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[9])) * scale)));
+    wr(vdst, lane, 10,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[10])) * scale)));
+    wr(vdst, lane, 11,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[11])) * scale)));
+    wr(vdst, lane, 12,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[12])) * scale)));
+    wr(vdst, lane, 13,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[13])) * scale)));
+    wr(vdst, lane, 14,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[14])) * scale)));
+    wr(vdst, lane, 15,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[15])) * scale)));
+    wr(vdst, lane, 16,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[16])) * scale)));
+    wr(vdst, lane, 17,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[17])) * scale)));
+    wr(vdst, lane, 18,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[18])) * scale)));
+    wr(vdst, lane, 19,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[19])) * scale)));
+    wr(vdst, lane, 20,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[20])) * scale)));
+    wr(vdst, lane, 21,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[21])) * scale)));
+    wr(vdst, lane, 22,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[22])) * scale)));
+    wr(vdst, lane, 23,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[23])) * scale)));
+    wr(vdst, lane, 24,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[24])) * scale)));
+    wr(vdst, lane, 25,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[25])) * scale)));
+    wr(vdst, lane, 26,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[26])) * scale)));
+    wr(vdst, lane, 27,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[27])) * scale)));
+    wr(vdst, lane, 28,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[28])) * scale)));
+    wr(vdst, lane, 29,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[29])) * scale)));
+    wr(vdst, lane, 30,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[30])) * scale)));
+    wr(vdst, lane, 31,
+       std::bit_cast<uint32_t>(
+           static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[31])) * scale)));
+  }
 }
 
 VCvtScalef32Pk32Fp6F16Vop3::VCvtScalef32Pk32Fp6F16Vop3(const MachineInst *inst)
@@ -4357,8 +5872,177 @@ VCvtScalef32Pk32Fp6F16Vop3::VCvtScalef32Pk32Fp6F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[1] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[3] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[5] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[7] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[9] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[11] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[13] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[15] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[17] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[19] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[21] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[23] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[25] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[27] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[29] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[31] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32Pk32Fp6Bf16Vop3::VCvtScalef32Pk32Fp6Bf16Vop3(const MachineInst *inst)
@@ -4375,8 +6059,177 @@ VCvtScalef32Pk32Fp6Bf16Vop3::VCvtScalef32Pk32Fp6Bf16Vop3(const MachineInst *inst
 }
 
 void VCvtScalef32Pk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[1] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[3] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[5] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[7] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[9] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[11] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[13] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[15] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[17] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[19] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[21] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[23] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[25] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[27] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[29] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_rne(sv0);
+      vals[31] = util::f32_to_fp6_e2m3_rne(sv1);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32Pk32Bf6F16Vop3::VCvtScalef32Pk32Bf6F16Vop3(const MachineInst *inst)
@@ -4393,8 +6246,177 @@ VCvtScalef32Pk32Bf6F16Vop3::VCvtScalef32Pk32Bf6F16Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[1] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[3] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[5] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[7] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[9] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[11] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[13] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[15] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[17] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[19] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[21] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[23] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[25] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[27] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[29] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[31] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32Pk32Bf6Bf16Vop3::VCvtScalef32Pk32Bf6Bf16Vop3(const MachineInst *inst)
@@ -4411,8 +6433,177 @@ VCvtScalef32Pk32Bf6Bf16Vop3::VCvtScalef32Pk32Bf6Bf16Vop3(const MachineInst *inst
 }
 
 void VCvtScalef32Pk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[1] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[3] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[5] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[7] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[9] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[11] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[13] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[15] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[17] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[19] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[21] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[23] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[25] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[27] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[29] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_rne(sv0);
+      vals[31] = util::f32_to_bf6_e3m2_rne(sv1);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Fp6F16Vop3::VCvtScalef32SrPk32Fp6F16Vop3(const MachineInst *inst)
@@ -4431,8 +6622,210 @@ VCvtScalef32SrPk32Fp6F16Vop3::VCvtScalef32SrPk32Fp6F16Vop3(const MachineInst *in
 }
 
 void VCvtScalef32SrPk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[1] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[3] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[5] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[7] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[9] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[11] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[13] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[15] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[17] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[19] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[21] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[23] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[25] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[27] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[29] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[31] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Fp6Bf16Vop3::VCvtScalef32SrPk32Fp6Bf16Vop3(const MachineInst *inst)
@@ -4451,8 +6844,210 @@ VCvtScalef32SrPk32Fp6Bf16Vop3::VCvtScalef32SrPk32Fp6Bf16Vop3(const MachineInst *
 }
 
 void VCvtScalef32SrPk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[1] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[3] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[5] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[7] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[9] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[11] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[13] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[15] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[17] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[19] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[21] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[23] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[25] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[27] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[29] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_fp6_e2m3_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[31] = util::f32_to_fp6_e2m3_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Bf6F16Vop3::VCvtScalef32SrPk32Bf6F16Vop3(const MachineInst *inst)
@@ -4471,8 +7066,210 @@ VCvtScalef32SrPk32Bf6F16Vop3::VCvtScalef32SrPk32Bf6F16Vop3(const MachineInst *in
 }
 
 void VCvtScalef32SrPk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[1] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[3] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[5] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[7] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[9] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[11] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[13] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[15] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[17] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[19] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[21] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[23] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[25] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[27] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[29] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::f16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::f16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[31] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32SrPk32Bf6Bf16Vop3::VCvtScalef32SrPk32Bf6Bf16Vop3(const MachineInst *inst)
@@ -4491,8 +7288,210 @@ VCvtScalef32SrPk32Bf6Bf16Vop3::VCvtScalef32SrPk32Bf6Bf16Vop3(const MachineInst *
 }
 
 void VCvtScalef32SrPk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src2.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t vals[32];
+    {
+      uint32_t dw = rd(src0, lane, 0);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[0] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[1] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 1);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[2] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[3] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 2);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[4] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[5] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 3);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[6] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[7] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 4);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[8] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[9] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 5);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[10] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[11] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 6);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[12] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[13] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 7);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[14] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[15] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 8);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[16] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[17] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 9);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[18] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[19] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 10);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[20] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[21] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 11);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[22] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[23] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 12);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[24] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[25] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 13);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[26] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[27] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 14);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[28] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[29] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    {
+      uint32_t dw = rd(src0, lane, 15);
+      float v0 = util::bf16_to_f32(static_cast<uint16_t>(dw & 0xFFFF));
+      float v1 = util::bf16_to_f32(static_cast<uint16_t>((dw >> 16) & 0xFFFF));
+      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);
+      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);
+      vals[30] = util::f32_to_bf6_e3m2_sr(sv0, seed);
+      seed = util::prng_advance(seed);
+      vals[31] = util::f32_to_bf6_e3m2_sr(sv1, seed);
+      seed = util::prng_advance(seed);
+    }
+    uint32_t dwords[6];
+    util::pack_6bit(vals, dwords);
+    wr(vdst, lane, 0, dwords[0]);
+    wr(vdst, lane, 1, dwords[1]);
+    wr(vdst, lane, 2, dwords[2]);
+    wr(vdst, lane, 3, dwords[3]);
+    wr(vdst, lane, 4, dwords[4]);
+    wr(vdst, lane, 5, dwords[5]);
+  }
 }
 
 VCvtScalef32Pk32F16Fp6Vop3::VCvtScalef32Pk32F16Fp6Vop3(const MachineInst *inst)
@@ -4509,8 +7508,145 @@ VCvtScalef32Pk32F16Fp6Vop3::VCvtScalef32Pk32F16Fp6Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[0])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[1])) * scale);
+      wr(vdst, lane, 0,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[2])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[3])) * scale);
+      wr(vdst, lane, 1,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[4])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[5])) * scale);
+      wr(vdst, lane, 2,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[6])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[7])) * scale);
+      wr(vdst, lane, 3,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[8])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[9])) * scale);
+      wr(vdst, lane, 4,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[10])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[11])) * scale);
+      wr(vdst, lane, 5,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[12])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[13])) * scale);
+      wr(vdst, lane, 6,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[14])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[15])) * scale);
+      wr(vdst, lane, 7,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[16])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[17])) * scale);
+      wr(vdst, lane, 8,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[18])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[19])) * scale);
+      wr(vdst, lane, 9,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[20])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[21])) * scale);
+      wr(vdst, lane, 10,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[22])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[23])) * scale);
+      wr(vdst, lane, 11,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[24])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[25])) * scale);
+      wr(vdst, lane, 12,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[26])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[27])) * scale);
+      wr(vdst, lane, 13,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[28])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[29])) * scale);
+      wr(vdst, lane, 14,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[30])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[31])) * scale);
+      wr(vdst, lane, 15,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+  }
 }
 
 VCvtScalef32Pk32Bf16Fp6Vop3::VCvtScalef32Pk32Bf16Fp6Vop3(const MachineInst *inst)
@@ -4527,8 +7663,145 @@ VCvtScalef32Pk32Bf16Fp6Vop3::VCvtScalef32Pk32Bf16Fp6Vop3(const MachineInst *inst
 }
 
 void VCvtScalef32Pk32Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[0])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[1])) * scale);
+      wr(vdst, lane, 0,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[2])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[3])) * scale);
+      wr(vdst, lane, 1,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[4])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[5])) * scale);
+      wr(vdst, lane, 2,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[6])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[7])) * scale);
+      wr(vdst, lane, 3,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[8])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[9])) * scale);
+      wr(vdst, lane, 4,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[10])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[11])) * scale);
+      wr(vdst, lane, 5,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[12])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[13])) * scale);
+      wr(vdst, lane, 6,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[14])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[15])) * scale);
+      wr(vdst, lane, 7,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[16])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[17])) * scale);
+      wr(vdst, lane, 8,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[18])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[19])) * scale);
+      wr(vdst, lane, 9,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[20])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[21])) * scale);
+      wr(vdst, lane, 10,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[22])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[23])) * scale);
+      wr(vdst, lane, 11,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[24])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[25])) * scale);
+      wr(vdst, lane, 12,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[26])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[27])) * scale);
+      wr(vdst, lane, 13,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[28])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[29])) * scale);
+      wr(vdst, lane, 14,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[30])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::fp6_e2m3_to_f32(vals[31])) * scale);
+      wr(vdst, lane, 15,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+  }
 }
 
 VCvtScalef32Pk32F16Bf6Vop3::VCvtScalef32Pk32F16Bf6Vop3(const MachineInst *inst)
@@ -4545,8 +7818,145 @@ VCvtScalef32Pk32F16Bf6Vop3::VCvtScalef32Pk32F16Bf6Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32Pk32F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[0])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[1])) * scale);
+      wr(vdst, lane, 0,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[2])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[3])) * scale);
+      wr(vdst, lane, 1,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[4])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[5])) * scale);
+      wr(vdst, lane, 2,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[6])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[7])) * scale);
+      wr(vdst, lane, 3,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[8])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[9])) * scale);
+      wr(vdst, lane, 4,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[10])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[11])) * scale);
+      wr(vdst, lane, 5,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[12])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[13])) * scale);
+      wr(vdst, lane, 6,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[14])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[15])) * scale);
+      wr(vdst, lane, 7,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[16])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[17])) * scale);
+      wr(vdst, lane, 8,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[18])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[19])) * scale);
+      wr(vdst, lane, 9,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[20])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[21])) * scale);
+      wr(vdst, lane, 10,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[22])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[23])) * scale);
+      wr(vdst, lane, 11,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[24])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[25])) * scale);
+      wr(vdst, lane, 12,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[26])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[27])) * scale);
+      wr(vdst, lane, 13,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[28])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[29])) * scale);
+      wr(vdst, lane, 14,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[30])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[31])) * scale);
+      wr(vdst, lane, 15,
+         static_cast<uint32_t>(util::f32_to_f16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16));
+    }
+  }
 }
 
 VCvtScalef32Pk32Bf16Bf6Vop3::VCvtScalef32Pk32Bf16Bf6Vop3(const MachineInst *inst)
@@ -4563,8 +7973,145 @@ VCvtScalef32Pk32Bf16Bf6Vop3::VCvtScalef32Pk32Bf16Bf6Vop3(const MachineInst *inst
 }
 
 void VCvtScalef32Pk32Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
+    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+  };
+  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
+    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+  };
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu)
+      continue;
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_dwords[6];
+    src_dwords[0] = rd(src0, lane, 0);
+    src_dwords[1] = rd(src0, lane, 1);
+    src_dwords[2] = rd(src0, lane, 2);
+    src_dwords[3] = rd(src0, lane, 3);
+    src_dwords[4] = rd(src0, lane, 4);
+    src_dwords[5] = rd(src0, lane, 5);
+    uint8_t vals[32];
+    util::unpack_6bit(src_dwords, vals);
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[0])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[1])) * scale);
+      wr(vdst, lane, 0,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[2])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[3])) * scale);
+      wr(vdst, lane, 1,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[4])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[5])) * scale);
+      wr(vdst, lane, 2,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[6])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[7])) * scale);
+      wr(vdst, lane, 3,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[8])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[9])) * scale);
+      wr(vdst, lane, 4,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[10])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[11])) * scale);
+      wr(vdst, lane, 5,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[12])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[13])) * scale);
+      wr(vdst, lane, 6,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[14])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[15])) * scale);
+      wr(vdst, lane, 7,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[16])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[17])) * scale);
+      wr(vdst, lane, 8,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[18])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[19])) * scale);
+      wr(vdst, lane, 9,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[20])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[21])) * scale);
+      wr(vdst, lane, 10,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[22])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[23])) * scale);
+      wr(vdst, lane, 11,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[24])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[25])) * scale);
+      wr(vdst, lane, 12,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[26])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[27])) * scale);
+      wr(vdst, lane, 13,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[28])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[29])) * scale);
+      wr(vdst, lane, 14,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+    {
+      float f0 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[30])) * scale);
+      float f1 = static_cast<float>(static_cast<double>(util::bf6_e3m2_to_f32(vals[31])) * scale);
+      wr(vdst, lane, 15,
+         static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+             (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16));
+    }
+  }
 }
 
 VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
@@ -4583,8 +8130,21 @@ VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
 }
 
 void VAshrPkI8I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      uint32_t shift = static_cast<uint32_t>(src2.read_lane(wf, lane)) & 31u;
+      auto pack = [&](uint32_t src) -> uint32_t {
+        int32_t shifted = static_cast<int32_t>(src) >> shift;
+        int32_t clamped =
+            std::clamp(shifted, static_cast<int32_t>(-128), static_cast<int32_t>(127));
+        return static_cast<uint32_t>(clamped) & 0xffu;
+      };
+      return pack(src0.read_lane(wf, lane)) | (pack(src1.read_lane(wf, lane)) << 8);
+    }());
+  }
 }
 
 VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
@@ -4603,8 +8163,20 @@ VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
 }
 
 void VAshrPkU8I32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane(wf, lane, [&]() -> uint32_t {
+      uint32_t shift = static_cast<uint32_t>(src2.read_lane(wf, lane)) & 31u;
+      auto pack = [&](uint32_t src) -> uint32_t {
+        int32_t shifted = static_cast<int32_t>(src) >> shift;
+        int32_t clamped = std::clamp(shifted, static_cast<int32_t>(0), static_cast<int32_t>(255));
+        return static_cast<uint32_t>(clamped);
+      };
+      return pack(src0.read_lane(wf, lane)) | (pack(src1.read_lane(wf, lane)) << 8);
+    }());
+  }
 }
 
 VCvtPkF16F32Vop3::VCvtPkF16F32Vop3(const MachineInst *inst)
@@ -4653,8 +8225,8 @@ void VCvtPkBf16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    uint32_t lo = util::f32_to_bf16(s0);
-    uint32_t hi = util::f32_to_bf16(s1);
+    uint32_t lo = util::f32_to_bf16_rne(s0);
+    uint32_t hi = util::f32_to_bf16_rne(s1);
     vdst.write_lane(wf, lane, lo | (hi << 16));
   }
 }
@@ -4673,8 +8245,30 @@ VCvtScalef32PkBf16Fp8Vop3::VCvtScalef32PkBf16Fp8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7FC0u) | (static_cast<uint32_t>(0x7FC0u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VCvtScalef32PkBf16Bf8Vop3::VCvtScalef32PkBf16Bf8Vop3(const MachineInst *inst)
@@ -4691,8 +8285,30 @@ VCvtScalef32PkBf16Bf8Vop3::VCvtScalef32PkBf16Bf8Vop3(const MachineInst *inst)
 }
 
 void VCvtScalef32PkBf16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t scale_bits = src1.read_lane(wf, lane);
+    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;
+    if (biased_exp == 0xFFu) {
+      vdst.write_lane(wf, lane,
+                      static_cast<uint32_t>(0x7FC0u) | (static_cast<uint32_t>(0x7FC0u) << 16));
+      continue;
+    }
+    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
+    uint32_t src_raw = src0.read_lane(wf, lane);
+    bool src_hi = inst_.op_sel & 1;
+    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);
+    float f0 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFF))) * scale);
+    float f1 = static_cast<float>(
+        static_cast<double>(util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFF))) *
+        scale);
+    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16(f0)) |
+                      (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16);
+    vdst.write_lane(wf, lane, result);
+  }
 }
 
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
@@ -4840,7 +8456,7 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VReadlaneB32Vop3>()),
       vdst(32, OperandType::OPR_SREG_NOVCC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -5232,8 +8848,17 @@ VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    uint32_t lo = util::f32_to_fp8_e4m3_rne(s0);
+    uint32_t hi = util::f32_to_fp8_e4m3_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.op_sel) & 0x8u, packed);
+  }
 }
 
 VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
@@ -5250,8 +8875,17 @@ VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
+    uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
+    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.op_sel) & 0x8u, packed);
+  }
 }
 
 VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
@@ -5268,8 +8902,18 @@ VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtSrFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_fp8_e4m3_sr(s0, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
@@ -5286,8 +8930,18 @@ VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
 }
 
 void VCvtSrBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float s0 = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
+    uint32_t seed = src1.read_lane(wf, lane);
+    uint8_t result = util::f32_to_bf8_e5m2_sr(s0, seed);
+    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;
+    uint32_t old = vdst.read_lane(wf, lane);
+    uint32_t mask = ~(0xFFu << (dst_byte * 8));
+    vdst.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));
+  }
 }
 
 VCvtSrF16F32Vop3::VCvtSrF16F32Vop3(const MachineInst *inst)
@@ -5352,51 +9006,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
 }
 
 void VMinimum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = std::fmin(
-                            std::fmin(
-                                [&]() {
-                                  float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                                  if (inst_.abs & (1u << 0))
-                                    sv = std::fabs(sv);
-                                  if (inst_.neg & (1u << 0))
-                                    sv = -sv;
-                                  return sv;
-                                }(),
-                                [&]() {
-                                  float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                                  if (inst_.abs & (1u << 1))
-                                    sv = std::fabs(sv);
-                                  if (inst_.neg & (1u << 1))
-                                    sv = -sv;
-                                  return sv;
-                                }()),
-                            [&]() {
-                              float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                              if (inst_.abs & (1u << 2))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 2))
-                                sv = -sv;
-                              return sv;
-                            }());
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_minimum3_f32_vop3(*this, wf);
 }
 
 VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
@@ -5415,51 +9025,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
 }
 
 void VMaximum3F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
-                      float v = [&]() {
-                        float v = std::fmax(
-                            std::fmax(
-                                [&]() {
-                                  float sv = std::bit_cast<float>(src0.read_lane(wf, lane));
-                                  if (inst_.abs & (1u << 0))
-                                    sv = std::fabs(sv);
-                                  if (inst_.neg & (1u << 0))
-                                    sv = -sv;
-                                  return sv;
-                                }(),
-                                [&]() {
-                                  float sv = std::bit_cast<float>(src1.read_lane(wf, lane));
-                                  if (inst_.abs & (1u << 1))
-                                    sv = std::fabs(sv);
-                                  if (inst_.neg & (1u << 1))
-                                    sv = -sv;
-                                  return sv;
-                                }()),
-                            [&]() {
-                              float sv = std::bit_cast<float>(src2.read_lane(wf, lane));
-                              if (inst_.abs & (1u << 2))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 2))
-                                sv = -sv;
-                              return sv;
-                            }());
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
+  amdgpu::execute_v_maximum3_f32_vop3(*this, wf);
 }
 
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
@@ -5641,39 +9207,45 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
 void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0_raw = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    float s0 = util::f16_to_f32(s0_raw);
+    uint16_t s0_raw =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
     if (inst_.abs & (1u << 0))
-      s0 = std::fabs(s0);
+      s0_raw &= 0x7FFFu;
     if (inst_.neg & (1u << 0))
-      s0 = -s0;
+      s0_raw ^= 0x8000u;
     uint32_t mask = src1.read_lane(wf, lane);
     bool match = false;
-    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);
-    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0)
+    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
+    uint16_t f16_mant = s0_raw & 0x3FF;
+    bool f16_sign = (s0_raw & 0x8000) != 0;
+    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
+    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
+    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
+    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
+    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
+    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
       match = true;
-    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0)
+    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
       match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
+    if ((mask & 0x004) && is_inf && f16_sign)
       match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
+    if ((mask & 0x008) && is_normal && f16_sign)
       match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
+    if ((mask & 0x010) && is_denorm && f16_sign)
       match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
+    if ((mask & 0x020) && is_zero && f16_sign)
       match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
+    if ((mask & 0x040) && is_zero && !f16_sign)
       match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
+    if ((mask & 0x080) && is_denorm && !f16_sign)
       match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
+    if ((mask & 0x100) && is_normal && !f16_sign)
       match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
+    if ((mask & 0x200) && is_inf && !f16_sign)
       match = true;
     if (match)
       result |= (1ULL << lane);
@@ -5972,7 +9544,10 @@ void VCmpxFF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -5992,11 +9567,14 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
 void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6008,7 +9586,10 @@ void VCmpxLtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6028,11 +9609,14 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
 void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6044,7 +9628,10 @@ void VCmpxEqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6064,11 +9651,14 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
 void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6080,7 +9670,10 @@ void VCmpxLeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6100,11 +9693,14 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
 void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6116,7 +9712,10 @@ void VCmpxGtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6136,11 +9735,14 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
 void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6152,7 +9754,10 @@ void VCmpxLgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6172,11 +9777,14 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
 void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6188,7 +9796,10 @@ void VCmpxGeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6208,11 +9819,14 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
 void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6224,7 +9838,10 @@ void VCmpxOF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6244,11 +9861,14 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
 void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6260,7 +9880,10 @@ void VCmpxUF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6280,11 +9903,14 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
 void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6296,7 +9922,10 @@ void VCmpxNgeF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6316,11 +9945,14 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
 void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6332,7 +9964,10 @@ void VCmpxNlgF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6352,11 +9987,14 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
 void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6368,7 +10006,10 @@ void VCmpxNgtF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6388,11 +10029,14 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
 void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6404,7 +10048,10 @@ void VCmpxNleF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6424,11 +10071,14 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
 void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6440,7 +10090,10 @@ void VCmpxNeqF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6460,11 +10113,14 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
 void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-    float s1 = util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
+    float s0 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float s1 = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
     if (inst_.abs & (1u << 0))
       s0 = std::fabs(s0);
     if (inst_.neg & (1u << 0))
@@ -6476,7 +10132,10 @@ void VCmpxNltF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6501,7 +10160,10 @@ void VCmpxTruF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6795,7 +10457,10 @@ void VCmpxFF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6831,7 +10496,10 @@ void VCmpxLtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6867,7 +10535,10 @@ void VCmpxEqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6903,7 +10574,10 @@ void VCmpxLeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6939,7 +10613,10 @@ void VCmpxGtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -6975,7 +10652,10 @@ void VCmpxLgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7011,7 +10691,10 @@ void VCmpxGeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7047,7 +10730,10 @@ void VCmpxOF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7083,7 +10769,10 @@ void VCmpxUF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7119,7 +10808,10 @@ void VCmpxNgeF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7155,7 +10847,10 @@ void VCmpxNlgF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7191,7 +10886,10 @@ void VCmpxNgtF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7227,7 +10925,10 @@ void VCmpxNleF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7263,7 +10964,10 @@ void VCmpxNeqF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7299,7 +11003,10 @@ void VCmpxNltF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7324,7 +11031,10 @@ void VCmpxTruF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7618,7 +11328,10 @@ void VCmpxFF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7654,7 +11367,10 @@ void VCmpxLtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7690,7 +11406,10 @@ void VCmpxEqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7726,7 +11445,10 @@ void VCmpxLeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7762,7 +11484,10 @@ void VCmpxGtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7798,7 +11523,10 @@ void VCmpxLgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1 || s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7834,7 +11562,10 @@ void VCmpxGeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7870,7 +11601,10 @@ void VCmpxOF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!std::isnan(s0) && !std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7906,7 +11640,10 @@ void VCmpxUF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7942,7 +11679,10 @@ void VCmpxNgeF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 >= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -7978,7 +11718,10 @@ void VCmpxNlgF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1 || s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8014,7 +11757,10 @@ void VCmpxNgtF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 > s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8050,7 +11796,10 @@ void VCmpxNleF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 <= s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8086,7 +11835,10 @@ void VCmpxNeqF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8122,7 +11874,10 @@ void VCmpxNltF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(s0 < s1))
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8147,7 +11902,10 @@ void VCmpxTruF64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8440,7 +12198,10 @@ void VCmpxFI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8460,15 +12221,25 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
 void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8488,15 +12259,25 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
 void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8516,15 +12297,25 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
 void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8544,15 +12335,25 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
 void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8572,15 +12373,25 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
 void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8600,15 +12411,25 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
 void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8633,7 +12454,10 @@ void VCmpxTI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8658,7 +12482,10 @@ void VCmpxFU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8678,15 +12505,25 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
 void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8706,15 +12543,25 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
 void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8734,15 +12581,25 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
 void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8762,15 +12619,25 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
 void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8790,15 +12657,25 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
 void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8818,15 +12695,25 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
 void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -8851,7 +12738,10 @@ void VCmpxTU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9144,7 +13034,10 @@ void VCmpxFI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9172,7 +13065,10 @@ void VCmpxLtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9200,7 +13096,10 @@ void VCmpxEqI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9228,7 +13127,10 @@ void VCmpxLeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9256,7 +13158,10 @@ void VCmpxGtI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9284,7 +13189,10 @@ void VCmpxNeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9312,7 +13220,10 @@ void VCmpxGeI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9337,7 +13248,10 @@ void VCmpxTI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9362,7 +13276,10 @@ void VCmpxFU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9390,7 +13307,10 @@ void VCmpxLtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9418,7 +13338,10 @@ void VCmpxEqU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9446,7 +13369,10 @@ void VCmpxLeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9474,7 +13400,10 @@ void VCmpxGtU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9502,7 +13431,10 @@ void VCmpxNeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9530,7 +13462,10 @@ void VCmpxGeU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9555,7 +13490,10 @@ void VCmpxTU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9848,7 +13786,10 @@ void VCmpxFI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9876,7 +13817,10 @@ void VCmpxLtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9904,7 +13848,10 @@ void VCmpxEqI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9932,7 +13879,10 @@ void VCmpxLeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9960,7 +13910,10 @@ void VCmpxGtI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -9988,7 +13941,10 @@ void VCmpxNeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10016,7 +13972,10 @@ void VCmpxGeI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10041,7 +14000,10 @@ void VCmpxTI64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10066,7 +14028,10 @@ void VCmpxFU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     (void)lane;
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10094,7 +14059,10 @@ void VCmpxLtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 < s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10122,7 +14090,10 @@ void VCmpxEqU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 == s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10150,7 +14121,10 @@ void VCmpxLeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10178,7 +14152,10 @@ void VCmpxGtU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 > s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10206,7 +14183,10 @@ void VCmpxNeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 != s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10234,7 +14214,10 @@ void VCmpxGeU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 
@@ -10259,7 +14242,10 @@ void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     result |= (1ULL << lane);
   }
-  vdst.write_scalar64(wf, result);
+  if (wf.wf_size() <= 32)
+    vdst.write_scalar(wf, static_cast<uint32_t>(result));
+  else
+    vdst.write_scalar64(wf, result);
   wf.set_exec(result);
 }
 

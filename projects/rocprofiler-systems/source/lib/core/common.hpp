@@ -13,7 +13,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/locking.hpp>
 

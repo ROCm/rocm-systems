@@ -188,7 +188,17 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_events();
 
       // Single-threaded: drain all events in timestamp order.
+      // Drain async events at each tick boundary so that events from other
+      // threads (e.g. doorbell poll threads) are merged promptly instead of
+      // waiting for the main queue to empty — which may never happen when
+      // CU work events continuously reschedule.
+      Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
+        Tick next_tick = ctx.event_queue.next_event_time();
+        if (next_tick > last_drained_tick) {
+          last_drained_tick = next_tick;
+          drain_async_events();
+        }
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire))

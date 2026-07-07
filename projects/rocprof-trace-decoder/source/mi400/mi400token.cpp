@@ -128,6 +128,7 @@ gfx10::Token TokenGenerator::next()
         auto& info = lookupbits.lookup(current);
         RdnaType type = (RdnaType) info.type;
         bits_toread = info.length;
+
         if (type == RdnaType::NOP || bits_toread == 0)
         {
             bits_toread = 8;
@@ -145,7 +146,7 @@ gfx10::Token TokenGenerator::next()
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
             if (real != 0) addRealtime(real);
-            continue;
+            if (!packetlost) continue;
         }
 
         auto token = Token{globaltime, current, type};
@@ -173,6 +174,8 @@ gfx10::Token TokenGenerator::next()
         return token;
     }
 
+    current = 0;
+    byte_ptr = BUFFER_SIZE;
     bit_ptr = byte_ptr * 8;
     return Token{0, 0, RdnaType::TIMESTAMP};
 }

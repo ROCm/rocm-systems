@@ -9,6 +9,7 @@
 
 #include "hip_internal.hpp"
 
+#include <atomic>
 #include <cstdint>
 
 #if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0
@@ -433,6 +434,20 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                     size_t num_prefetch_locs, unsigned long long flags,
                                     hipStream_t stream);
+hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream);
+hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                      unsigned long long flags, hipStream_t stream);
+hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count,
+                                              hipMemLocation* prefetchLocs,
+                                              size_t* prefetchLocIdxs,
+                                              size_t numPrefetchLocs,
+                                              unsigned long long flags, hipStream_t stream);
+hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdxs,
+                                                 size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream);
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
 hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
                                    const void* dev_ptr, size_t count);
@@ -1216,6 +1231,10 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemPrefetchAsync_fn = hip::hipMemPrefetchAsync;
   ptrDispatchTable->hipMemPrefetchAsync_v2_fn = hip::hipMemPrefetchAsync_v2;
   ptrDispatchTable->hipMemPrefetchBatchAsync_fn = hip::hipMemPrefetchBatchAsync;
+  ptrDispatchTable->hipMemDiscardBatchAsync_fn = hip::hipMemDiscardBatchAsync;
+  ptrDispatchTable->hipDrvMemDiscardBatchAsync_fn = hip::hipDrvMemDiscardBatchAsync;
+  ptrDispatchTable->hipMemDiscardAndPrefetchBatchAsync_fn = hip::hipMemDiscardAndPrefetchBatchAsync;
+  ptrDispatchTable->hipDrvMemDiscardAndPrefetchBatchAsync_fn = hip::hipDrvMemDiscardAndPrefetchBatchAsync;
   ptrDispatchTable->hipMemPtrGetInfo_fn = hip::hipMemPtrGetInfo;
   ptrDispatchTable->hipMemRangeGetAttribute_fn = hip::hipMemRangeGetAttribute;
   ptrDispatchTable->hipMemRangeGetAttributes_fn = hip::hipMemRangeGetAttributes;
@@ -1539,18 +1558,25 @@ template <typename Tp> void ToolsInit(Tp* table) {
 #endif
 }
 
-template <typename Tp> Tp& GetDispatchTableImpl() {
+template <typename Tp> Tp* GetDispatchTableImpl(std::atomic<bool>& registered) {
   // using a static inside a function prevents static initialization fiascos
   static auto dispatch_table = Tp{};
-
-  // Change all the function pointers to point to the HIP runtime implementation functions
-  UpdateDispatchTable(&dispatch_table);
-
-  // Profiler Registration, may wrap the function pointers
-  ToolsInit(&dispatch_table);
-
-  return dispatch_table;
+  static auto* table = [] {
+    UpdateDispatchTable(&dispatch_table);
+    return &dispatch_table;
+  }();
+  if (!registered.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      ToolsInit(table);
+    }
+  }
+  return table;
 }
+
+std::atomic<bool> hip_dispatch_registered{false};
+std::atomic<bool> hip_compiler_dispatch_registered{false};
+std::atomic<bool> hip_tools_dispatch_registered{false};
 }  // namespace
 
 // At the -O3 optimization level, these functions are vectorized (gcc 11.4.1),
@@ -1564,16 +1590,13 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
-  static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
-  return _v;
+  return GetDispatchTableImpl<HipToolsDispatchTable>(hip_tools_dispatch_registered);
 }
 }  // namespace hip
 
@@ -2223,6 +2246,11 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxWaitEvent_fn, 534);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetGlobal_fn, 535);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardBatchAsync_fn, 537);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardBatchAsync_fn, 538);
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemDiscardAndPrefetchBatchAsync_fn, 539);
+HIP_ENFORCE_ABI(HipDispatchTable, hipDrvMemDiscardAndPrefetchBatchAsync_fn, 540);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2230,9 +2258,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 537)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 541)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 29,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 30,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

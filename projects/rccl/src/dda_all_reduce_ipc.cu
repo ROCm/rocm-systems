@@ -30,56 +30,6 @@ using nccl_dda_ipc_detail::kDdaNranks;
 /** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
-inline uint32_t divRoundUp(size_t a, size_t b) {
-  uint32_t y = static_cast<uint32_t>((a + b - 1) / b);
-  if (y == 0) {
-    y = 1;
-  }
-  return y;
-}
-
-constexpr uint32_t
-calcBlockCount(size_t numThreads, size_t threadsPerBlock, size_t maxBlocks) {
-  const auto uNumThreads = static_cast<uint64_t>(numThreads);
-  const auto uThreadsPerBlock = static_cast<uint64_t>(threadsPerBlock);
-  // Overflow safe variant of (a + b - 1) / b
-  const uint64_t blocks =
-      uNumThreads / uThreadsPerBlock + (uNumThreads % uThreadsPerBlock != 0);
-  uint32_t y = static_cast<uint32_t>(std::min(blocks, maxBlocks));
-  if (y == 0) {
-    y = 1;
-  }
-  return y;
-}
-
-std::pair<dim3, dim3>
-getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
-  constexpr uint32_t kThreadsPerWarp = 64;
-  constexpr uint32_t kThreadsPerBlock = 512;
-
-  const uint32_t elementsPerThread =
-      16 / typeSize; // we do 16 Byte load in kernel
-
-  const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
-
-  dim3 threads(0, 1, 1);
-  dim3 blocks(0, 1, 1);
-  if (count < elementsPerThread * kThreadsPerBlock) {
-    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
-    blocks.x = 1;
-  } else {
-    auto warpsRequired = divRoundUp(count, elementsPerWarp);
-    blocks.x = calcBlockCount(
-        divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
-    auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock =
-        std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
-    threads.x = threadsPerBlock;
-  }
-
-  return std::make_pair(blocks, threads);
-}
-
 template <typename T>
 static ncclResult_t ncclAllReduceDdaIpcTyped(
     const void* sendbuff,
@@ -117,7 +67,7 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
 
  
   const int nBlocksMax = ddaMaxNBlocksForScratch(); 
-  auto gridBlock = getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 

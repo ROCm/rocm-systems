@@ -197,6 +197,7 @@ enum EINST
     reserved_valu_4,
     reserved_valu_2,
     wmma_ld_scale,
+    wmma_xdl_4,
     valu_dpmacc_32 = 187,
     vmem_other_simd_start,
     block_store = 222,
@@ -319,9 +320,11 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::cluster_barrier_signal, {WaveInstCategory::MSG, 1}            },
 
     {(int) EINST::wmma_spfp_16,           {WaveInstCategory::VALU, 16}          },
+    {(int) EINST::wmma_xdl_4,             {WaveInstCategory::VALU, 4}           },
     {(int) EINST::wmma_xdl_8,             {WaveInstCategory::VALU, 8}           },
     {(int) EINST::wmma_xdl_16,            {WaveInstCategory::VALU, 16}          },
     {(int) EINST::wmma_ld_scale,          {WaveInstCategory::LD_SCALE, 1}       },
+    {(int) EINST::valu_dpmacc_32,         {WaveInstCategory::VALU, 32}          },
 
     {(int) EINST::lds_other_simd_1,       {WaveInstCategory::LDS_OTHER_SIMD, 1} },
     {(int) EINST::lds_other_simd_2,       {WaveInstCategory::LDS_OTHER_SIMD, 2} },

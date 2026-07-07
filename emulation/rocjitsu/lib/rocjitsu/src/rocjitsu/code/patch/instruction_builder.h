@@ -20,10 +20,16 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
+
+class Instruction;
 
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = 0x17F;
@@ -59,6 +65,40 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
 }
 
+/// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
+///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
+///
+/// Returns std::nullopt if @p branch_pc or @p target is not dword-aligned, if
+/// the resulting delta does not fit in a signed 16-bit dword field, or if
+/// @p branch_pc / @p target are large enough that the signed int64 intermediate
+/// would overflow.
+///
+/// Shared by DBT cave-entry/return branches and the DBI relocation trampoline
+/// so both paths fail closed on the same range.
+[[nodiscard]] inline constexpr std::optional<int16_t> compute_sopp_branch_simm16(uint64_t branch_pc,
+                                                                                 uint64_t target) {
+  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
+  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr uint64_t kMaxSignedBranchPc =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
+  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
+    return std::nullopt;
+
+  // The SOPP immediate is a signed *dword* offset, so both the branch base
+  // (branch_pc + 4) and the target must be dword-aligned.
+  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0)
+    return std::nullopt;
+
+  const int64_t delta_bytes =
+      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
+  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
+  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
+      delta_dwords > std::numeric_limits<int16_t>::max())
+    return std::nullopt;
+
+  return static_cast<int16_t>(delta_dwords);
+}
+
 /// @brief Get the s_branch opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_branch(rj_code_arch_t arch) {
   // GFX9 (CDNA1-4): opcode 2; GFX12 (RDNA3/3.5/4): opcode 32
@@ -66,12 +106,26 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 32;
   default:
     return 2;
   }
 }
 
+/// @brief Get the s_endpgm opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
+  // GFX9 (CDNA1-4): opcode 1; GFX12 (RDNA3/3.5/4, gfx1250): opcode 48
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 48;
+  default:
+    return 1;
+  }
+}
 /// @brief Get the s_nop opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_nop([[maybe_unused]] rj_code_arch_t arch) {
   return 0; // s_nop is opcode 0 on all ISAs
@@ -83,6 +137,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 8;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
@@ -98,6 +153,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
     return 10;
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:
@@ -116,6 +172,28 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   return pack_sopp(sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
 
+/// @brief Patch an emitted direct PC-relative branch instruction in-place.
+///
+/// @details @p words points into the translated output buffer. @p delta_bytes is
+/// relative to the instruction's branch base. For AMDGPU SOPP direct branches
+/// and SOPK `s_call_b64`, the base is the next instruction and the immediate is
+/// a signed dword offset. The function replaces bits [15:0] of word 0. It
+/// returns false when @p inst has no decoded PC-relative branch offset, the
+/// buffer is empty, or the delta is not representable by a signed 16-bit dword
+/// immediate.
+[[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
+                                             int64_t delta_bytes, rj_code_arch_t arch);
+
+/// @brief Append a canonical PC-relative target builder for a recovered branch.
+///
+/// @details The original getpc remains in the instruction stream and initializes
+/// @p pc_sreg / @p pc_sreg+1. This helper appends the smallest positive or
+/// negative scalar add/sub sequence needed to turn that pair into the final
+/// relocated target. Static PC recovery only records address-builder ranges that
+/// have enough instruction words for this replacement to be written in place.
+[[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
+                                           uint16_t pc_sreg, int64_t delta);
+
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///
 /// @param cycles  Number of additional stall cycles (0-based).
@@ -124,6 +202,14 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 [[nodiscard]] inline constexpr uint32_t
 build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   return pack_sopp(sopp_op_nop(arch), cycles);
+}
+
+/// @brief Encode an s_endpgm instruction for the given target ISA.
+///
+/// @param arch    Target ISA architecture.
+/// @returns The encoded 32-bit instruction word.
+[[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
+  return pack_sopp(sopp_op_endpgm(arch), 0);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.

@@ -2,7 +2,7 @@
 stream:
   Unit_hipStreamCreate_default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamCreate_Negative:
     <<: *level_2
     tags: [lifecycle]
@@ -53,12 +53,14 @@ stream:
     tags: [callback]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_2
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [asan]
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
     tags: [memory]
     # disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipStreamCreateWithFlags_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -80,12 +82,14 @@ stream:
   Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
     <<: *level_2
     # SWDEV-398981 fails in stress test
-    disabled: [amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_2
     # Disabling test tracked SWDEV-394199
-    disabled: [amd_windows, amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
@@ -101,9 +105,22 @@ stream:
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_2
     tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_ChildWorkload:
+    <<: *level_2
+    # Internal helper, only invoked by the parent test via re-exec (by exact
+    # name, which still runs hidden [.] cases). Disabled everywhere so it does
+    # not run as a standalone no-op in the regular suite.
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
+    <<: *level_2
+    # Verifies AQL packet trace reports stream priority next to HWq; relies on
+    # AMD_LOG AQL output, so AMD/Linux only.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
-    tags: [lifecycle]
+    tags: [lifecycle, smoke]
   Unit_hipStreamDestroy_Negative_NullStream:
     <<: *level_2
     tags: [lifecycle]
@@ -123,6 +140,8 @@ stream:
     tags: [properties]
   Unit_hipMemPrefetchAsync_Basic:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [memory]
   Unit_hipMemPoolApi_hipStreamLegacy_Basic:
     <<: *level_2
@@ -148,7 +167,7 @@ stream:
     <<: *level_2
     # Note: TDR (pass)
     disabled: [amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_2
     # (amd_windows) mlsejenkins_Window_Failures_on_gfx1201
@@ -170,7 +189,7 @@ stream:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_2
     # Note: TDR (pass)
@@ -205,7 +224,7 @@ stream:
   Unit_hipLaunchHostFunc_streams:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [callback]
   Unit_hipLaunchHostFunc_multistreams:
     <<: *level_2
@@ -328,7 +347,7 @@ stream:
   Unit_hipExtStreamCreateWithCUMask_NegTst:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
     tags: [properties]
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_2
@@ -338,7 +357,7 @@ stream:
     tags: [synchronization]
   Unit_hipStreamWaitEvent_Default:
     <<: *level_2
-    tags: [synchronization]
+    tags: [synchronization, smoke]
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_2
     # Note: Windows disabled
@@ -368,17 +387,17 @@ stream:
   Unit_hipStreamQuery_spt_WithFinishedWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamQuery_spt_NegativeCases:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamQuery_spt_WithPendingWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamSynchronize_spt_EmptyStream:
     <<: *level_2
@@ -386,12 +405,12 @@ stream:
   Unit_hipStreamSynchronize_spt_FinishWork:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
     <<: *level_2
     # Following tests disabled due to SWDEV-486363
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, streamperthread]
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_2
@@ -420,3 +439,15 @@ stream:
   Unit_hipStreamValue_Wait_Blocking:
     <<: *level_2
     tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]
+  Unit_hipStreamWriteValue_Increment_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]

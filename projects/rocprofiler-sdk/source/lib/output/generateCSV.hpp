@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,9 @@ generate_csv(const output_config&                                           cfg,
              const generator<rocprofiler_buffer_tracing_rccl_api_record_t>& data,
              const stats_entry_t&                                           stats);
 
+// NOTE: OMPT is rocpd-only; it is exported to CSV via `rocpd convert`, so there is
+// intentionally no generate_csv() overload for OMPT.
+
 void
 generate_csv(const output_config&                                                    cfg,
              const metadata&                                                         tool_metadata,
@@ -123,6 +126,12 @@ generate_csv(const output_config&                                               
              const metadata&                                                    tool_metadata,
              const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& data,
              const stats_entry_t&                                               stats);
+
+void
+generate_csv(const output_config&                        cfg,
+             const metadata&                             tool_metadata,
+             const generator<tool_spm_counter_record_t>& data,
+             const stats_entry_t&                        stats);
 
 void
 generate_csv(const output_config&      cfg,

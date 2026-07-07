@@ -3,7 +3,7 @@
 
 """Cross-ISA instruction analysis for shared execute() deduplication.
 
-The ``CrossIsaAnalyzer`` compares instructions across all 9 AMDGPU ISAs
+The ``CrossIsaAnalyzer`` compares instructions across AMDGPU ISAs
 and classifies each into one of three categories:
 
 - **universal** — identical encoding fields and semantics on all ISAs where

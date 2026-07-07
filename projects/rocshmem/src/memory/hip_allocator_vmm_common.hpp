@@ -71,6 +71,9 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   prop.location.id = device_id;
   prop.requestedHandleTypes = handle_type;
 
+  // Required so VMM allocations are accessible by GPUDirect RDMA-capable NICs
+  prop.allocFlags.gpuDirectRDMACapable = 1;
+
   // Get allocation granularity
   size_t granularity;
   err = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);

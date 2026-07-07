@@ -12,12 +12,32 @@
 #include "trees.h"
 #include "rings.h"
 #include "topo.h"
+#include "bootstrap.h"
 
 #include <stdio.h>      // For NULL and
 #include <stdlib.h>     // For malloc(), calloc(), and free()
 #include <stdint.h>     // For uint8_t and other fixed-width types
 #include <string.h>     // For memset()
 #include <limits.h>     // For INT_MAX
+
+// Allgather *value across the comm and reduce it to the global minimum. Leak-safe
+// on the allgather error path. See declaration in graph.h for why grow needs this.
+ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
+#if defined(TOPO_EXPL)
+  // topo_expl does not link the bootstrap layer and never grows comms.
+  (void)comm; (void)value;
+  return ncclSuccess;
+#else
+  int* perRank = NULL;
+  NCCLCHECK(ncclCalloc(&perRank, comm->nRanks));
+  perRank[comm->rank] = *value;
+  ncclResult_t ret = bootstrapAllGather(comm->bootstrap, perRank, sizeof(int));
+  if (ret == ncclSuccess)
+    for (int r = 0; r < comm->nRanks; r++) *value = std::min(*value, perRank[r]);
+  free(perRank);
+  return ret;
+#endif
+}
 
 
 /******************************************************************/
@@ -585,7 +605,7 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
   // cases
   int depth = comm->nRanks/nNodes - 1 + log2i(nNodes);
 
-  int t0u, t0d0, t0d1, t0ChildType, t1u, t1d0, t1d1, t1ChildType;
+  int t0u, t0d0, t0d1, t0ChildType = 0, t1u, t1d0, t1d1, t1ChildType = 0;
   int* ttp, *ttc0, *ttc1;
   NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
   if (nChannels == comm->nChannels) {
@@ -1162,9 +1182,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     if (userMax != -2) {
       maxChannels = std::max(std::min(userMax, 64), 1);
       INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %d", maxChannels);
-    } else {
-      maxChannels = 48;
-      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
   }
 
@@ -1197,7 +1214,9 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
     // If user didn't override, use requested channels; otherwise keep capped max.
     if (!userUpdatedMaxChannels) {
       maxNchannels = nc * comm->nChannels * channelMultiplier;
-      nc = singleNode? maxNchannels : std::min(maxNchannels, maxChannels);
+      // Cap the single-node count at MAXCHANNELS/2, the maximum WarpSpeed supports. Left unbounded it
+      // overruns the fixed comm->channels[MAXCHANNELS] array (for example nc reaches 1760 in CPX mode at 64 ranks).
+      nc = singleNode? std::min(maxNchannels, MAXCHANNELS/2) : std::min(maxNchannels, maxChannels);
     } else {
       nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
     }
@@ -1290,6 +1309,11 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   } else {
     nChannels = comm->nChannels = std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs);
     nChannels = comm->nChannels = copyChannels(comm, nChannels, std::max(minNchannels, std::max(nc, comm->config.minCTAs)), ringPrev, ringNext);
+  }
+
+  if (comm->isGrow) {
+    NCCLCHECKGOTO(ncclTopoReconcileGrowChannels(comm, &comm->nChannels), ret, fail);
+    nChannels = comm->nChannels;
   }
 
   comm->collChannels = comm->nChannels;

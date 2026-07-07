@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
 #include <regex>
@@ -11,7 +12,6 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <timemory/defines.h>
-#include <timemory/utility/demangle.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -32,7 +32,7 @@
         {                                                                                \
             std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
             LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
-                        #result, status_msg);                                            \
+                        #result, static_cast<int>(CHECKSTATUS), status_msg);             \
         }                                                                                \
     }
 
@@ -53,18 +53,21 @@ get_setting_name(std::string _v)
     return _v;
 }
 
-#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
-    [&]() {                                                                              \
-        auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
-            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
-                                   __VA_ARGS__ });                                       \
-        if(!_ret.second)                                                                 \
-        {                                                                                \
-            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
-                        ENV_NAME);                                                       \
-        }                                                                                \
-        return _config->find(ENV_NAME)->second;                                          \
+// Accepts either a `const char*` literal or `std::string_view` (e.g. env_vars::FOO)
+// for ENV_NAME — std::string{} can be constructed from either.
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)           \
+    [&]() {                                                                                  \
+        auto _env_name = std::string{ ENV_NAME };                                            \
+        auto _ret      = _config->insert<TYPE, TYPE>(                                        \
+            _env_name, get_setting_name(_env_name), DESCRIPTION, TYPE{ INITIAL_VALUE }, \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",            \
+                                        __VA_ARGS__ });                                      \
+        if(!_ret.second)                                                                     \
+        {                                                                                    \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(_env_name),           \
+                        _env_name);                                                          \
+        }                                                                                    \
+        return _config->find(_env_name)->second;                                             \
     }()
 
 template <typename Tp>
@@ -336,12 +339,12 @@ config_settings(const std::shared_ptr<settings>& _config)
     _domain_defaults.append(",page_migration");
 #endif
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_DOMAINS", _domain_description,
+    ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::ROCM_DOMAINS, _domain_description,
                               _domain_defaults, "rocm", "rocprofiler-sdk")
         ->set_choices(_domain_choices);
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_ROCM_EVENTS",
+        std::string, env_vars::ROCM_EVENTS,
         "ROCm hardware counters. Use ':device=N' syntax to specify collection on device "
         "number N, e.g. ':device=0'. If no device specification is provided, the event "
         "is collected on every available device",
@@ -368,7 +371,7 @@ config_settings(const std::shared_ptr<settings>& _config)
     if(_has_hip_stream)
     {
         ROCPROFSYS_CONFIG_SETTING(
-            bool, "ROCPROFSYS_ROCM_GROUP_BY_QUEUE",
+            bool, env_vars::ROCM_GROUP_BY_QUEUE,
             "By default, Perfetto trace will show the HIP streams to which kernel "
             "and memory copy operations submitted. With the "
             "`ROCPROFSYS_ROCM_GROUP_BY_QUEUE` option, the trace will display HSA queues "
@@ -414,11 +417,11 @@ get_callback_domains()
     }
 #endif
 
-    auto _data = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
-    auto _domains =
-        tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                         .value_or(std::string{}),
-                     " ,;:\t\n");
+    auto _data    = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
+    auto _domains = tim::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
 
     if(config::get_use_rcclp() && _version.formatted >= 600)
     {
@@ -436,7 +439,7 @@ get_callback_domains()
 
     // Check that the domains are valid
     const auto valid_choices =
-        settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
+        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
 
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::any_of(valid_choices.begin(), valid_choices.end(),
@@ -511,13 +514,13 @@ get_buffered_domains()
 #endif
     };
 
-    auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
-    auto _domains =
-        tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                         .value_or(std::string{}),
-                     " ,;:\t\n");
+    auto _data    = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
+    auto _domains = tim::delimit(
+        config::get_setting_value<std::string>(std::string{ env_vars::ROCM_DOMAINS })
+            .value_or(std::string{}),
+        " ,;:\t\n");
     const auto valid_choices =
-        settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
+        settings::instance()->at(std::string{ env_vars::ROCM_DOMAINS })->get_choices();
 
     auto invalid_domain = [&valid_choices](const auto& domainv) {
         return !std::any_of(valid_choices.begin(), valid_choices.end(),
@@ -655,7 +658,8 @@ std::vector<std::string>
 get_rocm_events()
 {
     return tim::delimit(
-        get_setting_value<std::string>("ROCPROFSYS_ROCM_EVENTS").value_or(std::string{}),
+        get_setting_value<std::string>(std::string{ env_vars::ROCM_EVENTS })
+            .value_or(std::string{}),
         " ,;\t\n");
 }
 

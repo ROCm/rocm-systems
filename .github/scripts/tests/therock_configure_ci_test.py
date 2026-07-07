@@ -119,7 +119,9 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labeler.yml"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".github/labels.yml"))
-        self.assertTrue(therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml"))
+        self.assertTrue(
+            therock_configure_ci.is_path_skippable(".github/workflows/labeler.yml")
+        )
 
         # Test non-skippable patterns
         self.assertFalse(
@@ -421,6 +423,44 @@ class ConfigureCITest(unittest.TestCase):
         projects = json.loads(outputs["projects"])
         self.assertGreaterEqual(len(projects), 1)
         self.assertEqual(outputs["run_linux_rccl_ci"], "false")
+
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_hipfile_pr_triggers_storage_libs_linux_ci(self, mock_get_modified):
+        """PR with hipfile changes should trigger storage_libs build with THEROCK_ENABLE_STORAGE_LIBS=ON."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/hipfile/src/hipfile.cpp",
+            "projects/hipfile/include/hipfile.h",
+        ]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        cmake_options = project_to_run[0]["cmake_options"]
+        self.assertIn("DTHEROCK_ENABLE_STORAGE_LIBS=ON", cmake_options)
+        self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_hipfile_pr_skips_windows_ci(self, mock_get_modified):
+        """PR with only hipfile changes should not trigger Windows CI (Linux-only component)."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "windows",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/hipfile/src/hipfile.cpp",
+            "projects/hipfile/include/hipfile.h",
+        ]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
 
 
 if __name__ == "__main__":

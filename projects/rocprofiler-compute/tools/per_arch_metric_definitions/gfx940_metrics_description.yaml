@@ -127,6 +127,80 @@ System Speed-of-Light:
     plain: The percent of total SIMD cycles in the kernel where any SIMD on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
     rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
     unit: Percent
+Roofline Performance Rates:
+  VALU FLOPs (F16):
+    plain: 'The total 16-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator. Note: this does not include any F16 operations from MFMA instructions.'
+    rst: 'The total 16-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator. Note: this does not include any F16 operations from MFMA instructions.'
+    unit: GFLOP/s
+  VALU FLOPs (F32):
+    plain: 'The total 32-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator. Note: this does not include any F32 operations from MFMA instructions.'
+    rst: 'The total 32-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F32 FLOPs achievable on the specific accelerator. Note: this does not include any F32 operations from MFMA instructions.'
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    plain: 'The total 64-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator. Note: this does not include any F64 operations from MFMA instructions.'
+    rst: 'The total 64-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F64 FLOPs achievable on the specific accelerator. Note: this does not include any F64 operations from MFMA instructions.'
+    unit: GFLOP/s
+  MFMA FLOPs (F8):
+    plain: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
+    rst: The total number of 8-bit brain floating point MFMA operations executed per second. This does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured F8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison. It is supported on AMD Instinct MI300 series and later only.
+    unit: GFLOP/s
+  MFMA FLOPs (BF16):
+    plain: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured BF16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    rst: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions. The peak empirically measured BF16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F16):
+    plain: 'The total number of 16-bit floating point MFMA operations executed per second. Note: this does not include any 16-bit floating point operations from VALU instructions. The peak empirically measured F16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    rst: 'The total number of 16-bit floating point MFMA operations executed per second. Note: this does not include any 16-bit floating point operations from VALU instructions. The peak empirically measured F16 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F32):
+    plain: 'The total number of 32-bit floating point MFMA operations executed per second. Note: this does not include any 32-bit floating point operations from VALU instructions. The peak empirically measured F32 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    rst: 'The total number of 32-bit floating point MFMA operations executed per second. Note: this does not include any 32-bit floating point operations from VALU instructions. The peak empirically measured F32 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA FLOPs (F64):
+    plain: 'The total number of 64-bit floating point MFMA operations executed per second. Note: this does not include any 64-bit floating point operations from VALU instructions. The peak empirically measured F64 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    rst: 'The total number of 64-bit floating point MFMA operations executed per second. Note: this does not include any 64-bit floating point operations from VALU instructions. The peak empirically measured F64 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GFLOP/s
+  MFMA IOPs (Int8):
+    plain: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. The peak empirically measured INT8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    rst: 'The total number of 8-bit integer MFMA operations executed per second. Note: this does not include any 8-bit integer operations from VALU instructions. The peak empirically measured INT8 MFMA operations achievable on the specific accelerator is displayed alongside for comparison.'
+    unit: GIOP/s
+  HBM Bandwidth:
+    plain: The total number of bytes read from and written to High-Bandwidth Memory (HBM) per second. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The total number of bytes read from and written to High-Bandwidth Memory (HBM) per second. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  L2 Cache Bandwidth:
+    plain: The number of bytes looked up in the L2 cache per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The number of bytes looked up in the L2 cache per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  L1 Cache Bandwidth:
+    plain: The number of bytes looked up in the vL1D cache as a result of VMEM instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: The number of bytes looked up in the vL1D cache as a result of VMEM instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. The peak empirically measured bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+  LDS Bandwidth:
+    plain: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator is displayed alongside for comparison.
+    unit: GB/s
+Roofline Plot Points:
+  AI L1:
+    plain: The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L1 cache and the processing units.
+    rst: The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L1 cache and the processing units.
+    unit: FLOPs/Byte
+  AI L2:
+    plain: The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L2 cache and the L1 cache.
+    rst: The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between the L2 cache and the L1 cache.
+    unit: FLOPs/Byte
+  AI HBM:
+    plain: The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between HBM and the L2 cache.
+    rst: The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the ratio of total floating-point operations (FLOPs) to total bytes transferred between HBM and the L2 cache.
+    unit: FLOPs/Byte
+  AI LDS:
+    plain: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.
+    rst: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    plain: The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point operations divided by the total execution time. This value is used as the y-coordinate for the kernel's point on the Roofline plot.
+    rst: The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point operations divided by the total execution time. This value is used as the y-coordinate for the kernel's point on the Roofline plot.
+    unit: GFLOP/s
 Command processor fetcher (CPF):
   CPF Utilization:
     plain: Percent of total cycles where the CPF was busy actively doing any work. The ratio of CPF busy cycles over total cycles counted by the CPF.

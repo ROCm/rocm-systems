@@ -1,12 +1,13 @@
 //! Session: the long-lived context within which execs run.
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{common::MaybeRef, container::ContainerizedDef, profile::ProfileDef};
+use crate::{common::MaybeRef, profile::ProfileDef};
 
 /// A session identifier.
 ///
@@ -129,7 +130,7 @@ pub struct SessionHealth {
     /// Human-readable lifecycle phase.
     ///
     /// One of: `"starting"`, `"pulling"`, `"ready"`, `"degraded"`,
-    /// `"stopping"`, `"stopped"`, `"error"`.
+    /// `"stalled"`, `"dead"`, `"stopping"`, `"stopped"`, `"error"`.
     pub state: Option<String>,
 
     /// `true` if the host will never become (re-)healthy and the
@@ -138,6 +139,65 @@ pub struct SessionHealth {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// How often a running host re-stamps [`SessionHealth::timestamp`] to
+/// prove it is still alive ("heartbeat"). Readers compare the recorded
+/// timestamp against [`HEALTH_STALLED_AFTER`] / [`HEALTH_DEAD_AFTER`] to
+/// detect a host that stopped beating.
+pub const HEALTH_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+
+/// A healthy host whose heartbeat is older than this is reported as
+/// `stalled` (not healthy, but not yet terminal): it may still recover.
+pub const HEALTH_STALLED_AFTER: Duration = Duration::from_secs(6);
+
+/// A healthy host whose heartbeat is older than this is reported as
+/// `dead` (terminal): the host process is assumed to have crashed.
+pub const HEALTH_DEAD_AFTER: Duration = Duration::from_secs(20);
+
+impl SessionHealth {
+    /// Escalate a previously-healthy report whose heartbeat has gone
+    /// stale. A host that reached `ready` re-stamps its timestamp every
+    /// [`HEALTH_HEARTBEAT_INTERVAL`]; if that stops (the process crashed,
+    /// was killed, or hung), the on-disk record keeps claiming `healthy`
+    /// forever. Readers call this so a stale record is surfaced as
+    /// `stalled` and then terminally `dead` with an actionable message,
+    /// instead of a session that looks ready but never responds.
+    ///
+    /// Only `healthy`, non-terminal reports are escalated: a host that
+    /// cleanly reached `stopped`/`error` (or is still `starting`/
+    /// `pulling`, which can legitimately take a while without a
+    /// heartbeat) is left untouched.
+    pub fn escalate_if_stale(mut self) -> Self {
+        if !self.healthy || self.terminal {
+            return self;
+        }
+        let age = Utc::now()
+            .signed_duration_since(self.timestamp)
+            .to_std()
+            .unwrap_or_default();
+        if age >= HEALTH_DEAD_AFTER {
+            self.healthy = false;
+            self.terminal = true;
+            self.state = Some("dead".to_string());
+            self.message = Some(format!(
+                "host unresponsive: no heartbeat for {}s (last update {}). \
+                 The host process has likely crashed; destroy and recreate the session.",
+                age.as_secs(),
+                self.timestamp.to_rfc3339()
+            ));
+        } else if age >= HEALTH_STALLED_AFTER {
+            self.healthy = false;
+            self.state = Some("stalled".to_string());
+            self.message = Some(format!(
+                "host stalled: no heartbeat for {}s (last update {}). \
+                 Waiting for the host to recover.",
+                age.as_secs(),
+                self.timestamp.to_rfc3339()
+            ));
+        }
+        self
+    }
 }
 
 /// A session definition: user-facing parameters used to start a session.
@@ -149,15 +209,52 @@ pub struct SessionDef {
     /// emulator runtime.
     pub profile: MaybeRef<ProfileDef>,
 
-    /// Optional container in which to run the session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub container: Option<ContainerizedDef>,
-
     /// Working directory used as the default `cwd` for execs.
     pub workdir: String,
 
+    /// Run the emulator in out-of-process *daemon* mode for this session
+    /// (e.g. rocjitsu's per-node daemon) instead of the default
+    /// in-process (local) emulation. Off by default; opt in with
+    /// `mirage run --daemon` / `mirage session start --daemon`.
+    #[serde(default)]
+    pub daemon: bool,
+
     /// When this session was created (wall-clock).
     pub created_at: DateTime<Utc>,
+}
+
+/// Read a session's on-disk definition and resolve its profile (whether
+/// stored inline or referenced by name).
+///
+/// Shared by the host and every emulator backend so a backend's
+/// [`crate::emulator::EmulatorBackend::injection_def`] — which receives
+/// only a [`SessionId`] — can recover the profile it was started with
+/// without the caller threading it through.
+pub fn resolve_profile(session: &SessionId) -> crate::error::Result<ProfileDef> {
+    let layout = crate::paths::SessionLayout::for_id(session);
+    let def: SessionDef = crate::state::read_json(&layout.def())?;
+    match def.profile {
+        MaybeRef::Owned(p) => Ok(p),
+        MaybeRef::Ref(name) => {
+            let p = crate::paths::profile_path(&name);
+            if !p.exists() {
+                return Err(crate::error::MirageError::ProfileNotFound(name));
+            }
+            crate::state::read_json(&p)
+        }
+    }
+}
+
+/// Whether a session opted into out-of-process emulator *daemon* mode
+/// (`mirage run --daemon`). Best-effort: a missing or unreadable session
+/// definition reads as `false` (the in-process default), so a backend
+/// never accidentally stands up a daemon for a session that didn't ask
+/// for one.
+pub fn session_uses_daemon(session: &SessionId) -> bool {
+    let layout = crate::paths::SessionLayout::for_id(session);
+    crate::state::read_json::<SessionDef>(&layout.def())
+        .map(|def| def.daemon)
+        .unwrap_or(false)
 }
 
 /// Aggregate view returned by `MirageCtl::session_state`.
@@ -165,6 +262,13 @@ pub struct SessionDef {
 pub struct SessionState {
     pub def: SessionDef,
     pub health: SessionHealth,
+
+    /// Container runtime state for containerised sessions: the
+    /// provider, network, and per-node containers the host launched.
+    /// `None` for non-containerised sessions or before the host has
+    /// started the containers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<crate::container::ContainerState>,
 }
 
 #[cfg(test)]
@@ -191,5 +295,57 @@ mod tests {
     fn id_generate_is_valid() {
         let id = SessionId::generate();
         validate_id(id.as_str()).unwrap();
+    }
+
+    fn healthy_at(age: Duration) -> SessionHealth {
+        SessionHealth {
+            timestamp: Utc::now() - chrono::Duration::from_std(age).unwrap(),
+            healthy: true,
+            state: Some("ready".to_string()),
+            terminal: false,
+            message: None,
+        }
+    }
+
+    #[test]
+    fn fresh_health_is_unchanged() {
+        let h = healthy_at(Duration::from_secs(0)).escalate_if_stale();
+        assert!(h.healthy);
+        assert!(!h.terminal);
+        assert_eq!(h.state.as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn stale_health_becomes_stalled() {
+        let h = healthy_at(HEALTH_STALLED_AFTER + Duration::from_secs(1)).escalate_if_stale();
+        assert!(!h.healthy);
+        assert!(!h.terminal);
+        assert_eq!(h.state.as_deref(), Some("stalled"));
+        assert!(h.message.unwrap().contains("stalled"));
+    }
+
+    #[test]
+    fn long_stale_health_becomes_dead() {
+        let h = healthy_at(HEALTH_DEAD_AFTER + Duration::from_secs(1)).escalate_if_stale();
+        assert!(!h.healthy);
+        assert!(h.terminal);
+        assert_eq!(h.state.as_deref(), Some("dead"));
+        assert!(h.message.unwrap().contains("unresponsive"));
+    }
+
+    #[test]
+    fn unhealthy_record_is_not_escalated() {
+        // A cleanly-stopped host (healthy=false) with an old timestamp
+        // must not be flipped into a scary "dead" report.
+        let h = SessionHealth {
+            timestamp: Utc::now() - chrono::Duration::seconds(3600),
+            healthy: false,
+            state: Some("stopped".to_string()),
+            terminal: false,
+            message: None,
+        }
+        .escalate_if_stale();
+        assert_eq!(h.state.as_deref(), Some("stopped"));
+        assert!(!h.terminal);
     }
 }

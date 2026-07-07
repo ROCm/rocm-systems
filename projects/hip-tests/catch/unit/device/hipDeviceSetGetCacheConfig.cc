@@ -42,6 +42,31 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verifies that hipDeviceSetCacheConfig with each cache config hint
+ *    succeeds on carveout-capable devices and that a subsequent kernel
+ *    launch (without per-function carveout) uses the device-level default
+ *    without error.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceSetGetCacheConfig.cc
+ */
+__global__ void empty_kernel() {}
+
+HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Carveout) {
+  const auto cache_config =
+      GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
+
+  HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
+
+  // Launch a kernel without per-function carveout to exercise the
+  // device-level carveout fallback path in the dispatch packet.
+  empty_kernel<<<1, 1>>>();
+  HIP_CHECK(hipDeviceSynchronize());
+}
+
+/**
  * End doxygen group hipDeviceSetCacheConfig.
  * @}
  */

@@ -1,0 +1,7 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0000431a-142a-742a-96c2-2f4fdc525c58,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211053582,1125783211077102,0,TA_FLAT_ATOMIC_WAVEFRONTS_sum,0.0
+2,0000431a-142a-742a-96c2-2f4fdc525c58,1,0,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211053582,1125783211077102,0,TA_FLAT_READ_WAVEFRONTS_sum,16384.0
+2,0000431a-142a-742a-96c2-2f4fdc525c58,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211604778,1125783211623818,0,TA_FLAT_ATOMIC_WAVEFRONTS_sum,0.0
+2,0000431a-142a-742a-96c2-2f4fdc525c58,2,1,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211604778,1125783211623818,0,TA_FLAT_READ_WAVEFRONTS_sum,16384.0
+2,0000431a-142a-742a-96c2-2f4fdc525c58,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211823177,1125783211842057,0,TA_FLAT_ATOMIC_WAVEFRONTS_sum,0.0
+2,0000431a-142a-742a-96c2-2f4fdc525c58,3,2,1048576,256,0,0,8,8,16,"vecCopy(double*, double*, double*, int, int)",1125783211823177,1125783211842057,0,TA_FLAT_READ_WAVEFRONTS_sum,16384.0

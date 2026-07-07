@@ -261,6 +261,13 @@ namespace
 {
 // Lay out: ehdr | sections (data) | shstrtab data | shdr table.
 // Keeps offsets simple to compute deterministically.
+struct ElfBuildOptions
+{
+    uint16_t shentsize = static_cast<uint16_t>(sizeof(detail::Elf64Shdr));
+    bool zero_shstrndx = false;
+    bool shoff_oob = false;
+};
+
 struct ElfBuilder
 {
     std::vector<uint8_t> elf;
@@ -268,20 +275,13 @@ struct ElfBuilder
     struct SectionDesc
     {
         std::string name;
-        uint32_t type;
         std::vector<uint8_t> data;
     };
 
     // Builds an ELF with `sections` plus an implicit `.shstrtab`. Returns
     // the byte buffer. The first synthetic section is reserved as the SHT_NULL
     // entry (index 0), as per ELF convention.
-    static std::vector<uint8_t> build(
-        const std::vector<SectionDesc>& sections,
-        uint8_t elf_class = ELFCLASS64,
-        uint16_t shentsize_override = 0,
-        bool zero_shstrndx = false,
-        bool shoff_oob = false
-    )
+    static std::vector<uint8_t> build(const std::vector<SectionDesc>& sections, ElfBuildOptions options = {})
     {
         // Layout:
         // [Elf64_Ehdr][section data, packed]  [shstrtab data]  [shdr table (NULL + sections + shstrtab)]
@@ -301,7 +301,7 @@ struct ElfBuilder
         shstrtab.push_back(0);
 
         // Compute offsets.
-        size_t cursor = sizeof(Elf64_Ehdr);
+        size_t cursor = sizeof(detail::Elf64Ehdr);
         std::vector<uint64_t> data_offsets(sections.size(), 0);
         for (size_t i = 0; i < sections.size(); ++i)
         {
@@ -316,51 +316,47 @@ struct ElfBuilder
         // then 1 .shstrtab section. So total = sections.size() + 2.
         uint16_t shnum = uint16_t(sections.size() + 2);
         uint16_t shstrndx = uint16_t(sections.size() + 1);
-        if (zero_shstrndx) shstrndx = SHN_UNDEF;
+        if (options.zero_shstrndx) shstrndx = detail::ShnUndef;
 
-        size_t shdr_size = sizeof(Elf64_Shdr) * shnum;
+        size_t shdr_size = sizeof(detail::Elf64Shdr) * shnum;
 
         std::vector<uint8_t> out(shoff + shdr_size, 0);
 
-        Elf64_Ehdr ehdr{};
-        std::memcpy(ehdr.e_ident, ELFMAG, SELFMAG);
-        ehdr.e_ident[EI_CLASS] = elf_class;
-        ehdr.e_ident[EI_DATA] = ELFDATA2LSB;
-        ehdr.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr.e_type = ET_REL;
-        ehdr.e_machine = EM_NONE;
-        ehdr.e_version = EV_CURRENT;
-        ehdr.e_shoff = shoff_oob ? out.size() + 0x10000 : shoff;
-        ehdr.e_ehsize = sizeof(Elf64_Ehdr);
-        ehdr.e_shentsize = shentsize_override != 0 ? shentsize_override : uint16_t(sizeof(Elf64_Shdr));
+        detail::Elf64Ehdr ehdr{};
+        std::memcpy(ehdr.e_ident, detail::ElfMagic, detail::ElfMagicSize);
+        ehdr.e_ident[detail::EiClass] = detail::ElfClass64;
+        ehdr.e_shoff = options.shoff_oob ? out.size() + sizeof(detail::Elf64Ehdr) : shoff;
+        ehdr.e_ehsize = sizeof(detail::Elf64Ehdr);
+        ehdr.e_shentsize = options.shentsize;
         ehdr.e_shnum = shnum;
         ehdr.e_shstrndx = shstrndx;
         std::memcpy(out.data(), &ehdr, sizeof(ehdr));
 
         // Pack section data.
         for (size_t i = 0; i < sections.size(); ++i)
-            std::memcpy(out.data() + data_offsets[i], sections[i].data.data(), sections[i].data.size());
+        {
+            if (!sections[i].data.empty())
+                std::memcpy(out.data() + data_offsets[i], sections[i].data.data(), sections[i].data.size());
+        }
         std::memcpy(out.data() + shstrtab_off, shstrtab.data(), shstrtab.size());
 
         // SHT_NULL entry at index 0 (already zero).
         // User sections at indices [1..sections.size()].
         for (size_t i = 0; i < sections.size(); ++i)
         {
-            Elf64_Shdr s{};
+            detail::Elf64Shdr s{};
             s.sh_name = name_offsets[i];
-            s.sh_type = sections[i].type;
             s.sh_flags = 0;
             s.sh_offset = data_offsets[i];
             s.sh_size = sections[i].data.size();
-            std::memcpy(out.data() + shoff + (i + 1) * sizeof(Elf64_Shdr), &s, sizeof(s));
+            std::memcpy(out.data() + shoff + (i + 1) * sizeof(detail::Elf64Shdr), &s, sizeof(s));
         }
         // .shstrtab at index sections.size() + 1.
-        Elf64_Shdr s_str{};
+        detail::Elf64Shdr s_str{};
         s_str.sh_name = shstrtab_name_off;
-        s_str.sh_type = SHT_STRTAB;
         s_str.sh_offset = shstrtab_off;
         s_str.sh_size = shstrtab.size();
-        std::memcpy(out.data() + shoff + (sections.size() + 1) * sizeof(Elf64_Shdr), &s_str, sizeof(s_str));
+        std::memcpy(out.data() + shoff + (sections.size() + 1) * sizeof(detail::Elf64Shdr), &s_str, sizeof(s_str));
 
         return out;
     }
@@ -373,7 +369,7 @@ TEST(ExtractElfSection, FindsSection)
 {
     std::string body = "F:1:foo\n";
     auto elf = ElfBuilder::build({
-        {".sqtt_funcmap", SHT_PROGBITS, bytes_of(body)},
+        {".sqtt_funcmap", bytes_of(body)},
     });
 
     std::vector<FuncmapDiagnostic> diags;
@@ -386,7 +382,7 @@ TEST(ExtractElfSection, FindsSection)
 TEST(ExtractElfSection, AbsentSectionReturnsNulloptNoDiag)
 {
     auto elf = ElfBuilder::build({
-        {".text", SHT_PROGBITS, {0x90, 0x90}}
+        {".text", {0x90, 0x90}}
     });
 
     std::vector<FuncmapDiagnostic> diags;
@@ -398,7 +394,7 @@ TEST(ExtractElfSection, AbsentSectionReturnsNulloptNoDiag)
 TEST(ExtractElfSection, EmptySectionReturnsNulloptWithWarning)
 {
     auto elf = ElfBuilder::build({
-        {".sqtt_funcmap", SHT_PROGBITS, {}}
+        {".sqtt_funcmap", {}}
     });
 
     std::vector<FuncmapDiagnostic> diags;
@@ -411,9 +407,9 @@ TEST(ExtractElfSection, EmptySectionReturnsNulloptWithWarning)
 TEST(ExtractElfSection, MultipleProgbitsSelectByName)
 {
     auto elf = ElfBuilder::build({
-        {".text",         SHT_PROGBITS, {0x90, 0x90, 0x90}   },
-        {".rodata",       SHT_PROGBITS, bytes_of("hello")    },
-        {".sqtt_funcmap", SHT_PROGBITS, bytes_of("F:1:hit\n")},
+        {".text",         {0x90, 0x90, 0x90}   },
+        {".rodata",       bytes_of("hello")    },
+        {".sqtt_funcmap", bytes_of("F:1:hit\n")},
     });
 
     std::vector<FuncmapDiagnostic> diags;
@@ -423,14 +419,12 @@ TEST(ExtractElfSection, MultipleProgbitsSelectByName)
     EXPECT_TRUE(diags.empty());
 }
 
-TEST(ExtractElfSection, RejectsElf32)
+TEST(ExtractElfSection, RejectsNonElf64Class)
 {
-    auto elf = ElfBuilder::build(
-        {
-            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
-    },
-        ELFCLASS32
-    );
+    auto elf = ElfBuilder::build({
+        {".sqtt_funcmap", bytes_of("x")}
+    });
+    elf[detail::EiClass] = static_cast<uint8_t>(~elf[detail::EiClass]);
 
     std::vector<FuncmapDiagnostic> diags;
     auto sec = extract_elf_section(reinterpret_cast<const char*>(elf.data()), elf.size(), ".sqtt_funcmap", diags);
@@ -440,12 +434,13 @@ TEST(ExtractElfSection, RejectsElf32)
 
 TEST(ExtractElfSection, RejectsBadShentsize)
 {
+    ElfBuildOptions options;
+    options.shentsize = static_cast<uint16_t>(sizeof(detail::Elf64Shdr) - 1);
     auto elf = ElfBuilder::build(
         {
-            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+            {".sqtt_funcmap", bytes_of("x")}
     },
-        ELFCLASS64,
-        /*shentsize_override=*/13
+        options
     );
 
     std::vector<FuncmapDiagnostic> diags;
@@ -456,14 +451,13 @@ TEST(ExtractElfSection, RejectsBadShentsize)
 
 TEST(ExtractElfSection, RejectsShoffOutOfRange)
 {
+    ElfBuildOptions options;
+    options.shoff_oob = true;
     auto elf = ElfBuilder::build(
         {
-            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+            {".sqtt_funcmap", bytes_of("x")}
     },
-        ELFCLASS64,
-        /*shentsize_override=*/0,
-        /*zero_shstrndx=*/false,
-        /*shoff_oob=*/true
+        options
     );
 
     std::vector<FuncmapDiagnostic> diags;
@@ -474,13 +468,13 @@ TEST(ExtractElfSection, RejectsShoffOutOfRange)
 
 TEST(ExtractElfSection, RejectsNoShstrndx)
 {
+    ElfBuildOptions options;
+    options.zero_shstrndx = true;
     auto elf = ElfBuilder::build(
         {
-            {".sqtt_funcmap", SHT_PROGBITS, bytes_of("x")}
+            {".sqtt_funcmap", bytes_of("x")}
     },
-        ELFCLASS64,
-        /*shentsize_override=*/0,
-        /*zero_shstrndx=*/true
+        options
     );
 
     std::vector<FuncmapDiagnostic> diags;
@@ -510,14 +504,14 @@ TEST(ExtractElfSection, RejectsNullBuffer)
 TEST(ExtractElfSection, RejectsAdversarialShSizeWrap)
 {
     auto elf = ElfBuilder::build({
-        {".sqtt_funcmap", SHT_PROGBITS, bytes_of("F:1:x\n")}
+        {".sqtt_funcmap", bytes_of("F:1:x\n")}
     });
 
     // Find the .sqtt_funcmap shdr (index 1: NULL=0, our section=1) and clobber sh_size.
-    Elf64_Ehdr ehdr;
+    detail::Elf64Ehdr ehdr;
     std::memcpy(&ehdr, elf.data(), sizeof(ehdr));
-    Elf64_Shdr s;
-    size_t shdr_off = ehdr.e_shoff + 1 * sizeof(Elf64_Shdr);
+    detail::Elf64Shdr s;
+    size_t shdr_off = ehdr.e_shoff + 1 * sizeof(detail::Elf64Shdr);
     std::memcpy(&s, elf.data() + shdr_off, sizeof(s));
     // sh_offset is small and valid; sh_size huge so sh_offset + sh_size wraps.
     s.sh_size = ~uint64_t(0) - s.sh_offset + 1; // wrap target = 0

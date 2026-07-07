@@ -112,7 +112,7 @@ export function SessionDetailPage() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [execs, setExecs] = useState<ExecListItem[]>([]);
   const [error, setError] = useState("");
-  const [command, setCommand] = useState("/bin/sh -c 'echo hello'");
+  const [command, setCommand] = useState("rocminfo");
   const [keep, setKeep] = useState(true);
   const [envInput, setEnvInput] = useState("");
   const [envs, setEnvs] = useState<string[]>([]);
@@ -241,6 +241,18 @@ export function SessionDetailPage() {
           <Pill tone={healthy ? "ok" : "warn"}>{stateLabel}</Pill>
         </div>
       </div>
+
+      {session?.health.message && (
+        <div
+          className={`session-status-banner${
+            session.health.terminal ? " is-terminal" : ""
+          }`}
+          role={session.health.terminal ? "alert" : "status"}
+          data-testid="session-status-message"
+        >
+          {session.health.message}
+        </div>
+      )}
 
       {error && <div className="error" role="alert">{error}</div>}
 

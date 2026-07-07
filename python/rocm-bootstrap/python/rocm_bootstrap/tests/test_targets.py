@@ -19,7 +19,6 @@ from rocm_bootstrap.targets import (
     parse_gfx_target_version,
 )
 
-
 # ---------------------------------------------------------------------------
 # Hierarchy structure invariants
 # ---------------------------------------------------------------------------
@@ -253,12 +252,19 @@ class TestLookupBundle:
         assert b.level == PackagingLevel.FAMILY
 
     def test_sub_family(self):
-        b = lookup_bundle("gfx11_5")
+        b = lookup_bundle("gfx115x")
         assert b.level == PackagingLevel.SUB_FAMILY
 
     def test_target(self):
         b = lookup_bundle("gfx1151")
         assert b.level == PackagingLevel.TARGET
+
+    @pytest.mark.parametrize(
+        "alias,canonical_key",
+        [("gfx11_0", "gfx110x"), ("gfx11_5", "gfx115x")],
+    )
+    def test_legacy_sub_family_aliases(self, alias, canonical_key):
+        assert lookup_bundle(alias) is lookup_bundle(canonical_key)
 
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown bundle key"):
@@ -274,8 +280,8 @@ class TestPackagingChain:
     @pytest.mark.parametrize(
         "target_name,expected_sf_key,expected_fam_key",
         [
-            ("gfx1151", "gfx11_5", "gfx11"),
-            ("gfx1100", "gfx11_0", "gfx11"),
+            ("gfx1151", "gfx115x", "gfx11"),
+            ("gfx1100", "gfx110x", "gfx11"),
             ("gfx942", "gfx9_4", "gfx9"),
             ("gfx950", "gfx9_5", "gfx9"),
             ("gfx90a", "gfx9_0", "gfx9"),
@@ -318,7 +324,7 @@ class TestBundleForTarget:
 
     def test_sub_family_level(self):
         b = bundle_for_target("gfx1151", PackagingLevel.SUB_FAMILY)
-        assert b.key == "gfx11_5"
+        assert b.key == "gfx115x"
 
     def test_family_level(self):
         b = bundle_for_target("gfx1151", PackagingLevel.FAMILY)
@@ -380,12 +386,12 @@ class TestLLVMGenericAssignments:
     def test_gfx11_family_has_gfx11_generic(self):
         assert lookup_bundle("gfx11").llvm_generic == "gfx11-generic"
 
-    def test_gfx11_0_no_generic(self):
+    def test_gfx110x_no_generic(self):
         """gfx11-generic is at family level, not sub-family."""
-        assert lookup_bundle("gfx11_0").llvm_generic is None
+        assert lookup_bundle("gfx110x").llvm_generic is None
 
-    def test_gfx11_5_no_generic(self):
-        assert lookup_bundle("gfx11_5").llvm_generic is None
+    def test_gfx115x_no_generic(self):
+        assert lookup_bundle("gfx115x").llvm_generic is None
 
     def test_gfx12_0_has_gfx12_generic(self):
         assert lookup_bundle("gfx12_0").llvm_generic == "gfx12-generic"

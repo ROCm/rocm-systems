@@ -224,6 +224,17 @@ class RocprofsysConfig:
             "TERM": os.environ.get("TERM", ""),
             "LANG": os.environ.get("LANG", ""),
         }
+
+        # TheRock sysdeps should be used as VA drivers when present, if not set by the user
+        _libva = (os.environ.get("LIBVA_DRIVERS_PATH") or "").strip()
+        if _libva:
+            env["LIBVA_DRIVERS_PATH"] = _libva
+        elif self.rocm_path:
+            _sysdeps = (self.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
+            if _sysdeps.is_dir():
+                env["LIBVA_DRIVERS_PATH"] = str(_sysdeps)
+        if "LIBVA_DRIVER_NAME" in os.environ:
+            env["LIBVA_DRIVER_NAME"] = os.environ["LIBVA_DRIVER_NAME"]
         # To maintain a stable environment, only inherit OMPI_ and ROCPROFSYS_ env vars
         for key, value in os.environ.items():
             if key.startswith(("OMPI_", "ROCPROFSYS_")):
@@ -268,7 +279,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_FILE_OUTPUT": "ON",
             "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "trace",
+            "ROCPROFSYS_LOG_LEVEL": "info",
             "ROCPROFSYS_SAMPLING_FREQ": "300",
             "ROCPROFSYS_SAMPLING_DELAY": "0.05",
             "ROCPROFSYS_SAMPLING_GPUS": "all",
@@ -288,6 +299,7 @@ class RocprofsysConfig:
             "ROCPROFSYS_USE_SAMPLING": "ON",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_LOG_LEVEL": "info",
             "LD_LIBRARY_PATH": self.get_library_path(),
             "ROCPROFSYS_CONFIG_FILE": "",
         }

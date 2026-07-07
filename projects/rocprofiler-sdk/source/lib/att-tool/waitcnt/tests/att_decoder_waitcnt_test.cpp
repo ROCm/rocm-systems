@@ -372,7 +372,7 @@ TEST(att_decoder_waitcnt_test, fail_conditions)
     ASSERT_TRUE(WaitcntList(10, wave, isa_map).mem_unroll.empty());
     ASSERT_TRUE(WaitcntList(12, wave, isa_map).mem_unroll.empty());
 
-    // it cant operate on invalid gfxip
+    // it can't operate on invalid gfxip
     try
     {
         WaitcntList(-1, wave, isa_map);

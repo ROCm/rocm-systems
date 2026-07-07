@@ -92,7 +92,7 @@ public:
     AQLPacket()          = default;
     virtual ~AQLPacket() = default;
 
-    // Keep move constuctors (i.e. std::move())
+    // Keep move constructors (i.e. std::move())
     AQLPacket(AQLPacket&& other) = default;
     AQLPacket& operator=(AQLPacket&& other) = default;
 
@@ -357,6 +357,12 @@ public:
     void        populate_before() override;
     void        populate_after() override;
     bool        valid() const { return is_valid; }
+
+    void clear()
+    {
+        AQLPacket::clear();
+        cb = {};
+    }
 
     SPMCallbackContext             cb{};
     SPMProfileData                 profile{};

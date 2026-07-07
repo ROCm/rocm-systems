@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -23,6 +24,13 @@ Decoder::~Decoder() {
   // back to ::operator delete instead of following a dangling pool pointer.
   if (Instruction::alloc_pool_ == &pool_)
     deactivate_pool();
+}
+
+Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
+  Instruction *decoded = decode(inst);
+  if (decoded != nullptr)
+    decoded->src_loc_ = src_loc;
+  return decoded;
 }
 
 std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
@@ -45,6 +53,8 @@ std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
     return std::make_unique<IsaDecoder<rdna3_5::Isa>>();
   case ROCJITSU_CODE_ARCH_RDNA4:
     return std::make_unique<IsaDecoder<rdna4::Isa>>();
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return std::make_unique<IsaDecoder<gfx1250::Isa>>();
   default:
     return nullptr;
   }

@@ -8,8 +8,10 @@
 #define ROCJITSU_VM_AMDGPU_COMPUTE_UNIT_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -18,7 +20,9 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/execution_plugin.h"
+#include "rocjitsu/vm/amdgpu/wf_scheduler.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
@@ -28,6 +32,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -35,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -63,14 +69,15 @@ class CommandProcessor;
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
+  static constexpr uint32_t kFunctionalQuantum = 1024;
+
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;             ///< ISA architecture (determines wave size, decoder).
-    uint32_t num_wf_slots;           ///< Number of hardware wavefront slots (contexts).
-    uint32_t sgprs_per_wf;           ///< Scalar GPRs per wavefront (allocation granularity).
-    uint32_t vgprs_per_wf;           ///< Vector GPRs per wavefront (allocation granularity).
-    uint32_t lds_size_kb;            ///< Local Data Share size in kilobytes.
-    uint32_t functional_quantum = 0; ///< Max instructions per advance() (0 = unbounded).
+    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
+    uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
+    uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
+    uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
   };
 
   ~ComputeUnitCore() override = default;
@@ -119,17 +126,7 @@ public:
   /// @returns true if the CU has enough free slots, registers, and LDS.
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
-  /// @brief Execute work until the next scheduling boundary.
-  ///
-  /// @details In FUNCTIONAL mode, executes up to `functional_quantum`
-  /// instructions via step(), then yields back to the event loop. When
-  /// `functional_quantum` is 0 (the default), all active wavefronts are
-  /// drained in a single call. A non-zero quantum guarantees forward
-  /// progress for inter-CU synchronization (e.g., spin-locks on global
-  /// memory) by allowing other CUs' events to interleave.
-  /// In CLOCKED mode (future), processes one pipeline cycle.
-  /// @retval true More work remains; advance() should be called again.
-  /// @retval false No more active wavefronts; CU is idle.
+  /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool advance() = 0;
 
   /// @brief Signal that work has been dispatched; begin processing.
@@ -154,6 +151,23 @@ public:
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
+  /// @brief Return the command processor that owns this CU's dispatch stream.
+  CommandProcessor *command_processor() { return cp_; }
+
+  /// @brief Override the cluster LDS multicast backend.
+  ///
+  /// @details Passing nullptr restores the immediate functional backend. Timed
+  /// models can install a shared fabric object here without changing the ISA
+  /// execution path that produces multicast transactions.
+  void set_cluster_lds_multicast_engine(ClusterLdsMulticastEngine *engine) {
+    cluster_lds_multicast_engine_ = engine ? engine : &default_cluster_lds_multicast_engine_;
+  }
+
+  /// @brief Return the active cluster LDS multicast backend.
+  ClusterLdsMulticastEngine &cluster_lds_multicast_engine() {
+    return *cluster_lds_multicast_engine_;
+  }
+
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
@@ -170,6 +184,9 @@ public:
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
   }
+
+  /// @brief Return the execution plugin group.
+  ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
 
   /// @brief Return the number of dispatched (active or halted) wavefront slots.
   /// @returns Count of non-idle wavefront slots.
@@ -221,8 +238,24 @@ public:
     return base;
   }
 
-  /// @brief Reset LDS allocation (called when all WFs retire).
+  /// @brief Reset LDS allocation when no resident waves or pinned clusters remain.
   void reset_lds_alloc() { next_lds_alloc_ = 0; }
+
+  /// @brief Hold LDS allocation state while a workgroup cluster is resident.
+  ///
+  /// @details Cluster multicast can target peer workgroups after the source WG
+  /// halts. Keep the per-CU LDS allocator pinned until the whole peer cluster
+  /// completes so a later WG cannot reuse LDS while peer multicast writes are
+  /// still possible, but larger dispatches can reclaim LDS between clusters.
+  void pin_lds_until_cluster_retired(uint64_t cluster_key) {
+    lds_pinned_clusters_.insert(cluster_key);
+  }
+
+  /// @brief Release the LDS allocation pin for a retired workgroup cluster.
+  void unpin_lds_for_cluster(uint64_t cluster_key) { lds_pinned_clusters_.erase(cluster_key); }
+
+  /// @brief Return true while any cluster can still receive multicast LDS writes.
+  bool lds_allocation_pinned() const { return !lds_pinned_clusters_.empty(); }
 
   /// @brief Flush all per-CU caches and the shared L2 to backing store.
   ///
@@ -230,22 +263,21 @@ public:
   /// all dirty lines to the backing MemoryInterface (MSC or HBM).
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
-  void flush_all() {
+  void flush_all(uint32_t vmid = 0) {
     util::Logger::vm([&](auto &os) {
       if (l1_vector_.store_count() > 0)
         os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
-    l1_scalar_.writeback_all();
+    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
-    l2_->flush_all();
+    l2_->flush_all(vmid);
   }
 
-  /// @brief Flush only the per-CU L1 caches.
-  void flush_l1() {
-    l1_scalar_.writeback_all();
+  void flush_l1(uint32_t vmid = 0) {
+    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }
@@ -254,7 +286,11 @@ public:
   ///
   /// Used by the config loader for deferred initialization.
   /// @param memory New GPU memory (not owned).
-  void set_memory(GpuMemory *memory) { memory_ = memory; }
+  void set_memory(GpuMemory *memory) {
+    memory_ = memory;
+    l1_vector_.set_memory(memory);
+    l1_scalar_.set_memory(memory);
+  }
 
   /// @brief Set (or replace) the L2 cache pointer.
   ///
@@ -266,6 +302,15 @@ public:
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
     global_mem_pipeline_.set_l2(l2);
+  }
+
+  /// @brief Set flat-address-space aperture boundaries (SPI programs these once per node).
+  void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
+                     uint64_t private_limit) {
+    shared_aperture_base_ = shared_base;
+    shared_aperture_limit_ = shared_limit;
+    private_aperture_base_ = private_base;
+    private_aperture_limit_ = private_limit;
   }
 
   /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
@@ -283,27 +328,6 @@ public:
   /// @param dst_sgpr Physical SGPR index to write the first loaded dword.
   /// @param dword_count Number of dwords to load (1, 2, 4, 8, or 16).
   /// @param mtype Memory type (default RW — Phase D fills in correct value).
-  void issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
-                        Mtype mtype = Mtype::RW);
-
-  /// @brief Issue a per-lane global/buffer memory load through the L1 vector cache.
-  ///
-  /// @param addrs Per-lane byte addresses (only active lanes are accessed).
-  /// @param lane_mask Bitmask of active lanes.
-  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
-  /// @param dword_count Dwords per lane (1, 2, 3, or 4).
-  /// @param mtype Memory type (default RW — Phase D fills in correct value).
-  void issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
-                        uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype = Mtype::RW);
-
-  /// @brief Issue a per-lane local (LDS) memory load.
-  ///
-  /// @param addrs Per-lane byte addresses into the LDS.
-  /// @param lane_mask Bitmask of active lanes.
-  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
-  /// @param dword_count Dwords per lane (1 or 2).
-  void issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask, uint32_t dst_vgpr,
-                       uint32_t dword_count);
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
@@ -323,19 +347,39 @@ public:
     return false;
   }
 
+  bool has_active_wfs_for_process(uint32_t process_id) const {
+    for (const auto &w : wfs_)
+      if (!w->is_halted() && w->process_id() == process_id)
+        return true;
+    return false;
+  }
+
   /// @brief Return the current round-robin scheduling index.
   /// @returns Index of the next wavefront slot to schedule.
-  size_t next_wf_index() const { return next_wf_; }
+  uint64_t cycle_count() const { return cycle_counter_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
-  uint32_t read_sgpr(uint32_t reg_idx) const { return sgpr_file_[reg_idx]; }
+  // TODO(newling) consider cmake flag to build without plugins, this call
+  // overhead might be non-negligible.
+  uint32_t read_sgpr(uint32_t reg_idx) const {
+    if (auto *wf = sgpr_to_wave_[reg_idx]) {
+      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
+    }
+    return sgpr_file_[reg_idx];
+  }
 
   /// @brief Write a scalar register in the physical SGPR file.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
+
+  void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
+                        uint32_t lane_end, uint8_t byte_mask = 0xF) const {
+    if (wf)
+      plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane_begin, lane_end, byte_mask);
+  }
 
   /// @brief Read a vector register lane from the physical VGPR file.
   /// @param reg_idx Physical register index.
@@ -363,6 +407,27 @@ public:
   /// @param base Base register index in the VGPR file.
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *vgpr_data(uint32_t base) = 0;
+
+  /// @brief Number of physical VGPR registers in one allocation block.
+  virtual uint32_t vgpr_allocation_block_size() const = 0;
+
+  /// @brief Typed view of a single VGPR as the file's @c simdojo::VectorReg.
+  /// @details The abstract CU exposes the VGPR file only as a byte pointer
+  /// (@c vgpr_data), which erases the wavefront-size template parameter. The
+  /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
+  /// the typed register with the design's single localized @c reinterpret_cast.
+  /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
+  /// (no padding / vtable) so the byte view and the typed view coincide.
+  template <size_t N> simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+  template <size_t N> const simdojo::VectorReg<N, uint32_t> &vgpr_reg(uint32_t base) const {
+    static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
+                  "VectorReg must be layout-compatible with raw lane storage");
+    return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
 
   /// @brief Return the SGPR register file (for serialization).
   /// @returns Const reference to the SGPR register file.
@@ -411,7 +476,13 @@ protected:
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
-  /// @brief Tick all memory pipelines (called at the start of step).
+  /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
+  void update_wf_states();
+
+  /// @brief Fetch, decode, execute one instruction from the given wavefront.
+  void issue_instruction(Wavefront *wf);
+
+  /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
@@ -432,45 +503,50 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
-  size_t next_wf_ = 0;
+  std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
+  uint64_t cycle_counter_ = 0;
 
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
   Lds lds_;
+  ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
+  ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
   uint32_t next_lds_alloc_ = 0; ///< Next free LDS offset for per-WG allocation.
+  std::unordered_set<uint64_t> lds_pinned_clusters_;
   ScalarMemPipeline scalar_mem_pipeline_;
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   CommandProcessor *cp_ = nullptr;
 
-  static uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
-    return (uint64_t(dispatch_id) << 32) | wg_id;
-  }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
+  uint64_t shared_aperture_base_ = 0;
+  uint64_t shared_aperture_limit_ = 0;
+  uint64_t private_aperture_base_ = 0;
+  uint64_t private_aperture_limit_ = 0;
+
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+
+  /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
+  /// Populated at dispatch_wf time. Null entries mean "not allocated".
+  std::vector<Wavefront *> sgpr_to_wave_;
+  /// Populated by the ISA-specific subclass (which owns the VGPR file).
+  virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
+  uint64_t step_count_ = 0;
 };
 
 /// @brief Execution-mode-aware compute unit shell.
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
 ///
-/// In FUNCTIONAL mode, advance() executes instructions via step() up to the
-/// configured `functional_quantum` limit (or unbounded if quantum is 0).
-/// When the quantum is reached with work remaining, advance() returns true
-/// and the work_event_ reschedules at `now + 1`, yielding to the simulation
-/// event loop. This interleaving ensures forward progress when wavefronts
-/// on different CUs synchronize via global memory (e.g., spin-locks,
-/// semaphores). activate() schedules the initial work event. When
-/// advance() returns false (no more work), the idle callback is notified
-/// so the command processor can detect completion.
-///
-/// In CLOCKED mode (future), advance() will process one pipeline cycle and
-/// activate() will resume the clock.
+/// In FUNCTIONAL mode, advance() executes up to kFunctionalQuantum
+/// instructions, then yields to the simulation event loop. This
+/// interleaving ensures forward progress when wavefronts on different
+/// CUs synchronize via global memory (e.g., spin-locks, semaphores).
 ///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
 template <simdojo::ExecMode Mode> class ExecComputeUnit : public ComputeUnitCore {
@@ -478,53 +554,24 @@ public:
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
-  ///
-  /// @details In FUNCTIONAL mode, executes up to `functional_quantum`
-  /// instructions (or all remaining if quantum is 0), retires halted
-  /// wavefronts, and returns whether more work remains. If the CU is
-  /// idle after execution, fires the on_idle callback.
-  /// @retval true More work remains; work_event_ will reschedule.
-  /// @retval false CU is idle; all wavefronts have been exhausted.
   bool advance() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      const uint32_t quantum = this->config_.functional_quantum;
-      if (quantum == 0) {
-        // Unbounded: drain all wavefronts in a single call.
-        while (step()) {
-        }
-      } else {
-        // Bounded: execute up to 'quantum' instructions, then yield
-        // back to the event loop so other CUs can make progress.
-        for (uint32_t i = 0; i < quantum && step(); ++i) {
-        }
+      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
     if (is_idle()) {
       notify_idle();
-      return false;
+      return !is_idle();
     }
     return true;
   }
 
-  /// @brief Run wavefronts on this CU.
-  ///
-  /// In unbounded functional mode (quantum == 0), advance directly — the CU
-  /// will drain all wavefronts before returning. This avoids scheduling an
-  /// engine event and waiting for the LBTS to advance, which can deadlock
-  /// when the engine is in await_primaries mode (KFD driver).
-  ///
-  /// In bounded mode (quantum > 0), schedule a work event to yield between
-  /// quanta, ensuring fair interleaving across CUs.
+  /// @brief Schedule CU execution via the event loop.
   void activate() override {
-    if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      if (this->config_.functional_quantum == 0) {
-        advance();
-        return;
-      }
-    }
-    this->schedule_event(&work_event_, this->engine()->global_time() + 1);
+    auto now = this->engine()->context(this->partition_id()).current_tick();
+    this->schedule_event(&work_event_, now + 1);
   }
 
 private:
@@ -556,7 +603,16 @@ public:
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
-    vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
+    static_assert(!HasAccVgpr<Isa> || Isa::MAX_VGPRS_PER_WF == ACC_VGPR_OFFSET,
+                  "AccVGPR allocation base must match execution-side addressing");
+    // AccVGPR operands are addressed after the normal VGPR bank in the same
+    // physical file, so acc0 lives at base + ACC_VGPR_OFFSET.
+    constexpr uint32_t accvgpr_physical_base = ACC_VGPR_OFFSET;
+    constexpr uint32_t accvgpr_physical_limit =
+        Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
+    vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
+    vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
+    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -564,7 +620,14 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx]) {
+      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
+    }
     return vgpr_file_[reg_idx][lane];
+  }
+
+  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
+    std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
   }
 
   /// @brief Write a value to the VGPR file.
@@ -599,6 +662,10 @@ protected:
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
+public:
+  uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+
+protected:
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
@@ -606,6 +673,8 @@ protected:
 
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
+  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  uint32_t vgprs_per_block_ = 0;
 };
 
 } // namespace amdgpu

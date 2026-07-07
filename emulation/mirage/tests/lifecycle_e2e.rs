@@ -11,9 +11,10 @@
 //! * `keep=false` execs have their directory removed by the host on
 //!   exit, regardless of whether they exited naturally or were killed,
 //! * `keep=true` execs persist after death and after the kill,
-//! * destroying a session with a container provider invokes the
-//!   provider with `rm -f <container_id>` when a `container.id` file
-//!   is present (and skips it when absent).
+//! * destroying a session with a containerised runtime record invokes
+//!   the provider with `rm -f <container>` for each node and
+//!   `network rm <network>` when `container.json` is present (and
+//!   skips the provider entirely when absent).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -80,9 +81,7 @@ impl Env {
         if keep {
             args.push("--keep");
         }
-        args.extend([
-            "--detach", "--", "/bin/sh", "-c", "sleep 30",
-        ]);
+        args.extend(["--detach", "--", "/bin/sh", "-c", "sleep 30"]);
         let out = self.mirage().args(&args).output().unwrap();
         assert!(out.status.success(), "exec start failed: {:?}", out);
         String::from_utf8_lossy(&out.stdout).trim().to_string()
@@ -228,9 +227,7 @@ fn keep_false_exec_is_removed_after_natural_exit() {
     env.start_profile_and_session("s-natural");
     let out = env
         .mirage()
-        .args([
-            "exec", "start", "s-natural", "--detach", "--", "/bin/true",
-        ])
+        .args(["exec", "start", "s-natural", "--detach", "--", "/bin/true"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -272,7 +269,7 @@ fn signal_invalid_number_is_rejected() {
 }
 
 #[test]
-fn session_destroy_invokes_container_provider_when_id_present() {
+fn session_destroy_invokes_container_provider_when_state_present() {
     let env = Env::new();
     let provider_log = env._dir.path().join("provider.log");
     let provider = env._dir.path().join("mock-provider.sh");
@@ -289,27 +286,42 @@ fn session_destroy_invokes_container_provider_when_id_present() {
         .assert()
         .success();
 
-    // We can't ask the CLI to set a container provider (no flag yet),
-    // so create the session via the CLI and then patch def.json to add
-    // a container. The destroy path only reads from def.json.
+    // Create the session without a host, then write the container
+    // runtime record the host would normally persist. `session destroy`
+    // reads `container.json` and tears every node + the network
+    // down via the recorded provider.
     env.mirage()
         .args([
-            "session", "start", "--profile", "p", "--id", "s-cont", "--no-host",
+            "session",
+            "start",
+            "--profile",
+            "p",
+            "--id",
+            "s-cont",
+            "--no-host",
         ])
         .assert()
         .success();
     let session_dir = env.session_dir("s-cont");
-    let def_path = session_dir.join("def.json");
-    let raw = std::fs::read_to_string(&def_path).unwrap();
-    let mut def: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    def["container"] = serde_json::json!({
+    let state = serde_json::json!({
         "provider": provider.to_string_lossy(),
         "image": "ignored:latest",
-        "files": [],
-        "network": "None",
+        "network": "mirage-s-cont",
+        "head_port": 6000,
+        "nodes": [
+            { "rank": 0, "name": "mirage-s-cont-node-0" },
+            { "rank": 1, "name": "mirage-s-cont-node-1" },
+        ],
     });
-    std::fs::write(&def_path, serde_json::to_vec_pretty(&def).unwrap()).unwrap();
-    std::fs::write(session_dir.join("container.id"), "mirage-fake-1234").unwrap();
+    std::fs::write(
+        session_dir.join("container.json"),
+        serde_json::to_vec_pretty(&state).unwrap(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(session_dir.join("node/0")).unwrap();
+    std::fs::create_dir_all(session_dir.join("node/1")).unwrap();
+    std::fs::write(session_dir.join("node/0/cid"), "cid-0").unwrap();
+    std::fs::write(session_dir.join("node/1/cid"), "cid-1").unwrap();
 
     env.mirage()
         .args(["session", "stop", "s-cont", "-f"])
@@ -318,13 +330,27 @@ fn session_destroy_invokes_container_provider_when_id_present() {
 
     let recorded = std::fs::read_to_string(&provider_log).unwrap_or_default();
     assert!(
-        recorded.contains("rm -f mirage-fake-1234"),
-        "provider never called with rm -f; log: {recorded:?}"
+        recorded.contains("rm -f mirage-s-cont-node-0"),
+        "provider never asked to remove node 0; log: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("rm -f mirage-s-cont-node-1"),
+        "provider never asked to remove node 1; log: {recorded:?}"
+    );
+    assert!(
+        recorded.contains("network rm mirage-s-cont"),
+        "provider never asked to remove the network; log: {recorded:?}"
+    );
+    // The whole session directory (including the container dir and cid
+    // files) must be gone after destroy.
+    assert!(
+        !env.session_dir("s-cont").exists(),
+        "session dir should be removed"
     );
 }
 
 #[test]
-fn session_destroy_skips_provider_when_no_container_id() {
+fn session_destroy_skips_provider_when_no_container_state() {
     let env = Env::new();
     let provider_log = env._dir.path().join("provider.log");
     let provider = env._dir.path().join("mock-provider.sh");
@@ -352,17 +378,7 @@ fn session_destroy_skips_provider_when_no_container_id() {
         ])
         .assert()
         .success();
-    let def_path = env.session_dir("s-no-cid").join("def.json");
-    let raw = std::fs::read_to_string(&def_path).unwrap();
-    let mut def: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    def["container"] = serde_json::json!({
-        "provider": provider.to_string_lossy(),
-        "image": "ignored:latest",
-        "files": [],
-        "network": "None",
-    });
-    std::fs::write(&def_path, serde_json::to_vec_pretty(&def).unwrap()).unwrap();
-    // intentionally do NOT write container.id
+    // No container.json is written → the provider must not run.
 
     env.mirage()
         .args(["session", "stop", "s-no-cid", "-f"])
@@ -370,6 +386,6 @@ fn session_destroy_skips_provider_when_no_container_id() {
         .success();
     assert!(
         !provider_log.exists(),
-        "provider must not be invoked without container.id"
+        "provider must not be invoked without container state"
     );
 }

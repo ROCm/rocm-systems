@@ -16,6 +16,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_isa_rdna3
     rocjitsu_isa_rdna3_5
     rocjitsu_isa_rdna4
+    rocjitsu_isa_gfx1250
     # The DBT tool only needs generated AMDGPU decoders/disassemblers, but
     # those object files currently also contain instruction execute methods.
     # Until generated ISA decode/disassembly is split from VM execution, the

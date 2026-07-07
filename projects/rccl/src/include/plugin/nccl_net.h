@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_NET_H_
 #define NCCL_NET_H_
@@ -38,8 +39,7 @@
 #define NCCL_NET_MAX_PLUGINS 16
 #endif
 
-#define NCCL_NET_MAX_DEVS_PER_NIC 4
-
+#include "net/net_v12.h"
 #include "net/net_v11.h"
 #include "net/net_v10.h"
 #include "net/net_v9.h"
@@ -47,17 +47,18 @@
 #include "net/net_v7.h"
 #include "net/net_v6.h"
 
-typedef ncclNet_v11_t ncclNet_t;
-typedef ncclCollNet_v11_t ncclCollNet_t;
-typedef ncclGin_v11_t ncclGin_t;
-typedef ncclNetSGE_v11_t ncclNetSGE_t;
-typedef ncclNetProperties_v11_t ncclNetProperties_t;
-typedef ncclNetAttr_v11_t ncclNetAttr_t;
-typedef ncclNetVDeviceProps_v11_t ncclNetVDeviceProps_t;
-typedef ncclNetCommConfig_v11_t ncclNetCommConfig_t;
+#define NCCL_NET_MAX_DEVS_PER_NIC NCCL_NET_MAX_DEVS_PER_NIC_V12
 
-#define NCCL_NET_PLUGIN_SYMBOL ncclNetPlugin_v11
-#define NCCL_COLLNET_PLUGIN_SYMBOL ncclCollNetPlugin_v11
+typedef ncclNet_v12_t ncclNet_t;
+typedef ncclCollNet_v12_t ncclCollNet_t;
+typedef ncclNetSGE_v12_t ncclNetSGE_t;
+typedef ncclNetProperties_v12_t ncclNetProperties_t;
+typedef ncclNetAttr_v12_t ncclNetAttr_t;
+typedef ncclNetVDeviceProps_v12_t ncclNetVDeviceProps_t;
+typedef ncclNetCommConfig_v12_t ncclNetCommConfig_t;
+
+#define NCCL_NET_PLUGIN_SYMBOL ncclNetPlugin_v12
+#define NCCL_COLLNET_PLUGIN_SYMBOL ncclCollNetPlugin_v12
 
 // context passed from RCCL lib to n/w plugin
 typedef struct {

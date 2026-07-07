@@ -164,7 +164,7 @@ public:
     node.next_ = nullptr;
     return Iterator(next);
   }
-  /// @brief Return an iterator to the begining of the list.
+  /// @brief Return an iterator to the beginning of the list.
   /// @returns Iterator pointing to the first element in the list.
   Iterator begin() { return ++Iterator(sentinel_); }
   /// @brief Return an iterator past the end of the list.

@@ -155,9 +155,10 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         auto set_hip_visibility = [&agent_info](bool is_hip_visible) {
             if(is_hip_visible && agent_info.runtime_visibility.hsa == 0)
             {
-                ROCP_WARNING << fmt::format("Attempt to enable hip visiblity for agent-{} which is "
-                                            "not visible to HSA (ROCR)",
-                                            agent_info.node_id);
+                ROCP_WARNING << fmt::format(
+                    "Attempt to enable hip visibility for agent-{} which is "
+                    "not visible to HSA (ROCR)",
+                    agent_info.node_id);
                 return;
             }
 
@@ -217,7 +218,7 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         };
 
         static_assert(
-            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY,
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_OMPT_LIBRARY,
             "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
             "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
             "necessary) and make the necessary updates to the logic below has been updated");

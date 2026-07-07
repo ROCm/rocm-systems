@@ -1,13 +1,15 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "shmutils.h"
 #include "shm.h"
 #include "transport.h"
+#include "compiler.h"
 
 #define SHM_PATH_MAX 128
 #define SHM_HANDLE_TYPE ncclCuMemHandleType
@@ -373,13 +375,13 @@ static ncclResult_t shmSendProxyProgress(struct ncclProxyState* proxyState, stru
           CUDACHECK(cudaMemcpyAsync(resources->shmFifo+buffSlot*stepSize, resources->devFifo+buffSlot*stepSize, size, cudaMemcpyDeviceToHost, resources->stream));
           CUDACHECK(cudaEventRecord(resources->events[buffSlot], resources->stream));
           resources->recvMem->connFifo[buffSlot].size = size;
-          __sync_synchronize(); // make sure connFifo[].size is visible
+          std::atomic_thread_fence(std::memory_order_seq_cst); // make sure connFifo[].size is visible
           sub->transmitted += args->sliceSteps;
         }
       }
       if (sub->done < sub->transmitted) {
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
-        cudaError_t res = cudaEventQuery(resources->events[buffSlot]);
+        cudaError_t res = CUDACLEARERROR(cudaEventQuery(resources->events[buffSlot]));
         if (res != cudaErrorNotReady) CUDACHECK(res);
         if (res == cudaSuccess) {
           sub->done += args->sliceSteps;
@@ -436,7 +438,7 @@ static ncclResult_t shmRecvProxyProgress(struct ncclProxyState* proxyState, stru
       }
       if (sub->done < sub->transmitted) {
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
-        cudaError_t res = cudaEventQuery(resources->events[buffSlot]);
+        cudaError_t res = CUDACLEARERROR(cudaEventQuery(resources->events[buffSlot]));
         if (res != cudaErrorNotReady) CUDACHECK(res);
         if (res == cudaSuccess) {
           sub->done += args->sliceSteps;
@@ -547,7 +549,12 @@ ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpc
     char shmPath[SHM_PATH_MAX] = { '\0' };
     desc->shmli.shmSize = size;
     NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), size, hptr, dptr, 1, &desc->shmli.handle));
-    memcpy(desc->shmli.shmSuffix, shmPath + sizeof("/dev/shm/nccl-") - 1, sizeof(desc->shmli.shmSuffix));
+#if defined(NCCL_OS_LINUX)
+    static const char shmPrefix[] = "/dev/shm/nccl-";
+#elif defined(NCCL_OS_WINDOWS)
+    static const char shmPrefix[] = "Local\\nccl-shm-";
+#endif
+    memcpy(desc->shmli.shmSuffix, shmPath + sizeof(shmPrefix) - 1, sizeof(desc->shmli.shmSuffix));
     desc->legacy = true;
     INFO(NCCL_SHM, "MMAP allocated shareable host buffer %s size %zi ptr %p", shmPath, desc->shmli.shmSize, *hptr);
   }
@@ -555,7 +562,12 @@ ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpc
   char shmPath[SHM_PATH_MAX] = { '\0' };
   desc->shmli.shmSize = size;
   NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), size, hptr, dptr, 1, &desc->shmli.handle));
-  memcpy(desc->shmli.shmSuffix, shmPath + sizeof("/dev/shm/nccl-") - 1, sizeof(desc->shmli.shmSuffix));
+#if defined(NCCL_OS_LINUX)
+  static const char shmPrefix[] = "/dev/shm/nccl-";
+#elif defined(NCCL_OS_WINDOWS)
+  static const char shmPrefix[] = "Local\\nccl-shm-";
+#endif
+  memcpy(desc->shmli.shmSuffix, shmPath + sizeof(shmPrefix) - 1, sizeof(desc->shmli.shmSuffix));
   desc->legacy = true;
   INFO(NCCL_SHM, "MMAP allocated shareable host buffer %s size %zi ptr %p", shmPath, size, *hptr);
 #endif /* CUDART_VERSION >= 12020 */
@@ -630,14 +642,22 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm *comm, int proxyRank, 
     INFO(NCCL_SHM, "CUMEM imported shareable host buffer from proxyRank %d size %zi ptr %p, granularity %ld", proxyRank, desc->shmci.size, descOut->shmci.ptr, granularity);
   } else {
     char shmPath[SHM_PATH_MAX];
+#if defined(NCCL_OS_LINUX)
     snprintf(shmPath, sizeof(shmPath), "/dev/shm/nccl-%s", desc->shmli.shmSuffix);
+#elif defined(NCCL_OS_WINDOWS)
+    snprintf(shmPath, sizeof(shmPath), "Local\\nccl-shm-%s", desc->shmli.shmSuffix);
+#endif
     NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), desc->shmli.shmSize, hptr, dptr, -1, &descOut->shmli.handle));
     descOut->legacy = true;
     INFO(NCCL_SHM, "MMAP imported shareable host buffer %s size %zi ptr %p", shmPath, desc->shmli.shmSize, *hptr);
   }
 #else /* CUDART_VERSION >= 12020 */
   char shmPath[SHM_PATH_MAX];
+#if defined(NCCL_OS_LINUX)
   snprintf(shmPath, sizeof(shmPath), "/dev/shm/nccl-%s", desc->shmli.shmSuffix);
+#elif defined(NCCL_OS_WINDOWS)
+  snprintf(shmPath, sizeof(shmPath), "Local\\nccl-shm-%s", desc->shmli.shmSuffix);
+#endif
   NCCLCHECK(ncclShmOpen(shmPath, sizeof(shmPath), desc->shmli.shmSize, hptr, dptr, -1, &descOut->shmli.handle));
   descOut->legacy = true;
   INFO(NCCL_SHM, "MMAP imported shareable host buffer %s size %zi ptr %p", shmPath, desc->shmli.shmSize, *hptr);

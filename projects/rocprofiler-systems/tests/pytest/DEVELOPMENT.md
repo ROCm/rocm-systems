@@ -50,7 +50,10 @@ These fixtures run as **subtests**, meaning multiple validations within a single
 | `assert_rocpd` | Validates that a ROCpd database was created. Requires `@pytest.mark.rocpd("env_name")`. |
 | `assert_timemory` | Validates timemory JSON output files. |
 | `assert_file_exists` | Validates that a specific file exists in the output directory. |
+| `assert_unified_memory_output` | Validates unified-memory text and JSON outputs (`unified_memory*.txt` / `unified_memory*.json`) under the test output directory. |
 | `assert_causal_json` | Validates causal profiling JSON output. |
+
+> For precise, one-off checks, plain `assert` statements can also be used. They are reported as a single test failure (not a subtest), but the same runner output is included in the failure report.
 
 See the docstrings in `conftest.py` for full argument details.
 
@@ -58,9 +61,11 @@ See the docstrings in `conftest.py` for full argument details.
 
 ### General Rules
 
+At the minimum, the following rules should always be followed. If you have a reason not to, a comment should be left explaining the reasoning behind your choice.
+
 - Test methods should always be inside a test class.
 - Every test class should inherit from `RocprofsysTest`.
-- At minimum, a test should use both `run_test` and `assert_regex`.
+- At minimum, a test should use both `run_test` and `assert_regex`. They have complementary responsibilities: `run_test` performs process-level validation (subprocess launch, exit code, signals, timeout), while `assert_regex` performs content-level validation (matching against pass/fail patterns in the captured output). A test that only calls `run_test` will detect a crash but not a silent regression where the binary runs to completion without emitting the expected instrumentation output.
 
 ### Runner Modes
 
@@ -74,12 +79,15 @@ class TestExample(RocprofsysTest):
         self.assert_regex(result)
 ```
 
+If a test is hard-coded to a single mode (no `@pytest.mark.parametrize("mode", ...)` decorator), tag it with `@pytest.mark.<mode>` (e.g. `@pytest.mark.sampling`) so `_generate_ctest_definitions` records the correct CTest mode label. When `parametrize("mode", [...])` is used — even with a single-element list — this is handled automatically.
+
 ### Test Parametrization
 
 Parametrizing a test affects the generated CTest name. The order of `@pytest.mark.parametrize` decorators determines parameter order in the name. The **runner mode should always come last** so that tests group naturally when sorted:
 
 ```python
 # Good: parameters first, mode last
+@pytest.mark.class_name("transpose")
 class TestTranspose(RocprofsysTest):
     @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
     @pytest.mark.parametrize("iterations,tile_dim,block_rows", [(1, 16, 16), (2, 32, 32)])
@@ -90,10 +98,10 @@ class TestTranspose(RocprofsysTest):
 This produces names like:
 
 ```text
-Transpose_parametrized_1_16_16_sampling
-Transpose_parametrized_1_16_16_sys_run
-Transpose_parametrized_2_32_32_sampling
-Transpose_parametrized_2_32_32_sys_run
+transpose-parametrized-1-16-16-sampling
+transpose-parametrized-1-16-16-sys_run
+transpose-parametrized-2-32-32-sampling
+transpose-parametrized-2-32-32-sys_run
 ```
 
 Note: pytest applies decorators bottom-up, so the **bottom** `@pytest.mark.parametrize` varies first (outermost loop). Place `mode` on top so it varies last in the name.
@@ -208,7 +216,7 @@ When adding a functional marker:
 
 **CTest label behavior:** By default, all markers are included as CTest labels (e.g., `ctest -L "rocm"` filters by the `@pytest.mark.rocm` marker). To change how a marker appears in the generated CTest definitions, add it to one of these sets in `_generate_ctest_definitions()`:
 
-- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`, `ci_disable`).
+- `no_report_markers` — Marker is **not** added as a CTest label (e.g., `timeout`, `serialize`).
 - `no_report_args_markers` — Marker name is added as a label, but its **arguments are hidden** (e.g., `rocpd`).
 - `only_report_args_markers` — Only the marker's **arguments** are added as labels, not the marker name itself (e.g., `mpi_implementation`).
 
@@ -246,7 +254,6 @@ class Test<NAME>(RocprofsysTest):
 
     # Any test level markers here
     def test_<NAME>(self, <test>_env):
-        # Run the test
         result = self.run_test(
             # mode,
             # target,

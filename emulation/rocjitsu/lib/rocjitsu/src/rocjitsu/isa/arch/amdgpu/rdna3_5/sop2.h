@@ -534,6 +534,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand src2;
 };
 
 class SFmamkF32Sop2 : public Sop2 {
@@ -543,6 +544,7 @@ public:
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
+  Operand src2;
 };
 
 class SFmacF32Sop2 : public Sop2 {

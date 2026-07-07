@@ -76,7 +76,7 @@ struct ArgCheckTestEnvironment
         // Initialize the communicator with required fields
         comm->cudaDev       = 0;
         comm->nRanks        = 4;
-        comm->checkPointers = true;
+        comm->checkMode = ncclCheckModeDebugLocal; // was: comm->checkPointers = true (removed in v2.29)
         comm->rank          = 0;
 
         comm->startMagic = NCCL_MAGIC;

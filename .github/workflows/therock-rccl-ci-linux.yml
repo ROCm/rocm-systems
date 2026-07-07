@@ -41,7 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
+          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
 
       - name: Install python deps
         run: |
@@ -127,8 +127,8 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    # TODO: Re-enable gfx94X-dcgpu multi-node tests once the cluster is stable again.
-    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+    # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    if: false
     permissions:
       contents: read
       id-token: write

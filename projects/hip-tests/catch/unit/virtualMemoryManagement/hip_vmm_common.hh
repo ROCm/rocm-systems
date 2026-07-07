@@ -38,6 +38,17 @@
       HIP_SKIP_TEST("DMA-BUF is not supported for this test on this device.");                     \
     }                                                                                              \
   }
+#define checkFabricHandleSupported(device)                                                         \
+  {                                                                                                \
+    int value = 0;                                                                                 \
+    hipDeviceAttribute_t attr = hipDeviceAttributeHandleTypeFabricSupported;                       \
+    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
+    if (value == 0) {                                                                              \
+      HIP_SKIP_TEST("Fabric Handle Support not found. Skipping Test..");                  \
+      return;                                                                                      \
+    }                                                                                              \
+  }
+
 #ifdef __linux__
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \

@@ -184,8 +184,7 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
 std::string
 get_output_directory(const char* env_var = nullptr)
 {
-    const char* output_path =
-        std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH.data());
+    const char* output_path = std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH);
     if(output_path && std::strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
@@ -308,8 +307,8 @@ void
 validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES.data());
-    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES.data());
+    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES);
+    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES);
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
@@ -321,7 +320,7 @@ validate_configuration()
     }
 
     // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir     = std::getenv(env_vars::TMPDIR.data());
+    const char* tmpdir     = std::getenv(env_vars::TMPDIR);
     auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {
@@ -530,6 +529,7 @@ get_help_topic_map()
         { "general", { "[GENERAL OPTIONS]" } },
         { "tracing", { "[TRACING OPTIONS]" } },
         { "profiling", { "[PROFILE OPTIONS]" } },
+        { "output", { "[OUTPUT FORMAT OPTIONS]" } },
         { "sampling",
           { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
             "[ADVANCED SAMPLING OPTIONS]" } },
@@ -550,21 +550,60 @@ get_domain_help_map()
         { "gpu",
           { "GPU metrics, device sampling, GPU counters",
             { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",
-              "--process-duration", "-G", "--gpu-events", "--ai-nics" } } },
+              "--process-duration", "-G", "--gpu-events", "--ai-nics", "--use-amd-smi",
+              "--amd-smi-metrics" } } },
         { "cpu",
           { "CPU sampling, timers, CPU counters",
-            { "--cpu", "-H", "--host", "-S", "--sample", "-f", "--freq",
-              "--sampling-freq", "--sampling-wait", "--sampling-duration", "-t", "--tids",
-              "--cputime", "--sample-cputime", "--realtime", "--sample-realtime",
-              "--sample-overflow", "-C", "--cpu-events" } } },
+            { "--cpu", "-H", "--host", "-S", "--sample", "--sampling-freq",
+              "--sampling-wait", "--sampling-duration", "-t", "--tids",
+              "--sample-cputime", "--sample-realtime", "--sample-overflow", "-C",
+              "--cpu-events" } } },
         { "rocm",
           { "ROCm API tracing options",
-            { "--rocm", "-T", "--trace", "--hsa-interrupt" } } },
+            { "--rocm", "-T", "--trace", "--hsa-interrupt", "--selected-regions",
+              "--use-amd-smi", "--gpus", "--ai-nics" } } },
         { "parallel",
           { "MPI, OpenMP, Kokkos, RCCL options",
             { "--parallel", "-I", "--include", "-E", "--exclude" } } },
     };
     return map;
+}
+
+// Hand-curated topic relations. Listing a topic here surfaces it under
+// the "See also" footer of another topic. Keep the per-topic list short
+// (≤4 entries) so the footer stays useful rather than noisy.
+const related_topics_map&
+get_related_topics_map()
+{
+    static const related_topics_map map = {
+        { "tracing", { "rocm", "process", "backend", "output" } },
+        { "profiling", { "sampling", "counters", "backend", "output" } },
+        { "output", { "tracing", "profiling", "backend" } },
+        { "sampling", { "process", "profiling", "counters", "cpu" } },
+        { "process", { "gpu", "sampling" } },
+        { "counters", { "gpu", "cpu", "sampling" } },
+        { "backend", { "tracing", "profiling", "rocm" } },
+        { "general", { "preset", "tracing", "profiling" } },
+        { "preset", { "tracing", "profiling", "sampling" } },
+        { "misc", { "debug", "general" } },
+        { "gpu", { "rocm", "process", "counters" } },
+        { "cpu", { "sampling", "process", "counters" } },
+        { "rocm", { "gpu", "tracing", "parallel" } },
+        { "parallel", { "rocm", "sampling" } },
+    };
+    return map;
+}
+
+void
+print_see_also(std::string_view topic, std::ostream& out)
+{
+    const auto& relations = get_related_topics_map();
+    auto        it        = relations.find(topic);
+    if(it == relations.end() || it->second.empty()) return;
+
+    out << "\n  See also (related topics):\n";
+    for(const auto& related : it->second)
+        out << "    --help=" << related << "\n";
 }
 
 void

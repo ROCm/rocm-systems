@@ -34,6 +34,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
 ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm,
+                                  struct ncclCeCollArgs* args,
                                   struct ncclCeBatchOpsParams* params,
                                   hipStream_t stream);
 
@@ -384,7 +385,8 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
 TEST_F(CeInternalMPITest, LaunchEmptyBatchSucceeds)
 {
     ncclCeBatchOpsParams params{};
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 }
 
@@ -425,7 +427,8 @@ TEST_F(CeInternalMPITest, LaunchFourOpsSucceeds)
     }
     params.numOps = kOps;
 
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()), ncclSuccess);
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()), ncclSuccess);
     ASSERT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
 
     for(int i = 0; i < kOps; ++i)
@@ -535,13 +538,14 @@ TEST_F(CeFaultInjTest, LaunchBatchOpsErrorPropagates)
     }
     params.numOps = kOps;
 
+    ncclCeCollArgs collArgs{};
     ASSERT_EQ(ncclCeFaultSet(ceComm, CE_FAULT_LAUNCH_OP), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSystemError)
         << "Expected ncclSystemError when CE_FAULT_LAUNCH_OP is armed";
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &params, getActiveStream()),
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &params, getActiveStream()),
               ncclSuccess)
         << "Expected ncclSuccess after fault cleared";
     EXPECT_EQ(hipStreamSynchronize(getActiveStream()), hipSuccess);
@@ -586,7 +590,8 @@ TEST_F(CeFaultInjTest, MultipleFaultsArmedAndCleared)
 
     ncclCeBatchOpsParams emptyParams{};
     emptyParams.numOps = 1; // non-zero to bypass the early-out
-    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &emptyParams, getActiveStream()),
+    ncclCeCollArgs collArgs{};
+    EXPECT_EQ(ncclCeLaunchBatchOps(ceComm, &collArgs, &emptyParams, getActiveStream()),
               ncclSystemError);
 
     ASSERT_EQ(ncclCeFaultClear(ceComm), ncclSuccess);

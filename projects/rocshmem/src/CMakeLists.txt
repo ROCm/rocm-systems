@@ -28,6 +28,7 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
+    api_trace.cc
     backend_bc.cpp
     backend_bc_device.cpp
     build_info.cpp
@@ -82,13 +83,17 @@ target_compile_options(${PROJECT_NAME} PUBLIC ${ROCSHMEM_COMPILE_FLAGS})
 # DIExpressions are emitted instead and pass the verifier.  The flag is passed
 # only to the device sub-pass via -Xarch_device; the host sub-pass continues
 # to receive full -g.
-set_property(
-  SOURCE rocshmem_gpu.cpp rocshmem_tile_gpu.cpp team.cpp
-  TARGET_DIRECTORY ${PROJECT_NAME}
-  APPEND PROPERTY COMPILE_OPTIONS
-    "$<$<CONFIG:Debug,RelWithDebInfo>:-Xarch_device>"
-    "$<$<CONFIG:Debug,RelWithDebInfo>:-gno-heterogeneous-dwarf>"
-)
+#
+# Fixed in ROCm 7.13 — guard removed for newer compilers.
+if(ROCM_MAJOR_VERSION LESS 7 OR (ROCM_MAJOR_VERSION EQUAL 7 AND ROCM_MINOR_VERSION LESS 13))
+  set_property(
+    SOURCE rocshmem_gpu.cpp rocshmem_tile_gpu.cpp team.cpp
+    TARGET_DIRECTORY ${PROJECT_NAME}
+    APPEND PROPERTY COMPILE_OPTIONS
+      "$<$<CONFIG:Debug,RelWithDebInfo>:-Xarch_device>"
+      "$<$<CONFIG:Debug,RelWithDebInfo>:-gno-heterogeneous-dwarf>"
+  )
+endif()
 
 ###############################################################################
 # ROCSHMEM TARGET FOR BACKENDS

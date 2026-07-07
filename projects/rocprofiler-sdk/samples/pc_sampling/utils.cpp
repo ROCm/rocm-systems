@@ -29,7 +29,7 @@ namespace utils
 std::ostream*&
 get_output_stream()
 {
-    // The output strea is initially unitialized
+    // The output stream is initially uninitialized
     static std::ostream* _v = nullptr;
     return _v;
 }

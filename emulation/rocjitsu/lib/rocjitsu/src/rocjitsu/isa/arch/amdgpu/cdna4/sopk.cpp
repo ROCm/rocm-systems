@@ -46,9 +46,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
 }
 
 void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  if (wf.read_scc())
-    sdst.write_scalar(wf, static_cast<uint32_t>(
-                              static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_))));
+  amdgpu::execute_s_cmovk_i32_sopk(*this, wf);
 }
 
 SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
@@ -242,12 +240,13 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
 }
 
 void SAddkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  int64_t wide = static_cast<int64_t>(s0) + static_cast<int64_t>(imm);
-  int32_t result = static_cast<int32_t>(wide);
-  sdst.write_scalar(wf, static_cast<uint32_t>(result));
-  wf.write_scc(wide != static_cast<int64_t>(result));
+  uint32_t s0 = sdst.read_scalar(wf);
+  uint32_t imm =
+      static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(simm16.encoding_value_)));
+  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);
+  uint32_t result = static_cast<uint32_t>(wide);
+  sdst.write_scalar(wf, result);
+  wf.write_scc(wide > 0xFFFFFFFFu);
 }
 
 SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
@@ -261,9 +260,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  int32_t s0 = static_cast<int32_t>(sdst.read_scalar(wf));
-  int32_t imm = static_cast<int16_t>(simm16.encoding_value_);
-  sdst.write_scalar(wf, static_cast<uint32_t>(s0 * imm));
+  amdgpu::execute_s_mulk_i32_sopk(*this, wf);
 }
 
 SCbranchIForkSopk::SCbranchIForkSopk(const MachineInst *inst)
@@ -294,7 +291,35 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
 }
 
 void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_getreg_b32_sopk(*this, wf);
+  uint16_t hwreg = simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  uint32_t reg_val = 0;
+  switch (reg_id) {
+  case 1:
+    reg_val = wf.status_raw();
+    break;
+  case 4:
+    reg_val = static_cast<uint32_t>(wf.cu().id());
+    break;
+  case 5:
+    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
+    break;
+  case 6:
+    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
+    break;
+  case 7:
+    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
+    break;
+  default:
+    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  sdst.write_scalar(wf, (reg_val >> offset) & mask);
 }
 
 SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
@@ -309,7 +334,25 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
 }
 
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_setreg_b32_sopk(*this, wf);
+  uint16_t hwreg = simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  uint32_t src = sdst.read_scalar(wf);
+  switch (reg_id) {
+  case 1: {
+    uint32_t s = wf.status_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_status_raw(s);
+    break;
+  }
+  default:
+    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -322,7 +365,25 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
 }
 
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_setreg_imm32_b32_sopk(*this, wf);
+  uint16_t hwreg = simm16.encoding_value_;
+  uint32_t reg_id = hwreg & 0x3Fu;
+  uint32_t offset = (hwreg >> 6) & 0x1Fu;
+  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
+  if (offset + size > 32)
+    size = 32 - offset;
+  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
+  uint32_t src = literal_;
+  switch (reg_id) {
+  case 1: {
+    uint32_t s = wf.status_raw();
+    s = (s & ~(mask << offset)) | ((src & mask) << offset);
+    wf.set_status_raw(s);
+    break;
+  }
+  default:
+    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
+    break;
+  }
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
@@ -336,10 +397,15 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
 }
 
+std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   sdst.write_scalar64(wf, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
-  wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;
+  wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }
 
 } // namespace cdna4

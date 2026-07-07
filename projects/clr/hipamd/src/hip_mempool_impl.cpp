@@ -211,7 +211,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     }
 
     size_t offset = 0;
-    memory = getMemoryObject(dev_ptr, offset);
+    memory = getMemoryObject(device_, dev_ptr, offset);
     // Saves the current device id so that it can be accessed later
     memory->getUserData().deviceId = device_->deviceId();
 
@@ -501,8 +501,13 @@ void MemoryPool::GetAccess(hip::Device* device, hipMemAccessFlags* flags) {
 
 // ================================================================================================
 void MemoryPool::FreeAllMemory(Stream* stream) {
+  // skip_event=true: ordering is guaranteed by the caller (AutoFreeOnLaunch path
+  // finishes the stream before next dispatch). Creating a marker event here would
+  // allocate an HSA signal that leaks under ASAN if the free_heap_ entry is never
+  // reused before the pool is destroyed.
+  constexpr bool kSkipEvent = true;
   while (!busy_heap_.Allocations().empty()) {
-    FreeMemory(busy_heap_.Allocations().begin()->first.second, stream);
+    FreeMemory(busy_heap_.Allocations().begin()->first.second, stream, nullptr, kSkipEvent);
   }
 }
 

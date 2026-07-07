@@ -8,6 +8,7 @@
 #define ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/spi.h"
 
 #include "simdojo/sim/component.h"
 
@@ -77,8 +78,16 @@ public:
   /// @returns Const reference to the vector of CU pointers.
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
+  /// @brief Get or create the SPI for this shader engine.
+  ShaderProcessorInput &spi() {
+    if (!spi_)
+      spi_ = std::make_unique<ShaderProcessorInput>(cus_);
+    return *spi_;
+  }
+
 private:
   std::vector<ComputeUnitCore *> cus_;
+  std::unique_ptr<ShaderProcessorInput> spi_;
 };
 
 } // namespace amdgpu
