@@ -359,6 +359,12 @@ public:
   uint64_t cycle_count() const { return cycle_counter_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
+  /// @details This is the VM-level scalar register accessor. It notifies the
+  /// plugin group of an SGPR read when the physical register is currently owned
+  /// by a wavefront. Instruction operand implementations use this to implement
+  /// scalar operand semantics. VGPR reads from instruction emulators should not
+  /// use the analogous CU physical VGPR accessors directly; use Operand or
+  /// RegisterAccess APIs instead.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
   // TODO(newling) consider cmake flag to build without plugins, this call
@@ -371,26 +377,48 @@ public:
   }
 
   /// @brief Write a scalar register in the physical SGPR file.
+  /// @details VM-level scalar register write used for scalar operand
+  /// destinations and dispatch/runtime state setup. This does not imply a VGPR
+  /// read and does not participate in VGPR read observation.
   /// @param reg_idx Physical register index.
   /// @param val Value to write.
   void write_sgpr(uint32_t reg_idx, uint32_t val) { sgpr_file_[reg_idx] = val; }
 
+  /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
+  /// @details Low-level notification primitive used by RegisterAccess and the
+  /// concrete CU implementation. Instruction emulators should acquire observed
+  /// VGPR values through RegisterAccess rather than manually pairing raw
+  /// storage access with this hook.
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint64_t lane_mask,
                         uint8_t byte_mask = 0xF) const {
     if (wf && lane_mask != 0)
       plugin_group_->onAmdgpuReadVgprLanes(wf, reg_idx, lane_mask, byte_mask);
   }
 
+  /// @brief Notify plugins that lanes of a physical VGPR were read.
+  /// @details Resolves the owning wavefront from the physical register index.
+  /// Intended for RegisterAccess and CU internals, not as a direct instruction
+  /// emulator API.
   virtual void notify_vgpr_read_by_reg(uint32_t reg_idx, uint64_t lane_mask,
                                        uint8_t byte_mask = 0xF) const = 0;
 
   /// @brief Read a vector register lane from the physical VGPR file.
+  /// @details VM/storage-level scalar lane accessor. The concrete
+  /// implementation reports the read to plugins. Instruction-visible VGPR
+  /// reads should still go through Operand or RegisterAccess so the read
+  /// intent, lane mask, byte mask, and region lifetime remain explicit and
+  /// enforceable.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @returns Lane value.
   virtual uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const = 0;
 
   /// @brief Write a vector register lane in the physical VGPR file.
+  /// @details VM/storage-level scalar lane write. Instruction emulators should
+  /// prefer Operand or RegisterAccess write APIs for instruction-visible VGPR
+  /// writes. Use this directly only in VM/runtime code paths that deliberately
+  /// operate on physical register storage, such as dispatch setup or memory
+  /// completion.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @param val Value to write.
@@ -402,16 +430,20 @@ public:
   const uint32_t *sgpr_data(uint32_t base) const { return &sgpr_file_[base]; }
 
   /// @brief Return a raw pointer to a wavefront's VGPR data in the physical file.
-  /// @details This bypasses plugin read hooks. Instruction-visible reads should use
-  /// read_vgpr() or notify_vgpr_read() unless the caller is deliberately taking
-  /// responsibility for plugin notification.
+  /// @details This bypasses plugin read hooks and should not be used directly
+  /// by instruction emulators. It is reserved for RegisterAccess, VM storage
+  /// code, serialization/checkpointing, diagnostics, and tightly controlled
+  /// internals that have a separate observation contract.
   /// @param base Base register index in the VGPR file.
   /// @returns Const pointer to the raw VGPR data.
   virtual const uint8_t *raw_vgpr_data(uint32_t base) const = 0;
 
   /// @brief Return a mutable raw pointer to a wavefront's VGPR data.
-  /// @details This bypasses plugin write hooks. It is intended for raw storage
-  /// operations such as memory completion and tightly controlled SIMD paths.
+  /// @details This bypasses the instruction-facing RegisterAccess boundary.
+  /// It is intended for VM storage operations such as memory completion,
+  /// checkpoint restore, RegisterAccess view implementation, and other
+  /// tightly controlled internals. Instruction emulators should use Operand or
+  /// RegisterAccess write APIs instead.
   /// @param base Base register index in the VGPR file.
   /// @returns Mutable pointer to the raw VGPR data.
   virtual uint8_t *raw_vgpr_data(uint32_t base) = 0;
@@ -424,7 +456,8 @@ public:
   /// (@c raw_vgpr_data), which erases the wavefront-size template parameter. The
   /// file actually stores @c simdojo::VectorReg<N,uint32_t>, so this recovers
   /// the typed register with the design's single localized @c reinterpret_cast.
-  /// Like @c raw_vgpr_data, this bypasses plugin hooks.
+  /// Like @c raw_vgpr_data, this bypasses plugin hooks and is for
+  /// RegisterAccess/VM internals rather than instruction emulator call sites.
   /// The @c static_assert pins @c VectorReg<N> to @c N contiguous @c uint32_t
   /// (no padding / vtable) so the byte view and the typed view coincide.
   template <size_t N> simdojo::VectorReg<N, uint32_t> &raw_vgpr_reg(uint32_t base) {
