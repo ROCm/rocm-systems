@@ -89,7 +89,6 @@ Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze
 The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work. 
 The reader builds the frame from source **per analysis run** with filters applied in memory and the `pmc_perf.csv` export is derived from that frame.
 
-The decision is to 
 However, `pmc_perf.csv` generation could be useful for debugging purposes and some users may use it in their flow.
 Therefore, we will add a new debug option `--gen-pmc` which implements one-way export of this file.
 However, analysis scripts will not read its back.
