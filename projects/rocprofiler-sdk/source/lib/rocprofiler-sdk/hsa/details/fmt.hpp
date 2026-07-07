@@ -459,4 +459,39 @@ struct formatter<hsa_amd_memory_copy_op_t>
     }
 };
 #endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+template <>
+struct formatter<hsa_ext_image_descriptor_v2_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(hsa_ext_image_descriptor_v2_t const& h, FormatContext& ctx) const
+    {
+        static const char* geometry[] = {"HSA_EXT_IMAGE_GEOMETRY_1D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_3D",
+                                         "HSA_EXT_IMAGE_GEOMETRY_1DA",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DA",
+                                         "HSA_EXT_IMAGE_GEOMETRY_1DB",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DDEPTH",
+                                         "HSA_EXT_IMAGE_GEOMETRY_2DADEPTH"};
+        return fmt::format_to(ctx.out(),
+                              "{{format=[channel_order={}, channel_type={}], array_size={}, "
+                              "depth={}, height={}, width={}, mipmap_levels={}, geometry={}}}",
+                              h.format.channel_order,
+                              h.format.channel_type,
+                              h.array_size,
+                              h.depth,
+                              h.height,
+                              h.width,
+                              h.mipmap_levels,
+                              geometry[h.geometry]);
+    }
+};
+#endif
 }  // namespace fmt

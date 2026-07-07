@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
+include(rj_find_amdcxx)
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -295,6 +296,7 @@ add_executable(
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
+    cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
@@ -345,6 +347,7 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
@@ -435,7 +438,7 @@ get_filename_component(
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4.json"
 )
 
@@ -472,7 +475,7 @@ if(ROCMINFO_EXECUTABLE)
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
-    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
 
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(rocminfo_test)
@@ -529,7 +532,7 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
-    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
     endif()
@@ -878,10 +881,22 @@ else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")
 endif()
 
-# --- HIP tests (requires hipcc + CLI launcher) ---
+# --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-find_program(HIPCC_EXECUTABLE hipcc PATHS "${ROCM_PATH}" PATH_SUFFIXES bin)
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+rj_find_amdcxx(AMDCXX)
+set(RJ_ENABLE_HIP_TESTS ON)
+if(NOT AMDCXX)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT HSA_RUNTIME64)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_SANITIZER_LINK_OPTIONS)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (GNU host compiler with sanitizers)")
+endif()
+
+if(RJ_ENABLE_HIP_TESTS)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
     set(RJ_HIP_SANITIZER_FLAGS)
@@ -896,11 +911,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             ${_rj_sanitizer_flag}
         )
     endforeach()
-    if(RJ_HIP_SANITIZER_FLAGS OR RJ_HIP_SANITIZER_LINK_FLAGS)
-        list(APPEND RJ_HIP_SANITIZER_FLAGS -Xarch_device -fno-sanitize=all)
-    endif()
 
-    # Helper: build a HIP test binary with hipcc + gtest.
+    # Helper: build a HIP test binary with amdclang++ + gtest.
     function(rj_add_hip_test TEST_NAME)
         cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
         if(NOT ARG_ARCH)
@@ -927,11 +939,11 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
                 ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
-            COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
+            COMMENT "Building ${TEST_NAME} with amdclang++ -x hip (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
-        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_kmd_shim)
+        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
         if(RJ_INSTALL_TESTS)
             rj_install_test_program(${HIP_TEST_BIN})
         endif()
@@ -1056,7 +1068,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
             RJ_DAEMON_CONFIG="${RJ_CDNA4_KMD_CONFIG}"
             RJ_DAEMON_CONFIG_2GPU="${RJ_CDNA4_KMD_2GPU_CONFIG}"
-            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
+            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
             RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
@@ -1214,29 +1226,27 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     add_subdirectory(race-detector)
 
-    message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
-else()
-    message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+    message(STATUS "HIP tests enabled (found ${AMDCXX})")
 endif()
 
 # --- Narrow conversion HIP CTS tests ---
-# Uses hipcc (rocjitsu emulator does not yet support amdclang++ -x hip binaries).
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+# Uses the same HIP compiler path as the other HIP tests.
+if(RJ_ENABLE_HIP_TESTS)
     set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
     add_custom_command(
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
-            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
-            ${RJ_HIP_SANITIZER_FLAGS} -I${CMAKE_SOURCE_DIR}/lib/util/include -o
-            ${CVT_NARROW_BIN}
+            ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
+            -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
+            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
             ${RJ_HIP_SANITIZER_LINK_FLAGS}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
-        COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"
+        COMMENT "Building hip_cvt_narrow_test with amdclang++ -x hip (gfx950)"
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
-    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_program(${CVT_NARROW_BIN})
     endif()

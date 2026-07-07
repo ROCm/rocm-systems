@@ -25,6 +25,7 @@
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -561,6 +562,12 @@ class Device : public NullDevice {
   //! Returns the lock object for the virtual gpus list
   std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
+#ifdef _WIN32
+  //! D3D interop accessors - return adapter LUID for device matching
+  const LUID& getDeviceLUID() const { return deviceLuid_; }
+  bool hasValidLUID() const { return luidValid_; }
+#endif
+
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
   const VirtualGPUs& vgpus() const { return vgpus_; }
@@ -719,6 +726,12 @@ class Device : public NullDevice {
   //! Pre-computed metadata packet version header bits
   uint32_t metadata_version_header_ = 0;
   bool metadata_version_queried_ = false;
+
+#ifdef _WIN32
+  // D3D interop device properties
+  LUID deviceLuid_;     //!< Adapter LUID for D3D interop validation
+  bool luidValid_;      //!< True if LUID was successfully extracted from HSA
+#endif
 
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared

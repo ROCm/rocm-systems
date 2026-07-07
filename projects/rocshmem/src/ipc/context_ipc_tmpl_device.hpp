@@ -27,6 +27,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
+#include "constmem.hpp"
 #include "context_ipc_device.hpp"
 #include "log.hpp"
 #include "util.hpp"
@@ -75,20 +76,20 @@ __device__ void IPCContext::get_nbi(T *dest, const T *source, size_t nelems, int
 // Atomics
 template <typename T>
 __device__ void IPCContext::amo_add(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_set(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOSet(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_swap(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOSwap(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -96,7 +97,7 @@ __device__ T IPCContext::amo_swap(void *dest, T value, int pe) {
 template <typename T>
 __device__ T IPCContext::amo_fetch_and(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOFetchAnd(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -104,7 +105,7 @@ __device__ T IPCContext::amo_fetch_and(void *dest, T value, int pe) {
 template <typename T>
 __device__ void IPCContext::amo_and(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOAnd(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -112,7 +113,7 @@ __device__ void IPCContext::amo_and(void *dest, T value, int pe) {
 template <typename T>
 __device__ T IPCContext::amo_fetch_or(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOFetchOr(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -120,7 +121,7 @@ __device__ T IPCContext::amo_fetch_or(void *dest, T value, int pe) {
 template <typename T>
 __device__ void IPCContext::amo_or(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOOr(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -128,7 +129,7 @@ __device__ void IPCContext::amo_or(void *dest, T value, int pe) {
 template <typename T>
 __device__ T IPCContext::amo_fetch_xor(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOFetchXor(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
@@ -136,26 +137,26 @@ __device__ T IPCContext::amo_fetch_xor(void *dest, T value, int pe) {
 template <typename T>
 __device__ void IPCContext::amo_xor(void *dest, T value, int pe) {
   uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOXor(
       reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_cas(void *dest, T value, T cond, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   ipcImpl_.ipcAMOCas(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), cond, value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_add(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOFetchAdd(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_cas(void *dest, T value, T cond, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[constmem.my_pe];
   return ipcImpl_.ipcAMOFetchCas(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), cond, value);
 }
 
@@ -179,7 +180,7 @@ __device__ void IPCContext::internal_direct_allreduce(
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
 
   int finish = PE_start + stride * PE_size;
-  int pe = my_pe;
+  int pe = constmem.my_pe;
 
   int wg_id = get_flat_block_id();
   int wg_size = get_flat_block_size();
@@ -220,7 +221,7 @@ __device__ void IPCContext::internal_direct_allreduce(
   }
   __syncthreads();
 
-  for (int i = wg_id; i < num_pes; i += wg_size) {
+  for (int i = wg_id; i < constmem.num_pes; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -345,7 +346,7 @@ __device__ void IPCContext::internal_ring_allreduce(
     }
   }
 
-  for (int i = wg_id; i < 2 * num_pes - 2; i += wg_size) {
+  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -413,11 +414,100 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the algorithm; all other
+ * workgroups wait at the final barrier_wg.  This prevents concurrent
+ * accumulation races when multiple workgroups share the same team
+ * pSync/pWrk/dest buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int IPCContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long  *pSync = team_obj->reduce_pSync;
+  T     *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  // Only workgroup 0 runs the reduction algorithm; other workgroups participate
+  // in the barriers only (same number of barrier_wg calls as WG 0).
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
+
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
+      }
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i);
+          if (is_thread_zero_in_block()) {
+            fence(i);
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i);
+          }
+        }
+      }
+      threadfence_system();
+      __syncthreads();
+
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          ipc_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
+        }
+      }
+      __syncthreads();
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
+      }
+      __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
+  if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
         put_nbi_wg(dst, src, nelems, i);
@@ -452,7 +542,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
                                       long *p_sync) {  // NOLINT(runtime/int)
-  if (num_pes < 4) {
+  if (constmem.num_pes < 4) {
     internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
                            pe_size);
   } else {
@@ -460,7 +550,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>
@@ -505,7 +595,7 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
 
 template <typename T>
@@ -532,7 +622,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     fence(dest_pe);
-    ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[alltoall_pSync_offset + my_pe_in_team]) - wrk_sync_pool_bases_[my_pe];
+    ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[alltoall_pSync_offset + my_pe_in_team]) - wrk_sync_pool_bases_[constmem.my_pe];
     ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
   }
 
@@ -582,7 +672,7 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
 
 // Block/wave functions

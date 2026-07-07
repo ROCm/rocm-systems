@@ -145,6 +145,7 @@ test_categories:
       - "fcollect_.*"
       - "teambroadcast_.*"
       - "teamreduction_.*"
+      - "teamreducescatter_.*"
       - "teambarrier_.*"
       - "teamwavebarrier_.*"
       - "teamwgbarrier_.*"

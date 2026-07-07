@@ -915,10 +915,11 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                                 hsa_interop_map_flag_t flags, size_t* size, void** ptr,
-                                 size_t* metadata_size, const void** metadata) {
+                                 hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
+                                 void** ptr, size_t* metadata_size, const void** metadata) {
   constexpr int tinyArraySize = 8;
-  HsaGraphicsResourceInfo info;
+  HsaGraphicsResourceInfo info{};
+  info.SizeHintInBytes = size_hint;
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;
@@ -1379,7 +1380,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   static_assert(sizeof(hsa_amd_ipc_memory_t) == sizeof(HsaSharedMemoryHandle),
                 "Thunk IPC mismatch.");
 
-  static const size_t pageSize = 4096;
+  const size_t pageSize = os::PageSize();
 
   // Reject sharing allocations larger than ~8TB due to thunk limitations.
   if (len > 0x7FFFFFFF000ull) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3212,8 +3213,9 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
   if (set_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
@@ -3297,8 +3299,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
     attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
   }
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   if (attribs.size() != 0) {
     HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
@@ -3384,8 +3387,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
 hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
                                   uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                   hsa_signal_t completion_signal) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, 4096));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
   size_t len = end - base;
 
   PrefetchOp* op = new PrefetchOp();
@@ -3521,8 +3525,9 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
 }
 
 Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, 4096));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
 
   std::vector<std::pair<uintptr_t, uintptr_t>> holes;
 
@@ -3886,13 +3891,32 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     core::DriverMemoryHandle driver_handle = {};
     auto agentOwner = region->owner();
-    auto ret = agentOwner->driver().CreateShareableHandle(nullptr, mem, size, *agentOwner, &driver_handle, &offset);
+
+    /* For CPU-owned memory, DRM operations require a GPU agent. Select 
+    the first available GPU agent before calling CreateShareableHandle.
+    For device memory, use owner agent. */
+    core::Agent* agent_for_drm = agentOwner;
+    core::Agent* drm_owner = nullptr;
+    if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+      if (gpus.empty()) {
+        region->Free(mem, size);
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+      agent_for_drm = gpus.front();
+      drm_owner = agent_for_drm;
+    }
+
+    auto ret = agent_for_drm->driver().CreateShareableHandle(nullptr, mem, size, *agent_for_drm, &driver_handle, &offset);
     if (ret != HSA_STATUS_SUCCESS) {
       region->Free(mem, size);
       return ret;
     }
 
     auto memoryHandle = std::make_unique<MemoryHandle>(region, flags_unused, driver_handle, alloc_flags);
+    if (drm_owner)
+      memoryHandle->drm_owner = drm_owner;
+
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   }
@@ -4025,9 +4049,21 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
       mappedHandle(_mappedHandle) {
 
   // CPU agents have access as the memory is already mapped to the host.
-  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
+  if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    return;
+  }
 
   MemoryHandle *memHandle = mappedHandle->mem_handle;
+
+  /* Avoid creating multiple amdgpu bos in the same gpu agent that was used
+  for drm import of host memory during the creation of a shareable_handle */
+  if (!memHandle->imported && memHandle->region &&
+      memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
+      memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+    driver_handle = memHandle->driver_handle;
+    owns_driver_handle = false;
+    return;
+  }
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
@@ -4053,9 +4089,11 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
     (void)result;
   }
   else {
-    hsa_status_t status = targetAgent->driver().DestroyMemoryHandle(&driver_handle);
-    assert(status == HSA_STATUS_SUCCESS);
-    (void)status;
+    if (owns_driver_handle) {
+      hsa_status_t status = targetAgent->driver().DestroyMemoryHandle(&driver_handle);
+      assert(status == HSA_STATUS_SUCCESS);
+      (void)status;
+    }
   }
 }
 
@@ -4063,10 +4101,22 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
 
-    auto agentOwner = mappedHandle->mem_handle->agentOwner();
+    core::Agent* agent = nullptr;
     int mmap_fd = -1;
-    /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
-    agentOwner->driver().GetDeviceFd(agentOwner->node_id(), &mmap_fd);
+
+    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
+     * The driver_handle created during import should have the correct mmap_offset. */
+    if (mappedHandle->mem_handle->imported) {
+      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
+      if (!gpus.empty()) {
+        agent = gpus.front();
+        agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+      }
+    } else if (mappedHandle->mem_handle->region) {
+      agent = mappedHandle->mem_handle->drmAgent();
+      /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
+      agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
+    }
 
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->driver_handle.mmap_offset)) {
@@ -4131,7 +4181,8 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
           driver_handle(driver_handle),
           imported(false),
           is_fabric_handle(false),
-          alloc_flag(alloc_flag) {
+          alloc_flag(alloc_flag),
+          drm_owner(nullptr) {
 
   assert(driver_handle.handle != 0);
 }
@@ -4143,7 +4194,8 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
     driver_handle({.dmabuf_fd = dmabuf_fd}),
     imported(true),
     is_fabric_handle(false),
-    alloc_flag(MemoryRegion::AllocateNoFlags) {
+    alloc_flag(MemoryRegion::AllocateNoFlags),
+    drm_owner(nullptr) {
 }
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
@@ -4153,19 +4205,25 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     driver_handle({.dmabuf_fd = -1, .fabric_handle = fabric_handle}),
     imported(true),
     is_fabric_handle(true),
-    alloc_flag(MemoryRegion::AllocateNoFlags) {
+    alloc_flag(MemoryRegion::AllocateNoFlags),
+    drm_owner(nullptr) {
 }
 
 Runtime::MemoryHandle::~MemoryHandle() {
-  if (driver_handle.handle != 0 && region != nullptr)
-    agentOwner()->driver().DestroyMemoryHandle(&driver_handle);
+  if (driver_handle.handle != 0 && region != nullptr) {
+    /* For host memory, CreateShareableHandle imports the BO into a GPU DRM context
+    (drm_owner) to produce a driver_handle. The resulting driver_handle
+    is owned by that GPU agent, not the CPU region, so destruction must be
+    dispatched through drm_owner */
+    core::Agent* destroy_agent = drmAgent();
+    destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+  }
 
   if (driver_handle.dmabuf_fd >= 0) {
     os::DmaBufClose(driver_handle.dmabuf_fd);
     driver_handle.dmabuf_fd = -1;
   }
 }
-
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
 hsa_status_t
@@ -4181,10 +4239,12 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
    */
   bool created_dmabuf_fd = false;
   if (!memHandle->imported && memHandle->driver_handle.dmabuf_fd == -1) {
-    Agent *ownerAgent = memHandle->agentOwner();
+    /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
+     * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
+    Agent *exportAgent = memHandle->drmAgent();
     int dmabuf_fd = -1;
-    hsa_status_t status = ownerAgent->driver().ExportMemoryHandle(
-        *ownerAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+    hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
+        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, &dmabuf_fd);
     if (status != HSA_STATUS_SUCCESS)
       return status;
     memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
@@ -4393,11 +4453,12 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   if (memoryHandle->imported)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
-  auto agentOwner = memoryHandle->region->owner();
+  /* For host memory, agentOwner() is the CPU agent which cannot perform DRM exports.
+   * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
+  auto agentOwner = memoryHandle->drmAgent();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::DMABUF_FD,
-                                                 0, dmabuf_fd);
+                                                 ShareType::DMABUF_FD, dmabuf_fd);
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4427,8 +4488,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::FABRIC_HANDLE,
-                                                 0, fabric_handle);
+                                                 ShareType::FABRIC_HANDLE, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
