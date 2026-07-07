@@ -21,6 +21,7 @@ The first domains are:
 - `kernel`: tiny in-source kernel launch contracts
 - `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `kernel_launch`: cooperative, extended, symbol, and AMD extension kernel launch contracts
+- `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
 - `occupancy_ext`: occupancy with-flags and cluster query contracts

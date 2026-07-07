@@ -273,6 +273,24 @@ contract:
   Contract_KernelLaunch_ExtLaunchKernel_WritesExpectedValue:
     <<: *level_0
     tags: [kernel_launch]
+  Contract_SymbolCopy_ToSymbol_ThenFromSymbol_RoundTripsScalar:
+    <<: *level_0
+    tags: [symbol_copy]
+  Contract_SymbolCopy_ToSymbolWithOffset_WritesAtElementOffset:
+    <<: *level_0
+    tags: [symbol_copy]
+  Contract_SymbolCopy_FromSymbol_DefaultDirection_ReadsBytes:
+    <<: *level_0
+    tags: [symbol_copy]
+  Contract_SymbolCopy_ToSymbolAsync_FromSymbolAsync_RoundTripsInStreamOrder:
+    <<: *level_0
+    tags: [symbol_copy]
+  Contract_SymbolCopy_NullSymbol_IsRejected:
+    <<: *level_0
+    tags: [symbol_copy]
+  Contract_SymbolCopy_OutOfBoundsSizePlusOffset_IsRejected:
+    <<: *level_0
+    tags: [symbol_copy]
   Contract_Graph_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [graph]
