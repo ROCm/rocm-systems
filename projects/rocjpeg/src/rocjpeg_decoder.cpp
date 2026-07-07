@@ -482,7 +482,8 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
         }
 
         if (destination->pitch[channel_index] == hip_interop_dev_mem.pitch[channel_index]) {
-            uint32_t channel_size = destination->pitch[channel_index] * channel_height;
+            // Compute pitch*height in 64-bit; hipMemcpyDtoDAsync takes size_t.
+            size_t channel_size = static_cast<size_t>(destination->pitch[channel_index]) * static_cast<size_t>(channel_height);
             CHECK_HIP(hipMemcpyDtoDAsync(destination->channel[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, channel_size, hip_stream_));
         } else {
             CHECK_HIP(hipMemcpy2DAsync(destination->channel[channel_index], destination->pitch[channel_index], hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] + roi_offset, hip_interop_dev_mem.pitch[channel_index],

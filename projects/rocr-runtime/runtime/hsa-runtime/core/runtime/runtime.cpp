@@ -1380,7 +1380,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   static_assert(sizeof(hsa_amd_ipc_memory_t) == sizeof(HsaSharedMemoryHandle),
                 "Thunk IPC mismatch.");
 
-  static const size_t pageSize = 4096;
+  const size_t pageSize = os::PageSize();
 
   // Reject sharing allocations larger than ~8TB due to thunk limitations.
   if (len > 0x7FFFFFFF000ull) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3213,8 +3213,9 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
   if (set_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
@@ -3298,8 +3299,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
     attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
   }
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   if (attribs.size() != 0) {
     HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
@@ -3385,8 +3387,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
 hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
                                   uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                   hsa_signal_t completion_signal) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, 4096));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
   size_t len = end - base;
 
   PrefetchOp* op = new PrefetchOp();
@@ -3522,8 +3525,9 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
 }
 
 Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, 4096));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, 4096);
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
 
   std::vector<std::pair<uintptr_t, uintptr_t>> holes;
 
@@ -4240,7 +4244,7 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
     Agent *exportAgent = memHandle->drmAgent();
     int dmabuf_fd = -1;
     hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
-        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, 0, &dmabuf_fd);
+        *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, &dmabuf_fd);
     if (status != HSA_STATUS_SUCCESS)
       return status;
     memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
@@ -4454,8 +4458,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
   auto agentOwner = memoryHandle->drmAgent();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::DMABUF_FD,
-                                                 0, dmabuf_fd);
+                                                 ShareType::DMABUF_FD, dmabuf_fd);
 }
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
@@ -4485,8 +4488,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
   auto agentOwner = memoryHandle->region->owner();
 
   return agentOwner->driver().ExportMemoryHandle(*agentOwner, memoryHandle->driver_handle,
-                                                 ShareType::FABRIC_HANDLE,
-                                                 0, fabric_handle);
+                                                 ShareType::FABRIC_HANDLE, fabric_handle);
 }
 
 hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,

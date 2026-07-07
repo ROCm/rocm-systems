@@ -39,6 +39,12 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Hide symbols by default so the shared library (librocjitsu.so) exports only its
+# intended ABI.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 find_package(Threads REQUIRED)
 
 # GCC 14+ emits false-positive -Wuninitialized on reinterpret_cast<uint32_t*>
@@ -301,6 +307,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
 
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
