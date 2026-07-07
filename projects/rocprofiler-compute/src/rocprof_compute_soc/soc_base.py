@@ -302,8 +302,7 @@ class OmniSoC_Base:
             pass
         else:
             alias = block_id
-            arch = self._mspec.gpu_arch
-            panel_alias_dict = get_arch_alias_to_panel_id(arch)
+            panel_alias_dict = get_arch_alias_to_panel_id(self._mspec.gpu_arch)
             if alias not in panel_alias_dict:
                 console_error(f"Invalid --block value {alias!r}.{INVALID_BLOCK_HINT}")
             block_id = str(panel_alias_dict[alias])

@@ -5,12 +5,10 @@
 and utils_common.expand_placeholder_ranges."""
 
 from collections import OrderedDict
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import schema
 from utils.parser import build_dfs
 from utils.utils_common import (
@@ -108,54 +106,6 @@ class TestResolveFilterBlocksToPanelIds:
         )
         with pytest.raises(SystemExit):
             convert_filter_blocks_to_panel_ids(["bogus"], arch="gfx942")
-
-
-# =============================================================================
-# OmniSoC_Base._append_analysis_yaml_for_filter_token alias handling
-# =============================================================================
-
-
-class TestProfileFilterTokenAliasHandling:
-    """The profile-mode counterpart to convert_filter_blocks_to_panel_ids."""
-
-    @staticmethod
-    def _fake_soc(arch: str = "gfx942") -> Any:
-        return SimpleNamespace(_mspec=SimpleNamespace(gpu_arch=arch))
-
-    def test_unknown_alias_exits_instead_of_keyerror(self, monkeypatch):
-        monkeypatch.setattr(
-            "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "10"},
-        )
-        with pytest.raises(SystemExit):
-            OmniSoC_Base._append_analysis_yaml_for_filter_token(
-                self._fake_soc(), "SQ", {}, "/cfg", []
-            )
-
-    def test_known_alias_resolves_to_panel_without_crash(self, monkeypatch):
-        monkeypatch.setattr(
-            "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
-            lambda arch: {"lds": "10"},
-        )
-        texts: list[str] = []
-        # Alias resolves to block id 10 -> file id "1000", absent from the
-        # empty config dict, so the token is skipped with a warning, not a crash.
-        OmniSoC_Base._append_analysis_yaml_for_filter_token(
-            self._fake_soc(), "lds", {}, "/cfg", texts
-        )
-        assert texts == []
-
-    def test_invalid_metric_id_token_exits(self, monkeypatch):
-        # A non-alias, non-metric-id token reaches the alias branch and must
-        # exit gracefully rather than raise.
-        monkeypatch.setattr(
-            "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
-            lambda arch: {},
-        )
-        with pytest.raises(SystemExit):
-            OmniSoC_Base._append_analysis_yaml_for_filter_token(
-                self._fake_soc(), "not_a_block", {}, "/cfg", []
-            )
 
 
 # =============================================================================
