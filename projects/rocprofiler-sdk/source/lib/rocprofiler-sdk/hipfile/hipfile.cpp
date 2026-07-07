@@ -58,7 +58,11 @@ template <typename Tp>
 auto
 get_default_retval()
 {
-    if constexpr(std::is_pointer<Tp>::value)
+    if constexpr(std::is_same<Tp, const char*>::value)
+    {
+        return "UnknownString";
+    }
+    else if constexpr(std::is_pointer<Tp>::value)
     {
         Tp v = nullptr;
         return v;
@@ -74,10 +78,6 @@ get_default_retval()
     else if constexpr(std::is_same<Tp, int64_t>::value)
     {
         return int64_t{0};
-    }
-    else if constexpr(std::is_same<Tp, const char*>::value)
-    {
-        return "UnknownString";
     }
     else if constexpr(std::is_void<Tp>::value)
     {

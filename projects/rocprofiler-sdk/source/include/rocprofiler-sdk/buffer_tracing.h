@@ -286,7 +286,7 @@ typedef struct rocprofiler_buffer_tracing_hipfile_api_record_t
     rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
 
     /// @var kind
-    /// @brief ::ROCPROFILER_CALLBACK_TRACING_HIPFILE_API
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_HIPFILE_API
     /// @var operation
     /// @brief Specification of the API function (@see
     /// ::rocprofiler_hipfile_api_id_t)
