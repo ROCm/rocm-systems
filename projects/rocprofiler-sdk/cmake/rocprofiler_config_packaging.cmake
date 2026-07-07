@@ -198,6 +198,11 @@ if(rocm_version_DIR)
     # since most ROCm packages do not set CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS=ON
     list(APPEND CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
          "${rocm_version_DIR}/${CMAKE_INSTALL_LIBDIR}")
+    set(_sysdeps_libdir "${rocm_version_DIR}/${CMAKE_INSTALL_LIBDIR}/rocm_sysdeps")
+    set(_sysdeps_libdir "${_sysdeps_libdir}/${CMAKE_INSTALL_LIBDIR}")
+    if(EXISTS "${_sysdeps_libdir}")
+        list(APPEND CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "${_sysdeps_libdir}")
+    endif()
 endif()
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
     set(CPACK_DEBIAN_PACKAGE_RELEASE
