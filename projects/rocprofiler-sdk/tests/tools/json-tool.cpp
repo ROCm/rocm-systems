@@ -2832,7 +2832,7 @@ write_perfetto()
             tids.emplace(itr.thread_id);
         for(const auto& itr : rocjpeg_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(const auto& itr : rocshmem_api_bf_records)
+        for(const auto& itr : rocshmem_api_ext_bf_records)
             tids.emplace(itr.thread_id);
 
         for(const auto& itr : memory_copy_bf_records)
