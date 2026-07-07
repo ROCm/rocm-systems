@@ -12,6 +12,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -25,6 +26,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -42,6 +44,7 @@ static constexpr uint32_t TOTAL_XCDS = 8;
 static constexpr uint32_t CUS_PER_XCD = 32;
 static constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 static constexpr uint32_t WF_SIZE = 64;
+static constexpr uint32_t DEFAULT_CPU_DISPATCH_THREADS = 32;
 
 static constexpr uint64_t KD_ADDR = 0x10000;
 static constexpr uint64_t A_ADDR = 0x100000;
@@ -50,6 +53,43 @@ static constexpr uint64_t C_ADDR = 0x300000;
 static constexpr uint64_t KERNARG_ADDR = 0x400000;
 
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+enum class ScalingMode {
+  DispatchPool,
+  Partitioned,
+};
+
+struct Options {
+  ScalingMode mode = ScalingMode::DispatchPool;
+  uint32_t runs = 1;
+  uint32_t partitions = 0;
+  uint32_t dispatch_threads = 0;
+};
+
+uint32_t parse_u32_arg(const char *arg, const char *prefix) {
+  return static_cast<uint32_t>(std::strtoul(arg + std::strlen(prefix), nullptr, 10));
+}
+
+Options parse_options(int argc, char **argv) {
+  Options options;
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--mode=partitioned") == 0) {
+      options.mode = ScalingMode::Partitioned;
+    } else if (std::strcmp(argv[i], "--mode=dispatch-pool") == 0) {
+      options.mode = ScalingMode::DispatchPool;
+    } else if (std::strncmp(argv[i], "--runs=", 7) == 0) {
+      options.runs = std::max(parse_u32_arg(argv[i], "--runs="), 1u);
+    } else if (std::strncmp(argv[i], "--partitions=", 13) == 0) {
+      options.partitions = std::clamp(parse_u32_arg(argv[i], "--partitions="), 1u, TOTAL_XCDS);
+    } else if (std::strncmp(argv[i], "--dispatch-threads=", 19) == 0) {
+      options.dispatch_threads = std::max(parse_u32_arg(argv[i], "--dispatch-threads="), 1u);
+    } else {
+      std::cerr << "Unknown argument: " << argv[i] << "\n";
+      std::exit(2);
+    }
+  }
+  return options;
+}
 
 KD read_kd(const CodeObject &co) {
   for (const auto *sec : co.rodata_sections())
@@ -61,7 +101,8 @@ KD read_kd(const CodeObject &co) {
   return {};
 }
 
-double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint32_t num_threads) {
+double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint32_t partitions,
+                  uint32_t dispatch_threads, ScalingMode mode) {
   Executable exec(kernel_path(kernel_name));
   if (!exec.is_valid())
     return -1;
@@ -71,12 +112,14 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint3
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
-  loaded.engine_config.num_threads = 1;
+  uint32_t engine_threads = mode == ScalingMode::Partitioned ? partitions : 1;
+  loaded.engine_config.num_threads = engine_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-  // Sweep the shared per-SoC dispatch-pool thread budget; one engine partition.
-  soc->set_dispatch_threads(num_threads);
+  if (mode == ScalingMode::Partitioned)
+    amdgpu::partition_topology_by_xcds(engine->topology(), soc, partitions);
+  soc->set_dispatch_threads(dispatch_threads, engine_threads);
   engine->build();
 
   co->load_to_memory(memory, KD_ADDR);
@@ -128,7 +171,8 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint3
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-int main() {
+int main(int argc, char **argv) {
+  Options options = parse_options(argc, argv);
   struct Kernel {
     const char *name;
     uint32_t N;
@@ -140,25 +184,36 @@ int main() {
       {"matmul_mfma", 128, (128 / 4) * (128 / 4)},
   };
 
-  std::cout << "threads";
+  if (options.mode == ScalingMode::Partitioned)
+    std::cout << "partitions,dispatch_threads";
+  else
+    std::cout << "threads";
   for (auto &k : kernels)
     std::cout << "," << k.name;
   std::cout << "\n";
 
-  constexpr int RUNS = 1;
-
-  // Sweep the shared per-SoC dispatch-pool thread budget.
-  for (uint32_t t = 1; t <= TOTAL_XCDS; ++t) {
-    std::cout << t;
+  uint32_t begin = options.partitions ? options.partitions : 1;
+  uint32_t end = options.partitions ? options.partitions : TOTAL_XCDS;
+  for (uint32_t t = begin; t <= end; ++t) {
+    uint32_t partitions = options.mode == ScalingMode::Partitioned ? t : 1;
+    uint32_t dispatch_threads =
+        options.dispatch_threads
+            ? options.dispatch_threads
+            : (options.mode == ScalingMode::Partitioned ? DEFAULT_CPU_DISPATCH_THREADS : t);
+    if (options.mode == ScalingMode::Partitioned)
+      std::cout << partitions << "," << dispatch_threads;
+    else
+      std::cout << t;
     for (auto &k : kernels) {
-      // Take the median of RUNS.
+      // Take the median of the requested runs.
       std::vector<double> times;
-      for (int r = 0; r < RUNS; ++r) {
-        double ms = run_kernel(k.name, k.N, k.total_wgs, t);
+      for (uint32_t r = 0; r < options.runs; ++r) {
+        double ms =
+            run_kernel(k.name, k.N, k.total_wgs, partitions, dispatch_threads, options.mode);
         times.push_back(ms);
       }
       std::sort(times.begin(), times.end());
-      std::cout << "," << times[RUNS / 2];
+      std::cout << "," << times[times.size() / 2];
     }
     std::cout << "\n";
     std::cout.flush();

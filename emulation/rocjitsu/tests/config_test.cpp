@@ -47,6 +47,15 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 8u);
 }
 
+TEST(ConfigLoaderTest, LoadCdna4KmdThreadingConfig) {
+  auto loaded =
+      config::load_config(CONFIG_DIR_PATH + "/gfx950_cdna4_kmd.json", rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.engine_config.num_threads, 8u);
+  EXPECT_EQ(loaded.cpu_dispatch_threads, 32u);
+  EXPECT_EQ(loaded.soc()->num_xcds(), 8u);
+}
+
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   auto rdna4 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
