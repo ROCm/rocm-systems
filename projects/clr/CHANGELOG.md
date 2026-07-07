@@ -4,13 +4,20 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 10 for ROCm 10
 
+### Resolved issues
+
+* Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
+since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
+enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
+* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
+
 ### Optimized
 
 * Improved `hipMemcpy2D()` and `hipMemcpy2DAsync()` performance for copy operations with very small row widths and large row counts.
 Previously, non-4-byte-aligned row or slice pitches could cause the runtime to issue a separate copy for each row, resulting in significant
 performance degradation for workloads such as 1-byte-wide transfers with millions of rows.
 These transfers are now handled using a single shader-based copy operation, dramatically reducing transfer times.
-Copy operations at or below the 256-row threshold are unchanged. 
+Copy operations at or below the 256-row threshold are unchanged.
 
 ## HIP 7.14 for ROCm 7.14
 
@@ -65,10 +72,6 @@ allocations from `hipMalloc` leave these fields unset, leading to spurious valid
 for accurate size validation. Additionally, the exec flag is propagated through `ihipGraphNodeSetParams` to ensure executable graph updates use the correct validation path.
 * Fixed a deadlock caused by `hipMemMap`/`hipMemUnmap` operations on the null stream that could lead to hangs. The HIP runtime now implements proper synchronization to all devices with access to a mapped pointer before unmapping it.
 * Resolved an issue where streams created within an execution context remained usable after the context was destroyed, which did not align with CUDA behavior. The HIP runtime now flags such streams as detached when their execution context is destroyed and returns `hipErrorStreamDetached` if they are subsequently used.
-* Resolved library loading error messages thrown by `rocminfo` during driver initialization in WSL (Windows Subsystem for Linux) environment due to failure in loading the HSA runtime library `libhsa-runtime64.so`
-since it is not available in the dynamic linker search path. Since `rocminfo` already links against `libhsa-runtime64.so`, the runtime now correctly locates and loads the HSA runtime library using `RTLD_NOLOAD` option,
-enabling successful ROCm initialization, HSA agent discovery, and subsequent ROCm operations.
-* Fixed a segmentation fault in HIP queue idle detection caused by referencing a recycled completion signal. Idle state is now derived from a queue-owned signal with a safe lifetime.
 
 ### Optimized
 
