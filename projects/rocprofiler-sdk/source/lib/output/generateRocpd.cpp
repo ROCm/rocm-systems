@@ -1624,12 +1624,12 @@ write_rocpd(
         };
  
     auto insert_event_operation =
-        [&conn, &tool_metadata, &gpu_event_gen, &string_entries, node_id, this_pid]() {
+        [&, node_id, this_pid]() {
             auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_event_operation");
 
             for(auto pitr : gpu_event_gen)
             {
-                auto _deferred = sql::deferred_transaction{conn};
+                auto _deferred = sql::deferred_transaction{db.conn};
                 for(auto itr : gpu_event_gen.get(pitr))
                 {
                     // insert thread info if it doesn't already exist
@@ -1638,7 +1638,7 @@ write_rocpd(
                     auto kind = tool_metadata.buffer_names.at(itr.kind);
 
                     auto evt_id = create_event(
-                        conn,
+                        db,
                         {
                             insert_value("category_id", string_entries.at(kind)),
                             insert_value("stack_id", itr.correlation_id.internal),
@@ -1648,7 +1648,7 @@ write_rocpd(
 
                     auto type = itr.event_info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
 
-                    auto stmt = get_insert_statement(
+                    get_insert_statement(db,
                         "rocpd_event_operation{{uuid}}",
                         {
                             insert_value("id", itr.event_info.issue_id),
@@ -1666,8 +1666,6 @@ write_rocpd(
                             insert_value("end", itr.end_timestamp),
                             insert_value("event_id", evt_id),
                         });
-
-                    execute_raw_sql_statements(conn, stmt);
                 }
             }
         };

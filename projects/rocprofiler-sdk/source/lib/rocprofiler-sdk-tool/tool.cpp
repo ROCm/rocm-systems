@@ -2708,7 +2708,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             get_buffers().rocjpeg_api_trace},
                       buffer_service_config{tool::get_config().gpu_events,
                                             ROCPROFILER_BUFFER_TRACING_GPU_EVENTS,
-                                            get_buffers().gpu_events}
+                                            get_buffers().gpu_events},
                       // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
                       // for KFD QUEUE events; all other QUEUE related events are published as range
                       // records
