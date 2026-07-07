@@ -209,7 +209,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           apt-get update
-          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev libmount-dev file autoconf pkg-config rpm libzstd-dev
+          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
@@ -426,12 +426,11 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
 
-      - name: Install Dependencies for RHEL 8.8
+      - name: Install Curl for RHEL 8.8
         if: ${{ matrix.system.os == 'rhel-8.8' }}
         run: |
           dnf install -y curl
           ln -s /usr/local/bin/curl /usr/bin/curl
-          dnf install -y libmount-devel
 
       - name: Build ROCProfiler SDK Dependencies
         uses: ./.github/actions/rocprofiler-sdk-util
@@ -567,7 +566,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev libmount-dev file autoconf pkg-config
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get upgrade -y
