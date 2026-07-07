@@ -573,7 +573,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-    rocr::os::DmaBufClose(&res.dmabuf_fd);
+    if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
@@ -672,7 +672,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
-  rocr::os::DmaBufClose(&handle->dmabuf_fd);
+  hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   if (memhandle != nullptr) {
@@ -682,7 +682,7 @@ hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
     }
   }
   *handle = {};
-  return HSA_STATUS_SUCCESS;
+  return ret;
 }
 
 hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {

@@ -1844,6 +1844,7 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
 }
 
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf) {
+  /* dmabuf is passed by value; caller's copy is not zeroed — ABI constraint */
   TRY;
   return rocr::os::DmaBufClose(&dmabuf);
   CATCH;

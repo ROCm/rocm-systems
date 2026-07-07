@@ -1574,6 +1574,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
     int dmabuf_fd = static_cast<int>(os::IPCRecvHandle(socket_fd));
     if (dmabuf_fd == -1) return -1;
+    MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
 
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags{0};
@@ -1603,7 +1604,6 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-        os::DmaBufClose(&dmabuf_fd);
         return -1;
       }
 
@@ -1624,7 +1624,6 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       } else {
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
       }
-      os::DmaBufClose(&dmabuf_fd);
     }
 
     // Ping socket server to close exporter
@@ -4213,11 +4212,11 @@ Runtime::MemoryHandle::~MemoryHandle() {
     dispatched through drm_owner */
     core::Agent* destroy_agent = drmAgent();
     destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
+  } else {
+    /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
+    * we do not have a region so we do not have an agentOwner() to call the driver.*/
+    os::DmaBufClose(&driver_handle.dmabuf_fd);
   }
-
-  /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
-   * we do not have a region so we do not have an agentOwner() to call the driver.*/
-  os::DmaBufClose(&driver_handle.dmabuf_fd);
 }
 
 // Note: VMemorySetAccessPerHandle should be called with &memory_lock_ held
