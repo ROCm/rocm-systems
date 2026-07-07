@@ -3,8 +3,6 @@
 
 #include "param.h"
 #include <gtest/gtest.h>
-#include <cstdint>
-#include <cstdlib>
 #include <rccl/rccl.h>
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "graph/topo.h"
