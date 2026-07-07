@@ -7,6 +7,20 @@
 ## These tests link only against GoogleTest and the pure-header decision logic in
 ## core/inc/intercept_queue_logic.h, so they run as an ordinary host executable.
 
+## This directory can be configured two ways:
+##   * via add_subdirectory() from the hsa-runtime build (when HSA_BUILD_TESTS=ON), or
+##   * standalone (e.g. from CI: cmake -S core/runtime/test -B build), which needs no GPU,
+##     libhsakmt, or the hsa-runtime library -- only a C++17 compiler and GoogleTest.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  cmake_minimum_required(VERSION 3.16)
+  project(hsa_runtime_unit_tests CXX)
+  if(NOT CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  endif()
+  enable_testing()
+endif()
+
 set(HSA_INTERCEPT_LOGIC_TEST intercept_queue_logic_test)
 
 ## core/runtime/test -> hsa-runtime root (headers are included as "core/inc/...").

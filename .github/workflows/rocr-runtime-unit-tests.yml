@@ -1,0 +1,56 @@
+name: rocr-runtime Unit Tests
+permissions:
+    contents: read
+
+# GPU-free unit tests for host-side hsa-runtime logic (currently the InterceptQueue
+# retry/overflow slot accounting in core/inc/intercept_queue_logic.h). The test target
+# links only against GoogleTest and pure-header decision logic, so it builds and runs on
+# an ordinary Linux runner with no GPU, libhsakmt, or hsa-runtime library.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/inc/intercept_queue_logic.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/runtime/test/**'
+      - '.github/workflows/rocr-runtime-unit-tests.yml'
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/inc/intercept_queue_logic.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/core/runtime/test/**'
+      - '.github/workflows/rocr-runtime-unit-tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  intercept-queue-logic-test:
+    name: InterceptQueue logic unit tests
+    runs-on: ubuntu-24.04
+
+    env:
+      TEST_DIR: projects/rocr-runtime/runtime/hsa-runtime/core/runtime/test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: 'projects/rocr-runtime'
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ ninja-build libgtest-dev
+
+      - name: Configure
+        run: cmake -S "${TEST_DIR}" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
