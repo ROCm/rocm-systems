@@ -40,6 +40,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1433,10 +1434,10 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // pp_dpm_* without flagging any level as current ('*' marker absent).
   // Treat that as "current unknown" rather than discarding the parsed
   // table: keep f->num_supported / f->frequency populated and signal
-  // "no current level" via f->current = -1 so callers can still report
+  // "no current level" via f->current = UINT32_MAX so callers can still report
   // the frequency table.
   if (f->current >= f->num_supported) {
-    f->current = static_cast<uint32_t>(-1);
+    f->current = std::numeric_limits<uint32_t>::max();
   }
 
   return RSMI_STATUS_SUCCESS;
