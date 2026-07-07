@@ -455,7 +455,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional) {
   std::vector<size_t> sizes(config.copy_count, config.copy_size);
   size_t attrs_idxs[1] = {0};
   hipMemcpyAttributes attr{
-      hipMemcpySrcAccessOrderStream, {}, {}, static_cast<unsigned int>(flag)};
+      hipMemcpySrcAccessOrderAny, {}, {}, static_cast<unsigned int>(flag)};
 
   if (pointer_pattern == PointerPattern::kBroadcastSource) {
     FillDeviceBuffers(src_ptrs, copy_size, kPatternValue);
