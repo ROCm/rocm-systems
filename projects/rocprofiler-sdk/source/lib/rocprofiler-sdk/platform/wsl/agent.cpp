@@ -438,7 +438,7 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
 {
     // Opt-in only.
     const char* enable = std::getenv("ROCPROFILER_USE_LIBROCDXG");
-    if(!enable || std::string{enable} != "1") return false;
+    if(enable == nullptr || std::string{enable} != "1") return false;
 
 #if !defined(ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS)
     // Shim not available in this build (e.g. WSL2 / Linux). No-op.
