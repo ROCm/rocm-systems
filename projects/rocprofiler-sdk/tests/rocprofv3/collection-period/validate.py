@@ -42,11 +42,18 @@ class TimeWindow(object):
 
 
 def compute_guard(collection_period_data):
-    # Guard band around each on/off transition, ignored during assertions, since a
-    # record issued near a boundary can land on either side (the start/stop effect lags
-    # the logged call by a variable amount that grows under TSan/codecov). Derived from
-    # the measured start/stop call spans so it scales with environment overhead, scaled
-    # up to also cover effect latency, and floored at 2 ms.
+    # Collection switches between off windows (delay) and on windows (duration). Right
+    # at each switch, a record's timestamp could belong to either window, because
+    # collection doesn't flip the instant start()/stop() is called -- the runtime applies
+    # it a little later, and by a varying amount. So the assertions ignore a guard band
+    # (in ns) on both sides of every switch, and this returns its width.
+    #
+    # The width is loose on purpose: windows are seconds long but the flip latency is
+    # sub-millisecond, so anything from a few ms to tens of ms hides the ambiguity yet
+    # still leaves nearly the whole window testable. It scales with the start()/stop()
+    # call duration (stop minus start), a rough proxy for machine load, since a slower
+    # call means a slower flip; 8x is empirically enough headroom. The 2 ms floor covers
+    # fast idle machines, where 8x a tiny call duration would undershoot timestamp jitter.
     call_spans = []
     for period in collection_period_data:
         for key in ("start", "stop"):
