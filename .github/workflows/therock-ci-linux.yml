@@ -19,6 +19,10 @@ on:
       build_runs_on:
         type: string
         default: "azure-linux-scale-rocm"
+      run_mi455_test:
+        type: string
+        default: "false"
+        description: "Set to 'true' to run MI455 tests for gfx125X builds"
 
 
 permissions:
@@ -134,11 +138,26 @@ jobs:
   therock-test-linux:
     name: "Test"
     needs: [therock-build-linux]
+    # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+
+  # MI455 test job for gfx125X - only runs when explicitly enabled
+  # This is separate from therock-test-linux because gfx125X has no test_machine
+  # configured in therock-ci-config yet, but we have a dedicated MI455 runner.
+  therock-mi455-test-linux:
+    name: "MI455 Test"
+    needs: [therock-build-linux]
+    if: ${{ inputs.amdgpu_families == 'gfx125X-dcgpu' && inputs.run_mi455_test == 'true' }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: "hip-tests, rocrtst"
+      amdgpu_families: "gfx125X-dcgpu"
+      test_runs_on: "linux-mi455-gpu-rocm"
       platform: "linux"
