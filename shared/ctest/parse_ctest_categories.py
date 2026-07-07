@@ -316,7 +316,6 @@ def generate_cmake(categories, explicit_tests=None):
     for category, config in categories.items():
         test_patterns = config.get("test_patterns") or []
         test_labels = config.get("test_labels") or []
-        excludes = config.get("exclude") or []
         custom_labels = config.get("labels") or []
 
         # Combine the tier labels and custom labels, and remove duplicates
@@ -336,14 +335,18 @@ def generate_cmake(categories, explicit_tests=None):
                 lines, test_labels, labels_str, f"Category: {category} - test_labels"
             )
 
-        if excludes:
-            _emit_label_block(
-                lines,
-                excludes,
-                f"{category}_exclude",
-                f"Category: {category} - exclude",
-                explicit_tests=explicit_tests,
-            )
+        # Emit a per-category label for any *exclude list. Thread
+        # explicit_tests through so exclude labels are emitted at install
+        # time as well (build tree falls back to the directory-property loop).
+        for key, value in config.items():
+            if key.endswith("exclude") and isinstance(value, list) and value:
+                _emit_label_block(
+                    lines,
+                    value,
+                    f"{category}_{key}",
+                    f"Category: {category} - {key}",
+                    explicit_tests=explicit_tests,
+                )
 
     # Deduplicate labels across all tests. With explicit_tests we know
     # the names already and can iterate them directly (works at install

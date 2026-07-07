@@ -13,6 +13,8 @@ op_sel_hi fields, derived from the ISA profile at call time.
 
 from __future__ import annotations
 
+from .vop3_modifiers import vop3_dst_mod, vop3_src_mod
+
 
 def _append_pk_f32_pair_read(
     L: list[str], var: str, src: str, use_gfx1250_helpers: bool = False
@@ -544,37 +546,43 @@ def gen_mad_mix_f32(
         L.append(
             f'    float c = read_fma_mix_source_f32({s2}, wf, lane, inst_.src2, {op_sel_hi_2_expr}, inst_.opsel & 4);'
         )
-        L.append('    if (inst_.neg & 1) a = -a;')
-        L.append('    if (inst_.neg & 2) b = -b;')
-        L.append('    if (inst_.neg & 4) c = -c;')
-        L.append('    float result = std::fma(a, b, c);')
-        L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-        L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
-        L.append('  }')
-        return '\n'.join(L)
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
-    # op_sel_hi selects f16 vs f32 per source (1=f16, 0=f32)
-    # When f16: op_sel[i] selects which half (lo=0, hi=1)
-    opsel, opsel_hi = opsel_exprs
-    L.append('    float a, b, c;')
-    L.append(
-        f'    if ({opsel_hi} & 1) a = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 1) ? (raw0 >> 16) : raw0));'
-    )
-    L.append('    else a = std::bit_cast<float>(raw0);')
-    L.append(
-        f'    if ({opsel_hi} & 2) b = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 2) ? (raw1 >> 16) : raw1));'
-    )
-    L.append('    else b = std::bit_cast<float>(raw1);')
-    L.append(
-        f'    if ({op_sel_hi_2_expr}) c = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 4) ? (raw2 >> 16) : raw2));'
-    )
-    L.append('    else c = std::bit_cast<float>(raw2);')
+    else:
+        opsel, opsel_hi = opsel_exprs
+        L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
+        L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+        L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        L.append(
+            '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
+        )
+        L.append('                           bool high_half) -> float {')
+        L.append('      if (!src_is_f16) return std::bit_cast<float>(raw);')
+        L.append('      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)')
+        L.append(
+            '                          ? util::f32_to_f16(std::bit_cast<float>(raw))'
+        )
+        L.append(
+            '                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);'
+        )
+        L.append('      return util::f16_to_f32(bits);')
+        L.append('    };')
+        L.append(
+            f'    float a = read_mix_src(raw0, inst_.src0, {opsel_hi} & 1, {opsel} & 1);'
+        )
+        L.append(
+            f'    float b = read_mix_src(raw1, inst_.src1, {opsel_hi} & 2, {opsel} & 2);'
+        )
+        L.append(
+            f'    float c = read_mix_src(raw2, inst_.src2, {op_sel_hi_2_expr}, {opsel} & 4);'
+        )
+    L.append('    if (inst_.neg_hi & 1) a = std::fabs(a);')
+    L.append('    if (inst_.neg_hi & 2) b = std::fabs(b);')
+    L.append('    if (inst_.neg_hi & 4) c = std::fabs(c);')
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append('    float result = a * b + c;')
+    L.append(
+        f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
+    )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
     L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
     L.append('  }')
@@ -605,50 +613,52 @@ def gen_mad_mix_lo_hi(
         L.append(
             f'    float c = read_fma_mix_source_f32({s2}, wf, lane, inst_.src2, {op_sel_hi_2_expr}, inst_.opsel & 4);'
         )
-        L.append('    if (inst_.neg & 1) a = -a;')
-        L.append('    if (inst_.neg & 2) b = -b;')
-        L.append('    if (inst_.neg & 4) c = -c;')
-        L.append('    float result = std::fma(a, b, c);')
-        L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
-        L.append(f'    uint16_t h = util::f32_to_f16(result);')
-        L.append(f'    uint32_t prev = {d}.read_lane(wf, lane);')
-        if is_lo:
-            L.append(f'    {d}.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);')
-        else:
-            L.append(
-                f'    {d}.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));'
-            )
-        L.append('  }')
-        return '\n'.join(L)
-    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
-    L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
-    opsel, opsel_hi = opsel_exprs
-    L.append('    float a, b, c;')
-    L.append(
-        f'    if ({opsel_hi} & 1) a = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 1) ? (raw0 >> 16) : raw0));'
-    )
-    L.append('    else a = std::bit_cast<float>(raw0);')
-    L.append(
-        f'    if ({opsel_hi} & 2) b = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 2) ? (raw1 >> 16) : raw1));'
-    )
-    L.append('    else b = std::bit_cast<float>(raw1);')
-    L.append(
-        f'    if ({op_sel_hi_2_expr}) c = util::f16_to_f32(static_cast<uint16_t>(({opsel} & 4) ? (raw2 >> 16) : raw2));'
-    )
-    L.append('    else c = std::bit_cast<float>(raw2);')
+    else:
+        opsel, opsel_hi = opsel_exprs
+        L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
+        L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+        L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
+        L.append(
+            '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,'
+        )
+        L.append('                           bool high_half) -> float {')
+        L.append('      if (!src_is_f16) return std::bit_cast<float>(raw);')
+        L.append('      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)')
+        L.append(
+            '                          ? util::f32_to_f16(std::bit_cast<float>(raw))'
+        )
+        L.append(
+            '                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);'
+        )
+        L.append('      return util::f16_to_f32(bits);')
+        L.append('    };')
+        L.append(
+            f'    float a = read_mix_src(raw0, inst_.src0, {opsel_hi} & 1, {opsel} & 1);'
+        )
+        L.append(
+            f'    float b = read_mix_src(raw1, inst_.src1, {opsel_hi} & 2, {opsel} & 2);'
+        )
+        L.append(
+            f'    float c = read_mix_src(raw2, inst_.src2, {op_sel_hi_2_expr}, {opsel} & 4);'
+        )
+    L.append('    if (inst_.neg_hi & 1) a = std::fabs(a);')
+    L.append('    if (inst_.neg_hi & 2) b = std::fabs(b);')
+    L.append('    if (inst_.neg_hi & 4) c = std::fabs(c);')
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
-    L.append('    float result = a * b + c;')
+    L.append(
+        f'    float result = {"std::fma(a, b, c)" if use_gfx1250_helpers else "a * b + c"};'
+    )
     L.append('    if (inst_.clamp) result = std::clamp(result, 0.0f, 1.0f);')
     L.append(f'    uint16_t h = util::f32_to_f16(result);')
-    L.append(f'    uint32_t prev = {d}.read_lane(wf, lane);')
     if is_lo:
-        L.append(f'    {d}.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);')
+        L.append(
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
+        )
     else:
         L.append(
-            f'    {d}.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));'
+            f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0x8u, h);'
         )
     L.append('  }')
     return '\n'.join(L)
@@ -664,7 +674,6 @@ def gen_mad_mix_bf16(
 ) -> str:
     """Generate gfx1250 BF16 FMA_MIX variants."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
-    opsel, opsel_hi = opsel_exprs
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -680,22 +689,36 @@ def gen_mad_mix_bf16(
             f'    float c = read_fma_mix_bf16_source_f32({s2}, wf, lane, inst_.src2, {op_sel_hi_2_expr}, inst_.opsel & 4);'
         )
     else:
+        opsel, opsel_hi = opsel_exprs
         L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
         L.append(f'    uint32_t raw2 = {s2}.read_lane(wf, lane);')
-        L.append('    float a, b, c;')
         L.append(
-            f'    if ({opsel_hi} & 1) a = util::bf16_to_f32(static_cast<uint16_t>(({opsel} & 1) ? (raw0 >> 16) : raw0));'
+            '    auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_bf16,'
         )
-        L.append('    else a = std::bit_cast<float>(raw0);')
+        L.append('                           bool high_half) -> float {')
+        L.append('      if (!src_is_bf16) return std::bit_cast<float>(raw);')
+        L.append('      uint16_t bits = (src_selector >= 240u && src_selector <= 248u)')
         L.append(
-            f'    if ({opsel_hi} & 2) b = util::bf16_to_f32(static_cast<uint16_t>(({opsel} & 2) ? (raw1 >> 16) : raw1));'
+            '                          ? util::f32_to_bf16(std::bit_cast<float>(raw))'
         )
-        L.append('    else b = std::bit_cast<float>(raw1);')
         L.append(
-            f'    if ({op_sel_hi_2_expr}) c = util::bf16_to_f32(static_cast<uint16_t>(({opsel} & 4) ? (raw2 >> 16) : raw2));'
+            '                          : static_cast<uint16_t>(high_half ? (raw >> 16) : raw);'
         )
-        L.append('    else c = std::bit_cast<float>(raw2);')
+        L.append('      return util::bf16_to_f32(bits);')
+        L.append('    };')
+        L.append(
+            f'    float a = read_mix_src(raw0, inst_.src0, {opsel_hi} & 1, {opsel} & 1);'
+        )
+        L.append(
+            f'    float b = read_mix_src(raw1, inst_.src1, {opsel_hi} & 2, {opsel} & 2);'
+        )
+        L.append(
+            f'    float c = read_mix_src(raw2, inst_.src2, {op_sel_hi_2_expr}, {opsel} & 4);'
+        )
+    L.append('    if (inst_.neg_hi & 1) a = std::fabs(a);')
+    L.append('    if (inst_.neg_hi & 2) b = std::fabs(b);')
+    L.append('    if (inst_.neg_hi & 4) c = std::fabs(c);')
     L.append('    if (inst_.neg & 1) a = -a;')
     L.append('    if (inst_.neg & 2) b = -b;')
     L.append('    if (inst_.neg & 4) c = -c;')
@@ -705,12 +728,13 @@ def gen_mad_mix_bf16(
         L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(result));')
     else:
         L.append(f'    uint16_t h = util::f32_to_bf16(result);')
-        L.append(f'    uint32_t prev = {d}.read_lane(wf, lane);')
         if result == 'lo':
-            L.append(f'    {d}.write_lane(wf, lane, (prev & 0xFFFF0000u) | h);')
+            L.append(
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0u, h);'
+            )
         else:
             L.append(
-                f'    {d}.write_lane(wf, lane, (prev & 0x0000FFFFu) | (static_cast<uint32_t>(h) << 16));'
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, 0x8u, h);'
             )
     L.append('  }')
     return '\n'.join(L)
@@ -773,14 +797,14 @@ def gen_dot2(
         L.append(
             '    int16_t b1 = static_cast<int16_t>(sel1_hi ? (raw1 >> 16) : raw1);'
         )
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append(
-            '    int32_t result = static_cast<int32_t>(a0) * b0 + static_cast<int32_t>(a1) * b1 + acc;'
-        )
-        L.append(
-            '    if (inst_.clamp) result = std::clamp(result, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(result));')
+        L.append(f'    uint32_t result = {s2}.read_lane(wf, lane);')
+        L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a0) * b0);')
+        L.append('    result += static_cast<uint32_t>(static_cast<int32_t>(a1) * b1);')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_result = static_cast<int32_t>(result);')
+        L.append('      if (signed_result < 0) result = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, result);')
     else:  # dot2_u32_u16
         L.append(
             '    uint16_t a0 = static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0);'
@@ -804,6 +828,55 @@ def gen_dot2(
     return '\n'.join(L)
 
 
+def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
+    """Generate VOP3 true16 V_DOT2_{F16,BF16}_{F16,BF16}.
+
+    These are VOP3 dot instructions, not VOP3P packed instructions. LLVM rejects
+    op_sel[0:1] for this family, so src0/src1 are consumed as their packed v2
+    half values. op_sel[2] selects the half accumulator and op_sel[3] selects
+    the destination half.
+    """
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    if cls == 'dot2_f16_f16':
+        widen = 'util::f16_to_f32'
+        narrow = 'util::f32_to_f16'
+    elif cls == 'dot2_bf16_bf16':
+        widen = 'util::bf16_to_f32'
+        narrow = 'util::f32_to_bf16'
+    else:
+        raise ValueError(f'unhandled true16 dot2 class: {cls}')
+
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane)))')
+    L.append('      continue;')
+    L.append('    uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);')
+    L.append(f'    uint32_t raw0 = {s0}.read_lane(wf, lane);')
+    L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
+    L.append(
+        f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
+    )
+    L.append(f'    float a0 = {widen}(static_cast<uint16_t>(raw0 & 0xffffu));')
+    L.append(f'    float a1 = {widen}(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));')
+    L.append(f'    float b0 = {widen}(static_cast<uint16_t>(raw1 & 0xffffu));')
+    L.append(f'    float b1 = {widen}(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));')
+    L.append(f'    float acc = {widen}(static_cast<uint16_t>(acc_bits));')
+    L.extend(vop3_src_mod('a0', 0, True))
+    L.extend(vop3_src_mod('a1', 0, True))
+    L.extend(vop3_src_mod('b0', 1, True))
+    L.extend(vop3_src_mod('b1', 1, True))
+    L.extend(vop3_src_mod('acc', 2, True))
+    L.append('    float result = a0 * b0 + a1 * b1 + acc;')
+    L.extend(vop3_dst_mod('result'))
+    L.append(f'    uint32_t result_bits = {narrow}(result);')
+    L.append(
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits);'
+    )
+    L.append('  }')
+    return '\n'.join(L)
+
+
 def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
     """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -815,8 +888,7 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
     L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append('    int32_t sum = acc;')
+        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
         if cls == 'dot4_i32_iu8':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -836,14 +908,15 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
             L.append('      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);')
             L.append('      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);')
         if cls == 'dot4_i32_iu8':
-            L.append('      sum += a * b;')
+            L.append('      sum += static_cast<uint32_t>(a * b);')
         else:
-            L.append('      sum += static_cast<int32_t>(a) * b;')
+            L.append('      sum += static_cast<uint32_t>(static_cast<int32_t>(a) * b);')
         L.append('    }')
-        L.append(
-            '    if (inst_.clamp) sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sum));')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
+        L.append('      if (signed_sum < 0) sum = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, sum);')
     elif cls == 'dot4_f32_fp8':
         # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
         L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
@@ -882,8 +955,7 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
     L.append(f'    uint32_t raw1 = {s1}.read_lane(wf, lane);')
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
-        L.append(f'    int32_t acc = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append('    int32_t sum = acc;')
+        L.append(f'    uint32_t sum = {s2}.read_lane(wf, lane);')
         if cls == 'dot8_i32_iu4':
             L.append('    const bool src0_signed = (inst_.neg & 0x1u) != 0;')
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
@@ -904,12 +976,13 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
             L.append('      if (a & 0x8) a |= ~0xF;')
             L.append('      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);')
             L.append('      if (b & 0x8) b |= ~0xF;')
-        L.append('      sum += a * b;')
+        L.append('      sum += static_cast<uint32_t>(a * b);')
         L.append('    }')
-        L.append(
-            '    if (inst_.clamp) sum = std::clamp(sum, static_cast<int32_t>(0), std::numeric_limits<int32_t>::max());'
-        )
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(sum));')
+        L.append('    if (inst_.clamp) {')
+        L.append('      int32_t signed_sum = static_cast<int32_t>(sum);')
+        L.append('      if (signed_sum < 0) sum = 0u;')
+        L.append('    }')
+        L.append(f'    {d}.write_lane(wf, lane, sum);')
     else:  # dot8_u32_u4
         L.append(f'    uint32_t acc = {s2}.read_lane(wf, lane);')
         L.append('    uint32_t sum = acc;')

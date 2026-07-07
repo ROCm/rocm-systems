@@ -2982,7 +2982,7 @@ hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString);
 /**
  * @brief Creates an asynchronous stream.
  *
- * @param[in, out] stream  Valid pointer to hipStream_t.  This function writes the memory with the
+ * @param[out] stream  Valid pointer to hipStream_t.  This function writes the memory with the
  * newly created stream.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -3001,7 +3001,7 @@ hipError_t hipStreamCreate(hipStream_t* stream);
 /**
  * @brief Creates an asynchronous stream with flag.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -3022,7 +3022,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
 /**
  * @brief Creates an asynchronous stream with the specified priority.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] flags  Parameters to control stream creation
  * @param[in] priority  Priority of the stream. Lower numbers represent higher priorities.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -3189,7 +3189,7 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
 /**
  * @brief Creates an asynchronous stream with the specified CU mask.
  *
- * @param[in, out] stream  Pointer to new stream
+ * @param[out] stream  Pointer to new stream
  * @param[in] cuMaskSize  Size of CU mask bit array passed in.
  * @param[in] cuMask Bit-vector representing the CU mask. Each active bit represents using one CU.
  * The first 32 bits represent the first 32 CUs, and so on. If its size is greater than physical
@@ -3427,7 +3427,7 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
 /**
  * @brief Creates a batch memory operation node and adds it to a graph.[BETA]
  *
- * @param [in] phGraphNode      - Returns the newly created node
+ * @param [out] phGraphNode     - Returns the newly created node
  * @param [in] hGraph           - Graph to which to add the node
  * @param [in] dependencies     -  Dependencies of the node
  * @param [in] numDependencies  - Number of dependencies
@@ -3524,7 +3524,7 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
 /**
  * @brief Create an event with the specified flags
  *
- * @param[in,out] event Returns the newly created event.
+ * @param[out] event    Returns the newly created event.
  * @param[in] flags     Flags to control event behavior.  Valid values are #hipEventDefault,
  #hipEventBlockingSync, #hipEventDisableTiming, #hipEventInterprocess
  * #hipEventDefault : Default flag.  The event will use active synchronization and will support
@@ -3550,7 +3550,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
 /**
  *  Create an event
  *
- * @param[in,out] event Returns the newly created event.
+ * @param[out] event Returns the newly created event.
  *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure, #hipErrorOutOfMemory
@@ -4133,6 +4133,111 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                     size_t num_prefetch_locs, unsigned long long flags,
                                     hipStream_t stream);
+/**
+ * @brief Discards a batch of memory ranges asynchronously.
+ *
+ * @param [in] dev_ptrs      pointers to the memory ranges to discard
+ * @param [in] sizes         sizes in bytes of the memory ranges to discard
+ * @param [in] count         number of memory ranges to discard
+ * @param [in] flags         flags for future use, must be zero now.
+ * @param [in] stream        stream to enqueue the discard operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @warning Reading from a discarded range without first writing or prefetching
+ *          to it will return an indeterminate value.
+ * @warning Concurrent reads, writes, or prefetches to discarded ranges result
+ *          in undefined behavior.
+ *
+ * @note All memory ranges must be managed memory allocated via hipMallocManaged
+ *       or system-allocated memory (if device supports pageable memory access).
+ * @note This API is implemented on Linux and requires XNACK to be enabled.
+ * @note This API is marked as beta, meaning, while this is feature complete,
+ *       it is still open to changes and may have outstanding issues.
+ *
+ * @see hipMemPrefetchBatchAsync, hipMallocManaged
+ */
+hipError_t hipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+                                   unsigned long long flags, hipStream_t stream);
+/**
+ * @brief Discards a batch of memory ranges asynchronously (driver API variant).
+ *
+ * @param [in] dptrs    pointers to the memory ranges to discard
+ * @param [in] sizes    sizes in bytes of the memory ranges to discard
+ * @param [in] count    number of memory ranges to discard
+ * @param [in] flags    flags for future use, must be zero now.
+ * @param [in] stream   stream to enqueue the discard operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @warning Reading from a discarded range without first writing or prefetching
+ *          to it will return an indeterminate value.
+ *
+ * @note This is the driver API variant that uses hipDeviceptr_t instead of void*.
+ *       Both hipMemDiscardBatchAsync and hipDrvMemDiscardBatchAsync use the same
+ *       internal implementation.
+ *
+ * @see hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync, hipMallocManaged
+ */
+hipError_t hipDrvMemDiscardBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                      unsigned long long flags, hipStream_t stream);
+/**
+ * @brief Discards and prefetches a batch of memory ranges asynchronously.
+ *
+ * @param [in] dptrs              pointers to the memory ranges
+ * @param [in] sizes              sizes in bytes of the memory ranges
+ * @param [in] count              number of memory ranges
+ * @param [in] prefetchLocs       array of target locations for prefetching
+ * @param [in] prefetchLocIdxs    indices mapping each range to a prefetch location
+ * @param [in] numPrefetchLocs    number of unique prefetch locations
+ * @param [in] flags              flags for future use, must be zero now.
+ * @param [in] stream             stream to enqueue the operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Semantically equivalent to calling @p hipMemDiscardBatchAsync followed by
+ * @p hipMemPrefetchBatchAsync, but combines both operations into a single
+ * command submission for reduced overhead.
+ *
+ * @warning Reading from a discarded range without first writing or prefetching
+ *          to it will return an indeterminate value.
+ *
+ * @note All memory ranges must be managed memory allocated via hipMallocManaged
+ *       or system-allocated memory (if device supports pageable memory access).
+ * @note This API is implemented on Linux and requires XNACK to be enabled.
+ * @note This API is marked as beta, meaning, while this is feature complete,
+ *       it is still open to changes and may have outstanding issues.
+ *
+ * @see hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync, hipMallocManaged
+ */
+hipError_t hipMemDiscardAndPrefetchBatchAsync(void** dptrs, size_t* sizes, size_t count,
+                                              hipMemLocation* prefetchLocs,
+                                              size_t* prefetchLocIdxs,
+                                              size_t numPrefetchLocs,
+                                              unsigned long long flags, hipStream_t stream);
+/**
+ * @brief Discards and prefetches a batch of memory ranges asynchronously (driver API variant).
+ *
+ * @param [in] dptrs              pointers to the memory ranges
+ * @param [in] sizes              sizes in bytes of the memory ranges
+ * @param [in] count              number of memory ranges
+ * @param [in] prefetchLocs       array of target locations for prefetching
+ * @param [in] prefetchLocIdxs    indices mapping each range to a prefetch location
+ * @param [in] numPrefetchLocs    number of unique prefetch locations
+ * @param [in] flags              flags for future use, must be zero now.
+ * @param [in] stream             stream to enqueue the operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @note This is the driver API variant that uses hipDeviceptr_t instead of void*.
+ *
+ * @see hipMemDiscardAndPrefetchBatchAsync, hipMemDiscardBatchAsync, hipMemPrefetchBatchAsync
+ */
+hipError_t hipDrvMemDiscardAndPrefetchBatchAsync(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                 hipMemLocation* prefetchLocs,
+                                                 size_t* prefetchLocIdxs,
+                                                 size_t numPrefetchLocs,
+                                                 unsigned long long flags, hipStream_t stream);
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -5695,7 +5800,7 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @warning  Calling hipMemcpy2D with dst and src pointers that do not match the hipMemcpyKind
  * results in undefined behavior.
  *
- *  @param[in]   dst    Destination memory address
+ *  @param[out]  dst Destination memory address
  *  @param[in]   dpitch Pitch size in bytes of destination memory
  *  @param[in]   src    Source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
@@ -5757,7 +5862,7 @@ hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream _
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously.  For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
  *
- *  @param[in]   dst    Pointer to destination memory address
+ *  @param[out]  dst Pointer to destination memory address
  *  @param[in]   dpitch Pitch size in bytes of destination memory
  *  @param[in]   src    Pointer to source memory address
  *  @param[in]   spitch Pitch size in bytes of source memory
@@ -5776,7 +5881,7 @@ hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t sp
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[out]  dst Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5795,7 +5900,7 @@ hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, co
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[out]  dst   Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5816,7 +5921,7 @@ hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffse
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst Destination memory address
+ *  @param[out]  dst Destination memory address
  *  @param[in]   wOffsetDst Destination starting X offset
  *  @param[in]   hOffsetDst Destination starting Y offset
  *  @param[in]   src  Source memory address
@@ -5839,7 +5944,7 @@ hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOf
  *
  *  @ingroup MemoryD
  *
- *  @param[in]   dst     Destination memory address
+ *  @param[out]  dst     Destination memory address
  *  @param[in]   wOffset Destination starting X offset
  *  @param[in]   hOffset Destination starting Y offset
  *  @param[in]   src     Source memory address
@@ -5860,7 +5965,7 @@ hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, cons
  *
  *  @ingroup MemoryD
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[out]  dst       Destination memory address
  *  @param[in]   srcArray  Source memory address
  *  @param[in]   wOffset   Source starting X offset
  *  @param[in]   hOffset   Source starting Y offset
@@ -5879,7 +5984,7 @@ hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffs
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[out]  dst       Destination memory address
  *  @param[in]   dpitch    Pitch of destination memory
  *  @param[in]   src       Source memory address
  *  @param[in]   wOffset   Source starting X offset
@@ -5898,7 +6003,7 @@ hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, 
 /**
  *  @brief Copies data between host and device asynchronously.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[out]  dst       Destination memory address
  *  @param[in]   dpitch    Pitch of destination memory
  *  @param[in]   src       Source memory address
  *  @param[in]   wOffset   Source starting X offset
@@ -5919,7 +6024,7 @@ hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch, hipArray_const_t 
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dst       Destination memory address
+ *  @param[out]  dst       Destination memory address
  *  @param[in]   srcArray  Source array
  *  @param[in]   srcOffset Offset in bytes of source array
  *  @param[in]   count     Size of memory copy in bytes
@@ -5933,7 +6038,7 @@ hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_
 /**
  *  @brief Copies data between host and device.
  *
- *  @param[in]   dstArray   Destination memory address
+ *  @param[out]  dstArray Destination memory address
  *  @param[in]   dstOffset  Offset in bytes of destination array
  *  @param[in]   srcHost    Source host pointer
  *  @param[in]   count      Size of memory copy in bytes
@@ -6007,7 +6112,7 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 /**
  * @brief Perform Batch of 1D copies
  *
- * @param [in] dsts      - Array of destination pointers
+ * @param [out] dsts  - Array of destination pointers
  * @param [in] srcs      - Array of source pointers.
  * @param [in] sizes     - Array of sizes for memcpy operations
  * @param [in] count     - Size of dsts, srcs and sizes arrays
@@ -9692,8 +9797,6 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
  * @param [in] devPtr - starting address of the range.
  * @param [in] size - size of the range.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9708,8 +9811,6 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size);
  * @param [in] addr - requested starting address of the range.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9731,9 +9832,6 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
  * Any other value results in #hipErrorInvalidValue.
  *
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
- *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
 hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
@@ -9747,8 +9845,6 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
  * @param [in] handleType - type of the shareable handle.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9764,8 +9860,6 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
  * @param [in] location - target location.
  * @param [in] ptr - address to check the access flags.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9778,8 +9872,6 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
  * @param [in] prop - location properties.
  * @param [in] option - determines which granularity to return.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
@@ -9793,8 +9885,6 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
  * @param [out] prop - properties of the given handle.
  * @param [in] handle - handle to perform the query on.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9808,8 +9898,6 @@ hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
  * @param [in] osHandle - shareable handle representing the memory allocation.
  * @param [in] shHandleType - handle type.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9825,8 +9913,6 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
  * @param [in] handle - memory allocation to be mapped.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9840,8 +9926,6 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
  * @param [in] count - number of hipArrayMapInfo in mapInfoList.
  * @param [in] stream - stream identifier for the stream to use for map or unmap operations.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is under development. Currently it is not supported on AMD
- *          GPUs and returns #hipErrorNotSupported.
  */
 hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
                                hipStream_t stream);
@@ -9852,8 +9936,6 @@ hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
  *
  * @param [in] handle - handle of the memory allocation.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9865,8 +9947,6 @@ hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle);
  * @param [out] handle - handle representing addr.
  * @param [in] addr - address to look up.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9881,8 +9961,6 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
  * @param [in] desc - array of hipMemAccessDesc.
  * @param [in] count - number of hipMemAccessDesc in desc.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
@@ -9894,8 +9972,6 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
  * @param [in] ptr - starting address of the range to unmap.
  * @param [in] size - size of the virtual address range.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
- * @warning This API is marked as Beta. While this feature is complete, it can
- *          change and might have outstanding issues.
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */

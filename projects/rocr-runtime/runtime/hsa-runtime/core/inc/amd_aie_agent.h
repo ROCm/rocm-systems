@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,8 +40,6 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// AMD specific HSA backend.
-
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 
@@ -64,6 +62,7 @@ public:
  hsa_status_t VisitRegion(bool include_peer,
                           hsa_status_t (*callback)(hsa_region_t region, void* data),
                           void* data) const override;
+
  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
                             void* data) const override;
 
@@ -74,6 +73,8 @@ public:
                                    void* data) const override;
 
  hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
+
+ core::Agent* GetNearestCpuAgent() const override;
 
  void InitDerivedCuid() override;
 
@@ -93,14 +94,16 @@ public:
    return system_allocator_;
  }
 
-  /// @brief Getter for the AIE system deallocator.
-  const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
+ /// @brief Getter for the AIE system deallocator.
+ const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
 
-  const HsaNodeProperties& properties() const { return node_props_; }
+ /// @brief Getter for the AIE node properties.
+ const HsaNodeProperties& properties() const { return node_props_; }
 
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
+
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
 

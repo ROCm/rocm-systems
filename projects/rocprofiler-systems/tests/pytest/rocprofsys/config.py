@@ -224,6 +224,17 @@ class RocprofsysConfig:
             "TERM": os.environ.get("TERM", ""),
             "LANG": os.environ.get("LANG", ""),
         }
+
+        # TheRock sysdeps should be used as VA drivers when present, if not set by the user
+        _libva = (os.environ.get("LIBVA_DRIVERS_PATH") or "").strip()
+        if _libva:
+            env["LIBVA_DRIVERS_PATH"] = _libva
+        elif self.rocm_path:
+            _sysdeps = (self.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
+            if _sysdeps.is_dir():
+                env["LIBVA_DRIVERS_PATH"] = str(_sysdeps)
+        if "LIBVA_DRIVER_NAME" in os.environ:
+            env["LIBVA_DRIVER_NAME"] = os.environ["LIBVA_DRIVER_NAME"]
         # To maintain a stable environment, only inherit OMPI_ and ROCPROFSYS_ env vars
         for key, value in os.environ.items():
             if key.startswith(("OMPI_", "ROCPROFSYS_")):

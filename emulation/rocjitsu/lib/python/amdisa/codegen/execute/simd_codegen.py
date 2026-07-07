@@ -72,8 +72,14 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     'v_xor_b32_vop2': ('uint32_t', 'std::bit_xor<>{}'),
     'v_xnor_b32_vop2': ('uint32_t', '[](auto a, auto b) { return ~(a ^ b); }'),
     # rev: shift value is vsrc1 (b), shift count is src0 (a), masked to 5 bits.
-    'v_lshlrev_b32_vop2': ('uint32_t', '[](auto a, auto b) { return b << (a & 31u); }'),
-    'v_lshrrev_b32_vop2': ('uint32_t', '[](auto a, auto b) { return b >> (a & 31u); }'),
+    'v_lshlrev_b32_vop2': (
+        'uint32_t',
+        '[](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshl_u32(b, a); }',
+    ),
+    'v_lshrrev_b32_vop2': (
+        'uint32_t',
+        '[](auto a, auto b) { return ::rocjitsu::amdgpu::simd_lshr_u32(b, a); }',
+    ),
     'v_mul_u32_u24_vop2': (
         'uint32_t',
         '[](auto a, auto b) { return (a & 0x00FFFFFFu) * (b & 0x00FFFFFFu); }',
@@ -83,10 +89,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # are exact, so no widening is needed.
     'v_mul_i32_i24_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;'
-        ' auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb); }',
+        '[](auto a, auto b) { return ::rocjitsu::amdgpu::simd_mul_i24_u32(a, b); }',
     ),
     # High 32 bits of the 24-bit multiply (48-bit product). The 32x32->high32
     # step uses util::mul_hi_{u,i}32_simd, a 16x16 partial-product decomposition
@@ -336,8 +339,10 @@ _VOP3_UNARY_FP_F32 = {
 # widens it to f32, applies omod/clamp, then narrows back to u16 (a 16-bit->f32->16-bit
 # modifier round trip). The plain `a & 0xFFFFu` VOP1 functor it would otherwise reuse
 # ignores those modifiers, so with clamp/omod set the SIMD path diverged from scalar
-# (clamp=1: scalar 0x1 vs simd 0xffff). Leaving the VOP3 twin scalar keeps it correct;
-# the modifier-free VOP1 form still takes the fast path.
+# (clamp=1: scalar 0x1 vs simd 0xffff). The f32 FP8/BF8 VOP3 decoders use op_sel[1:0]
+# as a bit-swapped byte selector, while the VOP1 SIMD functor always consumes byte 0. Leaving these
+# VOP3 twins scalar keeps both modifier and byte-select behavior correct; the
+# modifier-free / byte0 VOP1 forms still take the fast path.
 _VOP3_UNARY_SKIP = {
     'v_floor_f16',
     'v_ceil_f16',
@@ -354,6 +359,8 @@ _VOP3_UNARY_SKIP = {
     'v_frexp_exp_i32_f64',
     'v_frexp_mant_f16',
     'v_frexp_exp_i16_f16',
+    'v_cvt_f32_fp8',
+    'v_cvt_f32_bf8',
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -388,22 +395,14 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'int32_t',
         '[](auto s) {'
         ' auto r = util::stdx::floor(s);'
-        ' util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);'
-        ' util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;'
-        ' util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;'
-        ' return out; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     'v_cvt_nearest_i32_f32_vop1': (
         'float32_t',
         'int32_t',
         '[](auto s) {'
         ' auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));'
-        ' util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);'
-        ' util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;'
-        ' util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;'
-        ' return out; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     # --- bit-scan (SWAR, no stdx primitive) -----------------------------------
     # All return uint32_t. Most special-case the zero input to 0xFFFFFFFF,
@@ -647,43 +646,26 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_cvt_i32_f32_vop1': (
         'float32_t',
         'int32_t',
-        '[](auto s) {'
-        ' util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(s);'
-        ' util::stdx::where(simd_mask_as<int32_t>(s >= 2147483648.0f), out) = 2147483647;'
-        ' util::stdx::where(simd_mask_as<int32_t>(s < -2147483648.0f), out) = (-2147483647 - 1);'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), out) = 0;'
-        ' return out; }',
+        '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_i32_f32(s); }',
     ),
     'v_cvt_u32_f32_vop1': (
         'float32_t',
         'uint32_t',
-        '[](auto s) {'
-        ' util::native<uint32_t> out = util::stdx::static_simd_cast<util::native<uint32_t>>(s);'
-        ' util::stdx::where(simd_mask_as<uint32_t>(s >= 4294967296.0f), out) = 4294967295u;'
-        ' util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), out) = 0u;'
-        ' return out; }',
+        '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); }',
     ),
     'v_cvt_flr_i32_f32_vop1': (
         'float32_t',
         'int32_t',
         '[](auto s) {'
         ' auto r = util::stdx::floor(s);'
-        ' util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);'
-        ' util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;'
-        ' util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;'
-        ' return out; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     'v_cvt_rpi_i32_f32_vop1': (
         'float32_t',
         'int32_t',
         '[](auto s) {'
         ' auto r = util::stdx::ceil(s - util::native<float32_t>(0.5f));'
-        ' util::native<int32_t> out = util::stdx::static_simd_cast<util::native<int32_t>>(r);'
-        ' util::stdx::where(simd_mask_as<int32_t>(r >= 2147483648.0f), out) = 2147483647;'
-        ' util::stdx::where(simd_mask_as<int32_t>(r < -2147483648.0f), out) = (-2147483647 - 1);'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(r)), out) = 0;'
-        ' return out; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_i32_f32(r); }',
     ),
     # --- f16 (half) ops. Scalar bodies route through an f32 intermediate with a
     # single final round, so the SIMD path (f16_to_f32_simd -> f32 op ->
@@ -782,21 +764,14 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) {'
         ' auto s = util::f16_to_f32_simd(a);'
-        ' util::native<int32_t> o = util::stdx::static_simd_cast<util::native<int32_t>>(s);'
-        ' util::stdx::where(simd_mask_as<int32_t>(s >= 32768.0f), o) = 32767;'
-        ' util::stdx::where(simd_mask_as<int32_t>(s < -32768.0f), o) = -32768;'
-        ' util::stdx::where(simd_mask_as<int32_t>(util::stdx::isnan(s)), o) = 0;'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>(o) & 0xFFFFu; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_i16_f32_to_u32(s); }',
     ),
     'v_cvt_u16_f16_vop1': (
         'uint32_t',
         'uint32_t',
         '[](auto a) {'
         ' auto s = util::f16_to_f32_simd(a);'
-        ' util::native<uint32_t> o = util::stdx::static_simd_cast<util::native<uint32_t>>(s);'
-        ' util::stdx::where(simd_mask_as<uint32_t>(s >= 65536.0f), o) = 65535u;'
-        ' util::stdx::where(simd_mask_as<uint32_t>(util::stdx::isnan(s) || s < 0.0f), o) = 0u;'
-        ' return o & 0xFFFFu; }',
+        ' return ::rocjitsu::amdgpu::simd_cvt_u16_f32_to_u32(s); }',
     ),
 }
 
@@ -976,7 +951,7 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
         'double',
         '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
     ),
-    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::stdx::sqrt(a); }'),
+    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
     # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
@@ -1011,18 +986,13 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
     'v_cvt_i32_f64_vop1': (
         'int32_t',
         '[](auto s) {'
-        ' auto r = s;'
-        ' util::stdx::where(util::stdx::isnan(s), r) = 0.0;'
-        ' util::stdx::where(s >= 2147483648.0, r) = 2147483647.0;'
-        ' util::stdx::where(s < -2147483648.0, r) = -2147483648.0;'
+        ' auto r = util::cvt_i32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r); }',
     ),
     'v_cvt_u32_f64_vop1': (
         'uint32_t',
         '[](auto s) {'
-        ' auto r = s;'
-        ' util::stdx::where(util::stdx::isnan(s) || s < 0.0, r) = 0.0;'
-        ' util::stdx::where(s >= 4294967296.0, r) = 4294967295.0;'
+        ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
     ),
     # frexp exponent (f64 -> int32). util::frexp_exp_f64_simd returns the int32 in
@@ -1334,6 +1304,7 @@ SIMD_DOTC_INT: dict[str, str] = {
 SIMD_DOTC_F16: dict[str, str] = {
     'v_dot2c_f32_f16_vop2': 'false',
     'v_dot2c_f32_f16_vop3': 'true',
+    'v_dot2acc_f32_f16_vop2': 'false',
 }
 
 
@@ -1546,7 +1517,7 @@ SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
 # v_cmp_class_f64: a 64-bit f64 value (src0) tested against a 32-bit class mask
 # (vsrc1), so it needs the mixed-width class glue (try_execute_vopc_class_f64_simd)
 # rather than the equal-width VOPC path. The functor receives src0 as
-# native<uint64_t> raw bits and vsrc1 as a native_width64-wide narrow32<uint32_t>
+# a uint64 SIMD raw-bit vector and vsrc1 as the matching uint32 SIMD class-mask
 # mask; it classifies the f64 from its raw bits (qNaN bit = mantissa MSB
 # 0x0008000000000000), partitions into one of the 10 mutually exclusive classes,
 # casts the small class code down to the 32-bit mask width, and returns
@@ -1554,7 +1525,8 @@ SIMD_VOPC_CLASS: dict[str, tuple[str, str]] = {
 # class-bit layout matches the f16/f32 forms above.
 _CMP_CLASS_F64 = (
     '[](auto s, auto m) {'
-    ' using U = util::native<uint64_t>;'
+    ' using U = std::decay_t<decltype(s)>;'
+    ' using M = std::decay_t<decltype(m)>;'
     ' U exp = (s >> 52) & 0x7FFu;'
     ' U mant = s & 0xFFFFFFFFFFFFFull;'
     ' auto sgn = ((s >> 63) & 1u) != 0u;'
@@ -1575,7 +1547,7 @@ _CMP_CLASS_F64 = (
     ' util::stdx::where(is_den && !sgn, cls) = 0x080u;'
     ' util::stdx::where(is_norm && !sgn, cls) = 0x100u;'
     ' util::stdx::where(is_inf && !sgn, cls) = 0x200u;'
-    ' auto cls32 = util::stdx::static_simd_cast<util::narrow32<uint32_t>>(cls);'
+    ' auto cls32 = util::stdx::static_simd_cast<M>(cls);'
     ' return (cls32 & m) != 0u; }'
 )
 SIMD_VOPC_CLASS_F64: dict[str, str] = {
@@ -1860,7 +1832,7 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # masked to low 5 bits — same vpsllvd-vs-shl rationale as v_lshl_add_u32.
     'v_bfm_b32_vop3': (
         'uint32_t',
-        '[](auto a, auto b) { return ((util::native<uint32_t>(1u) << (a & 31u)) - 1u) << (b & 31u); }',
+        '[](auto a, auto b) { return ::rocjitsu::amdgpu::simd_bfm_b32(a, b); }',
     ),
     # v_pack_b32_f16: pack two f16 halves into a b32. low16(src0) into the low
     # half, low16(src1) into the high half. The scalar body applies no abs/neg
@@ -1878,6 +1850,38 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     'v_or_b16_vop3': ('uint32_t', '[](auto a, auto b) { return (a | b) & 0xFFFFu; }'),
     'v_xor_b16_vop3': ('uint32_t', '[](auto a, auto b) { return (a ^ b) & 0xFFFFu; }'),
 }
+
+# True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
+# destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
+SIMD_VOP3_TRUE16_UNSAFE = frozenset(
+    {
+        'v_add_i16_vop3',
+        'v_add_nc_i16_vop3',
+        'v_add_nc_u16_vop3',
+        'v_add_u16_vop3',
+        'v_and_b16_vop3',
+        'v_cmp_eq_i16_vop3',
+        'v_cmp_eq_u16_vop3',
+        'v_cmp_ge_i16_vop3',
+        'v_cmp_ge_u16_vop3',
+        'v_cmp_gt_i16_vop3',
+        'v_cmp_gt_u16_vop3',
+        'v_cmp_le_i16_vop3',
+        'v_cmp_le_u16_vop3',
+        'v_cmp_lt_i16_vop3',
+        'v_cmp_lt_u16_vop3',
+        'v_cmp_ne_i16_vop3',
+        'v_cmp_ne_u16_vop3',
+        'v_mul_lo_u16_vop3',
+        'v_not_b16_vop3',
+        'v_or_b16_vop3',
+        'v_sub_i16_vop3',
+        'v_sub_nc_i16_vop3',
+        'v_sub_nc_u16_vop3',
+        'v_sub_u16_vop3',
+        'v_xor_b16_vop3',
+    }
+)
 
 # VOP3 unary integer ops without a VOP1 twin. Reuse the VOP1 unary glue
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
@@ -1948,13 +1952,7 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
     # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
     # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': (
-        '[](auto a) {'
-        ' auto r = util::stdx::sqrt(a);'
-        ' util::stdx::where(util::stdx::isnan(a), r) = a;'
-        ' util::stdx::where(a < 0.0, r) = std::numeric_limits<double>::quiet_NaN();'
-        ' return r; }'
-    ),
+    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
     # v_fract_f64: scalar = v - std::floor(v); util::floor_simd matches
     # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
     # skipped by the test like any other NaN-result lane).
@@ -2251,17 +2249,13 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     ),
     'v_lshl_or_b32_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) { return (a << (b & 31u)) | c; }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a, b) | c; }',
     ),
     # v_mad_i32_i24: low-24 sign-extended a, b -> int32 multiply (low 32 of the
     # 48-bit product, identical signed/unsigned for the low half) + int32(c).
     'v_mad_i32_i24_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) {'
-        ' auto sa = (util::stdx::static_simd_cast<util::native<int32_t>>(a) << 8) >> 8;'
-        ' auto sb = (util::stdx::static_simd_cast<util::native<int32_t>>(b) << 8) >> 8;'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>('
-        'sa * sb + util::stdx::static_simd_cast<util::native<int32_t>>(c)); }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_mad_i24_u32(a, b, c); }',
     ),
     # v_mad_u32_u24: low-24 mask a, b, multiply, add c.
     'v_mad_u32_u24_vop3': (
@@ -2303,11 +2297,11 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # shift operand on this host.
     'v_lshl_add_u32_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) { return (a << (b & 31u)) + c; }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a, b) + c; }',
     ),
     'v_add_lshl_u32_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) { return (a + b) << (c & 31u); }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_lshl_u32(a + b, c); }',
     ),
     'v_bfi_b32_vop3': (
         'uint32_t',
@@ -2422,37 +2416,17 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     'v_mad_i32_i16_vop3': (
         'uint32_t',
         '[](auto a, auto b, auto c) {'
-        ' using I = util::native<int32_t>;'
-        ' auto sa = (util::stdx::static_simd_cast<I>(a) << 16) >> 16;'
-        ' auto sb = (util::stdx::static_simd_cast<I>(b) << 16) >> 16;'
-        ' auto sc = util::stdx::static_simd_cast<I>(c);'
-        ' return util::stdx::static_simd_cast<util::native<uint32_t>>(sa * sb + sc); }',
+        ' auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 16);'
+        ' auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 16);'
+        ' return sa * sb + c; }',
     ),
     # v_mad_u32_u16: zero-extend low 16 of src0/src1, multiply, add full uint32 c.
     'v_mad_u32_u16_vop3': (
         'uint32_t',
         '[](auto a, auto b, auto c) { return (a & 0xFFFFu) * (b & 0xFFFFu) + c; }',
     ),
-    # v_mad_i16 / v_mad_u16 (and the _legacy twins): 16-bit multiply-add, result
-    # truncated to the low 16 bits and zero-extended. The low 16 bits of the
-    # product+add are independent of operand sign, so masking the operands and
-    # the result to 16 bits reproduces the int16 and uint16 scalar bodies alike.
-    'v_mad_i16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_u16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_legacy_i16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_legacy_u16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
+    # v_mad_i16 / v_mad_u16 need true16 VOP3 op_sel handling for each source
+    # and for the destination half, so their executors stay scalar.
     # v_bfe_u32: bitfield extract. off = src1 & 31, w = src2 & 31, result =
     # (src >> off) & ((1<<w)-1). The scalar `if (w==0) return 0` is redundant —
     # ((1u<<w)-1) is already 0 for w==0 — and `w>=32` is dead since w is masked
@@ -2460,10 +2434,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # vpsllvd) matches scalar for every count in [0,31].
     'v_bfe_u32_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) {'
-        ' auto off = b & 31u; auto w = c & 31u;'
-        ' auto mask = (util::native<uint32_t>(1u) << w) - 1u;'
-        ' return (a >> off) & mask; }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_bfe_u32(a, b, c); }',
     ),
     # v_bfe_i32: signed bitfield extract. Same off/width masking; the field is
     # extracted with an arithmetic shift (vpsravd, so off+w>32 sign-fill matches
@@ -2472,14 +2443,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # w==0 so the result is 0, matching the scalar early return).
     'v_bfe_i32_vop3': (
         'uint32_t',
-        '[](auto a, auto b, auto c) {'
-        ' using I = util::native<int32_t>;'
-        ' auto off = b & 31u; auto w = c & 31u;'
-        ' auto mask = (util::native<uint32_t>(1u) << w) - 1u;'
-        ' auto ext = util::stdx::static_simd_cast<util::native<uint32_t>>('
-        'util::stdx::static_simd_cast<I>(a) >> util::stdx::static_simd_cast<I>(off)) & mask;'
-        ' auto signbit = (mask + 1u) >> 1;'
-        ' return (ext ^ signbit) - signbit; }',
+        '[](auto a, auto b, auto c) { return ::rocjitsu::amdgpu::simd_bfe_i32(a, b, c); }',
     ),
 }
 
@@ -2492,13 +2456,10 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
 # the count already widened+masked. Logical shifts are plain `<< / >>` on the
 # uint64 lane; the signed (arithmetic) form casts through int64.
 SIMD_SHIFT64_VOP3: dict[str, str] = {
-    'v_lshlrev_b64_vop3': '[](auto v, auto sh) { return v << sh; }',
-    'v_lshrrev_b64_vop3': '[](auto v, auto sh) { return v >> sh; }',
+    'v_lshlrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshl_u64(v, sh); }',
+    'v_lshrrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshr_u64(v, sh); }',
     'v_ashrrev_i64_vop3': (
-        '[](auto v, auto sh) {'
-        ' return util::stdx::static_simd_cast<util::native<uint64_t>>('
-        'util::stdx::static_simd_cast<util::native<int64_t>>(v) >>'
-        ' util::stdx::static_simd_cast<util::native<int64_t>>(sh)); }'
+        '[](auto v, auto sh) {' ' return ::rocjitsu::amdgpu::simd_ashr_i64(v, sh); }'
     ),
 }
 
@@ -2509,14 +2470,17 @@ SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
 # --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
 #
 # 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend. Routed through
+# low-half product, plus the 64-bit src2 addend, with the carry/overflow mask
+# written to sdst. Routed through
 # try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
-# and the 64-bit addend.
+# and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
 SIMD_MAD_WIDE64: dict[str, str] = {
     'v_mad_u64_u32_vop3': (
         '[](auto a, auto b, auto c) {'
-        ' return util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
-        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b) + c; }'
+        ' auto product = util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
+        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b);'
+        ' auto result = product + c;'
+        ' return make_simd_carry(result, result < product); }'
     ),
     'v_mad_i64_i32_vop3': (
         '[](auto a, auto b, auto c) {'
@@ -2526,7 +2490,10 @@ SIMD_MAD_WIDE64: dict[str, str] = {
         ' auto wb = util::stdx::static_simd_cast<util::native<uint64_t>>('
         'util::stdx::static_simd_cast<util::native<int64_t>>('
         'util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));'
-        ' return wa * wb + c; }'
+        ' auto product = wa * wb;'
+        ' auto result = product + c;'
+        ' return make_simd_carry(result,'
+        ' ((~(product ^ c) & (product ^ result)) & (1ULL << 63)) != 0); }'
     ),
 }
 
@@ -2561,6 +2528,8 @@ SIMD_VOP3_CARRY_CIN.update(
 
 def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
+    if template_name in SIMD_VOP3_TRUE16_UNSAFE:
+        return None
     if template_name in SIMD_VOP2_CNDMASK:
         return '  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();'
     if template_name in SIMD_VOP3_CNDMASK:

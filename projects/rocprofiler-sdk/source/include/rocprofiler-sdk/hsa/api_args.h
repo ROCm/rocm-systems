@@ -1542,6 +1542,28 @@ typedef union rocprofiler_hsa_api_args_t
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
     struct
     {
+        hsa_agent_t                  agent;
+        hsa_amd_queue_create_desc_t* descs;
+        uint32_t                     num_descs;
+    } hsa_amd_queue_create;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x11
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_signal_external_semaphore;
+    struct
+    {
+        hsa_queue_t*                 queue;
+        hsa_amd_external_semaphore_t sem;
+        uint64_t                     value;
+    } hsa_amd_queue_wait_external_semaphore;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x12
+    struct
+    {
         hsa_agent_t                          agent;
         const hsa_ext_image_descriptor_v2_t* image_descriptor;
         const hsa_amd_image_descriptor_t*    image_layout;
@@ -1551,15 +1573,15 @@ typedef union rocprofiler_hsa_api_args_t
     } hsa_amd_image_create_v2;
     struct
     {
-        uint32_t         num_agents;
-        hsa_agent_t*     agents;
-        hsa_handle_t     interop_handle;
-        uint32_t         flags;
-        size_t           size_hint;
-        size_t*          size;
-        void**           ptr;
-        size_t*          metadata_size;
-        const void**     metadata;
+        uint32_t     num_agents;
+        hsa_agent_t* agents;
+        hsa_handle_t interop_handle;
+        uint32_t     flags;
+        size_t       size_hint;
+        size_t*      size;
+        void**       ptr;
+        size_t*      metadata_size;
+        const void** metadata;
     } hsa_amd_interop_map_buffer_with_size;
 #    endif
 #endif

@@ -60,7 +60,6 @@
 #ifndef _WIN32
 #define _open open
 #define _close close
-#define _tempnam tempnam
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -842,7 +841,16 @@ namespace elf {
 
     const char* GElfSegment::data() const
     {
-      return (const char*) elf->data() + phdr.p_offset;
+      if (!elf->buffer || elf->bufferSize == 0) {
+        return nullptr;
+      }
+      if (phdr.p_offset > elf->bufferSize) {
+        return nullptr;
+      }
+      if (phdr.p_filesz > elf->bufferSize - phdr.p_offset) {
+        return nullptr;
+      }
+      return elf->buffer + phdr.p_offset;
     }
 
     bool GElfImage::Freeze()
@@ -1225,19 +1233,39 @@ namespace elf {
       Elf_Scn *scn = elf_getscn(elf->e, ndxscn);
       assert(scn);
       while ((data = elf_getdata(scn, data)) != 0) {
-        uint32_t note_offset = 0;
-        while (note_offset < data->d_size) {
+        size_t note_offset = 0;
+        const size_t data_size = data->d_size;
+        while (note_offset < data_size) {
+          if (note_offset + sizeof(Elf64_Nhdr) > data_size) {
+            return false;
+          }
           char* notec = (char *) data->d_buf + note_offset;
           Elf64_Nhdr* note = (Elf64_Nhdr*) notec;
+          const size_t namesz_aligned = alignUp(note->n_namesz, 4);
+          const size_t descsz_aligned = alignUp(note->n_descsz, 4);
+          size_t entry_size = sizeof(Elf64_Nhdr);
+          if (entry_size + namesz_aligned < entry_size ||
+              entry_size + namesz_aligned + descsz_aligned < entry_size + namesz_aligned) {
+            return false;
+          }
+          entry_size += namesz_aligned + descsz_aligned;
+          if (note_offset + entry_size > data_size || note_offset + entry_size < note_offset) {
+            return false;
+          }
           if (type == note->n_type) {
+            const size_t desc_offset = note_offset + sizeof(Elf64_Nhdr) + namesz_aligned;
+            if (note_offset + sizeof(Elf64_Nhdr) + note->n_namesz > data_size ||
+                desc_offset + note->n_descsz > data_size) {
+              return false;
+            }
             std::string note_name = GetNoteString(note->n_namesz, notec + sizeof(Elf64_Nhdr));
             if (name == note_name) {
-              *desc = notec + sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4);
+              *desc = notec + sizeof(Elf64_Nhdr) + namesz_aligned;
               *desc_size = note->n_descsz;
               return true;
             }
           }
-          note_offset += sizeof(Elf64_Nhdr) + alignUp(note->n_namesz, 4) + alignUp(note->n_descsz, 4);
+          note_offset += entry_size;
         }
       }
       return false;

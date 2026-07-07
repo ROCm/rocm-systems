@@ -1747,3 +1747,6 @@ graph:
   Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
     <<: *level_2
     tags: [node]
+  Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
+    <<: *level_2
+    tags: [exec]
