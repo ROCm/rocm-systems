@@ -5,8 +5,8 @@ SPDX-License-Identifier: MIT
 
 // Entry point for the GPU-free InterceptQueue logic unit tests. These tests exercise
 // pure decision logic (see core/inc/intercept_queue_logic.h) and do not require the HSA
-// runtime or a GPU, so they run as an ordinary host executable under CTest.
-
+// runtime or a GPU, so they run as an ordinary host executable under CTest. Only used by
+// the standalone build; the in-tree rocrtst build links GoogleTest's own gtest_main.
 #include "gtest/gtest.h"
 
 int main(int argc, char** argv) {
