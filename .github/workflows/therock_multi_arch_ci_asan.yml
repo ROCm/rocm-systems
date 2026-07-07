@@ -51,7 +51,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e2acd7c9672b39d6bb7c69846090d579951ef506 # 2026-06-23
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@5c5be0b667423b56c651738223017974a97edfaf # 2026-06-23
     with:
       build_variant: "host-asan"
       # targets gfx94X and gfx950 are selected to replicate the ASAN coverage in TheRock
@@ -61,7 +61,7 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
-      ref: "e2acd7c9672b39d6bb7c69846090d579951ef506" # 2026-06-23
+      ref: "5c5be0b667423b56c651738223017974a97edfaf" # 2026-06-23
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}", "family_overrides": ""}'
 
   linux_build_and_test:
@@ -72,7 +72,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@e2acd7c9672b39d6bb7c69846090d579951ef506 # 2026-06-23
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@5c5be0b667423b56c651738223017974a97edfaf # 2026-06-23
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -81,7 +81,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: "e2acd7c9672b39d6bb7c69846090d579951ef506" # 2026-06-23
+      ref: "5c5be0b667423b56c651738223017974a97edfaf" # 2026-06-23
     permissions:
       contents: read
       id-token: write
@@ -99,7 +99,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: "e2acd7c9672b39d6bb7c69846090d579951ef506" # 2026-06-23
+          ref: "5c5be0b667423b56c651738223017974a97edfaf" # 2026-06-23
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
