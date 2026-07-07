@@ -131,6 +131,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Collects traces for rocDecode APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#rocdecode-trace">Read more...</a></td>
                 </tr>
                 <tr>
+                    <td>--hipfile-trace [BOOL]</td>
+                    <td>Collects traces for hipFILE APIs. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#hipfile-trace">Read more...</a></td>
+                </tr>
+                <tr>
                     <td>--ompt-trace [CATEGORY ...]</td>
                     <td>Collects OMPT (OpenMP Tools) traces from applications linked against an OMPT-capable OpenMP runtime (e.g. LLVM-based <code>libomp</code> from AOMP / ROCm). Captures host parallel regions, tasks, sync, mutex, and target-offload events. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#ompt-trace">Read more...</a></td>
                 </tr>

@@ -388,25 +388,26 @@ excluding traces for HSA runtime API and HIP compiler API.
 The HSA runtime API is excluded because it is a lower-level API upon which HIP and OpenMP target are built and
 thus, tends to be an implementation detail irrelevant to most users. Similarly, the HIP compiler API is also excluded for being an implementation detail as these functions are automatically inserted during HIP compilation.
 
-``--runtime-trace`` traces the HIP runtime API, marker API, kernel dispatches, and
-memory operations (copies, allocations, and scratch).
+``--runtime-trace`` traces the HIP runtime API, marker API, RCCL API, rocDecode API,
+rocJPEG API, hipFILE API, kernel dispatches, and memory operations (copies,
+allocations, and scratch).
 
 .. code-block:: shell
 
     rocprofv3 –-runtime-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, ``hipfile_api_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
 
-This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory allocation, and marker trace (if ``ROCTx`` APIs are specified in the application).
+This is an all-inclusive option to collect HIP, HSA, RCCL, rocDecode, rocJPEG, hipFILE, kernel, memory copy, memory allocation, and marker trace (if ``ROCTx`` APIs are specified in the application).
 
 .. code-block:: shell
 
     rocprofv3 –-sys-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
+Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, ``hipfile_api_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
 Scratch memory trace
 ++++++++++++++++++++++
@@ -503,6 +504,30 @@ Here are the contents of ``rocjpeg_api_trace.csv`` file:
    :file: /data/rocjpeg_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
+
+hipFILE trace
++++++++++++++
+
+`hipFILE <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_ is a GPU-aware file I/O library for HIP applications. This option traces the hipFILE API.
+
+.. code-block:: shell
+
+    rocprofv3 --hipfile-trace --output-format csv -- <application_path>
+
+The above command generates a ``hipfile_api_trace`` file prefixed with the process ID.
+
+.. code-block:: shell
+
+    $ cat 42176_hipfile_api_trace.csv
+
+Here are the contents of ``hipfile_api_trace.csv`` file:
+
+.. csv-table:: hipFILE trace
+   :file: /data/hipfile_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
+Perfetto will also show hipFILE API arguments. Pointers will not be dereferenced and only the address will be displayed.
 
 OMPT trace
 ++++++++++
@@ -1730,6 +1755,17 @@ Here are the properties of the JSON output schema:
                - **size** *(integer, required)*: Size of the rocDecode API record.
                - **kind** *(integer, required)*: Kind of the rocDecode API.
                - **operation** *(integer, required)*: Operation of the rocDecode API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **hipfile_api** *(array)*: hipFILE API records.
+            - **Items** *(object)*
+               - **size** *(integer, required)*: Size of the hipFILE API record.
+               - **kind** *(integer, required)*: Kind of the hipFILE API.
+               - **operation** *(integer, required)*: Operation of the hipFILE API.
                - **correlation_id** *(object, required)*: Correlation ID information.
                   - **internal** *(integer, required)*: Internal correlation ID.
                   - **external** *(integer, required)*: External correlation ID.
