@@ -714,8 +714,97 @@ hipFileGetStatsL2(hipFileStatsLevel2_t *stats)
 hipFileError_t
 hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
 {
-    (void)stats;
-    return {hipFileInternalError, hipSuccess};
+    try {
+        if (stats == nullptr) {
+            return {hipFileInvalidValue, hipSuccess};
+        }
+        const Stats *s{Context<IStatsServer>::get()->getStats()};
+        if (s == nullptr) {
+            return {hipFileInternalError, hipSuccess};
+        }
+
+        *stats = {};
+
+        hipFileError_t err{hipFile::hipFileGetStatsL2(&stats->detailed)};
+        if (err.err != hipFileSuccess) {
+            return err;
+        }
+
+        uint64_t globalBufRegs{s->getBufferRegistrations().load()};
+
+        uint32_t numGpus{};
+        for (size_t gpuId{}; gpuId < Stats::MaxGpus; ++gpuId) {
+            if (!s->gpuInUse(gpuId)) {
+                continue;
+            }
+            ++numGpus;
+
+            hipFilePerGpuStats_t &g{stats->per_gpu_stats[gpuId]};
+
+            // Fastpath maps to nvfs; fallback maps to posix
+            static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
+            for (const auto &backend : backends) {
+                const PerGpuStatsV1 *pg{s->getPerGpuStats(gpuId, backend)};
+                if (pg == nullptr) {
+                    continue;
+                }
+
+                const auto [rSizeHist, rCountHist, rTimeHist, rErrorHist] = pg->getHistograms(IoType::Read);
+                const auto [wSizeHist, wCountHist, wTimeHist, wErrorHist] = pg->getHistograms(IoType::Write);
+
+                uint64_t rBytes{rSizeHist ? rSizeHist->accumulate() : 0};
+                uint64_t rCount{rCountHist ? rCountHist->accumulate() : 0};
+                uint64_t rTimeUs{rTimeHist ? rTimeHist->accumulate() : 0};
+                uint64_t rErrors{rErrorHist ? rErrorHist->accumulate() : 0};
+
+                uint64_t wBytes{wSizeHist ? wSizeHist->accumulate() : 0};
+                uint64_t wCount{wCountHist ? wCountHist->accumulate() : 0};
+                uint64_t wTimeUs{wTimeHist ? wTimeHist->accumulate() : 0};
+                uint64_t wErrors{wErrorHist ? wErrorHist->accumulate() : 0};
+
+                g.read_bytes += rBytes;
+                g.read_duration_us += rTimeUs;
+                g.n_total_reads += rCount;
+                g.n_reads_err += rErrors;
+                g.n_unaligned_reads += pg->unalignedCount[static_cast<size_t>(IoType::Read)].load();
+
+                g.writes_bytes += wBytes;
+                g.write_duration_us += wTimeUs;
+                g.n_total_writes += wCount;
+                g.n_writes_err += wErrors;
+                g.n_unaligned_writes += pg->unalignedCount[static_cast<size_t>(IoType::Write)].load();
+
+                if (backend == StatsBackend::Fastpath) {
+                    g.n_nvfs_reads  = rCount;
+                    g.n_nvfs_writes = wCount;
+                }
+                else {
+                    g.n_posix_reads  = rCount;
+                    g.n_posix_writes = wCount;
+                }
+            }
+
+            if (g.read_duration_us > 0) {
+                g.read_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.read_bytes) * 1e6 /
+                                                                static_cast<double>(g.read_duration_us));
+            }
+            if (g.write_duration_us > 0) {
+                g.write_bw_bytes_per_sec = static_cast<uint64_t>(static_cast<double>(g.writes_bytes) * 1e6 /
+                                                                 static_cast<double>(g.write_duration_us));
+            }
+
+            // Buffer registrations are a global counter; report it on each active GPU
+            // as the best available approximation.
+            g.n_mmap    = globalBufRegs;
+            g.n_mmap_ok = globalBufRegs;
+        }
+
+        stats->num_gpus = numGpus;
+        return {hipFileSuccess, hipSuccess};
+    }
+    catch (...) {
+        return handle_exception();
+    }
 }
 
 } // namespace

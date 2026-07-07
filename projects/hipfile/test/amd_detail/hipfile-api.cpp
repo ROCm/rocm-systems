@@ -537,4 +537,159 @@ TEST_F(HipFileGetStatsL2, SizeHistogramsAreZeroFilled)
     }
 }
 
+// ***********************************************************************
+//  hipFileGetStatsL3 tests
+// ***********************************************************************
+
+struct HipFileGetStatsL3 : public HipFileUnopened {
+    Stats                    stats{};
+    StrictMock<MStatsServer> mstats{};
+
+    void SetUp() override
+    {
+        EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+        stats.setLevel(StatsLevel::Basic);
+    }
+};
+
+TEST_F(HipFileGetStatsL3, NullptrReturnsInvalidValue)
+{
+    EXPECT_EQ(hipFileGetStatsL3(nullptr), HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileGetStatsL3, NullStatsServerReturnsInternalError)
+{
+    EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(nullptr));
+    hipFileStatsLevel3_t out{};
+    EXPECT_EQ(hipFileGetStatsL3(&out), HipFileOpError(hipFileInternalError));
+}
+
+TEST_F(HipFileGetStatsL3, ZeroWhenNoActivity)
+{
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.num_gpus, 0u);
+    EXPECT_EQ(out.detailed.basic.read_bytes, 0u);
+}
+
+TEST_F(HipFileGetStatsL3, PopulatesDetailedL2Fields)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Write)]
+        .buckets[0] = 128;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioCount[static_cast<size_t>(IoType::Write)].buckets[0] =
+        1;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.detailed.basic.write_bytes, 128u);
+}
+
+TEST_F(HipFileGetStatsL3, CountsActiveGpus)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+    stats.getPerGpuStats(2, StatsBackend::Fallback)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.num_gpus, 2u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuReadBytesAggregatesBothBackends)
+{
+    // GPU 0: fastpath 100 bytes, fallback 50 bytes
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
+        .buckets[0]                                        = 100;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+    stats.getPerGpuStats(0, StatsBackend::Fallback)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
+        .buckets[0] = 50;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].read_bytes, 150u);
+}
+
+TEST_F(HipFileGetStatsL3, FastpathMapsToNvfsAndFallbackMapsToPosix)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioCount[static_cast<size_t>(IoType::Read)].buckets[0] =
+        3;
+    stats.getPerGpuStats(0, StatsBackend::Fallback)->ioCount[static_cast<size_t>(IoType::Read)].buckets[0] =
+        7;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].n_nvfs_reads, 3u);
+    EXPECT_EQ(out.per_gpu_stats[0].n_posix_reads, 7u);
+    EXPECT_EQ(out.per_gpu_stats[0].n_total_reads, 10u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuUnalignedCountsPopulated)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->unalignedCount[static_cast<size_t>(IoType::Read)]  = 4;
+    stats.getPerGpuStats(0, StatsBackend::Fallback)->unalignedCount[static_cast<size_t>(IoType::Write)] = 6;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse                                              = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].n_unaligned_reads, 4u);
+    EXPECT_EQ(out.per_gpu_stats[0].n_unaligned_writes, 6u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuErrorCountsPopulated)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->errorCount[static_cast<size_t>(IoType::Read)]
+        .buckets[0] = 2;
+    stats.getPerGpuStats(0, StatsBackend::Fallback)
+        ->errorCount[static_cast<size_t>(IoType::Write)]
+        .buckets[0]                                        = 9;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].n_reads_err, 2u);
+    EXPECT_EQ(out.per_gpu_stats[0].n_writes_err, 9u);
+}
+
+TEST_F(HipFileGetStatsL3, PerGpuBandwidthDerived)
+{
+    // 1e6 bytes over 1e6 us -> 1e6 bytes/sec
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
+        .buckets[0] = 1000000;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioTimeUs[static_cast<size_t>(IoType::Read)].buckets[0] =
+        1000000;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].read_bw_bytes_per_sec, 1000000u);
+}
+
+TEST_F(HipFileGetStatsL3, InactiveGpuSlotIsZero)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    // GPU 1 was never used — its slot must be zeroed
+    EXPECT_EQ(out.per_gpu_stats[1].read_bytes, 0u);
+    EXPECT_EQ(out.per_gpu_stats[1].n_total_reads, 0u);
+}
+
+TEST_F(HipFileGetStatsL3, BufferRegistrationsReportedOnActiveGpu)
+{
+    stats.getBufferRegistrations()                         = 5;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+
+    hipFileStatsLevel3_t out{};
+    ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.per_gpu_stats[0].n_mmap, 5u);
+    EXPECT_EQ(out.per_gpu_stats[0].n_mmap_ok, 5u);
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
