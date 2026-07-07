@@ -1746,7 +1746,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
   }
 
   if (verbosity() > 0) {
-    std::cout << "    Host Memory VA alias test PASSED" << std::endl;
+    std::cout << "    Host Memory VA alias test done" << std::endl;
   }
 
   // Run on GPU pools
