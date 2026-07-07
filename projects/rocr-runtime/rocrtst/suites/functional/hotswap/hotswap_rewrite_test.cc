@@ -230,19 +230,6 @@ rocr::hotswap::CodeObjectView MakeRealCodeObjectView() {
   return code_object;
 }
 
-std::vector<unsigned char> CopyLoadedCodeObject(const LoadCall& call) {
-  const auto* bytes = static_cast<const unsigned char*>(call.code_object);
-  return std::vector<unsigned char>(bytes, bytes + call.code_object_size);
-}
-
-bool LoadedCodeObjectDiffersFrom(const LoadCall& call,
-                                 const std::vector<unsigned char>& expected) {
-  if (call.code_object_size != expected.size()) {
-    return true;
-  }
-  return std::memcmp(call.code_object, expected.data(), expected.size()) != 0;
-}
-
 rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
                                              uint32_t asic_revision,
                                              bool has_asic_revision = true) {
@@ -253,12 +240,17 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
   return revision;
 }
 
-TEST(HotswapRewriteDecision, A0RetargetsWithDefaultEntryTrampolines) {
+TEST(HotswapRewriteDecision, A0RetargetsUsesLegacyPathUnlessOptedIn) {
   struct TestCase {
     rocr::hotswap::RewriteOptions options;
     bool request_entry_trampolines;
   };
-  const TestCase cases[] = {{{}, true}, {{true}, true}, {{false}, false}};
+  // {entry_trampolines_enabled}.
+  const TestCase cases[] = {
+      {{}, false},       // default: B0->A0 legacy path
+      {{false}, false},  // explicitly disabled: legacy path
+      {{true}, true},    // opted in: entry trampolines
+  };
   for (const TestCase& test_case : cases) {
     SCOPED_TRACE(test_case.request_entry_trampolines
                      ? "entry trampolines enabled"
@@ -275,14 +267,11 @@ TEST(HotswapRewriteDecision, A0RetargetsWithDefaultEntryTrampolines) {
   }
 }
 
-TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
+TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOffBlocksNonA0Gfx1250) {
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {});
 
-  ASSERT_TRUE(decision.has_value());
-  EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
-  EXPECT_EQ(decision->target_isa, kGfx1250B0Isa);
-  EXPECT_TRUE(decision->request_entry_trampolines);
+  EXPECT_FALSE(decision.has_value());
 }
 
 TEST(HotswapRewriteDecision, EntryTrampolinesEnabledRoutesNonA0Gfx1250) {
@@ -448,68 +437,8 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadA0EntryTrampolinesChangeRewrittenCodeObject) {
+TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginalWhenEntryTrampolinesUnset) {
   ResetRuntimeTestEnv();
-  if (!NewComgrHotswapApiAvailable()) return;
-  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "0";
-  LoadRecorder legacy_load;
-  const hsa_executable_t legacy_executable = MakeTestExecutable(0x502);
-
-  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-      legacy_executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
-      nullptr, MakeLoadCallbacks(&legacy_load));
-
-  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
-  ASSERT_EQ(legacy_load.calls.size(), 1u);
-  ASSERT_EQ(legacy_load.calls[0].path, LoadPath::kRewritten);
-  ASSERT_NE(legacy_load.calls[0].code_object,
-            static_cast<const void*>(kGfx1250MinCo));
-  ASSERT_GT(legacy_load.calls[0].code_object_size, 0u);
-  const std::vector<unsigned char> legacy_code_object =
-      CopyLoadedCodeObject(legacy_load.calls[0]);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
-          legacy_executable),
-      1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(legacy_executable);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
-          legacy_executable),
-      0u);
-
-  ResetRuntimeTestEnv();
-  LoadRecorder entry_load;
-  const hsa_executable_t entry_executable = MakeTestExecutable(0x503);
-
-  const hsa_status_t entry_status =
-      rocr::hotswap::LoadAgentCodeObjectWithHotswap(
-          entry_executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr,
-          nullptr, MakeLoadCallbacks(&entry_load));
-
-  EXPECT_EQ(entry_status, HSA_STATUS_SUCCESS);
-  ASSERT_EQ(entry_load.calls.size(), 1u);
-  EXPECT_EQ(entry_load.calls[0].path, LoadPath::kRewritten);
-  EXPECT_NE(entry_load.calls[0].code_object,
-            static_cast<const void*>(kGfx1250MinCo));
-  EXPECT_GT(entry_load.calls[0].code_object_size, 0u);
-  EXPECT_TRUE(
-      LoadedCodeObjectDiffersFrom(entry_load.calls[0], legacy_code_object));
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
-          entry_executable),
-      1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(entry_executable);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(
-          entry_executable),
-      0u);
-}
-
-TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToEntryTrampolines) {
-  ResetRuntimeTestEnv();
-  if (!NewComgrHotswapApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   LoadRecorder load;
   const hsa_executable_t executable = MakeTestExecutable(0x504);
@@ -520,11 +449,8 @@ TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToEntryTrampolines) {
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   ASSERT_EQ(load.calls.size(), 1u);
-  EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
-  EXPECT_EQ(
-      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
-
-  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
+  EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_EQ(
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }

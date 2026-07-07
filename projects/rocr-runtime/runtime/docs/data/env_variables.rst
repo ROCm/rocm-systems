@@ -106,10 +106,10 @@
         | Any other non-empty value: Enable HotSwap diagnostic logging.
 
     * - | ``AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES``
-        | Controls whether ROCr requests COMGR entry-trampoline HotSwap rewriting for gfx12.5 targets.
-      - ``1``
-      - | Unset or any non-empty value except false-like values: Enable entry-trampoline rewrites for gfx125* and ``gfx12-5-generic`` targets.
-        | Empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable entry-trampoline rewrites.
+        | Controls whether ROCr requests COMGR entry-trampoline HotSwap rewriting for gfx12.5 targets. Disabled by default.
+      - ``0``
+      - | ``1``, ``true``, ``on``, ``yes``, or any other truthy value: Enable entry-trampoline rewrites for gfx125* and ``gfx12-5-generic`` targets.
+        | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable entry-trampoline rewrites.
 
     * - | ``HSA_ENABLE_DXG_DETECTION``
         | Controls detection of the DXG driver (/dev/dxg) on WSL2.

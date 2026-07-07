@@ -65,10 +65,14 @@ struct CodeObjectView {
   std::string uri;
 };
 
-inline constexpr bool kDefaultGfx12_5EntryTrampolinesEnabled = true;
+// Entry-trampoline hotswap rewriting for gfx12.5 targets (the generic
+// gfx12.5 rewrite path and the gfx1250 B0->A0 retarget) is opt-in: disabled
+// by default and enabled only when the caller sets
+// AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES to a truthy value.
+inline constexpr bool kDefaultEntryTrampolinesEnabled = false;
 
 struct RewriteOptions {
-  bool gfx12_5_rewrite_enabled = kDefaultGfx12_5EntryTrampolinesEnabled;
+  bool entry_trampolines_enabled = kDefaultEntryTrampolinesEnabled;
 };
 
 struct RewriteDecision {
