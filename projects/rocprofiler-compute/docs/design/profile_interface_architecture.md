@@ -291,8 +291,7 @@ Analyze callers never branch on storage format, construct file paths, or read
 > The diagrams show only the PMC counter data path which is all this boundary
 > moves. A workload directory contains many other files (`roofline.csv`, traces,
 > `sysinfo.csv`, `profiling_config.yaml`, perfmon configs, and derived analyze
-> outputs). They are deliberately left unchanged here you may see
-> [Data Ownership](#data-ownership).
+> outputs) which are deliberately left unchanged here as they are either untouched by this abstraction or addressed in future phases.
 
 ## Phase C: Backend Execution
 
