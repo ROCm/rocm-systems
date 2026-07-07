@@ -41,7 +41,9 @@ except ImportError as e:
     print(
         "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
     )
-    sys.exit(1)
+    from amdsmi_cli_exceptions import AmdSmiExitCode
+
+    sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
@@ -181,18 +183,31 @@ def amdsmi_cli_init():
     init_thread.join(timeout=_INIT_TIMEOUT_SEC)
 
     if init_thread.is_alive():
+        # The library call hung and returned no status, so this timeout is the
+        # CLI's own watchdog decision. Exit with a CLI code, not a borrowed
+        # library status, so the exit code unambiguously means "CLI gave up".
+        from amdsmi_cli_exceptions import AmdSmiExitCode
+
         logging.error(
             "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
             _INIT_TIMEOUT_SEC,
         )
-        sys.exit(2)
+        sys.exit(int(AmdSmiExitCode.INIT_TIMEOUT))
 
     if isinstance(
         init_result["exception"],
         (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
     ):
         e = init_result["exception"]
-        # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
+        # "Drivers not loaded" is a single CLI conclusion reached two ways:
+        #   1. the library returned NOT_INIT / DRIVER_NOT_LOADED, or
+        #   2. no drivers were detected up front (init_flag == 0), in which case
+        #      amdsmi_init() raises AmdSmiParameterException with err_code=None
+        #      (not a library status), so it won't match the tuple below -- the
+        #      init_flag == 0 check is what catches that case.
+        # Since the CLI owns this normalization (it also collapses NOT_INIT and
+        # DRIVER_NOT_LOADED into one answer), exit with a CLI code rather than a
+        # borrowed library status.
         if (
             e.err_code
             in (
@@ -201,10 +216,12 @@ def amdsmi_cli_init():
             )
             or init_flag == 0
         ):
+            from amdsmi_cli_exceptions import AmdSmiExitCode
+
             logging.error(
                 "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
             )
-            sys.exit(-1)
+            sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
         else:
             raise e
     elif init_result["exception"] is not None:
