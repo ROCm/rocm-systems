@@ -4,13 +4,12 @@
 #include "rocjitsu/analysis/def_use_chain.h"
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 
 namespace rocjitsu {
 
 namespace {
-
-constexpr int MaxLaneWidth = 32;
 
 [[nodiscard]] bool is_exec_masked_def(RegisterRef ref) {
   return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
@@ -21,7 +20,7 @@ constexpr int MaxLaneWidth = 32;
 // lowest lane and leaves the remaining bits intact, so the instruction
 // read-modify-writes that register rather than fully redefining it.
 [[nodiscard]] bool is_partial_def(int size_bits) {
-  return size_bits > 0 && size_bits < MaxLaneWidth;
+  return size_bits > 0 && size_bits < REGISTER_GRANULARITY;
 }
 
 void add_def(InstDefUse &du, RegisterRef ref, int size_bits) {
