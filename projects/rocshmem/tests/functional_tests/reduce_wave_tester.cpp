@@ -79,9 +79,9 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
   int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
   int wf_id = t_id / wf_size;
-  int wf_per_wg = hipBlockDim_x / wf_size;
+  int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
 
-  int flat_wf_id = wg_id * wf_per_wg + wf_id;
+  int flat_wf_id = wf_id + wg_offset;
 
   __shared__ rocshmem_ctx_t ctx;
 
@@ -89,21 +89,21 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
 
   __syncthreads();
 
+  int num_elems = size / sizeof(T1);
+  r_buf += flat_wf_id * num_elems;
+  s_buf += flat_wf_id * num_elems;
+
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip && hipThreadIdx_x == 0) {
+    if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    if (wf_id == 0) {
-      wave_reduce<T1, T2>(ctx, teams[flat_wf_id],
-                             r_buf + flat_wf_id * size,
-                             s_buf + flat_wf_id * size, size);
-    }
+    wave_reduce<T1, T2>(ctx, teams[flat_wf_id], r_buf, s_buf, num_elems);
     __syncthreads();
   }
 
   __syncthreads();
 
-  if (hipThreadIdx_x == 0) {
+  if (t_id % wf_size == 0) {
     end_time[flat_wf_id] = wall_clock64();
   }
 
@@ -121,16 +121,20 @@ ReduceWaveTester<T1, T2>::ReduceWaveTester(
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
-  s_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1), args.local_buf_type);
-  r_buf = (T1 *)alloc_test_buffer(max_msg_size * sizeof(T1));
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs * num_warps;
+  int buff_size = total_elems * sizeof(T1);
+
+  s_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
+  r_buf = (T1 *)alloc_test_buffer(buff_size);
 
   char *value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
   }
 
-  if (num_teams < num_warps){
-    printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
+  if (num_teams < args.num_wgs * num_warps){
+    printf(
+      "not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
     abort();
   }
 
@@ -170,8 +174,8 @@ void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                      start_time, end_time, s_buf, r_buf, size, _type,
                      _shmem_context, wf_size, reduce_wave_world_dup);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop * gridSize.x;
+  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_timed_msgs = loop * gridSize.x * num_warps;
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -183,15 +187,17 @@ void ReduceWaveTester<T1, T2>::postLaunchKernel() {
 
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::resetBuffers([[maybe_unused]] size_t size) {
-  for (uint64_t i = 0; i < max_msg_size; i++) {
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs * num_warps;
+  for (int i = 0; i < total_elems; i++) {
     init_buf(s_buf[i], r_buf[i]);
   }
 }
 
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::verifyResults(size_t size) {
-  for (uint64_t i = 0; i < size; i++) {
-    auto r = verify_buf(r_buf[i], (T1)n_pes);
+  int num_elems = size / sizeof(T1);
+  for (uint64_t i = 0; i < num_elems; i++) {
+    auto r = verify_buf((T1)r_buf[i], (T1)n_pes);
     if (r.first == false) {
       fprintf(stderr, "Data validation error at idx %lu\n", i);
       fprintf(stderr, "%s.\n", r.second.c_str());

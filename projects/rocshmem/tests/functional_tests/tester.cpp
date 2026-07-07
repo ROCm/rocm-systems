@@ -108,6 +108,7 @@ Tester::Tester(TesterArguments args) : args(args) {
     case BroadcastWaveTestType:
     case AllToAllWaveTestType:
     case FcollectWaveTestType:
+    case ReduceWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -144,6 +145,7 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WAVEPutNBITestType:
       case WAVEPutSignalTestType:
       case WAVEPutSignalNBITestType:
+      case ReduceWaveTestType:
         max_msg_size = args.max_volume_size / args.num_wgs / num_warps;
         break;
       case WGGetTestType:
@@ -158,7 +160,6 @@ Tester::Tester(TesterArguments args) : args(args) {
       case BroadcastWaveTestType:
       case TeamReductionTestType:
       case TeamReduceScatterTestType:
-      case ReduceWaveTestType:
       case TeamFCollectTestType:
       case FcollectWaveTestType:
       case CollectTestType:
