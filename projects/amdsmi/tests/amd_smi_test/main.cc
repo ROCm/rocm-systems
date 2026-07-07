@@ -222,29 +222,35 @@ TEST(amdsmitstReadWrite, TestPowerReadWrite) {
 // New comprehensive power profile tests
 TEST(amdsmitstReadWrite, TestAllAvailableProfiles) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
-  RunCustomTestProlog(&tst);
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
   tst.TestAllAvailableProfiles();
-  RunCustomTestEpilog(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestSequentialProfileSwitching) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
-  RunCustomTestProlog(&tst);
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
   tst.TestSequentialProfileSwitching();
-  RunCustomTestEpilog(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestInvalidProfileHandling) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
-  RunCustomTestProlog(&tst);
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
   tst.TestInvalidProfileHandling();
-  RunCustomTestEpilog(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {

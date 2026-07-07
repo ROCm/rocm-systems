@@ -46,6 +46,15 @@ class TestPowerReadWrite : public TestBase {
 
   // @Brief: Display information about what this test does
   virtual void DisplayTestInfo(void);
+
+  // @Brief: Test all available power profiles
+  void TestAllAvailableProfiles();
+
+  // @Brief: Test sequential power profile switching
+  void TestSequentialProfileSwitching();
+
+  // @Brief: Test invalid profile handling
+  void TestInvalidProfileHandling();
 };
 
 #endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_READ_WRITE_H_
