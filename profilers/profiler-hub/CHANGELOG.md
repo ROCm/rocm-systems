@@ -20,6 +20,10 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- Windows/MSVC build support (Visual Studio 2022 or 2026 Build Tools).
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

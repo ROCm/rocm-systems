@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <cstdio>
+#include <filesystem>
 #include <string>
-#include <sys/stat.h>
 namespace utility
 {
 
@@ -37,10 +38,11 @@ format_file_size(size_t _bytes)
 inline size_t
 get_file_size(const std::string& _path)
 {
-    struct stat st;
-    if(stat(_path.c_str(), &st) == 0)
+    std::error_code ec;
+    const auto      size = std::filesystem::file_size(_path, ec);
+    if(!ec)
     {
-        return static_cast<size_t>(st.st_size);
+        return static_cast<size_t>(size);
     }
     return 0;
 }

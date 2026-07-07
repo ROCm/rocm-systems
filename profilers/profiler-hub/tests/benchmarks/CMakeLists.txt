@@ -13,12 +13,17 @@ target_link_libraries(
         profiler-hub
         benchmark::benchmark
         benchmark::benchmark_main
-        pthread
         spdlog::spdlog
         profiler-hub-sqlite3
 )
+
+if(NOT WIN32)
+    target_link_libraries(profiler-hub_benchmarks PRIVATE pthread)
+endif()
 
 target_include_directories(
     profiler-hub_benchmarks
     PRIVATE ${CMAKE_SOURCE_DIR}/source ${CMAKE_SOURCE_DIR}/source/common
 )
+
+target_compile_features(profiler-hub_benchmarks PRIVATE cxx_std_20)
