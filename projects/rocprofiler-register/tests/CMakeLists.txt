@@ -133,7 +133,7 @@ function(rocp_register_test_executable _NAME)
     cmake_parse_arguments(
         RRTE
         "" # options
-        "SECURE;${_SV_ARGS}" # single value args
+        "SECURE;${_SV_ARGS};LOG_LEVEL" # single value args
         "SOURCES;LIBRARIES" # multiple value args
         ${ARGN})
 
@@ -148,6 +148,9 @@ function(rocp_register_test_executable _NAME)
             set(_LABELS "secure")
         else()
             set(_LABELS "insecure")
+        endif()
+        if(RRTE_LOG_LEVEL)
+            list(APPEND _ENV "ROCPROFILER_REGISTER_LOG_LEVEL=${RRTE_LOG_LEVEL}")
         endif()
         add_test(
             NAME ${_TEST_NAME}
@@ -241,7 +244,7 @@ rocp_register_test_executable(
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
-    )
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-roctx-tool
@@ -353,7 +356,7 @@ rocp_register_test_executable(
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..push. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n.roctx.cpp..pop. thread-[0-3]\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 12\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..push. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n.rocprofiler.cpp..pop. thread-[0-3]\n"
-    )
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-roctx-mt-rocp
@@ -412,7 +415,7 @@ rocp_register_test_executable(
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.hsa-runtime.cpp. hsa_init\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libhsa-runtime64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n"
-    )
+    LOG_LEVEL "fatal")
 
 # 41
 rocp_register_test_executable(
@@ -471,7 +474,7 @@ rocp_register_test_executable(
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.hsa-runtime.cpp. hsa_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n.amdhip.cpp. hip_init\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libamdhip64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 6\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. hip_init\n"
-    )
+    LOG_LEVEL "fatal")
 
 rocp_register_test_executable(
     test-amdhip-ctor-mt-rocp
