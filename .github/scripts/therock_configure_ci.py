@@ -169,6 +169,48 @@ def check_rccl_changes(modified_paths: Optional[Iterable[str]]) -> bool:
     return any(path.startswith("projects/rccl/") for path in modified_paths)
 
 
+def check_hip_rocr_changes(modified_paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if any HIP or ROCR files were modified (excluding docs).
+
+    Also returns true if TheRock CI workflow files are modified.
+    """
+    if modified_paths is None:
+        return False
+
+    hip_rocr_prefixes = [
+        "projects/clr/",
+        "projects/hip/",
+        "projects/hip-tests/",
+        "projects/rocr-runtime/",
+    ]
+
+    # Patterns to ignore (docs, etc.)
+    ignore_patterns = [
+        "*.md",
+        "*/docs/*",
+        "*/.gitignore",
+        "*/README*",
+        "*/CONTRIBUTING*",
+        "*/LICENSE*",
+    ]
+
+    def is_ignored(path: str) -> bool:
+        return any(fnmatch.fnmatch(path, pattern) for pattern in ignore_patterns)
+
+    def is_hip_rocr_code(path: str) -> bool:
+        return any(path.startswith(prefix) for prefix in hip_rocr_prefixes)
+
+    # Check for CI workflow changes
+    if check_for_workflow_file_related_to_ci(modified_paths):
+        return True
+
+    # Check for HIP/ROCR code changes (excluding ignored files)
+    return any(
+        is_hip_rocr_code(path) and not is_ignored(path)
+        for path in modified_paths
+    )
+
+
 def is_rccl_path(path: str) -> bool:
     """Returns true if path is under projects/rccl/."""
     return path.startswith("projects/rccl/")
@@ -403,6 +445,19 @@ def run(args):
                 outputs["run_linux_rccl_ci"] = "true"
             else:
                 outputs["run_linux_rccl_ci"] = "false"
+
+    # Determine if MI455 CI should run (only for PRs on Linux when HIP/ROCR changes)
+    if args.get("platform") == "linux":
+        if args.get("is_pull_request"):
+            base_ref = args.get("base_ref")
+            modified_paths = get_modified_paths(base_ref)
+            if check_hip_rocr_changes(modified_paths):
+                outputs["run_mi455_test"] = "true"
+            else:
+                outputs["run_mi455_test"] = "false"
+        else:
+            # MI455 CI only runs on PRs, not push/nightly/workflow_dispatch
+            outputs["run_mi455_test"] = "false"
 
     set_github_output(outputs)
     return outputs
