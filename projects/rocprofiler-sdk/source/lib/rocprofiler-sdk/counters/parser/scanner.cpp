@@ -470,7 +470,7 @@ int        yy_flex_debug = 0;
 char* yytext;
 #line 1 "scanner.l"
 #line 4 "scanner.l"
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include "parser.h"
 #include "raw_ast.hpp"

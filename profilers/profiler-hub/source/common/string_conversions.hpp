@@ -4,7 +4,7 @@
 
 #include "profiler-hub/writer_types.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <optional>
 #include <string>

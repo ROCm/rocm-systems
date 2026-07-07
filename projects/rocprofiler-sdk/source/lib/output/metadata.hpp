@@ -45,7 +45,7 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <map>

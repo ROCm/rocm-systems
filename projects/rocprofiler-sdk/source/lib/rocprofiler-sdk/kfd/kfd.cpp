@@ -40,7 +40,7 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <sys/poll.h>
 #include <unistd.h>

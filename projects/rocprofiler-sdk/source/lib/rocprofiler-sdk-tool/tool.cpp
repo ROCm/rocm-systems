@@ -81,7 +81,7 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <time.h>

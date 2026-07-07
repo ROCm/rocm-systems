@@ -25,7 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <hsa/hsa_ext_amd.h>
 
 #define CHECK_HSA(fn, message)                                                                     \
