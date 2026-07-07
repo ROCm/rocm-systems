@@ -22,6 +22,11 @@
 #endif
 
 namespace cooperative_groups {
+  class thread_group;
+namespace impl {
+  template <typename TyGroup>
+__CG_QUALIFIER__ unsigned long long groupMask(const TyGroup&);
+}
 
 /** \brief The base type of all cooperative group types.
  *
@@ -32,12 +37,13 @@ namespace cooperative_groups {
  *         on Microsoft Windows.
  */
 class thread_group {
+  template <typename TyGroup>
+  friend __CG_QUALIFIER__ unsigned long long cooperative_groups::impl::groupMask(const TyGroup&);
  protected:
   __hip_uint32_t _type;         //! Type of the thread_group.
   __hip_uint32_t _num_threads;  //! Total number of threads in the thread_group.
   __hip_uint64_t _mask;         //! Lanemask for coalesced and tiled partitioned group types,
                                 //! LSB represents lane 0, and MSB represents lane 63
-
   //! Construct a thread group, and set thread group type and other essential
   //! thread group properties. This generic thread group is directly constructed
   //! only when the group is supposed to contain only the calling thread
@@ -387,6 +393,7 @@ class coalesced_group : public thread_group {
   friend __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
                                                           unsigned int tile_size);
   friend __CG_QUALIFIER__ coalesced_group binary_partition(const coalesced_group& cgrp, bool pred);
+
   template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
@@ -654,7 +661,10 @@ class coalesced_group : public thread_group {
  *  on Microsoft Windows.
  */
 __CG_QUALIFIER__ coalesced_group coalesced_threads() {
-  return cooperative_groups::coalesced_group(__builtin_amdgcn_read_exec());
+  return cooperative_groups::coalesced_group(
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_read_exec)
+          ? __builtin_amdgcn_read_exec()
+          : 0);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -749,7 +759,8 @@ __CG_QUALIFIER__ void thread_group::sync() const {
     }
   }
 #if __has_builtin(__builtin_amdgcn_s_wait_asynccnt)
-  __builtin_amdgcn_s_wait_asynccnt(0);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_s_wait_asynccnt))
+    __builtin_amdgcn_s_wait_asynccnt(0);
 #endif
 }
 
@@ -1044,6 +1055,36 @@ template <unsigned int size, class ParentCGTy> class thread_block_tile_internal
   __CG_QUALIFIER__ thread_block_tile_internal(const thread_block& g)
       : thread_block_tile_type<size, ParentCGTy>() {}
 };
+
+// becomes to std::true_type if the group is tiled and has a size known at compile time
+template <class TyGroup>
+struct isTiledGroup : __hip_internal::false_type {
+};
+
+template <unsigned int N, class ParentCGTy>
+struct isTiledGroup<cooperative_groups::thread_block_tile<N, ParentCGTy>>
+  : __hip_internal::integral_constant<bool,
+        (N == 1  || N == 2  || N == 4  || N == 8 ||
+         N == 16 || N == 32 || N == 64)> {
+};
+
+// returns the size of tile_group provided it is known at compile time
+template <class TyGroup>
+struct tiledGroupSize : __hip_internal::integral_constant<int, 0> {
+
+};
+template <unsigned int N, class ParentCGTy>
+struct tiledGroupSize<cooperative_groups::thread_block_tile<N, ParentCGTy>>
+  : __hip_internal::integral_constant<int, N> {
+};
+
+template <class TyGroup>
+struct isCoalescedGroup : __hip_internal::false_type {
+};
+
+template <>
+struct isCoalescedGroup<cooperative_groups::coalesced_group> : __hip_internal::true_type {
+};
 }  // namespace impl
 
 /** \brief    Group type - thread_block_tile
@@ -1287,6 +1328,7 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
   }
 }
 
+
 template <class T>
 struct plus {
   __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
@@ -1334,6 +1376,153 @@ struct bit_or {
     return lhs | rhs;
   }
 };
+
+namespace impl {
+// when instantiated with two parameter types, allows to know if there are the same, regardless
+// of const/volatile qualifiers
+template <typename T, typename U>
+using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
+                                                   typename __hip_internal::remove_cvref<U>>;
+
+template <class T, class Op>
+struct isArithmeticFunc : __hip_internal::false_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::plus<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::less<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isArithmeticFunc<T, cooperative_groups::greater<T>> : __hip_internal::true_type {
+};
+
+template <class T, class Op>
+struct isBooleanFunc : __hip_internal::false_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_and<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_or<T>> : __hip_internal::true_type {
+};
+
+template <class T>
+struct isBooleanFunc<T, cooperative_groups::bit_xor<T>> : __hip_internal::true_type {
+};
+
+// this is the value to return in exclusive_scan, for lane 0
+template <class T, class Op>
+struct CGIdentity {
+  __CG_QUALIFIER__ T operator()()
+  {
+    T result = {};
+    return result;
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::bit_and<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    T result {};
+    return ~result;
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::less<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    // CUDA would return 0 in this case. But in our case we mimic what __ockl_wfscan_*
+    // would do
+    return __hip_internal::NumericLimits<T>::maximum();
+  }
+};
+
+template <class T>
+struct CGIdentity<T, cooperative_groups::greater<T>> {
+  __CG_QUALIFIER__ T operator()()
+  {
+    return __hip_internal::NumericLimits<T>::minimum();
+  }
+};
+
+// calculates the necessary warp mask for cooperative groups that support reduce(), or
+// inclusive/exlcusive_scan()
+template <typename TyGroup>
+__CG_QUALIFIER__ unsigned long long groupMask(const TyGroup& group)
+{
+  unsigned long long mask = ~0ull;
+
+  if constexpr (impl::isCoalescedGroup<TyGroup>::value) {
+    mask = group.coalesced_info.member_mask;
+  } else {
+    // we cannot simply just use the __activemask() here, because more than one tile could have active
+    // threads at a time; we need to mask away the threads that not part of this tile first
+    mask >>= (64 - group.num_threads());
+    mask <<= (((internal::workgroup::thread_rank() % warpSize) / group.num_threads()) * group.num_threads());
+  }
+
+  return mask;
+}
+
+// backward permute implementation for cooperative group operations, i.e.
+// for up to 32 bytes (__hip_ds_bpermute() can only do 4 bytes at a time,
+// this function calls it (or the floating point version) multiple times to
+// implement it for bigger sizes
+template <bool isPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<NumPermutes == 0, int>::type = 0>
+__CG_QUALIFIER__ void bPermute(T&, T, int from)
+{
+}
+
+// trivial case: the type fits within the permute size
+template <bool IsPrimitiveType, class T, size_t NumPermutes, typename __hip_internal::enable_if<IsPrimitiveType && NumPermutes == 1, int>::type = 0>
+__CG_QUALIFIER__ void bPermute(T& permuteResult, T result, int from)
+{
+  auto backwardPermute = [](int index, T arg) {
+      if constexpr (__hip_internal::is_floating_point<T>::value &&
+                    sizeof(T) <= 4) {
+        return __hip_ds_bpermutef(index, arg);
+      } else {
+        return __hip_ds_bpermute(index, arg);
+      }
+    };
+
+  if constexpr (sizeof(T) == 2) {
+    union {
+      int i;
+      T f;
+    } tmp;
+
+    tmp.f = result;
+    tmp.i = __hip_ds_bpermute(from << 2, tmp.i);
+    permuteResult = tmp.f;
+  } else if constexpr (sizeof(T) == 4) {
+    auto bPermuteResult = backwardPermute(from << 2, result);
+    __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
+  } else {
+    static_assert(__hip_internal::is_void<T>::value, "Unexpected type");
+  }
+}
+
+// Overload when we need multiple ds_permute, because one is not enough
+template <bool IsPrimitiveType, class T, size_t NumPermutes>
+__CG_QUALIFIER__ void bPermute(T permuteResult[NumPermutes], T result[NumPermutes], int from)
+{
+  // ds_bpermute only deals with 32-bit sizes, so for other sizes
+  // we need to call the permute multiple times
+  for (int i = 0; i < NumPermutes; i++) {
+    permuteResult[i] = __hip_ds_bpermute(from << 2, result[i]);
+  }
+}
+
+}  // namespace impl
 #endif
 
 /**

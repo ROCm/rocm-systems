@@ -93,7 +93,7 @@ include(utils)
 set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # Provide git to utilities
 find_program(GIT NAMES git)
-get_version_from_tag("1.3.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.3.1" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${VERSION_STRING}")
 
@@ -163,7 +163,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.67.1 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.78.1 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)

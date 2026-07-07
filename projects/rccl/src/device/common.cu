@@ -34,3 +34,9 @@ __device__ void ncclDevFunc_Nop();
 #else
 __device__ __attribute__((noinline)) void ncclDevFunc_Nop();
 #endif
+
+// [RCCL] Body for the no-op device func. RCCL's common.cu declares ncclDevFunc_Nop
+// above (mode-aware attributes); generate.py excludes "Nop" from the generated
+// per-impl/specialized files, so the definition must live here (as in upstream and
+// the v2.29.7-1 base). The generated ncclDevFuncTable references this symbol.
+__device__ void ncclDevFunc_Nop() {}

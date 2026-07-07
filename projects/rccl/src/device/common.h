@@ -261,7 +261,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     // here which is the per batch maximum.
     if (tid < nPacks) {
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
-      ulong2 tmp;
+      ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
       // relying on the compiler to use "ld.param" in the first one. The parameter
       // space is not generically addressable, so any attempt to load through
@@ -282,15 +282,15 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
       // memcpy(dst, src, n);
       if (ncclShmem.args.workStorageType == ncclDevWorkStorageTypeArgs) {
         char* src = (char*)args + (batch.offsetBase + srcWork*workSize + packInWork*16);
-        tmp = *(ulong2*)src; // becomes ld.param.v2.u64
+        tmp = *(ulonglong2*)src; // becomes ld.param.v2.u64
       }
       if (ncclShmem.args.workStorageType != ncclDevWorkStorageTypeArgs) {
         char* src = (char*)ncclShmem.args.workBuf + ((batch.offsetBase + srcWork*workSize + packInWork*16) & ncclShmem.args.workMask);
-        tmp = *(ulong2*)src; // becomes ld.v2.u64
+        tmp = *(ulonglong2*)src; // becomes ld.v2.u64
       }
       char* dst = ncclShmem.workStorage;
       dst += (workCursor + dstWork)*workSize + packInWork*16;
-      *(ulong2*)dst = tmp;
+      *(ulonglong2*)dst = tmp;
     }
     workCursor += nWorks;
 
@@ -301,7 +301,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     } else {
       if (tid == 0) {
         ncclShmem.batchIx = batchIx;
-        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : batchIx + batch.nextJump;
+        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : (int)(batchIx + batch.nextJump);
         ncclShmem.workType = (enum ncclDevWorkType)batch.workType;
         ncclShmem.nWorks = workCursor;
         ncclShmem.funcId = batch.funcId;

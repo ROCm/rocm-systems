@@ -74,8 +74,8 @@ main(int argc, char *argv[])
             fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
             return EXIT_FAILURE;
         }
-        file_size  = (size_t)statbuf.st_size;
-        block_size = (size_t)statbuf.st_blksize;
+        file_size  = static_cast<size_t>(statbuf.st_size);
+        block_size = static_cast<size_t>(statbuf.st_blksize);
         if (!is_power_of_two(block_size)) {
             fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
             return EXIT_FAILURE;
@@ -148,9 +148,9 @@ main(int argc, char *argv[])
         while (bytes_read < alloc_size) {
             const size_t remaining  = alloc_size - bytes_read;
             const size_t this_chunk = (chunk_size < remaining) ? chunk_size : remaining;
-            void        *dst        = (char *)devbuf + bytes_read;
+            void        *dst        = static_cast<char *>(devbuf) + bytes_read;
 
-            nbytes = hipFileRead(in_handle, dst, this_chunk, (hoff_t)bytes_read, 0);
+            nbytes = hipFileRead(in_handle, dst, this_chunk, static_cast<hoff_t>(bytes_read), 0);
             if (nbytes < 0) {
                 fprintf(stderr, "Could not read from %s (%zd) (%s)\n", in_path, nbytes,
                         IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
@@ -158,7 +158,7 @@ main(int argc, char *argv[])
             }
             if (nbytes == 0)
                 break; /* EOF — file ended before alloc_size; OK */
-            bytes_read += (size_t)nbytes;
+            bytes_read += static_cast<size_t>(nbytes);
         }
 
         if (bytes_read < payload_size) {
@@ -183,7 +183,7 @@ main(int argc, char *argv[])
     }
 
     /* 6. ftruncate to exact size + hash verify */
-    if (-1 == ftruncate(out_fd, (off_t)payload_size)) {
+    if (-1 == ftruncate(out_fd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", out_path, strerror(errno));
         goto close_out;
     }

@@ -39,22 +39,21 @@ command -v docker &>/dev/null || {
 DOCKER_BUILDKIT=$(docker buildx version >/dev/null 2>&1 && echo 1 || echo 0)
 export DOCKER_BUILDKIT
 
+IMAGE_REF=""
+
 build_docker_image () {
     DOCKER_DIR=$(cd "$DIR/rust-interface" && pwd -P)
     DOCKERFILE="$DOCKER_DIR/Dockerfile"
 
-    DOCKERFILE_TIME=$(git log -1 --format=%at -- "$DOCKERFILE" 2>/dev/null || echo 0)
-    DOCKERFILE_TIME="${DOCKERFILE_TIME:-0}"
-    CREATED=$(docker inspect "$DOCKER_NAME" --format '{{.Created}}' 2>/dev/null || echo "")
-    if [ -n "$CREATED" ]; then
-        IMAGE_TIME=$(date +%s -d "$CREATED")
-    else
-        IMAGE_TIME=0
-    fi
+    # Tag the image by Dockerfile hash; rebuild when no image matches the current one.
+    DOCKERFILE_HASH=$(sha256sum "$DOCKERFILE" | cut -c1-12)
+    IMAGE_REF="$DOCKER_NAME:$DOCKERFILE_HASH"
 
-    # Build if Dockerfile is newer than image (or not yet tracked by git)
-    if [ "$DOCKERFILE_TIME" -eq 0 ] || [ "$DOCKERFILE_TIME" -gt "$IMAGE_TIME" ]; then
-        docker build "$DOCKER_DIR" -f "$DOCKERFILE" -t "$DOCKER_NAME":latest
+    if docker image inspect "$IMAGE_REF" >/dev/null 2>&1; then
+        echo "Reusing up-to-date image: $IMAGE_REF"
+    else
+        echo "Dockerfile changed or image missing -- (re)building $IMAGE_REF"
+        docker build "$DOCKER_DIR" -f "$DOCKERFILE" -t "$IMAGE_REF" -t "$DOCKER_NAME":latest
     fi
 }
 
@@ -68,8 +67,9 @@ if [ -e "${DIR}/build/CMakeCache.txt" ]; then
     echo "ENABLE_ESMI_LIB: [$ENABLE_ESMI_LIB]"
 fi
 
-DOCKER_TTY_FLAGS=$( [ -t 0 ] && echo "-ti" || echo "-i" )
-docker run --rm $DOCKER_TTY_FLAGS --volume "$DIR":/src:rw "$DOCKER_NAME":latest bash -c "
+DOCKER_TTY_FLAGS=(-i)
+if [ -t 0 ]; then DOCKER_TTY_FLAGS=(-t -i); fi
+docker run --rm "${DOCKER_TTY_FLAGS[@]}" --volume "$DIR":/src:rw "$IMAGE_REF" bash -c "
 cp -r /src /tmp/src \
     && cd /tmp/src \
     && rm -rf build .cache \

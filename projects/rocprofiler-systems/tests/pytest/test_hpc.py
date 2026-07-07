@@ -147,7 +147,6 @@ class TestJacobi(RocprofsysTest):
     def test_roctx(self, mode, hpc_openmp_environment):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
 
         result = self.run_test(
@@ -237,7 +236,6 @@ class TestMatrixExponential(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_USE_OMPT"] = "ON"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
 
         result = self.run_test(
             mode, target="matrix-exponential-streams-sync-hip", env=env

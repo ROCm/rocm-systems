@@ -21,6 +21,9 @@ rocprofiler-sdk:
             - gfx906
             - gfx908
             - gfx90a
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: 
             400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
     - name: AggSysCycles
@@ -105,6 +108,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 25
     - name: CPC_CPC_STAT_IDLE
@@ -119,6 +125,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 26
     - name: CPC_CPC_STAT_STALL
@@ -133,6 +142,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 27
     - name: CPC_CPC_TCIU_BUSY
@@ -147,6 +159,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 28
     - name: CPC_CPC_TCIU_IDLE
@@ -161,6 +176,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 29
     - name: CPC_CPC_UTCL2IU_BUSY
@@ -175,6 +193,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 30
     - name: CPC_CPC_UTCL2IU_IDLE
@@ -189,6 +210,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 31
     - name: CPC_CPC_UTCL2IU_STALL
@@ -202,6 +226,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 32
     - name: CPC_ME1_BUSY_FOR_PACKET_DECODE
@@ -216,6 +243,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 13
     - name: CPC_ME1_DC0_SPI_BUSY
@@ -230,6 +260,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 33
     - name: CPC_UTCL1_STALL_ON_TRANSLATION
@@ -243,6 +276,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 24
     - name: CPC_ALWAYS_COUNT
@@ -251,6 +287,9 @@ rocprofiler-sdk:
       definitions:
         - architectures:
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: CPC
           event: 0
     - name: CPC_ADC_VALID_CHUNK_NOT_AVAIL
@@ -779,6 +818,9 @@ rocprofiler-sdk:
             - gfx906
             - gfx908
             - gfx90a
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(SQ_INSTS_GDS,sum)/reduce(SQ_WAVES,sum)
     - name: GDS_UTIL
       description: Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS) is busy.
@@ -1464,6 +1506,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 30
     - name: GRBM_CPF_BUSY
@@ -1477,6 +1522,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 31
     - name: GRBM_CP_BUSY
@@ -1495,6 +1543,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 3
     - name: GRBM_EA_BUSY
@@ -1513,6 +1564,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 35
     - name: GRBM_GDS_BUSY
@@ -1525,6 +1579,9 @@ rocprofiler-sdk:
             - gfx1030
             - gfx1031
             - gfx1032
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 25
     - name: GRBM_GL2CC_BUSY
@@ -1588,6 +1645,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 11
     - name: GRBM_TA_BUSY
@@ -1606,6 +1666,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 13
     - name: GRBM_TC_BUSY
@@ -1632,6 +1695,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: GRBM
           event: 34
     - name: GRBMA_COUNT
@@ -1802,6 +1868,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
     - name: LdsPipeIssueUtil
       description: 'Unit: percent'
@@ -2188,6 +2257,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 48
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 46
     - name: SPI_CSN_NUM_THREADGROUPS
       description: Number of threadgroups launched. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select
         source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL
@@ -2203,6 +2278,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 49
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 47
     - name: SPI_CSN_WAVE
       description: Number of waves. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, 
         DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, 
@@ -2218,6 +2299,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 52
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 50
     - name: SPI_CSN_WINDOW_VALID
       description: Clock count enabled by perfcounter_start event. Requires 
         SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; 
@@ -2234,6 +2321,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 47
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 45
     - name: SPI_RA_BAR_CU_FULL_CSN
       description: Sum of CU where BARRIER can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2247,6 +2340,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 123
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 179
     - name: SPI_RA_BULKY_CU_FULL_CSN
       description: Sum of CU where BULKY can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2260,6 +2359,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 125
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 181
     - name: SPI_RA_LDS_CU_FULL_CSN
       description: Sum of CU where LDS can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2273,6 +2378,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 120
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 174
     - name: SPI_RA_REQ_NO_ALLOC
       description: Arb cycles with requests but no allocation. Source is RA0
       properties: []
@@ -2288,6 +2399,9 @@ rocprofiler-sdk:
           event: 79
         - architectures:
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SPI
           event: 144
     - name: SPI_RA_REQ_NO_ALLOC_CSN
@@ -2303,6 +2417,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 85
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 149
     - name: SPI_RA_RES_STALL_CSN
       description: Arb cycles with CSn req and no CSn fits. Source is RA0
       properties: []
@@ -2316,6 +2436,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 91
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 154
     - name: SPI_RA_SGPR_SIMD_FULL_CSN
       description: Sum of SIMD where SGPR can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2342,6 +2468,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 127
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 183
     - name: SPI_RA_TMP_STALL_CSN
       description: Cycles where csn wants to req but does not fit in temp space.
       properties: []
@@ -2355,6 +2487,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 97
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 159
     - name: SPI_RA_VGPR_SIMD_FULL_CSN
       description: Sum of SIMD where VGPR can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2368,6 +2506,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 109
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 169
     - name: SPI_RA_WAVE_SIMD_FULL_CSN
       description: Sum of SIMD where WAVE can't take csn wave when !fits. Source is RA0
       properties: []
@@ -2381,6 +2525,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 103
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 164
     - name: SPI_RA_WVLIM_STALL_CSN
       description: Number of clocks csn is stalled due to WAVE LIMIT.
       properties: []
@@ -2394,6 +2544,12 @@ rocprofiler-sdk:
             - gfx950
           block: SPI
           event: 133
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 188
     - name: SPI_SWC_CSC_WR
       description: Number of clocks to write CSC waves to SGPRs (need to multiply this value by 4) 
         Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; 
@@ -2967,6 +3123,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 289
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 292
     - name: SQC_DCACHE_HITS
       description: Number of cache hits. (per-SQ, per-Bank, nondeterministic)
       properties: []
@@ -2980,6 +3142,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 291
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 294
     - name: SQC_DCACHE_INPUT_VALID_READYB
       description: Input stalled by SQC (per-SQ, nondeterministic, unwindowed)
       properties: []
@@ -2993,6 +3161,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 260
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 281
     - name: SQC_DCACHE_MISSES
       description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, 
         nondeterministic)
@@ -3007,6 +3181,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 292
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 295
     - name: SQC_DCACHE_MISSES_DUPLICATE
       description: Number of misses that were duplicates (access to a non-resident, miss pending 
         CL). (per-SQ, per-Bank, nondeterministic)
@@ -3021,6 +3201,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 293
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 296
     - name: SQC_DCACHE_REQ
       description: Number of requests (post-bank-serialization). (per-SQ, per-Bank)
       properties: []
@@ -3034,6 +3220,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 290
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 293
     - name: SQC_DCACHE_REQ_READ_1
       description: Number of constant cache 1 dw read requests. (per-SQ)
       properties: []
@@ -3047,6 +3239,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 323
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 306
     - name: SQC_DCACHE_REQ_READ_16
       description: Number of constant cache 16 dw read requests. (per-SQ)
       properties: []
@@ -3060,6 +3258,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 327
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 310
     - name: SQC_DCACHE_REQ_READ_2
       description: Number of constant cache 2 dw read requests. (per-SQ)
       properties: []
@@ -3073,6 +3277,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 324
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 307
     - name: SQC_DCACHE_REQ_READ_4
       description: Number of constant cache 4 dw read requests. (per-SQ)
       properties: []
@@ -3086,6 +3296,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 325
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 308
     - name: SQC_DCACHE_REQ_READ_8
       description: Number of constant cache 8 dw read requests. (per-SQ)
       properties: []
@@ -3099,6 +3315,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 326
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 309
     - name: SQC_ICACHE_BUSY_CYCLES
       description: Clock cycles while cache is reporting that it is busy. (No-Masking, 
         nondeterministic, unwindowed)
@@ -3111,6 +3333,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 269
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 268
     - name: SQC_ICACHE_HITS
       description: Number of cache hits. (per-SQ, per-Bank, nondeterministic)
       properties: []
@@ -3134,6 +3362,12 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 642
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 270
     - name: SQC_ICACHE_INPUT_VALID_READYB
       description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
       properties: []
@@ -3145,6 +3379,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 257
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 280
     - name: SQC_ICACHE_MISSES
       description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, 
         nondeterministic)
@@ -3169,6 +3409,12 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 643
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 271
     - name: SQC_ICACHE_MISSES_DUPLICATE
       description: Number of misses that were duplicates (access to a non-resident, miss pending 
         CL). (per-SQ, per-Bank, nondeterministic)
@@ -3187,6 +3433,12 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 644
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 272
     - name: SQC_ICACHE_REQ
       description: Number of requests. (per-SQ, per-Bank)
       properties: []
@@ -3210,6 +3462,12 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 641
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 269
     - name: SQC_LDS_BANK_CONFLICT
       description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
       properties: []
@@ -3295,6 +3553,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 264
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 284
     - name: SQC_TC_DATA_WRITE_REQ
       description: Number of data write requests to the TC (No-Masking, nondeterministic)
       properties: []
@@ -3321,6 +3585,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 263
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 283
     - name: SQC_TC_REQ
       description: Total number of TC requests that were issued by instruction and constant caches. 
         (No-Masking, nondeterministic)
@@ -3335,6 +3605,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 262
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 282
     - name: SQC_TC_STALL
       description: Valid request stalled TC request interface (no-credits). (No-Masking, 
         nondeterministic, unwindowed)
@@ -3349,6 +3625,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 267
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 285
     - name: SQG_BUSY_CYCLES
       description: Number of clock cycles SQG is reporting that it is busy (per shader engine). 
         SQG_PERF_SEL_BUSY_CYCLES.
@@ -3788,6 +4070,9 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
             - gfx1250
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 2
     - name: SQ_IFETCH
@@ -3878,6 +4163,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 71
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 49
     - name: SQ_INSTS_DUAL_VALU_WAVE32
       description: Number of dual VALU (VOPD) instructions issued in wave32 mode. {emulated}
       properties: []
@@ -3915,6 +4206,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 70
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 53
     - name: SQ_INSTS_FLAT
       description: Total number of FLAT instructions issued. When used in combination with 
         SQ_ACTIVE_INST_FLAT (cycle count for executing instructions) the average latency of FLAT 
@@ -4030,6 +4327,9 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 54
         - architectures:
@@ -4192,6 +4492,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 72
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 61
     - name: SQ_INSTS_SMEM
       description: Total number of SMEM (Scalar Memory Read) instructions issued. This value is 
         returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information 
@@ -4271,6 +4577,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 203
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 60
     - name: SQ_INSTS_TEX_LOAD
       description: The number of buffer load, image load, sample, or atomic (with return) texture 
         instructions issued. The value is returned per-SE (aggregate of values in SIMDs in the SE). 
@@ -4360,6 +4672,10 @@ rocprofiler-sdk:
             - gfx1201
           block: SQ
           event: 50
+        - architectures:
+            - gfx1250
+          block: SQ
+          event: 128
     - name: SQ_INSTS_VALU_ADD_F16
       description: The number of VALU (Vector ALU) ADD/SUB instructions on float16. For maximum 
         performance lower precision floating point ops are preferred to higher precision ones. The 
@@ -5203,6 +5519,9 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 88
         - architectures:
@@ -5240,6 +5559,9 @@ rocprofiler-sdk:
           event: 73
         - architectures:
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 89
     - name: SQ_INST_LEVEL_VMEM
@@ -5284,6 +5606,12 @@ rocprofiler-sdk:
             - gfx1250
           block: SQ
           event: 7
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 8
     - name: SQ_LDS_ADDR_CONFLICT
       description: Number of cycles LDS (local data store) is stalled by address conflicts. This 
         value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -5330,6 +5658,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 146
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 260
     - name: SQ_LDS_BANK_CONFLICT
       description: The number of cycles LDS (local data store) is stalled by bank conflicts. This 
         value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -5406,6 +5740,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 145
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 259
     - name: SQ_LDS_UNALIGNED_STALL
       description: Number of cycles LDS (local data store) is stalled processing flat unaligned 
         load/store ops. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) 
@@ -5430,6 +5770,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 144
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 258
     - name: SQ_LEVEL_WAVES
       description: Track the number of waves. Set ACCUM_PREV for the next counter to use this. This 
         value is returned on a per-SIMD basis.
@@ -5441,6 +5787,9 @@ rocprofiler-sdk:
             - gfx1030
             - gfx1031
             - gfx1032
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 7
         - architectures:
@@ -5532,6 +5881,9 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 35
         - architectures:
@@ -5579,6 +5931,9 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 26
         - architectures:
@@ -5623,6 +5978,9 @@ rocprofiler-sdk:
             - gfx1100
             - gfx1101
             - gfx1102
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: SQ
           event: 29
         - architectures:
@@ -5746,6 +6104,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 6
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 14
     - name: SQ_WAVES_LT_16
       description: Count number of waves sent <16 active threads sent to SQs. (per-simd, emulated, 
         global). This value represents the number of waves that an each individual SIMD has enqueued
@@ -5766,6 +6130,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 10
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 18
     - name: SQ_WAVES_LT_32
       description: Count number of waves sent <32 active threads sent to SQs. This value represents 
         the number of waves that an each individual SIMD has enqueued during the collection 
@@ -5785,6 +6155,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 9
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 17
     - name: SQ_WAVES_LT_48
       description: Count number of waves with <48 active threads sent to SQs. This value represents 
         the number of waves that an each individual SIMD has enqueued during the collection 
@@ -5804,6 +6180,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 8
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 16
     - name: SQ_WAVES_LT_64
       description: Count number of waves with <64 active threads sent to SQs. This value represents 
         the number of waves that an each individual SIMD has enqueued during the collection 
@@ -5823,6 +6205,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 7
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 15
     - name: SQ_WAVES_RESTORED
       description: Count number of context-restored waves sent to SQs. This value represents the 
         number of waves whose current register state has been restored from a register bank during 
@@ -5851,6 +6239,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 201
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 19
     - name: SQ_WAVES_SAVED
       description: Count number of context-saved waves sent to SQs. This value represents the number
         of waves whose current register state has been saved to a register bank during the 
@@ -5879,6 +6273,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 202
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 20
     - name: SQ_WAVES_sum
       description: Gives the total number of waves currently enqueued by the application during the 
         collection timeframe (for dispatch profiling this is the timeframe of kernel execution, for 
@@ -6259,6 +6659,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 69
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 55
     - name: SQ_EVENTS
       description: Number of events. (unwindowed, emulated, global)
       properties: []
@@ -6267,6 +6673,12 @@ rocprofiler-sdk:
             - gfx950
           block: SQ
           event: 16
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 12
     - name: SQ_INST_CYCLES_VALU
       description: Number of cycles needed to execute VALU operations (SIMD cycles), where there is 
         overlapping V_OP32_1 and V_OP32_T instruction, count them separately.
@@ -6278,6 +6690,12 @@ rocprofiler-sdk:
             - gfx1200
           block: SQ
           event: 99
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 103
     - name: SQ_INSTS_VEC32_LEVEL_LDS
       description: Number of in-flight wave32 LDS (indexed, flat) instructions issued.{level, 
         nondeterministic}
@@ -6967,6 +7385,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(TA_TA_BUSY,sum)
     - name: TA_TOTAL_WAVEFRONTS
       description: Total number of wavefronts processed by TA.
@@ -9328,6 +9749,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: TCP
           event: 0
     - name: TCP_GATE_EN1_sum
@@ -9341,6 +9765,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(TCP_GATE_EN1,sum)
     - name: TCP_GATE_EN2
       description: TCP core clocks are turned on. Not Windowed.
@@ -9353,6 +9780,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: TCP
           event: 1
     - name: TCP_GATE_EN2_sum
@@ -9366,6 +9796,9 @@ rocprofiler-sdk:
             - gfx941
             - gfx942
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(TCP_GATE_EN2,sum)
     - name: TCP_PENDING_STALL_CYCLES
       description: Stall due to data pending from L2
@@ -10020,6 +10453,12 @@ rocprofiler-sdk:
             - gfx950
           block: TCP
           event: 64
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 38
     - name: TCP_TCP_LATENCY_sum
       description: Total TCP wave latency (from first clock of wave entering to first clock of wave 
         leaving), divide by TA_TCP_STATE_READ to avg wave latency Sum over TCP instances.
@@ -10029,6 +10468,9 @@ rocprofiler-sdk:
             - gfx90a
             - gfx908
             - gfx950
+            - gfx1150
+            - gfx1151
+            - gfx1152
           expression: reduce(TCP_TCP_LATENCY,sum)
     - name: TCP_TCP_TA_DATA_STALL_CYCLES
       description: TCP stalls TA data interface. Now Windowed.
@@ -10853,6 +11295,9 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: TCP
           event: 9
     - name: TCP_REQ_MISS
@@ -10863,6 +11308,9 @@ rocprofiler-sdk:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1150
+            - gfx1151
+            - gfx1152
           block: TCP
           event: 17
     - name: TD_ATOMIC_WAVEFRONT
@@ -11294,6 +11742,14 @@ rocprofiler-sdk:
             - gfx950
           block: TD
           event: 29
+    - name: TX_VCA_VCA_BUSY
+      description: Cycles VCA block is busy. Perf_windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          block: TCP
+          event: 184
     - name: TOTAL_16_OPS
       description: The number of 16 bits OPS executed
       properties: []
@@ -11857,6 +12313,1777 @@ rocprofiler-sdk:
             - gfx1200
             - gfx1201
           expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
+    - name: CPC_GCRIU_BUSY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 35
+    - name: CPC_GUS_READ_REQUEST_SENT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 51
+    - name: CPC_GUS_READ_REQUEST_SENT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_GUS_READ_REQUEST_SENT,sum)
+    - name: CPC_GUS_WRITE_REQUEST_SENT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 50
+    - name: CPC_GUS_WRITE_REQUEST_SENT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_GUS_WRITE_REQUEST_SENT,sum)
+    - name: CPC_ME1_STALL_ON_DATA_FROM_ROQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 11
+    - name: CPC_ME1_STALL_WAIT_ON_MEM_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 9
+    - name: CPC_ME1_STALL_WAIT_ON_MEM_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 10
+    - name: CPC_ME1_STALL_WAIT_ON_RCIU_READY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 6
+    - name: CPC_MEC_INSTR_CACHE_HIT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 43
+    - name: CPC_MEC_INSTR_CACHE_HIT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_MEC_INSTR_CACHE_HIT,sum)
+    - name: CPC_MEC_INSTR_CACHE_MISS
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 44
+    - name: CPC_MEC_INSTR_CACHE_MISS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_MEC_INSTR_CACHE_MISS,sum)
+    - name: CPC_TCIU_READ_REQUEST_SENT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 49
+    - name: CPC_TCIU_READ_REQUEST_SENT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_TCIU_READ_REQUEST_SENT,sum)
+    - name: CPC_TCIU_WRITE_REQUEST_SENT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: CPC
+          event: 48
+    - name: CPC_TCIU_WRITE_REQUEST_SENT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(CPC_TCIU_WRITE_REQUEST_SENT,sum)
+    - name: GCEA_ALWAYS_COUNT
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 0
+    - name: GCEA_ALWAYS_COUNT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_ALWAYS_COUNT,sum)
+    - name: GCEA_PRB_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 68
+    - name: GCEA_PRB_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_PRB_REQ,sum)
+    - name: GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 3
+    - name: GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP,sum)
+    - name: GCEA_RDRAM_NUM_BANKS_VLD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 1
+    - name: GCEA_RDRAM_NUM_BANKS_VLD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_RDRAM_NUM_BANKS_VLD,sum)
+    - name: GCEA_RDRAM_REQ_PER_CLIGRP
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 2
+    - name: GCEA_RDRAM_REQ_PER_CLIGRP_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_RDRAM_REQ_PER_CLIGRP,sum)
+    - name: GCEA_RDRAM_SIZE_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 77
+    - name: GCEA_RDRAM_SIZE_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_RDRAM_SIZE_REQ,sum)
+    - name: GCEA_RRET_VLD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 66
+    - name: GCEA_RRET_VLD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_RRET_VLD,sum)
+    - name: GCEA_SARB_BUSY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 62
+    - name: GCEA_SARB_BUSY_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_SARB_BUSY,sum)
+    - name: GCEA_SARB_DRAM_REQ_PER_VC
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 51
+    - name: GCEA_SARB_DRAM_REQ_PER_VC_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_SARB_DRAM_REQ_PER_VC,sum)
+    - name: GCEA_SARB_REQ_PER_VC
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 50
+    - name: GCEA_SARB_REQ_PER_VC_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_SARB_REQ_PER_VC,sum)
+    - name: GCEA_SARB_STALLED
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 63
+    - name: GCEA_SARB_STALLED_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_SARB_STALLED,sum)
+    - name: GCEA_SARB_STARVING
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 64
+    - name: GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 10
+    - name: GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP,sum)
+    - name: GCEA_WDRAM_NUM_BANKS_VLD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 8
+    - name: GCEA_WDRAM_NUM_BANKS_VLD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_WDRAM_NUM_BANKS_VLD,sum)
+    - name: GCEA_WDRAM_REQ_PER_CLIGRP
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 9
+    - name: GCEA_WDRAM_REQ_PER_CLIGRP_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_WDRAM_REQ_PER_CLIGRP,sum)
+    - name: GCEA_WDRAM_SIZE_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 78
+    - name: GCEA_WDRAM_SIZE_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_WDRAM_SIZE_REQ,sum)
+    - name: GCEA_WRET_VLD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GCEA
+          event: 67
+    - name: GCEA_WRET_VLD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GCEA_WRET_VLD,sum)
+    - name: GL1C_BUSY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 1
+    - name: GL1C_BUSY_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_BUSY,sum)
+    - name: GL1C_CYCLE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 0
+    - name: GL1C_CYCLE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_CYCLE,sum)
+    - name: GL1C_GL2_REQ_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 4
+    - name: GL1C_GL2_REQ_READ_128B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 5
+    - name: GL1C_GL2_REQ_READ_128B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_READ_128B,sum)
+    - name: GL1C_GL2_REQ_READ_32B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 6
+    - name: GL1C_GL2_REQ_READ_32B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_READ_32B,sum)
+    - name: GL1C_GL2_REQ_READ_64B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 7
+    - name: GL1C_GL2_REQ_READ_64B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_READ_64B,sum)
+    - name: GL1C_GL2_REQ_READ_LATENCY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 8
+    - name: GL1C_GL2_REQ_READ_LATENCY_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_READ_LATENCY,sum)
+    - name: GL1C_GL2_REQ_READ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_READ,sum)
+    - name: GL1C_GL2_REQ_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 9
+    - name: GL1C_GL2_REQ_WRITE_32B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 10
+    - name: GL1C_GL2_REQ_WRITE_32B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_WRITE_32B,sum)
+    - name: GL1C_GL2_REQ_WRITE_64B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 11
+    - name: GL1C_GL2_REQ_WRITE_64B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_WRITE_64B,sum)
+    - name: GL1C_GL2_REQ_WRITE_LATENCY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 12
+    - name: GL1C_GL2_REQ_WRITE_LATENCY_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_WRITE_LATENCY,sum)
+    - name: GL1C_GL2_REQ_WRITE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_GL2_REQ_WRITE,sum)
+    - name: GL1C_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 14
+    - name: GL1C_REQ_MISS
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 18
+    - name: GL1C_REQ_MISS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_REQ_MISS,sum)
+    - name: GL1C_REQ_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 21
+    - name: GL1C_REQ_READ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_REQ_READ,sum)
+    - name: GL1C_REQ_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 28
+    - name: GL1C_REQ_WRITE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_REQ_WRITE,sum)
+    - name: GL1C_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_REQ,sum)
+    - name: GL1C_STALL_GL2_GL1
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 31
+    - name: GL1C_STALL_GL2_GL1_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_STALL_GL2_GL1,sum)
+    - name: GL1C_STALL_LFIFO_FULL
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 32
+    - name: GL1C_STALL_LFIFO_FULL_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_STALL_LFIFO_FULL,sum)
+    - name: GL1C_STARVE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL1C
+          event: 2
+    - name: GL1C_STARVE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL1C_STARVE,sum)
+    - name: GL2C_ATOMIC
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 8
+    - name: GL2C_ATOMIC_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_ATOMIC,sum)
+    - name: GL2C_BUSY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 2
+    - name: GL2C_BUSY_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_BUSY,sum)
+    - name: GL2C_COMPRESSED_READ_96_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 81
+    - name: GL2C_COMPRESSED_READ_96_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_COMPRESSED_READ_96_REQ,sum)
+    - name: GL2C_CYCLE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 1
+    - name: GL2C_CYCLE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_CYCLE,sum)
+    - name: GL2C_EA_RDREQ_DRAM
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 110
+    - name: GL2C_EA_RDREQ_DRAM_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_EA_RDREQ_DRAM,sum)
+    - name: GL2C_EA_WRREQ_DRAM
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 111
+    - name: GL2C_EA_WRREQ_DRAM_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_EA_WRREQ_DRAM,sum)
+    - name: GL2C_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 6
+    - name: GL2C_READ_128_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 75
+    - name: GL2C_READ_128_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_READ_128_REQ,sum)
+    - name: GL2C_READ_32_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 73
+    - name: GL2C_READ_32_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_READ_32_REQ,sum)
+    - name: GL2C_READ_64_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 74
+    - name: GL2C_READ_64_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_READ_64_REQ,sum)
+    - name: GL2C_READ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_READ,sum)
+    - name: GL2C_REQ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 3
+    - name: GL2C_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_REQ,sum)
+    - name: GL2C_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GL2C
+          event: 7
+    - name: GL2C_WRITE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GL2C_WRITE,sum)
+    - name: GRBM_GL2C_BUSY
+      description: The GL2C block is busy.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: GRBM
+          event: 40
+    - name: GRBM_GUI_ACTIVE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(GRBM_GUI_ACTIVE,sum)
+    - name: SPI_BUSY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SPI
+          event: 283
+    - name: SPI_CSN_WAVE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SPI_CSN_WAVE,sum)
+    - name: SQC_DCACHE_BUSY_CYCLES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_DCACHE_BUSY_CYCLES,sum)
+    - name: SQC_DCACHE_HITS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_DCACHE_HITS,sum)
+    - name: SQC_DCACHE_INFLIGHT_LEVEL
+      description: Level count total outstanding transactions in data cache (per-SQ, 
+        nondeterministic)
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 276
+    - name: SQC_DCACHE_INPUT_VALID_READYB_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_DCACHE_INPUT_VALID_READYB,sum)
+    - name: SQC_DCACHE_MISSES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_DCACHE_MISSES,sum)
+    - name: SQC_DCACHE_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_DCACHE_REQ,sum)
+    - name: SQC_ICACHE_BUSY_CYCLES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_ICACHE_BUSY_CYCLES,sum)
+    - name: SQC_ICACHE_HITS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_ICACHE_HITS,sum)
+    - name: SQC_ICACHE_INFLIGHT_LEVEL
+      description: Level count total outstanding transactions in instruction cache (per-SQ, 
+        nondeterministic)
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 275
+    - name: SQC_ICACHE_INPUT_VALID_READYB_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_ICACHE_INPUT_VALID_READYB,sum)
+    - name: SQC_ICACHE_MISSES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_ICACHE_MISSES,sum)
+    - name: SQC_ICACHE_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_ICACHE_REQ,sum)
+    - name: SQC_LDS_BANK_CONFLICT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_LDS_BANK_CONFLICT,sum)
+    - name: SQC_LDS_IDX_ACTIVE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_LDS_IDX_ACTIVE,sum)
+    - name: SQC_TC_DATA_READ_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_TC_DATA_READ_REQ,sum)
+    - name: SQC_TC_INST_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQC_TC_INST_REQ,sum)
+    - name: SQ_BUSY_CYCLES_avr
+      description: SQ_BUSY_CYCLES averaged over SQ (shader engine) instances. The Shader Processor 
+        Group (SPG) perf specification exposes this counter per SE; avr matches 
+        reduce(SQ_BUSY_CYCLES,avr) for occupancy-style ratios.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_BUSY_CYCLES,avr)
+    - name: SQ_BUSY_CYCLES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_BUSY_CYCLES,sum)
+    - name: SQ_INSTS_ALL
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 48
+    - name: SQ_INSTS_ALL_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_ALL,sum)
+    - name: SQ_INSTS_DUAL_VALU_WAVE32_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
+    - name: SQ_INSTS_FLAT_LOAD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 189
+    - name: SQ_INSTS_FLAT_LOAD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_FLAT_LOAD,sum)
+    - name: SQ_INSTS_FLAT_STORE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 190
+    - name: SQ_INSTS_FLAT_STORE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_FLAT_STORE,sum)
+    - name: SQ_INSTS_FLAT_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_FLAT,sum)
+    - name: SQ_INSTS_INTERNAL
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 69
+    - name: SQ_INSTS_INTERNAL_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_INTERNAL,sum)
+    - name: SQ_INSTS_LDS_DIRECT_LOAD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 171
+    - name: SQ_INSTS_LDS_DIRECT_LOAD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_LDS_DIRECT_LOAD,sum)
+    - name: SQ_INSTS_LDS_PARAM_LOAD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 172
+    - name: SQ_INSTS_LDS_PARAM_LOAD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_LDS_PARAM_LOAD,sum)
+    - name: SQ_INSTS_LDS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_LDS,sum)
+    - name: SQ_INSTS_SALU_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_SALU,sum)
+    - name: SQ_INSTS_SMEM_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_SMEM,sum)
+    - name: SQ_INSTS_TEX
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 65
+    - name: SQ_INSTS_TEX_LOAD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_TEX_LOAD,sum)
+    - name: SQ_INSTS_TEX_STORE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_TEX_STORE,sum)
+    - name: SQ_INSTS_TEX_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_TEX,sum)
+    - name: SQ_INSTS_VALU_DP
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 182
+    - name: SQ_INSTS_VALU_DP_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_VALU_DP,sum)
+    - name: SQ_INSTS_VALU_TRANS
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 170
+    - name: SQ_INSTS_VALU_TRANS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_VALU_TRANS,sum)
+    - name: SQ_INSTS_VALU_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_VALU,sum)
+    - name: SQ_INSTS_WAVE32_LDS_PARAM_LOAD
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 173
+    - name: SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
+    - name: SQ_INST_CYCLES_LDS
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 109
+    - name: SQ_INST_CYCLES_LDS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_INST_CYCLES_LDS,sum)
+    - name: SQ_ITEMS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_ITEMS,sum)
+    - name: SQ_LDS_ATOMIC_RETURN_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_LDS_ATOMIC_RETURN,sum)
+    - name: SQ_WAIT_BARRIER
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 42
+    - name: SQ_WAIT_CNT_ANY
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 36
+    - name: SQ_WAIT_IFETCH
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: SQ
+          event: 41
+    - name: SQ_WAIT_INST_LDS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_WAIT_INST_LDS,sum)
+    - name: SQ_WAVE_CYCLES_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(SQ_WAVE_CYCLES,sum)
+    - name: TCP_DATA_FIFO_STALL
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 41
+    - name: TCP_DATA_FIFO_STALL_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_DATA_FIFO_STALL,sum)
+    - name: TCP_GL1_REQ_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 30
+    - name: TCP_GL1_REQ_READ_128B
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 31
+    - name: TCP_GL1_REQ_READ_128B_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_GL1_REQ_READ_128B,sum)
+    - name: TCP_GL1_REQ_READ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_GL1_REQ_READ,sum)
+    - name: TCP_GL1_REQ_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 33
+    - name: TCP_GL1_REQ_WRITE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_GL1_REQ_WRITE,sum)
+    - name: TCP_GL1_TCP_BACK_PRESSURE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 51
+    - name: TCP_GL1_TCP_BACK_PRESSURE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_GL1_TCP_BACK_PRESSURE,sum)
+    - name: TCP_REQ_MISS_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_REQ_MISS,sum)
+    - name: TCP_REQ_READ
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 10
+    - name: TCP_REQ_READ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_REQ_READ,sum)
+    - name: TCP_REQ_WRITE
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 14
+    - name: TCP_REQ_WRITE_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_REQ_WRITE,sum)
+    - name: TCP_REQ_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_REQ,sum)
+    - name: TCP_TCP_TA_REQ_STALL
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          block: TCP
+          event: 39
+    - name: TCP_TCP_TA_REQ_STALL_sum
+      description: ''
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+          expression: reduce(TCP_TCP_TA_REQ_STALL,sum)
   fw-restriction-schema-version: 1
   firmware_restrictions:
     - affected_architectures:

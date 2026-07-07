@@ -8,6 +8,7 @@
 
 #include "api.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -251,7 +252,7 @@ extern "C"
                 _command_line.append(" ").append(argv[i]);
             }
             if(_command_line.length() > 1) _command_line = _command_line.substr(1);
-            rocprofsys::set_env("ROCPROFSYS_COMMAND_LINE", _command_line, 0);
+            rocprofsys::set_env(rocprofsys::env_vars::COMMAND_LINE, _command_line, 0);
         }
     }
 
@@ -317,7 +318,8 @@ extern "C"
             }
 
             LOG_DEBUG("Initializing rocprof-sys (standalone)... ");
-            auto _mode = rocprofsys::get_env<std::string>("ROCPROFSYS_MODE", "trace");
+            auto _mode =
+                rocprofsys::get_env<std::string>(rocprofsys::env_vars::MODE, "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
                                                          : _initialize_arguments.at(0);
 
@@ -337,16 +339,17 @@ extern "C"
 
         LOG_DEBUG("Done");
 
-        _name_len_limit = rocprofsys::config::get_setting_value<std::int64_t>(
-                              "ROCPROFSYS_KOKKOSP_NAME_LENGTH_MAX")
-                              .value_or(_name_len_limit);
+        _name_len_limit =
+            rocprofsys::config::get_setting_value<std::int64_t>(
+                std::string{ rocprofsys::env_vars::KOKKOSP_NAME_LENGTH_MAX })
+                .value_or(_name_len_limit);
         _kp_prefix = rocprofsys::config::get_setting_value<std::string>(
-                         "ROCPROFSYS_KOKKOSP_PREFIX")
+                         std::string{ rocprofsys::env_vars::KOKKOSP_PREFIX })
                          .value_or(_kp_prefix);
 
-        _kp_deep_copy =
-            rocprofsys::config::get_setting_value<bool>("ROCPROFSYS_KOKKOSP_DEEP_COPY")
-                .value_or(_kp_deep_copy);
+        _kp_deep_copy = rocprofsys::config::get_setting_value<bool>(
+                            std::string{ rocprofsys::env_vars::KOKKOSP_DEEP_COPY })
+                            .value_or(_kp_deep_copy);
     }
 
     void kokkosp_finalize_library()

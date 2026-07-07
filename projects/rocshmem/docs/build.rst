@@ -258,6 +258,41 @@ This is similar to the default build in ROCm 6.4.
   Other experimental configuration scripts are available in ``./scripts/build_configs``, but only ``all_backends``, ``ipc_single`` and ``ro_ipc``
   are officially supported.
 
+Targeting GPU architectures
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, rocSHMEM builds device bitcode for a predefined set of supported GPU architectures
+(``gfx90a``, ``gfx942``, ``gfx950``, ``gfx1100``, ``gfx1201``, and ``gfx1250`` on ROCm 7 or
+later). To restrict the build to a specific subset - for example to reduce build time or when
+targeting a known deployment environment - pass ``GPU_TARGETS`` to CMake:
+
+.. code-block:: bash
+
+  ../scripts/build_configs/all_backends -DGPU_TARGETS="gfx942;gfx950"
+
+Some GPU features, such as SRAM ECC and XNACK (hardware page-fault support), are encoded as
+feature suffixes in the architecture string (for example ``gfx950:sramecc+:xnack-``). These
+suffixes are embedded in the device bitcode metadata. If the suffixes in the bitcode do not
+match the active feature configuration of the GPU at runtime, the bitcode may fail to load.
+
+To embed the correct feature metadata, include the suffixes in ``GPU_TARGETS``:
+
+.. code-block:: bash
+
+  ../scripts/build_configs/all_backends \
+    -DGPU_TARGETS="gfx942:sramecc+:xnack-;gfx950:sramecc+:xnack-"
+
+The feature strings for your GPU can be obtained by running ``rocminfo`` on the target machine
+and looking for the ``Name:`` field under each agent, for example
+``amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-``.
+
+.. note::
+
+  The ``xnack`` feature is runtime-configurable and can differ between machines. If a cluster
+  is configured with ``xnack+`` (unified memory), specifying ``xnack-`` in ``GPU_TARGETS``
+  may cause device bitcode load failures at runtime. Match the suffix to the actual
+  configuration of the target system.
+
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^
 

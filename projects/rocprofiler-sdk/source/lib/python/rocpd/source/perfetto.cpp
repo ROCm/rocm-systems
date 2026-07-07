@@ -732,6 +732,24 @@ write_perfetto(
 
                         current_it->end = new_current_end;
                         next_it->start  = new_next_start;
+
+                        // The modified start may have pushed next_sample_it's effective
+                        // midpoint rightward. Update the stored sort key and stably
+                        // reinsert the element so subsequent iterations see the correct
+                        // temporal order, including cases where it must move behind
+                        // multiple later slices.
+                        next_sample_it->timestamp = (new_next_start + next_it->end) / 2;
+                        auto insert_it            = std::upper_bound(
+                            std::next(next_sample_it),
+                            group_data.end(),
+                            next_sample_it->timestamp,
+                            [](rocprofiler_timestamp_t lhs, const kernel_dispatch_data& rhs) {
+                                return lhs < rhs.timestamp;
+                            });
+                        if(insert_it != std::next(next_sample_it))
+                        {
+                            std::rotate(next_sample_it, std::next(next_sample_it), insert_it);
+                        }
                     }
                 }
             }

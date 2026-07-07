@@ -1,65 +1,84 @@
-# Mirage on-disk state layout
+# mirage on-disk state layout
 
 All mirage state lives on disk in standard [XDG Base Directory][xdg]
-locations. This document is the authoritative reference for the layout
-and the file formats; tools that want to interoperate with mirage
-should read and write these files directly.
+locations. This document is the authoritative reference for the layout and the
+file formats; tools that interoperate with mirage may read and write these
+files directly.
 
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
 ## Base directories
 
-| Resource              | Variable           | Default                | Subpath                       |
-| --------------------- | ------------------ | ---------------------- | ----------------------------- |
-| Profiles              | `XDG_CONFIG_HOME`  | `~/.config`            | `mirage/profile/<name>.json`  |
-| Sessions (runtime)    | `XDG_RUNTIME_DIR`  | `/run/user/<uid>`      | `mirage/session/<id>/...`     |
-| State (reserved)      | `XDG_STATE_HOME`   | `~/.local/state`       | `mirage/`                     |
+| Resource          | Override         | XDG fallback        | Subpath                      |
+| ----------------- | ---------------- | ------------------- | ---------------------------- |
+| Config            | `MIRAGE_CONFIG`  | `$XDG_CONFIG_HOME`  | `mirage/` (profiles, agents, topologies) |
+| Sessions (runtime)| `MIRAGE_RUNTIME` | `$XDG_RUNTIME_DIR`  | `mirage/session/<id>/...`    |
+| Persistent state  | `MIRAGE_STATE`   | `$XDG_STATE_HOME`   | `mirage/`                    |
 
-`XDG_RUNTIME_DIR` is preferred because the kernel/systemd guarantees
-this directory exists, is writable only by the owning user, and is
-cleared on logout — exactly the lifetime we want for sessions.
+Each `MIRAGE_*` variable, when set, fully overrides the corresponding
+directory; otherwise the XDG variable (or its standard default) is used.
+`mirage paths` prints the resolved directories. `$XDG_RUNTIME_DIR` is
+preferred for sessions because it is per-user, writable only by its owner, and
+cleared on logout — exactly the lifetime sessions want.
+
+The config directory holds three resource trees:
+
+```text
+<config>/mirage/
+├── profile/<name>.json     # ProfileDef
+├── agent/<name>.json       # AgentDef   (hardware GPU definition)
+└── topology/<name>.json    # TopologyDef (rack/node/GPU layout)
+```
 
 ## Profiles
 
-A profile is a JSON document conforming to the `ProfileDef` schema.
-Profiles are content-addressable by filename:
+A profile is a JSON `ProfileDef` named by its filename:
 
 ```text
-$XDG_CONFIG_HOME/mirage/profile/<name>.json
+<config>/mirage/profile/<name>.json
 ```
-
-Example (`cdna3.json`):
 
 ```json
 {
-  "name": "cdna3",
-  "description": "A single-node rocjitsu emulator targeting CDNA3.",
+  "name": "cdna4",
+  "description": "Single-node rocjitsu targeting MI350X.",
   "emulator": {
     "emulator": "rocjitsu",
     "plugins": {},
-    "nodes": 1,
-    "gpus_per_node": 1,
     "exec_mode": "Functional",
     "options": {},
-    "topology": "rocjitsu/cdna3"
+    "topology": {
+      "num_nodes": 1,
+      "gpus_per_node": 1,
+      "agent": "MI350X"
+    }
   }
 }
 ```
+
+* `emulator.topology` may be an inline object (as above) or a string naming a
+  topology in `<config>/mirage/topology/`.
+* `topology.agent` may likewise be an inline object or a string naming an
+  agent in `<config>/mirage/agent/`.
+* A containerised profile additionally carries a `containerize` object
+  (`image`, optional `provider`, and `mounts`).
 
 Use `mirage profile show <name>` to print an existing profile.
 
 ## Sessions
 
-A session is a directory under `$XDG_RUNTIME_DIR/mirage/session/<id>`:
+A session is a directory under `<runtime>/mirage/session/<id>`:
 
 ```text
 <session>/
-├── def.json          # SessionDef (immutable after create)
-├── health.json       # SessionHealth (rewritten by the host on changes)
-├── host.pid          # ASCII pid of the host process
-├── host.log          # the host's stderr (tracing output)
+├── def.json              # SessionDef (immutable after create)
+├── health.json           # SessionHealth (rewritten by the host)
+├── node/                 # per-node host runtime state (one dir per rank)
+│   └── <rank>/
+│       ├── pid           # pid of the node's host process
+│       └── host.log      # the node host's stderr (tracing output)
 └── exec/
-    └── <exec-id>/    # one directory per exec
+    └── <exec-id>/        # one directory per exec
 ```
 
 ### `def.json`
@@ -68,44 +87,43 @@ A `SessionDef`:
 
 ```json
 {
-  "id": "s-20260530-153012-abcd",
-  "profile": "cdna3",
-  "container": null,
+  "id": "s-20260616-191636-f6c1",
+  "profile": "cdna4",
   "workdir": "/home/me/work",
-  "created_at": "2026-05-30T15:30:12.000Z"
+  "daemon": false,
+  "created_at": "2026-06-16T19:16:36.951820571Z"
 }
 ```
 
-`profile` may be a string (the name of a profile in
-`$XDG_CONFIG_HOME/mirage/profile`) or an inline `ProfileDef` object.
+* `profile` may be a string (a profile name under `<config>/mirage/profile`)
+  or an inline `ProfileDef` object (used when CLI overrides are applied).
+* `daemon` selects out-of-process emulation when `true`.
 
 ### `health.json`
 
-A `SessionHealth`:
+A `SessionHealth`, rewritten by the host as the session progresses:
 
 ```json
 {
-  "timestamp": "2026-05-30T15:30:12.250Z",
+  "timestamp": "2026-06-16T19:16:36.972372050Z",
   "healthy": true,
   "state": "ready",
-  "terminal": false,
-  "message": null
+  "terminal": false
 }
 ```
 
-`state` is one of `starting`, `pulling`, `ready`, `degraded`,
-`stopping`, `stopped`, `error`. When `terminal=true` the host has
-given up and the session must be discarded.
+`state` is one of `starting`, `pulling`, `ready`, `degraded`, `stopping`,
+`stopped`, `error`. When `terminal=true` the host has given up and the session
+must be discarded. An optional `message` carries detail (image-pull progress,
+node bring-up status, crash diagnostics). `mirage session wait` polls this
+file until `healthy=true` or `terminal=true`.
 
-The CLI's `session wait` polls `health.json` until it sees
-`healthy=true` or `terminal=true`.
+### Host pid and log
 
-### `host.pid` and `host.log`
-
-`host.pid` is the pid of the host process. It is rewritten on each
-host startup and is what `mirage session stop` signals. `host.log` is
-appended to by the host with tracing output (controlled by
-`MIRAGE_LOG=`).
+The per-session (node 0) host writes its pid to `node/0/pid` on startup and
+appends tracing output to `node/0/host.log`. Each additional node rank has its
+own `node/<rank>/` directory with the same two files. `mirage session stop`
+signals the recorded host pids.
 
 ## Execs
 
@@ -113,29 +131,27 @@ Each exec gets a directory under `<session>/exec/<exec-id>/`:
 
 ```text
 <exec>/
-├── def.json          # ExecDef (immutable)
-├── status.json       # ExecStatus (rewritten as nodes start/finish)
+├── def.json              # ExecDef (immutable)
+├── status.json           # ExecStatus (rewritten as nodes start/finish)
 └── node/
     └── <node-id>/
-        ├── stdin     # FIFO (named pipe), read by the child
-        ├── stdout    # file, child stdout+stderr (merged by the PTY) appended here
-        ├── pid       # ASCII pid of the child process
-        └── exit_code # ASCII exit code, written after the child exits
+        ├── stdin         # FIFO (named pipe), bridged to the child's PTY
+        ├── stdout        # plain file, merged child stdout+stderr (PTY)
+        ├── pid           # pid of the child process
+        └── exit_code     # exit code, written after the child exits
 ```
 
 ### Exec id format
 
-`<exec-id>` is `e-<n>` where `<n>` is a zero-padded counter (e.g.
-`e-000000`). Ids are allocated monotonically by inspecting the
-existing entries; if you delete an exec directory and then create a
-new one, the new one will reuse the slot.
+`<exec-id>` is `e-<n>` with a zero-padded counter (e.g. `e-000000`). Ids are
+allocated monotonically from the existing entries.
 
 ### `def.json`
 
 ```json
 {
-  "timestamp": "2026-05-30T15:31:00.000Z",
-  "session": "s-20260530-153012-abcd",
+  "timestamp": "2026-06-16T19:31:00.000Z",
+  "session": "s-20260616-191636-f6c1",
   "exec": {
     "command": "/bin/sh",
     "args": ["-c", "echo hi"],
@@ -147,9 +163,8 @@ new one, the new one will reuse the slot.
 }
 ```
 
-The host watches `exec/` for new directories that contain a `def.json`
-but no `status.json` yet. As soon as one appears, it creates the
-per-node directory structure and spawns the child.
+The host watches for `exec/<id>/def.json` directories with no `status.json`
+yet; when one appears it creates the per-node structure and spawns the child.
 
 ### `status.json`
 
@@ -158,48 +173,47 @@ per-node directory structure and spawns the child.
   "started": true,
   "ended": true,
   "exit_code": 0,
-  "started_at": "2026-05-30T15:31:00.100Z",
-  "ended_at": "2026-05-30T15:31:00.250Z",
+  "started_at": "2026-06-16T19:31:00.100Z",
+  "ended_at": "2026-06-16T19:31:00.250Z",
   "nodes": {
     "0": { "pid": 110891, "exit_code": 0 }
   }
 }
 ```
 
-`exit_code` at the top level is the worst (largest absolute) exit
-code across nodes. Clients should consult per-node entries for full
-detail.
+The top-level `exit_code` summarises across nodes; consult the per-node
+entries for full detail.
 
 ### Per-node files
 
-* `stdin` is a Unix FIFO created with `mkfifo(2)`. To write to a
-  running exec's stdin: `printf 'data\n' > <node>/stdin`. The CLI
-  exposes this via `MirageCtl::session_stdin`.
-* `stdout` is a plain file opened with `O_APPEND` by the
-  host (the PTY merges the child's stderr into it). Concurrent readers
-  can `tail -f` it safely.
-* `pid` is written before the child runs; readers that need a pid can
-  poll the file. The file is removed when the host removes the exec
-  directory (only when `keep=false`).
-* `exit_code` is written after the child exits, atomically (write-then-
-  rename). Its presence indicates the child is done.
+* `stdin` is a Unix FIFO created with `mkfifo(2)`. Writing to it forwards to
+  the running exec's stdin: `printf 'data\n' > <node>/stdin`. The CLI exposes
+  this via `MirageCtl::session_stdin` (used by interactive `attach`). It is
+  created when the exec starts.
+* `stdout` is a plain file opened `O_APPEND`; the PTY merges the child's
+  stderr into it, so concurrent readers can `tail -f` safely.
+* `pid` is written before the child runs.
+* `exit_code` is written atomically after the child exits; its presence marks
+  the child done.
 
 ## Atomicity guarantees
 
-* All JSON writes are atomic (`<path>.tmp.<pid>` followed by `rename`).
-* `stdin` (FIFO) and `stdout` (append-only file) are created
-  before the child is spawned, so readers can attach as soon as the
-  per-node directory exists.
-* `status.json` may be rewritten many times; each rewrite is atomic.
-* The host writes its own pid file before publishing healthy, so any
-  client that sees `health.json:healthy=true` can rely on `host.pid`.
+* All JSON writes are atomic (`<path>.tmp.<pid>` then `rename`).
+* `stdin` and `stdout` exist before the child is spawned, so readers can
+  attach as soon as the per-node directory appears.
+* `status.json` is rewritten many times; each rewrite is atomic.
+* The host writes its pid before publishing `healthy=true`, so any client that
+  sees `healthy=true` can rely on the recorded pid.
 
 ## Cleanup
 
-* When `keep=false` (the default for `exec start` without `--keep` and
-  for `run`), the host removes the entire `<exec>/` directory after
-  `exit_code` has been written for every node.
-* `mirage session stop` removes the entire `<session>/` directory after
-  the host exits.
-* `XDG_RUNTIME_DIR` is itself cleared on logout, so leaked sessions
-  do not survive across reboots/logins.
+* When `keep=false` (the default for `exec start` without `--keep`, and for
+  `run`), the host removes the entire `<exec>/` directory once `exit_code` has
+  been written for every node. Attaching to such an exec after it finishes is
+  therefore racy; use `--keep` if you need its logs afterward.
+* `mirage session stop` removes the entire `<session>/` directory after the
+  host exits.
+* `mirage state purge` removes the runtime and state directories (and,
+  with `--all`, the config directory too).
+* `$XDG_RUNTIME_DIR` is cleared on logout, so leaked sessions do not survive
+  across reboots.

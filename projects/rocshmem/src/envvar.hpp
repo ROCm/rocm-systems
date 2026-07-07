@@ -310,6 +310,9 @@ namespace envvar {
        *
        * Format: ROCSHMEM_DEBUG_LEVEL=<level>[:<modifier>]*
        * Modifiers: noversion, noenv, noinfo, nowarn, notrace, env:all, env:full
+       * Special opt-in: :stats — print backend API call statistics at finalize via LOG_INFO.
+       *   Requires INFO level to be active (e.g. ROCSHMEM_DEBUG_LEVEL=info:stats).
+       *   Not implied by any verbosity level; must be specified explicitly.
        */
       enum class env_print_mode { MODIFIED, ALL, FULL };
 
@@ -323,6 +326,7 @@ namespace envvar {
         const bool show_warn;
         const bool show_trace;
         const bool show_color;
+        const bool show_stats;
       };
     }  // inline namespace _debug
   }  // namespace types

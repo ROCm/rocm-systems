@@ -179,6 +179,13 @@ ncclResult_t
 ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 
 ncclResult_t
+ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId);
+
+ncclResult_t
+ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId,
+                  int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+
+ncclResult_t
 ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count,
                    ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                    cudaStream_t stream, const void* acc);
@@ -302,11 +309,13 @@ RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommMemStats_fn, 46);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclPutSignal_fn, 47);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclSignal_fn, 48);
 RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclWaitSignal_fn, 49);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGetUniqueId_fn, 50);
+RCCL_ASSERT_OFFSET(rcclApiFuncTable, ncclCommGrow_fn, 51);
 // DO NOT REORDER, ADD NEW ITEMS HERE
 
 #undef RCCL_ASSERT_OFFSET
 
-static_assert(sizeof(rcclApiFuncTable) == compute_table_size(50),
+static_assert(sizeof(rcclApiFuncTable) == compute_table_size(52),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -366,7 +375,9 @@ RcclGetFunctionTable_impl()
                                                &ncclCommMemStats_impl,
                                                &ncclPutSignal_impl,
                                                &ncclSignal_impl,
-                                               &ncclWaitSignal_impl
+                                               &ncclWaitSignal_impl,
+                                               &ncclCommGetUniqueId_impl,
+                                               &ncclCommGrow_impl
                                                // DO NOT REORDER, ADD NEW ITEMS HERE
                                              };
 
@@ -539,6 +550,12 @@ NCCL_API(ncclResult_t, ncclCommResume, ncclComm_t comm);
 
 NCCL_API(ncclResult_t, ncclCommMemStats, ncclComm_t comm, ncclCommMemStat_t stat,
          uint64_t* value);
+
+NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
+
+NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks,
+         const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm,
+         ncclConfig_t* config);
 
 ncclResult_t
 ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
@@ -895,4 +912,18 @@ ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs,
                ncclComm_t comm, cudaStream_t stream)
 {
     return ::rccl::RcclGetFunctionTable()->ncclWaitSignal_fn(nDesc, signalDescs, comm, stream);
+}
+
+ncclResult_t
+ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommGetUniqueId_fn(comm, uniqueId);
+}
+
+ncclResult_t
+ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank,
+             ncclComm_t* newcomm, ncclConfig_t* config)
+{
+    return ::rccl::RcclGetFunctionTable()->ncclCommGrow_fn(comm, nRanks, uniqueId, rank,
+                                                           newcomm, config);
 }
