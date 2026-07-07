@@ -149,6 +149,7 @@ set(SRC_FILES
   include/fabric_init.h
   include/fabric_gpu_barrier.h
   include/fabric_mem_handler.h
+  include/ll_fabric.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h

@@ -638,6 +638,21 @@ struct ncclComm {
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;
 
+  // DDA fabric LL (low-latency) all-reduce path. A dedicated, persistent
+  // fabric-shared recv buffer (distinct from ddaScratch so the Simple remote-read
+  // path never clobbers it) holding LL {data,flag} packets, laid out as
+  // [2 banks][nRanks slots][slotStridePkts packets]. Cleared once at init; the
+  // per-op monotonically increasing epoch acts as the packet flag, so the path
+  // needs no cross-GPU barrier. All nullptr/0 when LL resources are unavailable.
+  ncclFabricMemHandler* ddaFabricLLMemHandler;
+  void* ddaFabricLLRecv;         /* this rank's LL recv buffer (VMM) */
+  size_t ddaFabricLLBytes;       /* size of ddaFabricLLRecv */
+  void* ddaFabricLLPeerPtrsDev;  /* device array of nRanks peer LL recv bases */
+  // Device-resident monotonic epoch counter (the packet flag value). Bumped by
+  // a 1-thread kernel enqueued before each LL op, so it stays correct under HIP
+  // graph capture/replay (a host-side counter would be baked in at capture).
+  uint32_t* ddaFabricLLEpochDev;
+
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;
   struct channelMasks* connectRecv;

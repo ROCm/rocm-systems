@@ -140,6 +140,7 @@ static uint32_t cumask[4];
 std::string rccl_output_file;
 std::string rccl_output_format;
 static int report_cputime = 0;
+static int report_hip_event_time = 1;
 static int report_timestamps = 0;
 static int deviceImpl = 0;
 int unalign = 0;
@@ -300,6 +301,9 @@ extern "C" __global__ void flush_icache()
                      "s_nop 0 \n\t"
                      "s_nop 0 \n\t" ::
                          :);
+}
+
+extern "C" __global__ void timing_marker_kernel() {
 }
 
 // NCCL-tests JSON output format
@@ -790,6 +794,18 @@ testResult_t completeColl(struct threadArgs* args) {
 
 testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place) {
   size_t count = args->nbytes / wordSize(type);
+  std::vector<hipEvent_t> perfStartEvents;
+  std::vector<hipEvent_t> perfStopEvents;
+  auto recordPerfMarkers = [&](std::vector<hipEvent_t>& events, bool startMarker) -> testResult_t {
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      CUDACHECK(hipExtLaunchKernel(
+          (const void*)timing_marker_kernel, dim3(1), dim3(1), nullptr, 0,
+          args->streams[i], startMarker ? events[i] : nullptr,
+          startMarker ? nullptr : events[i], 0));
+    }
+    return testSuccess;
+  };
   if (datacheck) {
     // Initialize sendbuffs, recvbuffs and expected
     TESTCHECK(args->collTest->initData(args, type, op, root, 99, in_place));
@@ -819,6 +835,17 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
 
   // Performance Benchmark
+  if (report_hip_event_time) {
+    perfStartEvents.resize(args->nGpus);
+    perfStopEvents.resize(args->nGpus);
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      CUDACHECK(hipEventCreate(perfStartEvents.data() + i));
+      CUDACHECK(hipEventCreate(perfStopEvents.data() + i));
+    }
+    TESTCHECK(recordPerfMarkers(perfStartEvents, true));
+  }
+
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
@@ -873,6 +900,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // Resync CPU, restart timing, launch cuda graph
     Barrier(args);
     tim.reset();
+    if (report_hip_event_time) {
+      TESTCHECK(recordPerfMarkers(perfStartEvents, true));
+    }
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
 #ifdef __HIP_PLATFORM_AMD__
@@ -884,6 +914,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
+  if (report_hip_event_time) {
+    TESTCHECK(recordPerfMarkers(perfStopEvents, false));
+  }
+
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
 
@@ -891,6 +925,22 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   deltaSec = deltaSec/(iters*agg_iters);
   if (cudaGraphLaunches >= 1) deltaSec = deltaSec/cudaGraphLaunches;
   Allreduce(args, &deltaSec, average);
+
+  double hipEventTimeSec = -1.0;
+  if (report_hip_event_time) {
+    float maxElapsedMs = 0.0f;
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      float elapsedMs = 0.0f;
+      CUDACHECK(hipEventElapsedTime(&elapsedMs, perfStartEvents[i], perfStopEvents[i]));
+      maxElapsedMs = std::max(maxElapsedMs, elapsedMs);
+      CUDACHECK(hipEventDestroy(perfStartEvents[i]));
+      CUDACHECK(hipEventDestroy(perfStopEvents[i]));
+    }
+    hipEventTimeSec = (double)maxElapsedMs / ((double)iters * (double)agg_iters * 1.0e3);
+    if (cudaGraphLaunches >= 1) hipEventTimeSec = hipEventTimeSec / cudaGraphLaunches;
+    Allreduce(args, &hipEventTimeSec, average);
+  }
 
 #if HIP_VERSION >= 50221310
   if (cudaGraphLaunches >= 1) {
@@ -981,7 +1031,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 
   double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+  double hipEventTimeUsec = hipEventTimeSec * 1.0E6;
+  writeBenchmarkLineBody(timeUsec, hipEventTimeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, report_hip_event_time, in_place==0);
 
   auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
   if (args->reporter) {
@@ -1568,6 +1619,7 @@ int main(int argc, char* argv[], char **envp) {
     {"timeout", required_argument, 0, 'T'},
     {"cudagraph", required_argument, 0, 'G'},
     {"report_cputime", required_argument, 0, 'C'},
+    {"report_hip_event_time", required_argument, 0, 'H'},
     {"report_timestamps", required_argument, 0, 'S'},
     {"output_file", required_argument, 0, 'J'},
     {"average", required_argument, 0, 'a'},
@@ -1592,7 +1644,7 @@ int main(int argc, char* argv[], char **envp) {
 
   while(1) {
     int c;
-    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:", longopts, &longindex);
+    c = getopt_long(argc, argv, "t:g:b:e:i:f:n:m:w:N:p:c:o:d:r:z:y:T:hG:C:H:a:R:x:D:V:J:S:M:u:Y:U:O:q:F:E:Z:X:A:", longopts, &longindex);
 
     if (c == -1)
       break;
@@ -1680,6 +1732,9 @@ int main(int argc, char* argv[], char **envp) {
         break;
       case 'C':
         report_cputime = strtol(optarg, NULL, 0);
+        break;
+      case 'H':
+        report_hip_event_time = strtol(optarg, NULL, 0);
         break;
       case 'J':
         output_file = strdup(optarg);
@@ -1809,6 +1864,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-T,--timeout <time in seconds>] \n\t"
             "[-G,--cudagraph <num graph launches>] \n\t"
             "[-C,--report_cputime <0/1>] \n\t"
+            "[-H,--report_hip_event_time <0/1> (default: 1)] \n\t"
             "[-S,--report_timestamps <0/1> report timestamps (default 0)] \n\t"
             "[-J,--output_file <file> write output to filepath, if accessible. Infer type from suffix (only json supported presently.)] \n\t"
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
@@ -2202,7 +2258,7 @@ testResult_t run() {
   fflush(stdout);
   
   // RCCL: Call NCCL's refactored header function with RCCL-specific parameters
-  writeResultHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels);
+  writeResultHeader(report_cputime, report_timestamps, enable_out_of_place, enable_in_place, output_algo_proto_channels, report_hip_event_time);
   
   // RCCL: Initialize Reporter for file output (-Z flag)
   Reporter reporter(rccl_output_file, rccl_output_format);

@@ -23,9 +23,71 @@
 namespace {
 
 using nccl_dda_detail::DdaFabricBarrierState;
+using nccl_dda_detail::ddaFabricLLMaxBytes;
 
 // Flat all-reduce kernel below this size; tree kernel at or above it.
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
+
+// LL (low-latency, remote-write) one-shot all-reduce. Used for small messages
+// (<= ddaFabricLLMaxBytes) when the dedicated LL buffer is available. Pushes LL
+// packets into peers' slots and polls locally; no cross-GPU barrier.
+template <typename T>
+static ncclResult_t ncclAllReduceDdaFabricLLTyped(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    ncclComm* comm,
+    cudaStream_t stream) {
+  const int nRanks = comm->nRanks;
+  const size_t sizeBytes = count * sizeof(T);
+  const size_t numPackets = sizeBytes / meta::comms::kLLDataBytesPerPacket;
+  const size_t slotStridePkts =
+      ddaFabricLLMaxBytes() / meta::comms::kLLDataBytesPerPacket;
+  const size_t bankStridePkts = static_cast<size_t>(nRanks) * slotStridePkts;
+
+  const int nBlocksMax = comm->ddaFabricMaxBlocks;
+  // One 16B packet per thread (treat each packet as a 16B "element").
+  auto gridBlock =
+      meta::comms::getGridAndBlockDims(numPackets, sizeof(uint4), nBlocksMax);
+  const auto& grid = gridBlock.first;
+  const auto& block = gridBlock.second;
+
+  auto** peerLLbufs =
+      reinterpret_cast<meta::comms::LLPacket16**>(comm->ddaFabricLLPeerPtrsDev);
+  auto* epochDev = comm->ddaFabricLLEpochDev;
+
+  INFO(NCCL_COLL,
+       "DDA fabric AllReduce: LL one-shot (remote-write) kernel: nRanks=%d count=%zu sizeBytes=%zu numPackets=%zu grid=%u block=%u%s",
+       nRanks, count, sizeBytes, numPackets, grid.x, block.x,
+       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
+
+  // Bump the device epoch first (graph-safe: re-runs on every replay).
+  meta::comms::ddaLLEpochBump<<<1, 1, 0, stream>>>(epochDev);
+
+  switch (nRanks) {
+  case 4:
+    meta::comms::ddaAllReduceFlatFabricLL<T, 4><<<grid, block, 0, stream>>>(
+        peerLLbufs, static_cast<T*>(recvbuff), count,
+        static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
+        slotStridePkts, bankStridePkts, epochDev);
+    break;
+  case 8:
+    meta::comms::ddaAllReduceFlatFabricLL<T, 8><<<grid, block, 0, stream>>>(
+        peerLLbufs, static_cast<T*>(recvbuff), count,
+        static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
+        slotStridePkts, bankStridePkts, epochDev);
+    break;
+  default:
+    meta::comms::ddaAllReduceFlatFabricLL<T, 0><<<grid, block, 0, stream>>>(
+        peerLLbufs, static_cast<T*>(recvbuff), count,
+        static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
+        slotStridePkts, bankStridePkts, epochDev);
+    break;
+  }
+
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
 
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricTyped(
@@ -50,6 +112,16 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(
 
   const int nRanks = comm->nRanks;
   const size_t sizeBytes = count * sizeof(T);
+
+  // Small messages: prefer the LL remote-write path when its dedicated buffer
+  // is available. Falls through to the Simple remote-read kernels otherwise.
+  if (comm->ddaFabricLLRecv != nullptr &&
+      comm->ddaFabricLLPeerPtrsDev != nullptr &&
+      sizeBytes <= ddaFabricLLMaxBytes()) {
+    return ncclAllReduceDdaFabricLLTyped<T>(
+        sendbuff, recvbuff, count, comm, stream);
+  }
+
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
   const bool treeOk =
       wantTree && (count % static_cast<size_t>(nRanks) == 0);

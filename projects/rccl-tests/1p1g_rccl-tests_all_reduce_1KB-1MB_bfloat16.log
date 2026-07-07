@@ -1,0 +1,24 @@
+Running all_reduce DDA for small messages (1024B-1024B) for 100 iterations and 0 graph launches
+mpirun -np 1 -mca pml ob1 -mca btl ^openib -x PATH -x LD_LIBRARY_PATH -x NCCL_DEBUG=VERSION -x NCCL_CUMEM_ENABLE=1 -x NCCL_MNNVL_ENABLE=1 /home/nilenegi/rocm-systems/projects/rccl-tests/build/all_reduce_perf -b 1024 -e 1024 -f 2 -g 1 -d bfloat16 -n 100 -w 50 -O 0 -G 0
+# rccl-tests version 2.18.3-rccl/gfx1250:99666db223+ rccl-headers=23004 rccl-library=23004
+# Collective test starting: all_reduce_perf
+# nThread 1 nGpus 1 minBytes 1024 maxBytes 1024 step: 2(factor) warmup iters: 50 iters: 100 agg iters: 1 validation: 1 graph: 0 unalign: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid 241278 on ctheliosp-1b112-a43-1 device  0 [0001:01:00] AMD Radeon Graphics
+RCCL version : 2.30.4-rccl/gfx1250:99666db
+HIP version  : 7.15.0-0000000
+ROCm version : 7.15.0.0-9999-435195a1
+Hostname     : ctheliosp-1b112-a43-1
+Librccl path : /home/nilenegi/rocm-systems/projects/rccl/install_rccl_gfx1250_20260706/lib/librccl.so.1
+#
+#                                                              in-place                 
+#       size         count      type   redop    root     time   hipevt   algbw   busbw  #wrong  
+#        (B)    (elements)                               (us)     (us)  (GB/s)  (GB/s)          
+        1024           512  bfloat16     sum      -1     5.71     2.78    0.18    0.00       0
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 0 
+#
+# Collective test concluded: all_reduce_perf
+#
+

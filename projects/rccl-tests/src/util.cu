@@ -469,9 +469,14 @@ void getFloatStr(double value, int width, char* str) {
 // Write the performance-related payload to stdout/json.
 // We call this function twice at the top level per test: once for out-of-place, and once for in-place.
 // The Json output assumes out-of-place happens first.
-void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool out_of_place) {
+void writeBenchmarkLineBody(double timeUsec, double hipEventTimeUsec, double algBw, double busBw, bool reportErrors, int64_t wrongElts, bool report_cputime, bool report_timestamps, bool report_hip_event_time, bool out_of_place) {
   char timeStr[8];
   getFloatStr(timeUsec, 7, timeStr);
+
+  char hipEventTimeStr[8] = "N/A";
+  if (report_hip_event_time && hipEventTimeUsec >= 0.0) {
+    getFloatStr(hipEventTimeUsec, 7, hipEventTimeStr);
+  }
 
   char algBwStr[7];
   getFloatStr(algBw, 6, algBwStr);
@@ -480,9 +485,17 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
   getFloatStr(busBw, 6, busBwStr);
 
   if (reportErrors) {
-    PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
+    if (report_hip_event_time) {
+      PRINT("  %7s  %7s  %6s  %6s  %6g", timeStr, hipEventTimeStr, algBwStr, busBwStr, (double)wrongElts);
+    } else {
+      PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
+    }
   } else {
-    PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+    if (report_hip_event_time) {
+      PRINT("  %7s  %7s  %6s  %6s    N/A", timeStr, hipEventTimeStr, algBwStr, busBwStr);
+    } else {
+      PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+    }
   }
 
   if (!out_of_place && report_timestamps) {
@@ -495,6 +508,9 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
     jsonKey(out_of_place ? "out_of_place" : "in_place");
     jsonStartObject();
     jsonKey(report_cputime ? "cpu_time" : "time"); jsonDouble(timeUsec);
+    if (report_hip_event_time) {
+      jsonKey("hip_event_time"); jsonDouble(hipEventTimeUsec);
+    }
     jsonKey("alg_bw");                             jsonDouble(algBw);
     jsonKey("bus_bw");                             jsonDouble(busBw);
     jsonKey("nwrong");                             (reportErrors ? jsonDouble((double)wrongElts) : jsonNull());
@@ -620,11 +636,12 @@ testResult_t writeDeviceReport(size_t *maxMem, int localRank, int proc, int tota
 // Write a result header to stdout/json.
 // Json results object and contained table list are left open
 // RCCL: Added parameters to support algo/proto/channels and flexible in-place/out-of-place layout
-void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_out_of_place, bool enable_in_place, bool output_algo_proto_channels) {
+void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_out_of_place, bool enable_in_place, bool output_algo_proto_channels, bool report_hip_event_time) {
   const char* tsLbl  = report_timestamps ? "timestamp" : "";
   const int tsPad = report_timestamps ? 19 : 0;
   const char* tsFmt = report_timestamps ? TIME_STRING_FORMAT : "";
   const char* timeStr = report_cputime ? "cputime" : "time";
+  const char* hipEventTimeStr = "hipevt";
   
   const char* extra_col_str[3] = {"", "", ""};
   int extraPad = 0;
@@ -638,26 +655,55 @@ void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_
   PRINT("#\n");
   
   if (enable_out_of_place && enable_in_place) {
-  PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong", extraPad, 
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    if (report_hip_event_time) {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                             in-place                \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, hipEventTimeStr, "algbw", "busbw", "#wrong",
+            timeStr, hipEventTimeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(us)", "(GB/s)", "(GB/s)", "",
+            "(us)", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    } else {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                       in-place          \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, "algbw", "busbw", "#wrong", timeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(GB/s)", "(GB/s)", "", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    }
   } else if (enable_out_of_place) {
-    PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", extraPad,
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    if (report_hip_event_time) {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place                 \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, hipEventTimeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    } else {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           out-of-place          \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    }
   } else {
-    PRINT("# %10s  %12s  %8s  %6s  %6s           in-place          \n", "", "", "", "", "");
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
-          timeStr, "algbw", "busbw", "#wrong", extraPad,
-          output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
-    PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
-          "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    if (report_hip_event_time) {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           in-place                 \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, hipEventTimeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    } else {
+      PRINT("# %10s  %12s  %8s  %6s  %6s           in-place          \n", "", "", "", "", "");
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "size", "count", "type", "redop", "root",
+            timeStr, "algbw", "busbw", "#wrong", extraPad,
+            output_algo_proto_channels ? "algo      proto      nchannels" : "", tsPad, tsLbl);
+      PRINT("# %10s  %12s  %8s  %6s  %6s  %7s  %6s  %6s  %6s %*s %*s\n", "(B)", "(elements)", "", "", "",
+            "(us)", "(GB/s)", "(GB/s)", "", extraPad, "", tsPad, tsFmt);
+    }
   }
 
   if(write_json) {

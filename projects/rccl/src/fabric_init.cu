@@ -14,6 +14,7 @@
 #include "dda_init_detail.h"
 #include "fabric_gpu_barrier.h"
 #include "fabric_mem_handler.h"
+#include "ll_fabric.h"
 
 #include <cuda_runtime.h>
 
@@ -21,8 +22,104 @@
 #include <vector>
 
 using meta::comms::kDdaMaxNranks;
+using meta::comms::kLLDataBytesPerPacket;
+using meta::comms::LLPacket16;
+using nccl_dda_detail::ddaFabricLLMaxBytes;
 using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::DdaFabricBarrierState;
+
+namespace {
+
+// Optional dedicated LL (low-latency, remote-write) recv buffer for the DDA
+// fabric all-reduce. Separate from ddaScratch so the Simple remote-read path
+// never clobbers the persistent LL flags. Non-fatal: on any failure the LL
+// fields are left null and the Simple fabric path remains usable.
+void ncclDdaFabricLLInit(ncclComm* comm) {
+  comm->ddaFabricLLMemHandler = nullptr;
+  comm->ddaFabricLLRecv = nullptr;
+  comm->ddaFabricLLBytes = 0;
+  comm->ddaFabricLLPeerPtrsDev = nullptr;
+  comm->ddaFabricLLEpochDev = nullptr;
+
+  const int nRanks = comm->nRanks;
+  const size_t llMaxBytes = ddaFabricLLMaxBytes();
+  const size_t slotStridePkts = llMaxBytes / kLLDataBytesPerPacket;
+  const size_t bankStridePkts = static_cast<size_t>(nRanks) * slotStridePkts;
+  // 2 banks (double-buffered) x nRanks slots x slotStridePkts packets.
+  const size_t llBytes = 2 * bankStridePkts * sizeof(LLPacket16);
+
+  void* llRecv = nullptr;
+  CUmemGenericAllocationHandle llHandle{};
+  ncclFabricMemHandler* llMemHandler = nullptr;
+  void* llPeerDev = nullptr;
+  uint32_t* llEpochDev = nullptr;
+  std::vector<void*> h_ptrs(nRanks, nullptr);
+  ncclResult_t res = ncclSuccess;
+
+  res = ncclCuMemAlloc(
+      &llRecv, &llHandle, ncclCuMemHandleType, llBytes, comm->memManager);
+  if (res != ncclSuccess || llRecv == nullptr) {
+    INFO(NCCL_INIT,
+         "ncclDdaFabricLLInit: VMM LL buffer alloc failed; LL path disabled");
+    llRecv = nullptr;
+    goto ll_fail;
+  }
+
+  // Clear once: flag 0 is never a valid epoch (epochs start at 1), so readers
+  // for epoch >= 1 correctly block on not-yet-written slots.
+  CUDACHECKGOTO(cudaMemset(llRecv, 0, llBytes), res, ll_fail);
+
+  llMemHandler = new (std::nothrow)
+      ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
+  if (llMemHandler == nullptr) {
+    WARN("ncclDdaFabricLLInit: OOM allocating ncclFabricMemHandler");
+    goto ll_fail;
+  }
+
+  NCCLCHECKGOTO(
+      llMemHandler->addSelfDeviceMem(llRecv, llHandle, llBytes), res, ll_fail);
+  NCCLCHECKGOTO(llMemHandler->exchangeMemPtrs(), res, ll_fail);
+
+  CUDACHECKGOTO(cudaMalloc(&llPeerDev, nRanks * sizeof(void*)), res, ll_fail);
+  for (int i = 0; i < nRanks; ++i) {
+    NCCLCHECKGOTO(llMemHandler->getPeerDeviceMemPtr(i, &h_ptrs[i]), res, ll_fail);
+  }
+  CUDACHECKGOTO(
+      cudaMemcpy(llPeerDev, h_ptrs.data(), nRanks * sizeof(void*),
+                 cudaMemcpyHostToDevice),
+      res, ll_fail);
+
+  // Device epoch counter, zero-initialized (first op bumps it to 1; flag 0 is
+  // never valid, matching the cleared-once recv buffer).
+  CUDACHECKGOTO(cudaMalloc(&llEpochDev, sizeof(uint32_t)), res, ll_fail);
+  CUDACHECKGOTO(cudaMemset(llEpochDev, 0, sizeof(uint32_t)), res, ll_fail);
+
+  comm->ddaFabricLLMemHandler = llMemHandler;
+  comm->ddaFabricLLRecv = llRecv;
+  comm->ddaFabricLLBytes = llBytes;
+  comm->ddaFabricLLPeerPtrsDev = llPeerDev;
+  comm->ddaFabricLLEpochDev = llEpochDev;
+  INFO(NCCL_INIT,
+       "ncclDdaFabricLLInit: nRanks %d, LL recv %zu bytes (vmm), maxBytes=%zu, slotStridePkts=%zu",
+       nRanks, llBytes, llMaxBytes, slotStridePkts);
+  return;
+
+ll_fail:
+  if (llEpochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(llEpochDev));
+  }
+  if (llPeerDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(llPeerDev));
+  }
+  if (llMemHandler != nullptr) {
+    delete llMemHandler;
+  }
+  if (llRecv != nullptr) {
+    (void)ncclCuMemFree(llRecv, comm->memManager);
+  }
+}
+
+} // namespace
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -134,6 +231,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       nRanks,
       bytes,
       nBlocksMax);
+
+  // Optional dedicated LL remote-write recv buffer (small-size fast path).
+  ncclDdaFabricLLInit(comm);
   return ncclSuccess;
 
 fail:
@@ -160,6 +260,24 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
     delete static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
     comm->ddaFabricBarrierState = nullptr;
   }
+  // LL remote-write path resources (optional; may be null).
+  if (comm->ddaFabricLLEpochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(comm->ddaFabricLLEpochDev));
+    comm->ddaFabricLLEpochDev = nullptr;
+  }
+  if (comm->ddaFabricLLPeerPtrsDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(comm->ddaFabricLLPeerPtrsDev));
+    comm->ddaFabricLLPeerPtrsDev = nullptr;
+  }
+  if (comm->ddaFabricLLMemHandler != nullptr) {
+    delete static_cast<ncclFabricMemHandler*>(comm->ddaFabricLLMemHandler);
+    comm->ddaFabricLLMemHandler = nullptr;
+  }
+  if (comm->ddaFabricLLRecv != nullptr) {
+    (void)ncclCuMemFree(comm->ddaFabricLLRecv, comm->memManager);
+    comm->ddaFabricLLRecv = nullptr;
+  }
+  comm->ddaFabricLLBytes = 0;
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
   // Destroying the fabric handler unmaps/frees the imported peer scratch buffers.

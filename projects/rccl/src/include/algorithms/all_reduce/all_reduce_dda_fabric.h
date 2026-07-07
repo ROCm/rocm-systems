@@ -20,8 +20,104 @@
 
 #include "algorithms/CollCommon.h"
 #include "fabric_gpu_barrier.h"
+#include "ll_fabric.h"
 
 namespace meta::comms {
+
+// Bump the device-resident LL epoch counter by one. Enqueued before each LL
+// all-reduce so the flag value re-increments on every HIP graph replay (a
+// host-side counter would be captured once and reused, breaking LL).
+__global__ void ddaLLEpochBump(uint32_t* __restrict__ epoch) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *epoch = *epoch + 1;
+  }
+}
+
+// DDA all-reduce, LL (low-latency) protocol, REMOTE-WRITE one-shot path.
+//
+// Each rank pushes its input as LL {data,flag} packets into every peer's
+// per-source slot (remote writes), then polls its own nRanks slots locally.
+// A packet is consumed once both flag halves equal the current epoch, so no
+// cross-GPU barrier is needed. The reduction is folded on the consumer side as
+// slots arrive, reusing vecElementAdd<T> (handles fp32/fp16/bf16 lanes per 4B
+// data word). recvbuff receives the full reduced result (every rank computes
+// the whole reduction: one-shot / flat).
+//
+// Buffer layout (per rank, in the dedicated LL recv buffer):
+//   [ bank 0: nRanks slots ][ bank 1: nRanks slots ]
+// each slot is slotStridePkts packets; the active bank is bankOffset packets in.
+template <typename T, int NRANKS_CT>
+#if defined(USE_ROCM)
+__launch_bounds__(512)
+#endif
+__global__ void ddaAllReduceFlatFabricLL(
+    LLPacket16* const* __restrict__ peerLLbufs,
+    T* __restrict__ recvbuff,
+    size_t count,
+    const T* __restrict__ sendbuff,
+    int selfRank,
+    int nRanks,
+    size_t numPackets,
+    size_t slotStridePkts,
+    size_t bankStridePkts,
+    const uint32_t* __restrict__ epochPtr) {
+  const int nR = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
+  const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
+  const auto stride = gridDim.x * blockDim.x;
+
+  // Epoch was set by the preceding bump kernel (stream-ordered); every thread
+  // reads the same value. It is the packet flag and selects the double-buffer
+  // bank, so a lagging peer's read of op N doesn't collide with op N+1.
+  const uint32_t flagVal = *epochPtr;
+  const size_t bankOffset =
+      static_cast<size_t>((flagVal - 1) & 1) * bankStridePkts;
+  const uint32_t* __restrict__ sendU32 =
+      reinterpret_cast<const uint32_t*>(sendbuff);
+  uint32_t* __restrict__ recvU32 = reinterpret_cast<uint32_t*>(recvbuff);
+
+  // 1. PUSH: pack my payload into every peer's slot for my rank (remote write).
+#pragma unroll(NRANKS_CT > 0 ? NRANKS_CT : 1)
+  for (int p = 0; p < nR; ++p) {
+    if (p == selfRank) {
+      continue;
+    }
+    LLPacket16* __restrict__ dst =
+        peerLLbufs[p] + static_cast<size_t>(selfRank) * slotStridePkts +
+        bankOffset;
+    for (size_t pkt = gtIdx; pkt < numPackets; pkt += stride) {
+      const uint32_t* s = sendU32 + pkt * 2;
+      llStoreLine(
+          reinterpret_cast<uint32_t*>(&dst[pkt]), s[0], flagVal, s[1], flagVal);
+    }
+  }
+
+  // 2. POLL + REDUCE: local reads of my nRanks slots, fused sum -> recvbuff.
+  LLPacket16* __restrict__ myBuf = peerLLbufs[selfRank] + bankOffset;
+  for (size_t pkt = gtIdx; pkt < numPackets; pkt += stride) {
+    // Seed with my own contribution (already local; no packetization).
+    uint32_t acc0 = sendU32[pkt * 2 + 0];
+    uint32_t acc1 = sendU32[pkt * 2 + 1];
+#pragma unroll(NRANKS_CT > 0 ? NRANKS_CT : 1)
+    for (int p = 0; p < nR; ++p) {
+      if (p == selfRank) {
+        continue;
+      }
+      volatile LLPacket16* slot =
+          myBuf + static_cast<size_t>(p) * slotStridePkts;
+      uint32_t d0, f0, d1, f1;
+      do {
+        llLoadLine(
+            reinterpret_cast<const uint32_t*>(
+                const_cast<LLPacket16*>(&slot[pkt])),
+            d0, f0, d1, f1);
+      } while (f0 != flagVal || f1 != flagVal);
+      acc0 = vecElementAdd<T>(acc0, d0);
+      acc1 = vecElementAdd<T>(acc1, d1);
+    }
+    recvU32[pkt * 2 + 0] = acc0;
+    recvU32[pkt * 2 + 1] = acc1;
+  }
+}
 
 template <typename T, int NRANKS_CT, bool hasAcc>
 #if defined(USE_ROCM)
