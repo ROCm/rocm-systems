@@ -151,7 +151,8 @@ jobs:
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
-      cmake_options: ${{ matrix.projects.cmake_options }}
+      # For gfx125X (MI455), always build ALL projects instead of just core
+      cmake_options: ${{ contains(matrix.target_bundle.amdgpu_family, 'gfx125X') && '-DTHEROCK_ENABLE_ALL=ON' || matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       package_version: ${{ needs.setup.outputs.package_version }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
