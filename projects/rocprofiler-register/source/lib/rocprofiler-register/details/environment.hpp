@@ -114,7 +114,7 @@ set_env_impl(std::string_view env_id, bool value, int overwrite)
 }
 
 template <typename Tp>
-int
+int  // NOLINTNEXTLINE(performance-unnecessary-value-param)
 set_env_impl(std::string_view env_id, Tp value, int overwrite)
 {
     auto str_value = std::stringstream{};
