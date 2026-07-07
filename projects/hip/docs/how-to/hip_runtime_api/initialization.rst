@@ -92,7 +92,7 @@ operations. This function performs several key tasks:
   Checks for errors in device selection and returns error if the specified
   device is not available or not capable of executing HIP operations.
 
-Process creation (fork/exec)
+Process creation (`fork()`/`exec()`)
 ================================================================================
 
 Applications that use `fork()` should avoid initializing the HIP runtime before
