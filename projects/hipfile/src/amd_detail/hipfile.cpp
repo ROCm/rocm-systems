@@ -622,4 +622,25 @@ catch (...) {
     return handle_exception();
 }
 
+hipFileError_t
+hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
+{
+    (void)stats;
+    return {hipFileInternalError, hipSuccess};
+}
+
+hipFileError_t
+hipFileGetStatsL2(hipFileStatsLevel2_t *stats)
+{
+    (void)stats;
+    return {hipFileInternalError, hipSuccess};
+}
+
+hipFileError_t
+hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
+{
+    (void)stats;
+    return {hipFileInternalError, hipSuccess};
+}
+
 } // namespace
