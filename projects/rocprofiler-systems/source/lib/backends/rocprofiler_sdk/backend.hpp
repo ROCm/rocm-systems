@@ -23,7 +23,8 @@ sdk_check(typename Wrapper::status_t status)
 {
     if(status != Wrapper::STATUS_SUCCESS)
     {
-        throw std::runtime_error{ Wrapper::get_status_string(status) };
+        const char* msg = Wrapper::get_status_string(status);
+        throw std::runtime_error{ msg != nullptr ? msg : "unknown rocprofiler status" };
     }
 }
 
