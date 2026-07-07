@@ -22,6 +22,7 @@ downstream consumer of the library.
 
 ### Added
 
+- Windows/MSVC build support (Visual Studio 2022 or 2026 Build Tools).
 - `libprofiler-hub.so` now ships with a SOVERSION (`libprofiler-hub.so.0` symlink and
   `libprofiler-hub.so.0.1.0` actual file) so consumers can pin to a specific ABI.
 - New cache var `FMT_VERSION` (default `11.2.0`). When the system fmt is missing,

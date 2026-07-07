@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(profiler-hub VERSION 0.1.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -214,7 +214,20 @@ endif()
 
 add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
-set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
+if(WIN32)
+    set_target_properties(profiler-hub PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # On MSVC, profiler-hub.lib is the DLL import library; keep the static
+    # archive under a distinct name so consumers link the shared library.
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub-static
+    )
+else()
+    set_target_properties(
+        profiler-hub-static
+        PROPERTIES OUTPUT_NAME profiler-hub
+    )
+endif()
 
 # Embed semantic version + ABI version on the shared library so that
 # libprofiler-hub.so.<MAJOR> is the SONAME and libprofiler-hub.so.<MAJOR>.<MINOR>.<PATCH>

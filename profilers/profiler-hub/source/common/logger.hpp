@@ -18,11 +18,23 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
-#include <pthread.h>
+#ifdef _WIN32
+#    include <process.h>
+#else
+#    include <pthread.h>
+#    include <unistd.h>
+#endif
 #include <string>
 #include <string_view>
-#include <unistd.h>
 #include <vector>
+
+#if defined(_MSC_VER)
+#    define PROFILER_HUB_ALWAYS_INLINE __forceinline
+#elif defined(__GNUC__)
+#    define PROFILER_HUB_ALWAYS_INLINE __attribute__((always_inline))
+#else
+#    define PROFILER_HUB_ALWAYS_INLINE inline
+#endif
 
 namespace profiler_hub
 {
@@ -30,7 +42,7 @@ namespace profiler_hub
 namespace
 {
 
-inline __attribute__((always_inline)) auto
+inline PROFILER_HUB_ALWAYS_INLINE auto
 to_lower(std::string_view s)
 {
     std::string result;
@@ -57,7 +69,13 @@ include_process_id_in_filename(std::string_view filename)
     bool const has_extension =
         (dot_pos != std::string_view::npos) && (dot_pos > filename_start);
 
-    std::string const pid_suffix = "_" + std::to_string(getpid());
+    std::string const pid_suffix = "_" + std::to_string(
+#ifdef _WIN32
+                                             _getpid()
+#else
+                                             getpid()
+#endif
+                                         );
 
     if(!has_extension)
     {
@@ -164,6 +182,7 @@ public:
         static std::atomic<bool>               initialized{ false };
         static std::mutex                      init_mutex;
 
+#ifndef _WIN32
         static std::once_flag atfork_flag;
         std::call_once(atfork_flag, [] {
             pthread_atfork(nullptr, nullptr, [] {
@@ -172,6 +191,7 @@ public:
                 initialized.store(false, std::memory_order_release);
             });
         });
+#endif
 
         if(!initialized.load(std::memory_order_acquire))
         {
