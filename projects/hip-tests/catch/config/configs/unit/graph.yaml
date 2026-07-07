@@ -149,9 +149,6 @@ graph:
     # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
     disabled: [amd_windows, amd_wsl]
     tags: [lifecycle]
-    # SWDEV-517063 Below tests are temporarily disabled due to PSDB failure
-    disabled: [amd_windows, amd_wsl]
-    tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_Negative:
     <<: *level_2
     # Unit_hipGraphInstantiateWithParams_Negative
@@ -1237,35 +1234,22 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
     <<: *level_2
-    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
-    # https://github.com/ROCm/rocm-systems/issues/7148
-    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility:
     <<: *level_2
-    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
-    # https://github.com/ROCm/rocm-systems/issues/7148
-    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer:
     <<: *level_2
     tags: [capture]
   Unit_hipLaunchHostFunc_CrossStreamDepSdmaDtoH_UncapturedFirstNode:
     <<: *level_2
-    # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
-    # https://github.com/ROCm/rocm-systems/issues/7148
-    disabled: [amd_windows, amd_wsl]
     tags: [capture]
   Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads:
     <<: *level_2
-    skip:
-      - os: windows
-        reason: Hangs on Windows PAL
+    tags: [capture]
   Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads:
     <<: *level_2
-    skip:
-      - os: windows
-        reason: Hangs on Windows PAL
+    tags: [capture]
   Unit_hipLaunchHostFunc_SameStreamSdmaDtoH_UncapturedHost:
     <<: *level_2
     tags: [capture]
