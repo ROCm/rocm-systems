@@ -392,14 +392,14 @@ namespace hip {
     void SetAsyncError(hipError_t err) {
       hipError_t expected = hipSuccess;
       async_error_.compare_exchange_strong(expected, err,
-          std::memory_order_relaxed, std::memory_order_relaxed);
+          std::memory_order_release, std::memory_order_relaxed);
     }
     hipError_t GetAndClearAsyncError() {
       // Fast path: no error, skip the locked RMW.
-      if (async_error_.load(std::memory_order_relaxed) == hipSuccess) {
+      if (async_error_.load(std::memory_order_acquire) == hipSuccess) {
         return hipSuccess;
       }
-      return async_error_.exchange(hipSuccess, std::memory_order_relaxed);
+      return async_error_.exchange(hipSuccess, std::memory_order_acq_rel);
     }
 
     static void Destroy(hip::Stream* stream, bool forceDestroy = false);
