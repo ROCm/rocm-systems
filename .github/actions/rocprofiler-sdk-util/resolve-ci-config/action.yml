@@ -16,12 +16,21 @@ inputs:
     default: linux-mi325-gpu-rocm-cpu-sandbox
 
 outputs:
+  gfx90a_runner:
+    description: Linux gfx950 test runner label
+    value:
   gfx94x_runner:
     description: Linux gfx94x test runner label
     value: ${{ steps.runner.outputs.gfx94x_runner }}
   gfx94x_sandbox_runner:
     description: Linux gfx94x sandbox test runner label
     value: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+  gfx950_runner:
+    description: Linux gfx950 test runner label
+    value:
+  gfx1151_runner:
+    description: Linux gfx1151 test runner label
+    value:
 
 runs:
   using: composite
