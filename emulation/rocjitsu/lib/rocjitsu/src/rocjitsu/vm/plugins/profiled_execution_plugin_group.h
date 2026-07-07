@@ -49,7 +49,7 @@ public:
   }
 
   void onShutdown() {
-    if (prof_before_exec_.count > 0)
+    if (has_profile_data())
       print_profile_summary();
     ExecutionPluginGroup::onShutdown();
     double total = std::chrono::duration<double>(Clock::now() - start_time_).count();
@@ -76,7 +76,7 @@ public:
   }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override {
-    if (prof_before_exec_.count > 0)
+    if (has_profile_data())
       print_profile_summary();
     current_kernel_name_ = info.kernel_name;
     dispatch_kernel_names_[info.dispatch_id] = info.kernel_name;
@@ -85,7 +85,7 @@ public:
   }
 
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override {
-    if (prof_before_exec_.count > 0) {
+    if (has_profile_data()) {
       auto it = dispatch_kernel_names_.find(dispatch_id);
       if (it != dispatch_kernel_names_.end())
         current_kernel_name_ = it->second;
@@ -128,6 +128,13 @@ public:
     });
   }
 
+  void onAmdgpuWriteVgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane,
+                         uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override {
+    profiled_dispatch(prof_write_vgpr_, [&]() {
+      ExecutionPluginGroup::onAmdgpuWriteVgpr(wf, physical_reg, lane, byte_mask);
+    });
+  }
+
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override {
     profiled_dispatch(prof_read_sgpr_,
                       [&]() { ExecutionPluginGroup::onAmdgpuReadSgpr(wf, physical_reg); });
@@ -154,10 +161,19 @@ private:
     }
   }
 
+  bool has_profile_data() const {
+    return prof_before_exec_.count > 0 || prof_after_exec_.count > 0 || prof_read_vgpr_.count > 0 ||
+           prof_write_vgpr_.count > 0 || prof_read_sgpr_.count > 0 || prof_route_mem_.count > 0 ||
+           prof_barrier_.count > 0 || prof_wg_dispatched_.count > 0 ||
+           prof_wg_completed_.count > 0 || prof_wf_dispatched_.count > 0 ||
+           prof_wf_halted_.count > 0;
+  }
+
   void reset_profiles() {
     prof_before_exec_ = {};
     prof_after_exec_ = {};
     prof_read_vgpr_ = {};
+    prof_write_vgpr_ = {};
     prof_read_sgpr_ = {};
     prof_route_mem_ = {};
     prof_barrier_ = {};
@@ -179,6 +195,7 @@ private:
     print_hook("beforeExecuteInstruction", prof_before_exec_);
     print_hook("afterExecuteInstruction", prof_after_exec_);
     print_hook("readVgpr", prof_read_vgpr_);
+    print_hook("writeVgpr", prof_write_vgpr_);
     print_hook("readSgpr", prof_read_sgpr_);
     print_hook("routeMemoryInstruction", prof_route_mem_);
     print_hook("barrierResolved", prof_barrier_);
@@ -199,6 +216,7 @@ private:
   HookProfile prof_before_exec_;
   HookProfile prof_after_exec_;
   HookProfile prof_read_vgpr_;
+  HookProfile prof_write_vgpr_;
   HookProfile prof_read_sgpr_;
   HookProfile prof_route_mem_;
   HookProfile prof_barrier_;

@@ -21,6 +21,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <memory>
@@ -174,6 +175,119 @@ void ComputeUnitCore::reset_all_wf() {
     }
     w->reset();
   }
+}
+
+void ComputeUnitCore::begin_vgpr_write_hook_filter(const Instruction &inst, const Wavefront &wf) {
+  cancel_vgpr_write_hook_filter();
+  if (plugin_group_->empty())
+    return;
+
+  auto filter = inst.vgpr_write_hook_filter(wf.wf_size(), wf.exec());
+  if (!filter)
+    return;
+
+  auto &state = vgpr_write_hook_filter_;
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const Operand *dst = inst.dst_operand(i);
+    if (!dst)
+      continue;
+    auto ref = dst->to_register_ref();
+    if (!ref || ref->cls != RegClass::VGPR)
+      continue;
+
+    uint32_t off = ref->index + (wf.vgpr_msb_for_role(dst->vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
+    for (uint32_t r = 0; r < ref->width; ++r) {
+      uint32_t physical_reg = wf.vgpr_alloc().base + voff + r;
+      auto duplicate = std::find_if(state.destinations.begin(), state.destinations.end(),
+                                    [physical_reg](const FilteredVgprHooks &entry) {
+                                      return entry.physical_reg == physical_reg;
+                                    });
+      if (duplicate == state.destinations.end())
+        state.destinations.push_back(FilteredVgprHooks{physical_reg});
+    }
+  }
+  if (state.destinations.empty())
+    return;
+
+  state.wf = &wf;
+  state.lane_mask = filter->lane_mask;
+  state.byte_mask = filter->byte_mask;
+  state.suppress_destination_merge_reads = filter->suppress_destination_merge_reads;
+  state.initial_destination_merge_read_lanes =
+      filter->suppress_destination_merge_reads ? wf.exec() : 0;
+}
+
+void ComputeUnitCore::flush_vgpr_write_hook_filter() {
+  auto &state = vgpr_write_hook_filter_;
+  if (!state.active())
+    return;
+
+  const Wavefront *wf = state.wf;
+  state.wf = nullptr;
+  for (const auto &dst : state.destinations) {
+    uint64_t pending = dst.pending_writes;
+    while (pending) {
+      uint32_t lane = static_cast<uint32_t>(std::countr_zero(pending));
+      uint8_t byte_mask = state.byte_mask ? state.byte_mask : dst.byte_masks[lane];
+      plugin_group_->onAmdgpuWriteVgpr(wf, dst.physical_reg, lane, byte_mask);
+      pending &= pending - 1;
+    }
+  }
+  state.destinations.clear();
+}
+
+void ComputeUnitCore::cancel_vgpr_write_hook_filter() { vgpr_write_hook_filter_.clear(); }
+
+bool ComputeUnitCore::filter_vgpr_read_notification(const Wavefront *wf, uint32_t reg_idx,
+                                                    uint32_t lane_begin, uint32_t lane_end,
+                                                    uint8_t byte_mask) const {
+  auto &state = vgpr_write_hook_filter_;
+  if (!state.active() || state.wf != wf || !state.suppress_destination_merge_reads)
+    return false;
+
+  auto dst = std::find_if(
+      state.destinations.begin(), state.destinations.end(),
+      [reg_idx](const FilteredVgprHooks &entry) { return entry.physical_reg == reg_idx; });
+  if (dst == state.destinations.end())
+    return false;
+
+  for (uint32_t lane = lane_begin; lane < lane_end; ++lane) {
+    assert(lane < 64);
+    uint64_t bit = 1ULL << lane;
+    bool suppress = false;
+    if (dst->writes & bit) {
+      suppress = true;
+    } else if ((state.initial_destination_merge_read_lanes & bit) && !(dst->initial_reads & bit)) {
+      dst->initial_reads |= bit;
+      suppress = true;
+    }
+    if (!suppress)
+      plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1, byte_mask);
+  }
+  return true;
+}
+
+bool ComputeUnitCore::filter_vgpr_write_notification(const Wavefront *wf, uint32_t reg_idx,
+                                                     uint32_t lane, uint8_t byte_mask) const {
+  auto &state = vgpr_write_hook_filter_;
+  if (!state.active() || state.wf != wf)
+    return false;
+
+  auto dst = std::find_if(
+      state.destinations.begin(), state.destinations.end(),
+      [reg_idx](const FilteredVgprHooks &entry) { return entry.physical_reg == reg_idx; });
+  if (dst == state.destinations.end())
+    return false;
+
+  assert(lane < 64);
+  uint64_t bit = 1ULL << lane;
+  dst->writes |= bit;
+  if (state.lane_mask & bit) {
+    dst->pending_writes |= bit;
+    dst->byte_masks[lane] |= byte_mask;
+  }
+  return true;
 }
 
 void ComputeUnitCore::retire_halted_wfs_no_lds_reset() {
@@ -408,7 +522,14 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  execute_instruction(inst, *active);
+  begin_vgpr_write_hook_filter(*inst, *active);
+  try {
+    execute_instruction(inst, *active);
+  } catch (...) {
+    cancel_vgpr_write_hook_filter();
+    throw;
+  }
+  flush_vgpr_write_hook_filter();
   plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {

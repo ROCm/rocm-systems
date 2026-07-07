@@ -448,6 +448,12 @@ class Vop1 : public IsaInstruction<Isa> {
 public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  std::optional<VgprWriteHookFilter> vgpr_write_hook_filter(uint32_t wf_size,
+                                                            uint64_t exec) const override {
+    return amdgpu::vop_write_hook_filter(inst_.src0, wf_size, exec, dpp_ctrl_, dpp_row_mask_,
+                                         dpp_bank_mask_, dpp_bound_ctrl_, sdwa_dst_sel_,
+                                         sdwa_dst_unused_);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp();
@@ -505,6 +511,12 @@ class Vop2 : public IsaInstruction<Isa> {
 public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   void implicit_uses(RegisterSet &uses) const override;
+  std::optional<VgprWriteHookFilter> vgpr_write_hook_filter(uint32_t wf_size,
+                                                            uint64_t exec) const override {
+    return amdgpu::vop_write_hook_filter(inst_.src0, wf_size, exec, dpp_ctrl_, dpp_row_mask_,
+                                         dpp_bank_mask_, dpp_bound_ctrl_, sdwa_dst_sel_,
+                                         sdwa_dst_unused_);
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp();

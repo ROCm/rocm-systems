@@ -2029,6 +2029,33 @@ class CodeGenerator:
                 public_members.append(func_decl)
                 class_func_impls.append(func_body)
 
+            _enc_upper = inst_enc.enc_name.upper()
+            _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(_enc_upper)
+            if _enc_upper in ('ENC_VOP1', 'ENC_VOP2'):
+                public_members.append(
+                    cgen.Line(
+                        'std::optional<VgprWriteHookFilter> vgpr_write_hook_filter('
+                        'uint32_t wf_size, uint64_t exec) const override {'
+                        ' return amdgpu::vop_write_hook_filter('
+                        'inst_.src0, wf_size, exec, dpp_ctrl_, dpp_row_mask_,'
+                        ' dpp_bank_mask_, dpp_bound_ctrl_, sdwa_dst_sel_,'
+                        ' sdwa_dst_unused_); }'
+                    )
+                )
+            elif _dpp_struct and _enc_upper in (
+                'ENC_VOP3',
+                'ENC_VOP3P',
+                'VOP3_SDST_ENC',
+            ):
+                public_members.append(
+                    cgen.Line(
+                        'std::optional<VgprWriteHookFilter> vgpr_write_hook_filter('
+                        'uint32_t wf_size, uint64_t exec) const override {'
+                        ' return amdgpu::dpp_write_hook_filter('
+                        'inst_.src0, wf_size, exec, dpp_ctrl_, dpp_row_mask_,'
+                        ' dpp_bank_mask_, dpp_bound_ctrl_); }'
+                    )
+                )
             class_members.extend(public_members)
             class_members.append(
                 cgen.Statement(f'using OpEncoding = {inst_enc.fmt_enc_name}MachineInst')
@@ -2041,8 +2068,6 @@ class CodeGenerator:
                 class_members.append(cgen.Statement('std::string owned_mnemonic_'))
             # VOP encoding bases store DPP control fields.
             # apply_dpp() is a free function in dpp_sdwa_ops.h.
-            _enc_upper = inst_enc.enc_name.upper()
-            _dpp_struct, _dpp8_struct = self._vop_dpp_struct_names(_enc_upper)
             if (
                 _dpp_struct
                 or _dpp8_struct

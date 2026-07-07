@@ -8,6 +8,9 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -17,12 +20,16 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "util/simd_test_hooks.h"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <map>
 #include <memory>
@@ -42,6 +49,85 @@ constexpr uint32_t S_NOP = sopp(0);
 constexpr uint32_t S_ENDPGM = sopp(1);
 constexpr uint32_t S_BARRIER = sopp(10);
 
+// VOP1 encoding: bits[31:25]=0x3F, bits[24:17]=vdst,
+// bits[16:9]=op, bits[8:0]=src0.
+constexpr uint32_t vop1(uint32_t op, uint32_t vdst, uint32_t src0) {
+  return (0x3Fu << 25) | (vdst << 17) | (op << 9) | src0;
+}
+constexpr uint32_t vgpr_src(uint32_t idx) { return 256 + idx; }
+constexpr uint32_t v_mov_b32(uint32_t vdst, uint32_t src0) { return vop1(1, vdst, src0); }
+
+std::array<uint32_t, 3> v_mov_b32_dpp(uint32_t vdst, uint32_t vsrc0) {
+  cdna4::Vop1VopDppMachineInst raw{};
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.op = 1;
+  raw.vdst = vdst;
+  raw.encoding = 0x3F;
+  raw.vsrc0 = vsrc0;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  static_assert(sizeof(raw) == 2 * sizeof(uint32_t));
+  std::array<uint32_t, 3> code{};
+  std::memcpy(code.data(), &raw, sizeof(raw));
+  code[2] = S_ENDPGM;
+  return code;
+}
+
+std::array<uint32_t, 4> rdna4_v_add_f16_dpp_high(uint32_t vdst, uint32_t vsrc0, uint32_t vsrc1) {
+  rdna4::Vop3VopDpp16MachineInst raw{};
+  raw.vdst = vdst;
+  raw.opsel = 0xB;
+  raw.op = 0x132;
+  raw.encoding = 0x35;
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.src1 = vgpr_src(vsrc1);
+  raw.vsrc0 = vsrc0;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.fi = 1;
+  raw.bound_ctrl = 1;
+  raw.bank_mask = 0xF;
+  raw.row_mask = 0xF;
+  static_assert(sizeof(raw) == 3 * sizeof(uint32_t));
+  std::array<uint32_t, 4> code{};
+  std::memcpy(code.data(), &raw, sizeof(raw));
+  code[3] = S_ENDPGM;
+  return code;
+}
+
+std::array<uint32_t, 3> v_mov_b32_sdwa_byte1_preserve(uint32_t vdst, uint32_t vsrc0) {
+  cdna4::Vop1VopSdwaMachineInst raw{};
+  raw.src0 = amdgpu::SRC_SDWA;
+  raw.op = 1;
+  raw.vdst = vdst;
+  raw.encoding = 0x3F;
+  raw.vsrc0 = vsrc0;
+  raw.dst_sel = amdgpu::sdwa::BYTE_1;
+  raw.dst_unused = amdgpu::sdwa::UNUSED_PRESERVE;
+  raw.src0_sel = amdgpu::sdwa::DWORD;
+  static_assert(sizeof(raw) == 2 * sizeof(uint32_t));
+  std::array<uint32_t, 3> code{};
+  std::memcpy(code.data(), &raw, sizeof(raw));
+  code[2] = S_ENDPGM;
+  return code;
+}
+
+constexpr std::array<uint32_t, 2> cdna_vop3(uint32_t op, uint32_t vdst, uint32_t src0,
+                                            uint32_t src1, uint32_t src2, uint32_t opsel = 0) {
+  return {vdst | ((opsel & 0xFu) << 11) | ((op & 0x3FFu) << 16) | (0x34u << 26),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
+}
+
+struct ForceScalarGuard {
+  explicit ForceScalarGuard(bool force_scalar) : old_force_scalar(util::force_scalar()) {
+    util::set_force_scalar_for_testing(force_scalar);
+  }
+  ~ForceScalarGuard() { util::set_force_scalar_for_testing(old_force_scalar); }
+
+  bool old_force_scalar;
+};
+
 struct HookEvent {
   enum Kind {
     DISPATCH_PACKET_PROCESSED,
@@ -55,6 +141,7 @@ struct HookEvent {
     AFTER_INSTRUCTION,
     ROUTE_MEMORY,
     READ_VGPR,
+    WRITE_VGPR,
     READ_SGPR,
     BARRIER_RESOLVED,
     INIT,
@@ -71,6 +158,9 @@ struct HookEvent {
   uint32_t physical_vgpr_count = 0;
   uint32_t sgpr_count = 0;
   uint64_t pc = 0;
+  uint32_t physical_reg = 0;
+  uint32_t lane = 0;
+  uint8_t byte_mask = 0;
   std::string mnemonic;
 };
 
@@ -121,12 +211,16 @@ public:
   }
 
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override {
+    if (dispatch_exec_mask)
+      wf.set_exec(*dispatch_exec_mask);
     HookEvent e{HookEvent::WAVEFRONT_DISPATCHED};
     e.dispatch_id = wf.dispatch_id();
     e.wg_id = wf.wg_id();
     e.wf_id = wf.wf_id();
     events.push_back(e);
   }
+
+  std::optional<uint64_t> dispatch_exec_mask;
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override {
     HookEvent e{HookEvent::WAVEFRONT_HALTED};
@@ -167,14 +261,30 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t, uint32_t, uint32_t,
-                         uint8_t) override {
+  void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
+                         uint32_t, uint8_t) override {
     HookEvent e{HookEvent::READ_VGPR};
     if (wf) {
       e.dispatch_id = wf->dispatch_id();
       e.wg_id = wf->wg_id();
       e.wf_id = wf->wf_id();
     }
+    e.physical_reg = physical_reg;
+    e.lane = lane_begin;
+    events.push_back(e);
+  }
+
+  void onAmdgpuWriteVgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane,
+                         uint8_t byte_mask) override {
+    HookEvent e{HookEvent::WRITE_VGPR};
+    if (wf) {
+      e.dispatch_id = wf->dispatch_id();
+      e.wg_id = wf->wg_id();
+      e.wf_id = wf->wf_id();
+    }
+    e.physical_reg = physical_reg;
+    e.lane = lane;
+    e.byte_mask = byte_mask;
     events.push_back(e);
   }
 
@@ -211,6 +321,7 @@ const char *kindName(HookEvent::Kind k) {
       "AFTER_INSTRUCTION",
       "ROUTE_MEMORY",
       "READ_VGPR",
+      "WRITE_VGPR",
       "READ_SGPR",
       "BARRIER_RESOLVED",
       "INIT",
@@ -380,11 +491,15 @@ struct PluginFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc = nullptr;
   amdgpu::GpuMemory *mem = nullptr;
+  uint32_t wave_front_size = 64;
 
-  explicit PluginFixture(uint32_t num_wf_slots = 10) {
+  explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
+                         uint32_t configured_wave_front_size = 64)
+      : wave_front_size(configured_wave_front_size) {
+    uint32_t sgprs_per_wf = arch == "rdna4" || arch == "gfx1250" ? 128 : 104;
     std::string json = std::format(R"({{
       "max_ticks":10000,"num_threads":1,"exec_mode":"functional",
-      "vm":{{"arch":"cdna4","gpu":{{"device":{{"wave_front_size":64}}}}}},
+      "vm":{{"arch":"{}","gpu":{{"device":{{"wave_front_size":{}}}}}}},
       "topology":{{"root":{{"name":"soc","type":"soc","children":[
         {{"name":"vram","type":"gpu_memory"}},
         {{"name":"xcd0","type":"xcd","children":[
@@ -393,7 +508,7 @@ struct PluginFixture {
           {{"name":"se0","type":"shader_engine","children":[
             {{"name":"cu[0:1]","type":"compute_unit","config":[
               {{"key":"num_wf_slots","value":"{}"}},
-              {{"key":"sgprs_per_wf","value":"104"}},
+              {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"256"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
@@ -404,7 +519,7 @@ struct PluginFixture {
         {{"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}}
       ]}}}}
     )",
-                                   num_wf_slots);
+                                   arch, wave_front_size, num_wf_slots, sgprs_per_wf);
     auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     mem = loaded.memory();
@@ -417,13 +532,18 @@ struct PluginFixture {
   amdgpu::ComputeUnitCore *cu() { return soc->xcd(0)->shader_engine(0)->compute_unit(0); }
   amdgpu::CommandProcessor *cp() { return soc->xcd(0)->command_processor(); }
 
-  uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words) {
+  uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words,
+                        uint32_t enable_vgpr_workitem_id = 0) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                    enable_vgpr_workitem_id);
+    if (wave_front_size == 32)
+      AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,
                     addr + sizeof(kernel_descriptor_t));
@@ -454,8 +574,8 @@ struct PluginFixture {
   }
 
   void run_kernel(const uint32_t *code, size_t num_words, uint32_t grid = 64,
-                  uint32_t workgroup = 64) {
-    uint64_t ko = write_kernel(0x1000, code, num_words);
+                  uint32_t workgroup = 64, uint32_t enable_vgpr_workitem_id = 0) {
+    uint64_t ko = write_kernel(0x1000, code, num_words, enable_vgpr_workitem_id);
     test::AqlQueue queue(mem, cp());
     queue.dispatch(ko, grid, workgroup);
     run_until_idle();
@@ -466,6 +586,19 @@ TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
+}
+
+TEST(ExecutionPluginTest, ProfiledGroupReportsVgprWriteHook) {
+  ProfiledExecutionPluginGroup group;
+  StringSink sink;
+  group.add_sink(&sink);
+
+  group.onInit();
+  group.onAmdgpuWriteVgpr(nullptr, /*physical_reg=*/7, /*lane=*/3, /*byte_mask=*/0xC);
+  group.onShutdown();
+
+  EXPECT_NE(sink.str().find("writeVgpr"), std::string::npos) << sink.str();
+  EXPECT_NE(sink.str().find("calls=1"), std::string::npos) << sink.str();
 }
 
 // -- Ordering tests ----------------------------------------------------------
@@ -507,6 +640,144 @@ TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalVgprBlockSize) {
   EXPECT_EQ(it->physical_vgpr_count, f.cu()->vgpr_allocation_block_size());
   EXPECT_GT(it->physical_vgpr_count, f.cu()->config().vgprs_per_wf);
   EXPECT_EQ(it->sgpr_count, f.cu()->config().sgprs_per_wf);
+}
+
+TEST(HookOrderingTest, WorkitemIdSetupVgprWritesAreSilent) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1, /*grid=*/64, /*workgroup=*/64,
+               /*enable_vgpr_workitem_id=*/2);
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), 1u);
+  EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 0u)
+      << "work-item ID setup writes must use the raw VGPR path and stay invisible to "
+         "instruction write hooks";
+}
+
+TEST(HookOrderingTest, SimdVgprWritesReachPlugins) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {v_mov_b32(/*vdst=*/2, vgpr_src(/*idx=*/0)), S_ENDPGM};
+  f.run_kernel(code, 2);
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 64u);
+  for (const auto &event : p->events) {
+    if (event.kind == HookEvent::WRITE_VGPR)
+      EXPECT_EQ(event.byte_mask, 0xF);
+  }
+}
+
+TEST(HookOrderingTest, DppReportsOnlyArchitecturalDestinationWrites) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  auto code = v_mov_b32_dpp(/*vdst=*/2, /*vsrc0=*/0);
+  f.run_kernel(code.data(), code.size());
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 48u);
+  uint32_t destination_reg = UINT32_MAX;
+  for (const auto &event : p->events) {
+    if (event.kind != HookEvent::WRITE_VGPR)
+      continue;
+    destination_reg = event.physical_reg;
+    EXPECT_GE(event.lane, 16u);
+    EXPECT_EQ(event.byte_mask, 0xF);
+  }
+  ASSERT_NE(destination_reg, UINT32_MAX);
+  for (const auto &event : p->events)
+    if (event.kind == HookEvent::READ_VGPR)
+      EXPECT_NE(event.physical_reg, destination_reg);
+}
+
+TEST(HookOrderingTest, DppAliasedInactiveSourceReadRemainsVisible) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  p->dispatch_exec_mask = ~(1ULL << 15);
+  auto code = v_mov_b32_dpp(/*vdst=*/0, /*vsrc0=*/0);
+  f.run_kernel(code.data(), code.size());
+  f.shutdown();
+
+  uint32_t destination_reg = UINT32_MAX;
+  for (const auto &event : p->events)
+    if (event.kind == HookEvent::WRITE_VGPR) {
+      destination_reg = event.physical_reg;
+      break;
+    }
+  ASSERT_NE(destination_reg, UINT32_MAX);
+  EXPECT_TRUE(std::ranges::any_of(p->events, [destination_reg](const HookEvent &event) {
+    return event.kind == HookEvent::READ_VGPR && event.physical_reg == destination_reg &&
+           event.lane == 15;
+  }));
+}
+
+TEST(HookOrderingTest, DppTrue16PreservesDestinationByteMask) {
+  PluginFixture f(/*num_wf_slots=*/10, /*arch=*/"rdna4", /*wave_front_size=*/32);
+  auto *p = f.attach_ordering_plugin();
+  auto code = rdna4_v_add_f16_dpp_high(/*vdst=*/2, /*vsrc0=*/0, /*vsrc1=*/1);
+  f.run_kernel(code.data(), code.size(), /*grid=*/32, /*workgroup=*/32);
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 32u);
+  for (const auto &event : p->events)
+    if (event.kind == HookEvent::WRITE_VGPR)
+      EXPECT_EQ(event.byte_mask, 0xC);
+}
+
+TEST(HookOrderingTest, SdwaCoalescesMergeAndReportsSelectedBytes) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  auto code = v_mov_b32_sdwa_byte1_preserve(/*vdst=*/2, /*vsrc0=*/0);
+  f.run_kernel(code.data(), code.size());
+  f.shutdown();
+
+  EventLog log(p->events);
+  EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 64u);
+  uint32_t destination_reg = UINT32_MAX;
+  for (const auto &event : p->events) {
+    if (event.kind != HookEvent::WRITE_VGPR)
+      continue;
+    destination_reg = event.physical_reg;
+    EXPECT_EQ(event.byte_mask, 0x2);
+  }
+  ASSERT_NE(destination_reg, UINT32_MAX);
+  for (const auto &event : p->events)
+    if (event.kind == HookEvent::READ_VGPR)
+      EXPECT_NE(event.physical_reg, destination_reg);
+}
+
+TEST(HookOrderingTest, True16VgprWritesReportSelectedByteMask) {
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    PluginFixture f;
+    auto *p = f.attach_ordering_plugin();
+    constexpr auto inst = cdna_vop3(/*op=*/0x12B, /*vdst=*/16, /*src0=*/256,
+                                    /*src1=*/257, /*src2=*/0, /*opsel=*/0xB);
+    const uint32_t code[] = {inst[0], inst[1], S_ENDPGM};
+    f.run_kernel(code, 3);
+    f.shutdown();
+
+    EventLog log(p->events);
+    EXPECT_EQ(log.count(HookEvent::WRITE_VGPR), 64u);
+    uint32_t destination_reg = UINT32_MAX;
+    for (const auto &event : p->events) {
+      if (event.kind == HookEvent::WRITE_VGPR) {
+        destination_reg = event.physical_reg;
+        EXPECT_EQ(event.byte_mask, 0xC);
+      }
+    }
+    ASSERT_NE(destination_reg, UINT32_MAX);
+    for (const auto &event : p->events)
+      if (event.kind == HookEvent::READ_VGPR)
+        EXPECT_NE(event.physical_reg, destination_reg);
+  }
 }
 
 TEST(HookOrderingTest, FiveDispatchLifecycle) {

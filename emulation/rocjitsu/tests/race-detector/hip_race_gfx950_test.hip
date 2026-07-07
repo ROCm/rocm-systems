@@ -34,6 +34,7 @@
 
 struct RaceRecord {
   std::string type;     // "VGPR", "SGPR", "LDS"
+  std::string access;   // "read" or "write"
   int reg = -1;         // register index (VGPR/SGPR) or byte address (LDS)
   int wave = -1;
   int lane = -1;
@@ -47,7 +48,7 @@ struct RaceRecord {
 ///
 /// Example log file content:
 ///
-///   RACE type=VGPR reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
+///   RACE type=VGPR access=read reg=2 wave=0 lane=0 wg=0,0,0 conflict=global_load_dword
 ///   Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]
 ///    ==>  0x5400021940  global_load_dword v2, v[2:3], off
 ///         0x5400021948  s_nop 0
@@ -81,6 +82,7 @@ static std::vector<RaceRecord> parse_race_log() {
       std::string key = rest.substr(pos, eq - pos);
       std::string val = rest.substr(eq + 1, sp - eq - 1);
       if (key == "type")          r.type = val;
+      else if (key == "access")   r.access = val;
       else if (key == "reg")      r.reg = std::stoi(val);
       else if (key == "wave")     r.wave = val.empty() ? -1 : std::stoi(val);
       else if (key == "lane")     r.lane = val.empty() ? -1 : std::stoi(val);
@@ -1062,25 +1064,18 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
   EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
 }
 
-// TODO(newling): D16 (partial-register) HIP tests.
+// TODO(newling): Add D16 (partial-register) HIP tests.
 //
-// Concrete gap: the rocjitsu CU's read_vgpr always reads the full 32-bit
-// register, so checkVgprRead is called with byteMask=0xF. Sub-dword store
-// instructions (ds_write_b16, global_store_short) only consume 16 bits of
-// the source VGPR, but trigger a full-register race check — false positive
-// when the other half has a pending D16 load.
+// The core and generated CU paths have byte-mask support. The remaining gap is
+// HIP coverage proving sub-dword consumers such as ds_write_b16 and
+// global_store_short read/write with byteMask=0x3/0xC and do not falsely race
+// with the unrelated half of a pending D16 load.
 //
-// Fix: add read_vgpr_masked(reg, lane, byteMask) to the CU, and have the
-// codegen (_gen_ds_write in codegen.py, esz <= 2) emit the masked variant.
-// See compute_unit.h for details. The original race-emulator solved this
-// with Wave::getHalfVgpr(reg, lane, hi) which passed byteMask=0x3/0xC.
+// read_vgpr_masked(reg, lane, byteMask) follows the original race-emulator
+// Wave::getHalfVgpr(reg, lane, hi) model, which passed byteMask=0x3/0xC.
 // See /home/jnewling/workspace/rocm-libraries/shared/race-emulator/tests/
 // race_tests.cpp (D16_LdsLoad_NoFalsePositive, D16_HiLoadOutstanding_LoReadSafe)
 // for the original tests exercising this.
-//
-// The write-side byte mask propagation IS done: registerEvent/registerLdsEvent
-// pass 0x3/0xC from VectorMemState::d16_lo/hi. The core D16 tests using
-// RaceTestBuilder (which bypasses read_vgpr) pass correctly.
 //
 // Deeper observation: even if an instruction reads "garbage" from pending
 // bytes, it only matters if that garbage propagates to an observable side
@@ -1092,13 +1087,10 @@ TEST_F(Gfx950RaceTest, scratch_vmcnt_race) {
 
 // --- WAW: global load then ALU write to same register ---
 //
-// TODO(newling): the detector does not currently flag this. A global load targets
-// a VGPR, then an ALU instruction overwrites the same VGPR before
-// s_waitcnt retires the load. The final register value is ambiguous —
-// if the load completes after the ALU write, it silently clobbers the
-// ALU result. This is a WAW (write-after-write) race that should be
-// detected but isn't, because the detector only checks reads against
-// pending loads (checkVgprRead), not ALU writes.
+// A global load targets a VGPR, then an ALU instruction overwrites the same
+// VGPR before s_waitcnt retires the load. The final register value is
+// ambiguous: if the load completes after the ALU write, it silently clobbers
+// the ALU result.
 
 __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1106,7 +1098,7 @@ __global__ void waw_global_load_then_alu_kernel(const float *src, float *dst) {
   asm volatile(
       "global_load_dword %0, %1, off\n"
       // BUG: no s_waitcnt before ALU write to the same register.
-      "v_add_f32 %0, %0, %0\n"
+      "v_mov_b32 %0, 0\n"
       : "=v"(val) : "v"(&src[tid])
   );
   asm volatile("s_waitcnt vmcnt(0)\n" ::: "memory");
@@ -1117,12 +1109,13 @@ TEST_F(Gfx950RaceTest, waw_global_load_then_alu) {
   auto *src = allocWithData<float>(64), *dst = alloc<float>(64);
   waw_global_load_then_alu_kernel<<<1, 64>>>(src, dst);
   sync();
-  // TODO(newling): this should detect a VGPR WAW race, but currently
-  // doesn't. When WAW detection is implemented, change to:
-  //   auto r = records();
-  //   ASSERT_GE(r.size(), 1u);
-  //   EXPECT_NE(r[0].type.find("VGPR"), npos);
-  ExpectNoRace();
+  auto r = records();
+  ASSERT_GE(r.size(), 1u);
+  EXPECT_EQ(r[0].access, "write");
+  auto t = parseTrace(r[0]);
+  EXPECT_NE(t.header.find("VGPR"), npos);
+  EXPECT_NE(t.mark0.find("global_load_dword"), npos) << "mark0: " << t.mark0;
+  EXPECT_NE(t.mark1.find("v_mov_b32"), npos) << "mark1: " << t.mark1;
 }
 
 // --- f64 VGPR race (64-bit global load + use without waitcnt) ---

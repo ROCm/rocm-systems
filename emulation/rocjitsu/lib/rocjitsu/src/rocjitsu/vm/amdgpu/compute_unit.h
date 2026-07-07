@@ -384,8 +384,14 @@ public:
 
   void notify_vgpr_read(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
                         uint32_t lane_end, uint8_t byte_mask = 0xF) const {
-    if (wf)
+    if (wf && !filter_vgpr_read_notification(wf, reg_idx, lane_begin, lane_end, byte_mask))
       plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane_begin, lane_end, byte_mask);
+  }
+
+  void notify_vgpr_write(const Wavefront *wf, uint32_t reg_idx, uint32_t lane,
+                         uint8_t byte_mask = 0xF) const {
+    if (wf && !filter_vgpr_write_notification(wf, reg_idx, lane, byte_mask))
+      plugin_group_->onAmdgpuWriteVgpr(wf, reg_idx, lane, byte_mask);
   }
 
   /// @brief Read a vector register lane from the physical VGPR file.
@@ -394,11 +400,38 @@ public:
   /// @returns Lane value.
   virtual uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const = 0;
 
+  /// @brief Read a vector register lane while notifying plugins with a byte mask.
+  virtual uint32_t read_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint8_t byte_mask) const = 0;
+
+  /// @brief Read a vector register lane without plugin hooks.
+  ///
+  /// Used by architectural memory writeback merge paths that need the old
+  /// dword value to preserve untouched D16 bits.
+  virtual uint32_t read_vgpr_raw(uint32_t reg_idx, uint32_t lane) const = 0;
+
   /// @brief Write a vector register lane in the physical VGPR file.
   /// @param reg_idx Physical register index.
   /// @param lane Lane index within the wavefront.
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
+
+  /// @brief Write a vector register lane while notifying plugins with a byte mask.
+  virtual void write_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint32_t val,
+                                 uint8_t byte_mask) = 0;
+
+  /// @brief Write a vector register lane without plugin write hooks.
+  ///
+  /// Used by simulator setup and architectural writeback paths that must update
+  /// the physical register file without reporting an instruction destination write.
+  virtual void write_vgpr_raw(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
+
+  /// @brief Write a memory instruction result without plugin write hooks.
+  ///
+  /// The race detector observes memory results when the instruction is routed.
+  /// Completion writes must not look like a new instruction destination write.
+  void write_vgpr_from_memory(uint32_t reg_idx, uint32_t lane, uint32_t val) {
+    write_vgpr_raw(reg_idx, lane, val);
+  }
 
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
@@ -492,6 +525,14 @@ protected:
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
+  void begin_vgpr_write_hook_filter(const Instruction &inst, const Wavefront &wf);
+  void flush_vgpr_write_hook_filter();
+  void cancel_vgpr_write_hook_filter();
+  bool filter_vgpr_read_notification(const Wavefront *wf, uint32_t reg_idx, uint32_t lane_begin,
+                                     uint32_t lane_end, uint8_t byte_mask) const;
+  bool filter_vgpr_write_notification(const Wavefront *wf, uint32_t reg_idx, uint32_t lane,
+                                      uint8_t byte_mask) const;
+
   /// @brief Route a memory instruction into the appropriate pipeline.
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
@@ -535,6 +576,30 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+
+  struct FilteredVgprHooks {
+    uint32_t physical_reg = 0;
+    uint64_t initial_reads = 0;
+    uint64_t writes = 0;
+    uint64_t pending_writes = 0;
+    std::array<uint8_t, 64> byte_masks{};
+  };
+  struct VgprWriteHookFilterState {
+    const Wavefront *wf = nullptr;
+    uint64_t lane_mask = 0;
+    uint64_t initial_destination_merge_read_lanes = 0;
+    uint8_t byte_mask = 0xF;
+    bool suppress_destination_merge_reads = false;
+    std::vector<FilteredVgprHooks> destinations;
+
+    bool active() const { return wf != nullptr; }
+    void clear() {
+      wf = nullptr;
+      initial_destination_merge_read_lanes = 0;
+      destinations.clear();
+    }
+  };
+  mutable VgprWriteHookFilterState vgpr_write_hook_filter_;
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
@@ -632,9 +697,15 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx]) {
-      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
-    }
+    return read_vgpr_masked(reg_idx, lane, 0xF);
+  }
+
+  uint32_t read_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint8_t byte_mask) const override {
+    this->notify_vgpr_read(vgpr_to_wave_[reg_idx], reg_idx, lane, lane + 1, byte_mask);
+    return vgpr_file_[reg_idx][lane];
+  }
+
+  uint32_t read_vgpr_raw(uint32_t reg_idx, uint32_t lane) const override {
     return vgpr_file_[reg_idx][lane];
   }
 
@@ -644,6 +715,16 @@ public:
 
   /// @brief Write a value to the VGPR file.
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
+    write_vgpr_masked(reg_idx, lane, val, 0xF);
+  }
+
+  void write_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint32_t val,
+                         uint8_t byte_mask) override {
+    this->notify_vgpr_write(vgpr_to_wave_[reg_idx], reg_idx, lane, byte_mask);
+    write_vgpr_raw(reg_idx, lane, val);
+  }
+
+  void write_vgpr_raw(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
     vgpr_file_[reg_idx][lane] = val;
   }
 

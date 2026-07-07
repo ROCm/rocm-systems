@@ -76,7 +76,7 @@ RJ_RACE=1 build/tools/rocjitsu/rocjitsu --config configs/gfx950_cdna4.json -- /t
 You should see output:
 
 ```
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  ds_write_b32 v0, v1  ; <-- wave 1
        v_sub_u32_e32 v1, 0, v0
@@ -127,7 +127,8 @@ races. Some examples:
 ## What this plugin detects
 
 - **VGPR races**: a vector register is read before a pending global or LDS load
-  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient).
+  has completed (`s_waitcnt vmcnt` / `s_waitcnt lgkmcnt` insufficient), or an
+  instruction writes a VGPR that still has an active pending load.
 - **SGPR races**: a scalar register is read before a pending scalar load has
   completed (`s_waitcnt lgkmcnt` insufficient).
 - **LDS races**: an LDS byte is read or written by one wave while another wave
@@ -155,7 +156,9 @@ operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
 RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-Similar logic applies for VGPR and SGPR accesses.
+Similar logic applies for VGPR and SGPR accesses. VGPR writes are also checked
+against outstanding loads to catch write-after-write hazards where a later ALU
+write may be clobbered by a still-pending memory result.
 
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
@@ -266,10 +269,9 @@ ctest --test-dir build -R "RaceTest"
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **No WAW detection**: write-after-write hazards are not currently flagged.
-  This includes both LDS WAW (two waves writing to the same LDS byte without a
-  barrier) and VGPR WAW (an ALU instruction overwriting a register that has a
-  pending global load).
+- **No LDS WAW detection**: LDS write-after-write hazards are not currently
+  flagged. VGPR write-after-load hazards are checked, but two waves writing the
+  same LDS byte without a barrier are still not reported.
 
 - **Kernel name resolution**: kernel names in race reports may show as `"?"` if
   symbol information is not available in the code object.

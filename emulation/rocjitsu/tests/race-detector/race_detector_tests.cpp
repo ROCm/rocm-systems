@@ -218,6 +218,23 @@ TEST(RaceDetector, SameWave_WriteWaitcntOk) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, SameWave_VgprWriteBeforeWaitcntRaces) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_TRUE(b.hasVgprRace(2));
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_TRUE(b.violations()[0].isWrite);
+}
+
+TEST(RaceDetector, SameWave_VgprWriteAfterWaitcntOk) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.globalLoad(/*wave=*/0, /*vgprBase=*/2, /*numRegs=*/1);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0);
+  EXPECT_FALSE(b.hasRace());
+}
+
 TEST(RaceDetector, SameWave_DoubleWriteRace) {
   // Two LDS loads into same VGPR, waitcnt(1) drains oldest → newest RACE.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
@@ -354,6 +371,25 @@ TEST(RaceDetector, D16_LoOutstanding_FullRaces) {
   EXPECT_TRUE(b.hasVgprRace(2));
 }
 
+TEST(RaceDetector, D16_HiOutstanding_LoWriteSafe) {
+  // Hi half outstanding, low-half destination write does not overlap.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/2, /*vgprDst=*/2,
+            /*byteMask=*/0xC);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0,
+                   /*byteMask=*/0x3);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, D16_HiOutstanding_HiWriteRaces) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/2, /*vgprDst=*/2,
+            /*byteMask=*/0xC);
+  b.checkVgprWrite(/*wave=*/0, /*reg=*/2, /*lane=*/0,
+                   /*byteMask=*/0xC);
+  EXPECT_TRUE(b.hasVgprRace(2));
+}
+
 // ---- Direct-to-LDS (GlobalToLds) ----
 
 TEST(RaceDetector, Dtl_CrossWaveRace) {
@@ -478,16 +514,15 @@ TEST(RaceDetector, LdsSameWave_ScatterBroadcastOk) {
 }
 
 TEST(RaceDetector, LdsSameWave_AllLanesWriteSameAddr) {
-  // All lanes write same address (WAW). Currently not detected as a race.
-  // TODO(newling): WAW detection is not implemented — this documents current
-  // behavior.
+  // All lanes write same LDS address (LDS WAW). Currently not detected as a
+  // race; this documents current LDS behavior.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
   b.ldsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
   b.ldsWrite(/*wave=*/0, /*lane=*/1, /*addr=*/0, /*bytes=*/4);
   b.ldsWrite(/*wave=*/0, /*lane=*/2, /*addr=*/0, /*bytes=*/4);
   b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
   b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  // Currently passes (WAW not flagged). If WAW detection is added, this
+  // Currently passes (LDS WAW not flagged). If LDS WAW detection is added, this
   // test should be updated to EXPECT_TRUE(b.hasRace()).
   EXPECT_FALSE(b.hasRace());
 }

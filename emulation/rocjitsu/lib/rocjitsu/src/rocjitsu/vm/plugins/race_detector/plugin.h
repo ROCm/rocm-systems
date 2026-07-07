@@ -104,6 +104,9 @@ public:
   void onAmdgpuReadVgprs(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane_begin,
                          uint32_t lane_end, uint8_t byte_mask = 0xF) override;
 
+  void onAmdgpuWriteVgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint32_t lane,
+                         uint8_t byte_mask = 0xF) override;
+
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override;
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,

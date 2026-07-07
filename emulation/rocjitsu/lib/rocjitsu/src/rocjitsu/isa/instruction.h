@@ -51,6 +51,15 @@ enum InstFlags : uint64_t {
 
 class BasicBlock;
 
+/// @brief Architectural VGPR write shape for instructions whose execution
+/// implementation performs temporary destination writes.
+struct VgprWriteHookFilter {
+  uint64_t lane_mask = 0;
+  /// Nonzero overrides the observed write mask; zero preserves it.
+  uint8_t byte_mask = 0xF;
+  bool suppress_destination_merge_reads = false;
+};
+
 /// @brief Base class for opaque per-instruction dynamic state.
 ///
 /// @details ISA backends attach subclasses to carry mutable pipeline state (e.g.,
@@ -211,6 +220,18 @@ public:
   /// label operand is a signed instruction-count delta. Indirect branches and
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
+
+  /// @brief Describe the architectural VGPR write produced by this instruction.
+  ///
+  /// Most instructions report writes directly as they update the register file.
+  /// DPP and SDWA execution wrappers additionally write temporary results and
+  /// restore/merge the destination. Their encoding bases override this method so
+  /// the compute unit can collapse those implementation writes into one
+  /// architectural callback per destination lane.
+  [[nodiscard]] virtual std::optional<VgprWriteHookFilter>
+  vgpr_write_hook_filter(uint32_t /*wf_size*/, uint64_t /*exec*/) const {
+    return std::nullopt;
+  }
 
   /// @brief Add registers implicitly read by this instruction.
   ///

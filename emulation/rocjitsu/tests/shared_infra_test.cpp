@@ -2753,6 +2753,17 @@ TEST(SdwaTest, DstMerge) {
   EXPECT_EQ(merged, 0x12345678u);
 }
 
+TEST(SdwaTest, DstWriteMask) {
+  using namespace amdgpu::sdwa;
+  EXPECT_EQ(sdwa_dst_write_mask(BYTE_0, UNUSED_PRESERVE), 0x1);
+  EXPECT_EQ(sdwa_dst_write_mask(BYTE_3, UNUSED_PRESERVE), 0x8);
+  EXPECT_EQ(sdwa_dst_write_mask(WORD_0, UNUSED_PRESERVE), 0x3);
+  EXPECT_EQ(sdwa_dst_write_mask(WORD_1, UNUSED_PRESERVE), 0xC);
+  EXPECT_EQ(sdwa_dst_write_mask(DWORD, UNUSED_PRESERVE), 0xF);
+  EXPECT_EQ(sdwa_dst_write_mask(BYTE_1, UNUSED_PAD), 0xF);
+  EXPECT_EQ(sdwa_dst_write_mask(WORD_1, UNUSED_SEXT), 0xF);
+}
+
 // ---------------------------------------------------------------------------
 // Scratch address calculation tests
 // ---------------------------------------------------------------------------

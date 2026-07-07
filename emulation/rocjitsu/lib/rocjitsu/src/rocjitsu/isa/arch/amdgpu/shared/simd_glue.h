@@ -308,11 +308,12 @@ inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t la
     uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
+    uint32_t old_dst = low_dst_zeroes_high ? 0 : wf.cu().read_vgpr_raw(idx, lane);
     uint32_t merged = dst_hi
                           ? ((old_dst & 0x0000ffffu) | (src_half << 16))
                           : (low_dst_zeroes_high ? src_half : ((old_dst & 0xffff0000u) | src_half));
-    wf.cu().write_vgpr(idx, lane, merged);
+    const uint8_t byte_mask = low_dst_zeroes_high ? 0xF : (dst_hi ? 0xC : 0x3);
+    wf.cu().write_vgpr_masked(idx, lane, merged, byte_mask);
     return;
   }
   dst.write_lane(wf, lane, dst_hi ? (src_half << 16) : src_half);
@@ -494,7 +495,7 @@ inline void write_simd(const Op &op, Wavefront &wf, uint32_t lane_base, util::na
                        uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = util::native_width_v<T>;
-  if (VgprStorage *r = SimdAccess::vgpr_storage_mut(op, wf)) {
+  if (VgprStorage *r = SimdAccess::vgpr_storage_mut(op, wf); r && wf.cu().plugin_group().empty()) {
     r->template simd_store<T>(lane_base, v, mask);
     return;
   }
@@ -516,7 +517,7 @@ inline void write_simd_at(VgprStorage *rd, const Op &op, Wavefront &wf, uint32_t
                           util::native<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = util::native_width_v<T>;
-  if (rd) {
+  if (rd && wf.cu().plugin_group().empty()) {
     rd->template simd_store<T>(base, v, mask);
     return;
   }
@@ -537,7 +538,30 @@ inline void write_vop3_true16_simd_at(VgprStorage *rd, const Op &op, Wavefront &
                      : ((old & util::broadcast<uint32_t>(0xffff0000u)) | src_half);
   if (!(opsel & 0x8u) && cdna_low_dst_zeroes_high && cdna_vop3_low_dst_zeroes_high(wf))
     merged = src_half;
-  write_simd_at<uint32_t>(rd, op, wf, base, merged, mask);
+  if (wf.cu().plugin_group().empty()) {
+    write_simd_at<uint32_t>(rd, op, wf, base, merged, mask);
+    return;
+  }
+
+  auto reg = op.to_register_ref();
+  if (!reg || reg->cls != RegClass::VGPR) {
+    write_simd_at<uint32_t>(rd, op, wf, base, merged, mask);
+    return;
+  }
+
+  constexpr std::size_t W = util::native_width_v<uint32_t>;
+  alignas(util::native<uint32_t>) uint32_t buf[W];
+  util::blit_to_buffer<uint32_t>(buf, merged);
+  uint32_t off = reg->index + (wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8);
+  uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
+  uint32_t idx = wf.vgpr_alloc().base + voff;
+  const bool dst_hi = (opsel & 0x8u) != 0;
+  const bool low_dst_zeroes_high =
+      !dst_hi && cdna_low_dst_zeroes_high && cdna_vop3_low_dst_zeroes_high(wf);
+  const uint8_t byte_mask = low_dst_zeroes_high ? 0xF : (dst_hi ? 0xC : 0x3);
+  for (uint32_t i = 0; i < W; ++i)
+    if (mask & (1ULL << i))
+      wf.cu().write_vgpr_masked(idx, base + i, buf[i], byte_mask);
 }
 
 /// Narrow (native_width64-wide) counterpart of write_simd_at, for the f64->32-bit
@@ -550,7 +574,7 @@ inline void write_simd_narrow_at(VgprStorage *rd, const Op &op, Wavefront &wf, u
                                  util::narrow32<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = util::native_width64;
-  if (rd) {
+  if (rd && wf.cu().plugin_group().empty()) {
     rd->template simd_store_narrow<T>(base, v, mask);
     return;
   }
@@ -616,7 +640,7 @@ inline void write_simd64(const Op &op, Wavefront &wf, uint32_t lane_base, util::
   static_assert(sizeof(T) == sizeof(uint64_t));
   constexpr std::size_t W = util::native_width64;
   VgprStoragePair64 p = simd_dst_reg64(op, wf);
-  if (p.lo) {
+  if (p.lo && wf.cu().plugin_group().empty()) {
     p.lo->template simd_store64<T>(*p.hi, lane_base, v, mask);
     return;
   }
@@ -647,7 +671,7 @@ inline void write_simd64_at(VgprStoragePair64 p, const Op &op, Wavefront &wf, ui
                             util::native<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   constexpr std::size_t W = util::native_width64;
-  if (p.lo) {
+  if (p.lo && wf.cu().plugin_group().empty()) {
     p.lo->template simd_store64<T>(*p.hi, base, v, mask);
     return;
   }
@@ -3543,8 +3567,8 @@ template <typename Inst, typename Op>
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.vdst.simd_capable())
+  if (simd_force_scalar() || !wf.cu().plugin_group().empty() || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u)
     return false;
@@ -3584,8 +3608,8 @@ template <typename Inst, typename Op>
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
-      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar() || !wf.cu().plugin_group().empty() || !inst.src0.simd_capable() ||
+      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
   if (inst.inst_.op_sel != 0u || inst.inst_.op_sel_hi != 3u || inst.inst_.op_sel_hi_2 != 1u)
     return false;

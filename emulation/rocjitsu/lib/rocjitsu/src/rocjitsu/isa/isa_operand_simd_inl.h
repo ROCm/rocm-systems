@@ -70,7 +70,7 @@ void AmdgpuIsaOperand<Isa>::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lan
   uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;
   uint32_t reg = wf.vgpr_alloc().base + voff;
   uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
-  if ((mask & full_mask) == full_mask) {
+  if ((mask & full_mask) == full_mask && wf.cu().plugin_group().empty()) {
     uint8_t *dst = wf.cu().vgpr_data(reg);
     std::memcpy(dst + lane_base * sizeof(uint32_t), vals, count * sizeof(uint32_t));
     return;

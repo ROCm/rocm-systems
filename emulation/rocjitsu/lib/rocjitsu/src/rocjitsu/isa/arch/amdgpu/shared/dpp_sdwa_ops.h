@@ -389,6 +389,19 @@ enum SdwaUnused : uint32_t {
   UNUSED_PRESERVE = 2, ///< Keep the original destination register value.
 };
 
+/// @brief Return the destination bytes architecturally written by an SDWA op.
+///
+/// PAD and SEXT define every non-selected byte, so they write the full dword.
+/// PRESERVE leaves those bytes untouched and reports only the selected byte or
+/// word. DWORD always writes the full destination.
+inline uint8_t sdwa_dst_write_mask(uint32_t dst_sel, uint32_t dst_unused) {
+  if (dst_sel == DWORD || dst_unused != UNUSED_PRESERVE)
+    return 0xF;
+  if (dst_sel <= BYTE_3)
+    return static_cast<uint8_t>(1u << dst_sel);
+  return dst_sel == WORD_0 ? 0x3 : 0xC;
+}
+
 /// @brief Extract a sub-dword from a source value per SDWA sel.
 ///
 /// @param val The full 32-bit source value.
@@ -469,6 +482,32 @@ inline uint32_t sdwa_clamp_f32(uint32_t result) {
 }
 
 } // namespace sdwa
+
+/// @brief Build the architectural VGPR hook filter for VOP1/VOP2 suffixes.
+inline std::optional<VgprWriteHookFilter>
+dpp_write_hook_filter(uint32_t src0, uint32_t wf_size, uint64_t exec, uint32_t dpp_ctrl,
+                      uint32_t dpp_row_mask, uint32_t dpp_bank_mask, uint32_t dpp_bound_ctrl) {
+  if (src0 == SRC_DPP)
+    return VgprWriteHookFilter{
+        exec & dpp::dpp_write_mask(wf_size, dpp_ctrl, dpp_row_mask, dpp_bank_mask, dpp_bound_ctrl),
+        // DPP changes destination lanes, but not the instruction's architectural byte mask.
+        0, true};
+  return std::nullopt;
+}
+
+inline std::optional<VgprWriteHookFilter>
+vop_write_hook_filter(uint32_t src0, uint32_t wf_size, uint64_t exec, uint32_t dpp_ctrl,
+                      uint32_t dpp_row_mask, uint32_t dpp_bank_mask, uint32_t dpp_bound_ctrl,
+                      uint32_t sdwa_dst_sel, uint32_t sdwa_dst_unused) {
+  if (auto filter = dpp_write_hook_filter(src0, wf_size, exec, dpp_ctrl, dpp_row_mask,
+                                          dpp_bank_mask, dpp_bound_ctrl))
+    return filter;
+  if (src0 == SRC_SDWA)
+    return VgprWriteHookFilter{exec, sdwa::sdwa_dst_write_mask(sdwa_dst_sel, sdwa_dst_unused),
+                               sdwa_dst_sel != sdwa::DWORD};
+  return std::nullopt;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 

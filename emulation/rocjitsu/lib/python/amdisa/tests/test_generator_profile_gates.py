@@ -1280,6 +1280,44 @@ def test_generated_dpp_cleanup_uses_full_write_mask_for_dpp16(
         assert 'dpp_bound_ctrl_, dpp_fi_' in body
 
 
+def test_vop_encoding_bases_publish_architectural_write_hook_filter(
+    amdgpu_generated_root: Path,
+):
+    arches = (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'gfx1250',
+    )
+    for arch in arches:
+        encodings = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        for class_name, next_class in (('Vop1', 'Vopc'), ('Vop2', 'Vop3p')):
+            start = encodings.index(f'class {class_name} :')
+            end = encodings.index(f'class {next_class} :', start)
+            body = encodings[start:end]
+            assert 'vgpr_write_hook_filter' in body, arch
+            assert 'amdgpu::vop_write_hook_filter(' in body, arch
+            assert 'sdwa_dst_unused_' in body, arch
+
+    for arch in ('rdna3', 'rdna3_5', 'rdna4', 'gfx1250'):
+        encodings = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        classes = ('Vop3', 'Vop3p', 'Vop3SdstEnc')
+        for class_name, next_class in zip(classes, classes[1:] + ('}',)):
+            start = encodings.index(f'class {class_name} :')
+            end = encodings.index(
+                f'class {next_class} :' if next_class != '}' else '\n};', start
+            )
+            body = encodings[start:end]
+            assert 'vgpr_write_hook_filter' in body, (arch, class_name)
+            assert 'amdgpu::dpp_write_hook_filter(' in body, (arch, class_name)
+
+
 def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
     amdgpu_generated_root: Path,
 ):

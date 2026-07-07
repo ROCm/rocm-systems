@@ -157,10 +157,10 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf,
       for (uint32_t i = 0; i < vgpr_count; ++i) {
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
-          const uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          const uint32_t old = cu.read_vgpr_raw(d.dst_reg_base + i, lane);
           val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
         }
-        cu.write_vgpr(d.dst_reg_base + i, lane, val);
+        cu.write_vgpr_from_memory(d.dst_reg_base + i, lane, val);
       }
     }
   }
@@ -186,14 +186,14 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf,
           else
             val = val & 0xFFFF;
         } else {
-          uint32_t old = cu.read_vgpr(d.dst_reg_base + i, lane);
+          uint32_t old = cu.read_vgpr_raw(d.dst_reg_base + i, lane);
           if (d.d16_hi)
             val = (old & 0xFFFF) | (val << 16);
           else
             val = (old & 0xFFFF0000) | (val & 0xFFFF);
         }
       }
-      cu.write_vgpr(d.dst_reg_base + i, lane, val);
+      cu.write_vgpr_from_memory(d.dst_reg_base + i, lane, val);
     }
   }
   return MemoryAccessCompletion::Complete;
@@ -615,7 +615,7 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
         uint32_t val = 0;
         uint32_t data_offset = lane * d.elem_size + i * 4;
         std::memcpy(&val, &d.ds2_response_data[data_offset], std::min(d.elem_size, 4u));
-        cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+        cu.write_vgpr_from_memory(d.ds2_dst_reg_base + i, lane, val);
       }
     }
     // Per-lane DS read2 complete trace: show first 4 lanes with both accesses.

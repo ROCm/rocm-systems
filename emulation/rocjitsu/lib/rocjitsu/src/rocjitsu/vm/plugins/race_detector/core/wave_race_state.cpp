@@ -186,6 +186,17 @@ void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
   }
 }
 
+void WaveRaceState::checkVgprWrite(int reg, int lane, uint8_t byteMask) const {
+  for (EventId eid : vgprMemoryEvents[reg]) {
+    if (isToVgpr(detector->events().type(eid)) &&
+        (detector->events().byteMask(eid) & byteMask) != 0 &&
+        detector->events().isActiveForLane(eid, lane)) {
+      detector->getRaceHandler()(
+          {RaceViolation::Space::VGPR, reg, waveId.value, lane, true, detector->getWorkgroupId()});
+    }
+  }
+}
+
 // Like checkVgprRead but for instructions that read all lanes (e.g. cross-lane ops).
 // countr_zero picks the first active lane from the event's exec mask as the
 // representative lane for the violation report.

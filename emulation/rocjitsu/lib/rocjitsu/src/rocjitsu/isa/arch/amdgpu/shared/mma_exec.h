@@ -1648,7 +1648,7 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                     const_acc, c_modifier);
       return;
@@ -1724,7 +1724,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16,
                     amdgpu::extract_bf16, const_acc, c_modifier);
       return;
@@ -1838,7 +1838,7 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     fallback();
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       fallback();
       return;
     }
@@ -1914,7 +1914,7 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
                   const_acc, c_modifier);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;
@@ -2354,7 +2354,7 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
     fallback();
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       fallback();
       return;
     }
@@ -2478,7 +2478,7 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
     fallback();
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       fallback();
       return;
     }
@@ -2576,7 +2576,7 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     fallback();
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       fallback();
       return;
     }
@@ -3121,7 +3121,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
     fallback();
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16) {
       fallback();
       return;
     }
@@ -3817,8 +3817,8 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
-        cu.wf_size() != 64) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || cbsz != 0 || blgp != 0 ||
+        util::native<float>::size() != 16 || cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
                amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
       return;
@@ -3892,8 +3892,8 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
-        cu.wf_size() != 64) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || cbsz != 0 || blgp != 0 ||
+        util::native<float>::size() != 16 || cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                const_acc, cbsz, abid, blgp);
       return;
@@ -3981,8 +3981,8 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
              const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
-        cu.wf_size() != 64) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || cbsz != 0 || blgp != 0 ||
+        util::native<float>::size() != 16 || cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
                const_acc, cbsz, abid, blgp);
       return;
@@ -4071,8 +4071,8 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
     return;
   } else {
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16 ||
-        cu.wf_size() != 64) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || cbsz != 0 || blgp != 0 ||
+        util::native<float>::size() != 16 || cu.wf_size() != 64) {
       exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid, blgp);
       return;
     }
@@ -4159,7 +4159,8 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     exec_i32_i8(cu, M, N, K, B, dst, s0, s1, s2, const_acc);
     return;
   } else {
-    if (util::force_scalar() || util::native<float>::size() != 16 || cu.wf_size() != 64) {
+    if (!cu.plugin_group().empty() || util::force_scalar() || util::native<float>::size() != 16 ||
+        cu.wf_size() != 64) {
       exec_i32_i8(cu, M, N, K, B, dst, s0, s1, s2, const_acc);
       return;
     }

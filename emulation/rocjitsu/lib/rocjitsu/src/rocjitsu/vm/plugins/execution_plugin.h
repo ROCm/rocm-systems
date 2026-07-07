@@ -114,6 +114,14 @@ public:
                                  uint32_t /*lane_begin*/, uint32_t /*lane_end*/,
                                  uint8_t /*byte_mask*/ = kFullByteMask) {}
 
+  /// Called when a VGPR is written by instruction execution.
+  /// @param wf Owning wavefront, or nullptr if the register is unallocated.
+  /// @param physical_reg Physical register index in the VGPR file.
+  /// @param lane Lane index within the wavefront.
+  /// @param byte_mask Sub-dword byte mask (kFullByteMask = full dword).
+  virtual void onAmdgpuWriteVgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/,
+                                 uint32_t /*lane*/, uint8_t /*byte_mask*/ = kFullByteMask) {}
+
   /// Called when an SGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
   /// @param physical_reg Physical register index in the SGPR file.
