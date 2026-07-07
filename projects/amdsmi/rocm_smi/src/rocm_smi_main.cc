@@ -76,6 +76,17 @@ static uint32_t GetDeviceIndex(const std::string s) {
   return static_cast<uint32_t>(stoi(t));
 }
 
+// Helper function to suppress deprecated warnings for std::stable_sort
+// std::stable_sort uses get_temporary_buffer() which is deprecated and
+// will be removed in C++26
+template <typename ItrTp, typename CmpTp>
+static inline auto stable_sort_suppress_deprecated(ItrTp first, ItrTp last, CmpTp cmp) -> void {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  std::stable_sort(first, last, cmp);
+#pragma clang diagnostic pop
+}
+
 // Find the drm minor from from sysfs path "/sys/class/drm/cardX/device/drm".
 // From the directory renderDN in that sysfs path, the drm minor can be
 // computed for cardX.
@@ -320,14 +331,9 @@ void RocmSMI::Initialize(uint64_t flags) {
   LOG_DEBUG(ss);
 
   // Sort index based on BDF (BDF values are unique per device).
-#pragma clang diagnostic push
-  // stable sort uses a deprecated function, get_temporary_buffer() which is slated
-  // to be removed in C++ 2026
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  std::stable_sort(
+  stable_sort_suppress_deprecated(
       dv_to_id.begin(), dv_to_id.end(),
       [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
-#pragma clang diagnostic pop
   devices_.clear();
   for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
     devices_.push_back(dv_to_id[dv_ind].second);
@@ -449,14 +455,9 @@ void RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Sort index based on BDF (BDF values are unique per device).
-#pragma clang diagnostic push
-    // stable sort uses a deprecated function, get_temporary_buffer() which is slated
-    // to be removed in C++ 2026
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    std::stable_sort(
+    stable_sort_suppress_deprecated(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
-#pragma clang diagnostic pop
     nic_devices_.clear();
     for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
       nic_devices_.push_back(dv_to_id[dv_ind].second);
@@ -514,14 +515,9 @@ void RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Sort index based on BDF (BDF values are unique per device).
-#pragma clang diagnostic push
-    // stable sort uses a deprecated function, get_temporary_buffer() which is slated
-    // to be removed in C++ 2026
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    std::stable_sort(
+    stable_sort_suppress_deprecated(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
-#pragma clang diagnostic pop
     switch_devices_.clear();
     for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
       switch_devices_.push_back(dv_to_id[dv_ind].second);

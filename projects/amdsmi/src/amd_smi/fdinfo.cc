@@ -39,7 +39,7 @@ extern "C" {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc99-designator"
-// Using know extentsion, array designators
+// Using known extension, array designators
 static const char* container_type_name[AMDSMI_MAX_CONTAINER_TYPE] = {
     [AMDSMI_CONTAINER_LXC] = "lxc",
     [AMDSMI_CONTAINER_DOCKER] = "docker",
