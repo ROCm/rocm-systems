@@ -64,14 +64,14 @@ The following dimensions are supported:
     - ``ROCPROFILER_DIMENSION_WGP`` appears only for counters collected at CU/WGP granularity.
     - The extent of ``ROCPROFILER_DIMENSION_SHADER_ENGINE`` (the number of shader engines) differs between architectures.
 
-    Because of this, you should always **query the dimensions of a counter at runtime** rather than assuming a fixed set (see :ref:`querying_counter_dimensions`). Applying a ``reduce`` or ``select`` on a dimension that a counter does not have has no effect on that counter.
+    Because of this, you should always **query the dimensions of a counter at runtime** rather than assuming a fixed set (see :ref:`querying_counter_dimensions`). When a counter does not have a given dimension, that dimension's coordinate is encoded as ``0`` for every value. As a result, ``reduce`` on an absent dimension is a no-op, but ``select`` on an absent dimension only matches index ``0`` (selecting any non-zero index drops all values for that counter).
 
 .. _querying_counter_dimensions:
 
 Querying counter dimensions
 +++++++++++++++++++++++++++
 
-To discover which dimensions a counter has (and their sizes) for a given agent, query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above). Dimensions are agent-specific, so query them using the agent the profile was created for.
+Dimensions depend on the counter's architecture. To discover which dimensions a counter has (and their sizes), query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. This call does not take an agent Id; it reports the dimensions for the counter's architecture, selecting a representative agent of that architecture internally. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above).
 
 Using the counter collection service
 ------------------------------------
@@ -479,8 +479,9 @@ The select() function returns only the counter values matching the dimension ind
 .. note::
     Points to note on ``select`` arguments:
 
-    - **Number of dimensions**: There is no fixed limit of one or two. The examples show one and two dimensions only for brevity. You may constrain as many distinct dimensions as the counter actually has, up to all of the user-visible dimensions listed above. Each dimension may appear at most once in the argument list. Constraining a dimension that the counter does not have has no effect. To find out which dimensions a counter has, see :ref:`querying_counter_dimensions`.
-    - **Index values**: Each dimension is assigned a list of indices (in square brackets). A single index (``DIMENSION_XCC=[0]``) or a comma-separated list of indices (``DIMENSION_XCC=[0,1]``) is supported; values not listed are dropped. Range syntax (for example, ``0:1``) is **not** supported. Each index must be less than 64 and must be within the extent of that dimension for the target agent.
+    - **Number of dimensions**: There is no fixed limit of one or two. The examples show one and two dimensions only for brevity. You may constrain as many distinct dimensions as the counter actually has, up to all of the user-visible dimensions listed above. Each dimension may appear at most once in the argument list. To find out which dimensions a counter has, see :ref:`querying_counter_dimensions`.
+    - **Single index per dimension**: Each dimension takes exactly one index in square brackets (for example, ``DIMENSION_XCC=[0]``). A comma-separated list (for example, ``DIMENSION_XCC=[0,1]``) and range syntax (for example, ``[0:1]``) are **not** supported and raise a runtime error. To keep several indices, apply ``select`` for each index separately.
+    - **Index limits**: Each index must be non-negative and fit within the number of bits allocated to the dimension: ``DIMENSION_XCC``, ``DIMENSION_AID``, ``DIMENSION_SHADER_ENGINE``, ``DIMENSION_SHADER_ARRAY``, and ``DIMENSION_WGP`` use 6 bits (indices ``0``-``63``), while ``DIMENSION_INSTANCE`` uses 10 bits (indices ``0``-``1023``). The index must also be within the actual extent of that dimension for the counter.
 
 Assuming that Y has XCC, SHADER_ENGINE (SE), and WGP dimensions with sizes 2, 4, and 4 respectively, the raw counter data in the 3D space is:
 
