@@ -39,5 +39,8 @@ void pc_sampling_feature_t::finalize()
 {
     code_object_writer_json_t writer;
     m_collector->write(writer);
-    writer.flush(m_output_path);
+    // Processes that loaded no code objects (e.g. non-GPU launchers/forks)
+    // should not leave an empty artifact behind.
+    if (!writer.empty())
+        writer.flush(m_output_path);
 }

@@ -307,6 +307,14 @@ class Backend {
 
  protected:
   /**
+   * @brief Alignment for regions carved from a backend's work/sync pool.
+   *
+   * The barrier_sync and pSync pools are accessed with 64-bit atomics, which
+   * require 8-byte alignment.
+   */
+  static constexpr size_t wrk_sync_pool_alignment{alignof(int64_t)};
+
+  /**
    * @brief Required to support static inheritance for device calls.
    *
    * The Context DISPATCH implementation requires this member.

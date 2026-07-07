@@ -66,6 +66,14 @@ jobs:
             enable_ubsan: 1
             enable_tsan: 0
             enable_msan: 0
+          - name: asan-ubsan-gcc
+            build_type: RelWithDebInfo
+            enable_asan: 1
+            enable_ubsan: 1
+            enable_tsan: 0
+            enable_msan: 0
+            c_compiler: gcc
+            cxx_compiler: g++
 
     steps:
       - name: Install base dependencies
@@ -139,48 +147,28 @@ jobs:
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
-            "RaceTest\.vgpr_waitcnt"
-            "RaceTest\.vgpr_waitcnt_race"
-            "RaceTest\.sgpr_waitcnt"
-            "RaceTest\.sgpr_waitcnt_race"
-            "RaceTest\.lds_cross_wave"
-            "RaceTest\.lds_cross_wave_race"
-            "RaceTest\.global_to_lds_buffer"
-            "RaceTest\.global_to_lds_buffer_race"
-            "RaceTest\.partial_vmcnt_race"
-            "RaceTest\.multiple_race"
-            "RaceTest\.multi_kernel"
-            "RaceTest\.multi_kernel_race"
-            "RaceTest\.multi_workgroup"
-            "RaceTest\.multi_workgroup_race"
-            "RaceTest\.mixed_counters_race"
-            "RaceTest\.stress_wavefront_reuse"
-            "RaceTest\.stress_wavefront_reuse_race"
-            "RaceTest\.exec_mask"
-            "RaceTest\.exec_mask_race"
-            "RaceTest\.exec_mask_same_wave"
-            "RaceTest\.exec_mask_cross_wave_race"
-            "RaceTest\.exec_mask_cross_wave"
-            "RaceTest\.lds_transpose"
-            "RaceTest\.lds_transpose_race"
-            "RaceTest\.dual_offset_lds"
-            "RaceTest\.dual_offset_lds_race"
-            "RaceTest\.scratch_vmcnt"
-            "RaceTest\.scratch_vmcnt_race"
-            "RaceTest\.f64_vgpr_safe"
-            "RaceTest\.f64_vgpr_race"
+            "RaceTest\..*"
           )
 
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.name }}" == "asan-ubsan" ]]; then
+          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
             EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
             CMAKE_CONFIG_FLAGS+=(
               -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"
               -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g"
             )
           fi
+          if [[ -n "${{ matrix.c_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_C_COMPILER="${{ matrix.c_compiler }}")
+          fi
+          if [[ -n "${{ matrix.cxx_compiler }}" ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${{ matrix.cxx_compiler }}")
+          fi
 
-          CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          CXXFLAGS=""
+          if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
+            CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
+          fi
           ROCM_PATH=`rocm-sdk path --root` \
             cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \

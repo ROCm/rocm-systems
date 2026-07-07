@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cstring>
+#include <type_traits>
+
 #include <hip/hip_runtime.h>
 #include "device.hpp"
 #include "hip/driver_types.h"
@@ -2940,6 +2943,58 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   return metadata;
 }
 
+template <typename Command, typename Operation>
+static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
+                                       cl_command_type command_type, hip::Stream& stream,
+                                       bool is_async, amd::Command* stream_wait_cmd,
+                                       amd::Command::EventWaitList& marker_wait_list) {
+  for (size_t device_id = 0; device_id < operations_by_device.size(); ++device_id) {
+    std::vector<Operation>& operations = operations_by_device[device_id];
+    if (operations.empty()) {
+      continue;
+    }
+
+    hip::Stream* queue_stream = static_cast<int>(device_id) == stream.DeviceId()
+                                    ? &stream
+                                    : hip::getNullStream(*g_devices[device_id]->asContext());
+    amd::Command::EventWaitList wait_list;
+    if (queue_stream != &stream && stream_wait_cmd != nullptr) {
+      wait_list.push_back(stream_wait_cmd);
+    }
+
+    Command* batch_cmd = nullptr;
+    if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
+      std::vector<std::vector<char>> host_snapshots;
+      if (!AMD_DIRECT_DISPATCH) {
+        for (Operation& op : operations) {
+          if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+            host_snapshots.emplace_back(op.size);
+            std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
+            op.src_host = host_snapshots.back().data();
+          }
+        }
+      }
+      batch_cmd = new amd::BatchWriteMemoryCommand(
+          *queue_stream, command_type, wait_list, std::move(operations), std::move(host_snapshots));
+    } else {
+      batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
+    }
+    if (batch_cmd == nullptr) {
+      return hipErrorOutOfMemory;
+    }
+
+    batch_cmd->enqueue();
+    if (!is_async) {
+      batch_cmd->queue()->finishCommand(batch_cmd);
+    } else if (queue_stream != &stream) {
+      batch_cmd->retain();
+      marker_wait_list.push_back(batch_cmd);
+    }
+    batch_cmd->release();
+  }
+  return hipSuccess;
+}
+
 // ================================================================================================
 // Returns the attribute flags that apply to copy `copyIdx`.
 static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
@@ -3030,11 +3085,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Classify copies by type and group them
-  std::vector<size_t> bufferCopyIndices;
+  // Classify copies by type and group them by the queue device that will execute each batch.
+  std::vector<std::vector<amd::BatchCopyOp>> copy_ops_by_device(g_devices.size());
+  std::vector<std::vector<amd::BatchWriteMemoryOp>> write_ops_by_device(g_devices.size());
+  std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
-  std::vector<size_t> writeBufferIndices;
-  std::vector<size_t> readBufferIndices;
 
   // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
   // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
@@ -3078,21 +3133,41 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
       }
     }
 
+    amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, i, isAsync);
     switch (type) {
       case hipCopyBuffer:
-      case hipCopyBufferSDMA:
-      case hipCopyBufferP2P:
-        bufferCopyIndices.push_back(i);
+      case hipCopyBufferSDMA: {
+        const hipMemoryType src_memory_type = getMemoryType(srcMemories[i]);
+        const hipMemoryType dst_memory_type = getMemoryType(dstMemories[i]);
+        const int device_id =
+            (src_memory_type == hipMemoryTypeDevice && dst_memory_type == hipMemoryTypeHost)
+                ? srcMemories[i]->getUserData().deviceId
+                : dstMemories[i]->getUserData().deviceId;
+        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                   dstOffsets[i], sizes[i], metadata);
         break;
+      }
+      case hipCopyBufferP2P: {
+        const int device_id = stream.DeviceId();
+        copy_ops_by_device[device_id].emplace_back(srcMemories[i], dstMemories[i], srcOffsets[i],
+                                                   dstOffsets[i], sizes[i], metadata);
+        break;
+      }
       case hipHostToHost:
         hostToHostIndices.push_back(i);
         break;
-      case hipWriteBuffer:
-        writeBufferIndices.push_back(i);
+      case hipWriteBuffer: {
+        const int device_id = dstMemories[i]->getUserData().deviceId;
+        write_ops_by_device[device_id].emplace_back(srcs[i], dstMemories[i], dstOffsets[i],
+                                                    sizes[i], metadata);
         break;
-      case hipReadBuffer:
-        readBufferIndices.push_back(i);
+      }
+      case hipReadBuffer: {
+        const int device_id = srcMemories[i]->getUserData().deviceId;
+        read_ops_by_device[device_id].emplace_back(srcMemories[i], dsts[i], srcOffsets[i], sizes[i],
+                                                   metadata);
         break;
+      }
     }
   }
 
@@ -3106,53 +3181,46 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Handle buffer-to-buffer copies as a batch
-  if (!bufferCopyIndices.empty()) {
-    std::vector<amd::BatchCopyOp> copyOps;
-    copyOps.reserve(bufferCopyIndices.size());
+  amd::Command::EventWaitList marker_wait_list;
+  amd::Command* stream_wait_cmd = stream.getLastQueuedCommand(true);
 
-    for (size_t idx : bufferCopyIndices) {
-      if (srcMemories[idx] == nullptr || dstMemories[idx] == nullptr) {
-        return hipErrorInvalidValue;
-      }
+  status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
+      copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd,
+      marker_wait_list);
+  if (status == hipSuccess) {
+    status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
+        write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
+        marker_wait_list);
+  }
+  if (status == hipSuccess) {
+    status = EnqueueBatchCommands<amd::BatchReadMemoryCommand>(
+        read_ops_by_device, ROCCLR_COMMAND_BATCH_READ_BUFFER, stream, isAsync, stream_wait_cmd,
+        marker_wait_list);
+  }
 
-      amd::CopyMetadata metadata = buildCopyMetadataFromAttrs(attrs, attrsIdxs, numAttrs, idx, isAsync);
-      copyOps.emplace_back(srcMemories[idx], dstMemories[idx], srcOffsets[idx], dstOffsets[idx], sizes[idx],
-                           metadata);
+  if (stream_wait_cmd != nullptr) {
+    stream_wait_cmd->release();
+  }
+
+  if (status != hipSuccess) {
+    for (auto* cmd : marker_wait_list) {
+      cmd->release();
     }
+    return status;
+  }
 
-    // Create and enqueue batch copy command
-    amd::Command::EventWaitList waitList;
-    amd::BatchCopyMemoryCommand* batchCmd = new amd::BatchCopyMemoryCommand(
-        stream, ROCCLR_COMMAND_BATCH_COPY_BUFFER, waitList, std::move(copyOps));
-
-    if (batchCmd == nullptr) {
+  if (!marker_wait_list.empty()) {
+    amd::Command* dependent_marker = new amd::Marker(stream, true, marker_wait_list);
+    if (dependent_marker == nullptr) {
+      for (auto* cmd : marker_wait_list) {
+        cmd->release();
+      }
       return hipErrorOutOfMemory;
     }
-
-    batchCmd->enqueue();
-    if (!isAsync) {
-      batchCmd->queue()->finishCommand(batchCmd);
-    }
-    batchCmd->release();
-  }
-
-  // Handle write buffer (host to device) copies.
-  // This path handles kSrcAccessOrderDuringApiCall and kSrcAccessOrderAny for host sources
-  // that lack a memory object (e.g. malloc'd or stack pointers). The writeBuffer path
-  // handles kSrcAccessOrderDuringApiCall
-  for (size_t idx : writeBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
-    }
-  }
-
-  // Handle read buffer (device to host) copies
-  for (size_t idx : readBufferIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
+    dependent_marker->enqueue();
+    dependent_marker->release();
+    for (auto* cmd : marker_wait_list) {
+      cmd->release();
     }
   }
 
