@@ -1167,7 +1167,7 @@ def gen_vector_cvt_scale(
             L.append('    uint32_t src_words[4] = {};')
             L.append('    for (uint32_t word = 0; word < 3u; ++word)')
             L.append(
-                '      src_words[word] = wf.cu().read_vgpr(src_base + word, lane);'
+                '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
             )
         else:
             raise ValueError(f'unsupported scaled unpack operation: {op}')
@@ -1177,7 +1177,7 @@ def gen_vector_cvt_scale(
             L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
             L.append('      float value = read_scaled_src(index) * scale;')
             L.append(
-                '      wf.cu().write_vgpr(dst_base + index, lane, std::bit_cast<uint32_t>(value));'
+                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + index, lane, std::bit_cast<uint32_t>(value));'
             )
             L.append('    }')
         elif out_fmt in ('f16', 'bf16'):
@@ -1190,7 +1190,7 @@ def gen_vector_cvt_scale(
             L.append('    }')
             L.append(f'    for (uint32_t word = 0; word < {words}u; ++word)')
             L.append(
-                '      wf.cu().write_vgpr(dst_base + word, lane, dst_words[word]);'
+                '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
             )
         else:
             raise ValueError(f'unsupported scaled unpack output format: {out_fmt}')
@@ -1201,7 +1201,9 @@ def gen_vector_cvt_scale(
         _scale_read_vgpr_base(L, 'src_base', src[0])
         L.append(f'    uint32_t src_words[{src_words}] = {{}};')
         L.append(f'    for (uint32_t word = 0; word < {src_words}u; ++word)')
-        L.append('      src_words[word] = wf.cu().read_vgpr(src_base + word, lane);')
+        L.append(
+            '      src_words[word] = amdgpu::RegisterAccess(wf.cu()).read_vgpr(src_base + word, lane);'
+        )
         L.extend(_scale_source_reader(in_fmt))
         L.append(f'    uint32_t dst_words[{out_words}] = {{}};')
         L.append('    auto pack_scaled_dst = [&](uint32_t index, uint32_t code) {')
@@ -1226,7 +1228,9 @@ def gen_vector_cvt_scale(
             )
         L.append('    }')
         L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
-        L.append('      wf.cu().write_vgpr(dst_base + word, lane, dst_words[word]);')
+        L.append(
+            '      amdgpu::RegisterAccess(wf.cu()).write_vgpr(dst_base + word, lane, dst_words[word]);'
+        )
     else:
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
 
@@ -1717,7 +1721,7 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
                 f'    float val0 = std::bit_cast<float>(static_cast<uint32_t>({data_src}.read_lane(wf, lane)));'
             )
             L.append(
-                f'    float val1 = std::bit_cast<float>(cu.read_vgpr(vb + {data_src}.unified_vgpr_index() + 1, lane));'
+                f'    float val1 = std::bit_cast<float>(amdgpu::RegisterAccess(cu).read_vgpr(vb + {data_src}.unified_vgpr_index() + 1, lane));'
             )
         else:
             L.append(f'    uint32_t packed_src = {data_src}.read_lane(wf, lane);')
@@ -1949,12 +1953,16 @@ def _gen_wide_scalef32(
     L.append(
         '  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {'
     )
-    L.append('    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);')
+    L.append(
+        '    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);'
+    )
     L.append('  };')
     L.append(
         '  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {'
     )
-    L.append('    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);')
+    L.append(
+        '    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);'
+    )
     L.append('  };')
 
     L.append('  uint64_t exec = wf.exec();')

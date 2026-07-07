@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu {
@@ -1016,7 +1017,7 @@ inline RegisterAccess::VgprWriteRegion write_mfma_acc32_region(amdgpu::ComputeUn
 struct MatrixReadRegions {
   RegisterAccess::VgprReadRegion a;
   RegisterAccess::VgprReadRegion b;
-  RegisterAccess::VgprReadRegion acc;
+  std::optional<RegisterAccess::VgprReadRegion> acc;
 };
 
 inline MatrixReadRegions read_mfma_fast_path_regions(amdgpu::ComputeUnitCore &cu, uint32_t s0,
@@ -1028,10 +1029,10 @@ inline MatrixReadRegions read_mfma_fast_path_regions(amdgpu::ComputeUnitCore &cu
   uint64_t lane_mask = mfma_full_lane_mask(wf_size);
   uint32_t a_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * K * B, data_bits, wf_size);
   uint32_t b_regs = mfma_dense_reg_count(static_cast<uint64_t>(N) * K * B, data_bits, wf_size);
-  RegisterAccess::VgprReadRegion acc_region;
+  std::optional<RegisterAccess::VgprReadRegion> acc_region;
   if (const_acc == ACC_FROM_VGPR) {
     uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N * B, 32, wf_size);
-    acc_region = regs.read_vgpr_region(s2, acc_regs, lane_mask);
+    acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
   }
   return {regs.read_vgpr_region(s0, a_regs, lane_mask),
           regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
@@ -1053,10 +1054,10 @@ inline MatrixReadRegions read_wmma_fast_path_regions(amdgpu::ComputeUnitCore &cu
   uint64_t lane_mask = mfma_full_lane_mask(wf_size);
   uint32_t a_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * K, data_bits, wf_size);
   uint32_t b_regs = mfma_dense_reg_count(static_cast<uint64_t>(N) * K, data_bits, wf_size);
-  RegisterAccess::VgprReadRegion acc_region;
+  std::optional<RegisterAccess::VgprReadRegion> acc_region;
   if (const_acc == ACC_FROM_VGPR) {
     uint32_t acc_regs = mfma_dense_reg_count(static_cast<uint64_t>(M) * N, acc_bits, wf_size);
-    acc_region = regs.read_vgpr_region(s2, acc_regs, lane_mask);
+    acc_region.emplace(regs.read_vgpr_region(s2, acc_regs, lane_mask));
   }
   return {regs.read_vgpr_region(s0, a_regs, lane_mask),
           regs.read_vgpr_region(s1, b_regs, lane_mask), acc_region};
@@ -1797,7 +1798,7 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
@@ -1876,7 +1877,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
@@ -1993,7 +1994,7 @@ void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
@@ -2074,7 +2075,7 @@ void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_wmma_output_region(cu, dst, M, N, /*output_bits=*/32, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
@@ -2519,7 +2520,7 @@ void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, 
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
@@ -2647,7 +2648,7 @@ void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
@@ -2749,7 +2750,7 @@ void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = readwrite_wmma_output_region(cu, dst, M, N, /*output_bits=*/16, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
@@ -3301,7 +3302,7 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
                                              const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     // Accumulate in unsigned 32-bit (wrap is well-defined; identical mod 2^32
     // to the intended signed wrap), sign-restore via int32 cast at pack time.
     alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-/zero-extended bits)
@@ -4001,7 +4002,7 @@ void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
         read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, BATCH, in_bits, const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, BATCH, wf);
     alignas(64) float A_buf[M * K];
     alignas(64) float B_buf[K * N];
@@ -4077,7 +4078,7 @@ void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t 
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
@@ -4167,7 +4168,7 @@ void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
     alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
@@ -4257,7 +4258,7 @@ void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
@@ -4345,7 +4346,7 @@ void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s
     auto reads = read_mfma_fast_path_regions(cu, s0, s1, s2, M, N, K, B, in_bits, const_acc, wf);
     const uint32_t *a_words = reads.a.reg_data();
     const uint32_t *b_words = reads.b.reg_data();
-    const uint32_t *c_words = reads.acc.empty() ? nullptr : reads.acc.reg_data();
+    const uint32_t *c_words = reads.acc ? reads.acc->reg_data() : nullptr;
     auto writes = write_mfma_acc32_region(cu, dst, M, N, B, wf);
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-

@@ -878,7 +878,7 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         ):
             if ctx.true16_dst_reg is not None:
                 value = (
-                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                    'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + '
                     f'({ctx.true16_dst_reg}), lane)'
                 )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
@@ -1021,8 +1021,8 @@ def _lower_dst_write(
             ind = _indent(ctx)
             if ctx.true16_dst_reg is not None:
                 dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
-                read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
-                write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
+                read_dst = f'amdgpu::RegisterAccess(wf.cu()).read_vgpr({dst_ref}, lane)'
+                write_dst = f'amdgpu::RegisterAccess(wf.cu()).write_vgpr({dst_ref}, lane, merged);'
             elif ctx.true16_dst_select in {
                 'inst_.opsel & 0x8u',
                 'amdgpu::vop3_opsel(inst_) & 0x8u',

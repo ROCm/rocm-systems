@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -74,15 +75,15 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     else if (inst.seg == 1)
       has_vaddr = (inst.lds == 1);
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-    RegisterAccess::VgprReadRegion vaddr_region;
+    std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
     if (has_vaddr)
-      vaddr_region = regs.read_vgpr_region(vbase, 1, exec);
+      vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
       uint32_t vaddr = 0;
       if (has_vaddr)
-        vaddr = vaddr_region.lane(0, lane);
+        vaddr = vaddr_region->lane(0, lane);
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
     }

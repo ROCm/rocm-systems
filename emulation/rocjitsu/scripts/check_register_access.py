@@ -20,11 +20,18 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 INSTRUCTION_ROOT = (
     REPO_ROOT / "emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu"
 )
-SHARED_ROOT = INSTRUCTION_ROOT / "shared"
 RAW_STORAGE = re.compile(r"\braw_vgpr_(?:data|reg)\s*(?:\(|<)")
-SHARED_BACKDOOR = re.compile(
+INSTRUCTION_BACKDOOR = re.compile(
     r"\b(?:cu|c)\.(?:read|write)_vgpr\s*\(|\bwf\.cu\(\)\.(?:read|write)_vgpr\s*\(|\bSimdAccess::"
 )
+
+
+def checks_physical_vgpr_io(path: pathlib.Path) -> bool:
+    try:
+        rel = path.relative_to(INSTRUCTION_ROOT)
+    except ValueError:
+        return False
+    return True
 
 
 def main() -> int:
@@ -37,13 +44,15 @@ def main() -> int:
             if RAW_STORAGE.search(line):
                 rel = path.relative_to(REPO_ROOT)
                 failures.append(f"{rel}:{line_number}: raw storage: {line.strip()}")
-            if path.is_relative_to(SHARED_ROOT) and SHARED_BACKDOOR.search(line):
+            if checks_physical_vgpr_io(path) and INSTRUCTION_BACKDOOR.search(line):
                 rel = path.relative_to(REPO_ROOT)
-                failures.append(f"{rel}:{line_number}: shared backdoor: {line.strip()}")
+                failures.append(
+                    f"{rel}:{line_number}: physical VGPR backdoor: {line.strip()}"
+                )
 
     if failures:
         print(
-            "Instruction code must not call raw VGPR storage directly, and shared AMDGPU "
+            "Instruction code must not call raw VGPR storage directly, and non-gfx1250 AMDGPU "
             "instruction helpers must not bypass RegisterAccess for physical VGPR I/O.",
             file=sys.stderr,
         )
