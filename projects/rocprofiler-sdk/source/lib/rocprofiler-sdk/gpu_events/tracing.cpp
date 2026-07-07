@@ -333,21 +333,21 @@ hip_gpu_event_registration_callback(rocprofiler_intercept_table_t type,
 
     auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
 
-    baseEventCreate = hip_api_table->hipEventCreate_fn;
-    baseEventCreateWithFlags = hip_api_table->hipEventCreateWithFlags_fn;
-    baseStreamWaitEvent = hip_api_table->hipStreamWaitEvent_fn;
-    baseStreamWaitEventSpt = hip_api_table->hipStreamWaitEvent_spt_fn;
-    baseEventRecord = hip_api_table->hipEventRecord_fn;
-    baseEventRecordSpt = hip_api_table->hipEventRecord_spt_fn;
-    baseEventRecordWithFlags = hip_api_table->hipEventRecordWithFlags_fn;
+    rocprofiler::gpu_events::baseEventCreate = hip_api_table->hipEventCreate_fn;
+    rocprofiler::gpu_events::baseEventCreateWithFlags = hip_api_table->hipEventCreateWithFlags_fn;
+    rocprofiler::gpu_events::baseStreamWaitEvent = hip_api_table->hipStreamWaitEvent_fn;
+    rocprofiler::gpu_events::baseStreamWaitEventSpt = hip_api_table->hipStreamWaitEvent_spt_fn;
+    rocprofiler::gpu_events::baseEventRecord = hip_api_table->hipEventRecord_fn;
+    rocprofiler::gpu_events::baseEventRecordSpt = hip_api_table->hipEventRecord_spt_fn;
+    rocprofiler::gpu_events::baseEventRecordWithFlags = hip_api_table->hipEventRecordWithFlags_fn;
 
-    hip_api_table->hipEventCreate_fn = &hipEventCreateWrapper;
-    hip_api_table->hipEventCreateWithFlags_fn = &hipEventCreateWithFlagsWrapper;
-    hip_api_table->hipStreamWaitEvent_fn = &hipStreamWaitEventWrapper;
-    hip_api_table->hipStreamWaitEvent_spt_fn = &hipStreamWaitEventSptWrapper;
-    hip_api_table->hipEventRecord_fn = &hipEventRecordWrapper;
-    hip_api_table->hipEventRecord_spt_fn = &hipEventRecordSptWrapper;
-    hip_api_table->hipEventRecordWithFlags_fn = &hipEventRecordWithFlagsWrapper;
+    hip_api_table->hipEventCreate_fn = &rocprofiler::gpu_events::hipEventCreateWrapper;
+    hip_api_table->hipEventCreateWithFlags_fn = &rocprofiler::gpu_events::hipEventCreateWithFlagsWrapper;
+    hip_api_table->hipStreamWaitEvent_fn = &rocprofiler::gpu_events::hipStreamWaitEventWrapper;
+    hip_api_table->hipStreamWaitEvent_spt_fn = &rocprofiler::gpu_events::hipStreamWaitEventSptWrapper;
+    hip_api_table->hipEventRecord_fn = &rocprofiler::gpu_events::hipEventRecordWrapper;
+    hip_api_table->hipEventRecord_spt_fn = &rocprofiler::gpu_events::hipEventRecordSptWrapper;
+    hip_api_table->hipEventRecordWithFlags_fn = &rocprofiler::gpu_events::hipEventRecordWithFlagsWrapper;
 }
 
 }
