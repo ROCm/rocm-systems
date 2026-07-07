@@ -54,6 +54,7 @@
 #include <new>
 #include <stdexcept>
 #include <sys/resource.h>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::pmc
