@@ -53,10 +53,11 @@ bool HostQueue::terminate() {
   if (AMD_DIRECT_DISPATCH) {
     if (!forceDestroy_ && vdev() != nullptr) {
       // The blocking drain below self-deadlocks if run on the async-events
-      // thread. Re-arm and hand to an app thread; return false gates off delete
-      // so it re-runs terminate() off the async thread.
+      // thread. Re-arm (valid here at count 0, unlike retain()) and hand to an
+      // app thread; return false gates off delete so it re-runs terminate() off
+      // the async thread.
       if (device().isInAsyncSignalHandler()) {
-        retain();
+        reArmReference();
         device().deferReleaseObject(this);
         return false;
       }

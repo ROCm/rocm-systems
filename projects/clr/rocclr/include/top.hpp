@@ -41,6 +41,7 @@
 #endif /*ATI_ARCH_X86*/
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <cstddef>
 #include <new>
@@ -158,6 +159,17 @@ class ReferenceCountedObject {
  protected:
   virtual ~ReferenceCountedObject() {}
   virtual bool terminate() { return true; }
+
+  //! Re-arm an object from within terminate(), which runs when release() drove
+  //! the count to 0. Unlike retain() (which asserts count != 0), this is valid
+  //! only at 0. Use only to defer teardown -- e.g. off an async handler where the
+  //! blocking drain would deadlock: re-arm, return false, and release() again
+  //! from a safe thread later.
+  void reArmReference() {
+    assert(referenceCount_.load(std::memory_order_relaxed) == 0 &&
+           "reArmReference is only valid at count 0, from within terminate()");
+    referenceCount_.store(1, std::memory_order_relaxed);
+  }
 
  public:
   ReferenceCountedObject() : referenceCount_(1) {}
