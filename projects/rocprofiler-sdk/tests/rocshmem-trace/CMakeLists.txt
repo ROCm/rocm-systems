@@ -68,11 +68,12 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocshmem-tracing
     COMMAND
-        ${CMAKE_COMMAND} -E env ${MPI_ENV_VARS} ${MPIRUN_EXECUTABLE} -np 2 bash -c
+        ${MPIRUN_EXECUTABLE} -np 2 bash -c
         "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec timeout -k 5 30 '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
     DEPENDS rocshmem-demo
     TIMEOUT 45
     LABELS "integration-tests"
+    ENVIRONMENT ${MPI_ENV_VARS}
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "Finalization complete"
     FIXTURES_SETUP rocshmem-tracing
