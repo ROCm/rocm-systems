@@ -54,11 +54,14 @@ class DeviceTableGenerationTest(unittest.TestCase):
         cls._dir = tempfile.mkdtemp(prefix="rccl_devtable_")
         cls.header = _generate(cls._dir)
 
-    def test_noinline_selector_is_device_linker_gated(self):
-        # RCCL_DEVFUNC_ATTR = noinline iff RCCL_DEVICE_LINKER.
-        self.assertIn("#if defined(RCCL_DEVICE_LINKER)", self.header)
-        self.assertIn("#define RCCL_DEVFUNC_ATTR __attribute__((noinline))", self.header)
-        self.assertIn("__device__ RCCL_DEVFUNC_ATTR void ncclDevFunc_", self.header)
+    def test_forward_declarations_are_plain(self):
+        # noinline is applied only by DEFINE_ncclDevFunc (common.h), gated on
+        # RCCL_DEVICE_LINKER. The generated forward declarations must stay plain:
+        # a stray noinline here leaks into the definition (attribute is a union
+        # across decl+def) and would force pure-RDC funcs noinline.
+        self.assertIn("__device__ void ncclDevFunc_", self.header)
+        self.assertNotIn("noinline", self.header)
+        self.assertNotIn("RCCL_DEVFUNC_ATTR", self.header)
 
     def test_table_is_static_and_runtime_dispatch_gated(self):
         # Table only for the runtime-dispatch builds, and internal linkage.

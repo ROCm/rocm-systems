@@ -604,14 +604,17 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-// noinline iff RCCL_DEVICE_LINKER, via RCCL_DEVFUNC_ATTR (defined in the generated
-// device_table.h).
-#ifndef RCCL_DEVFUNC_ATTR
-#define RCCL_DEVFUNC_ATTR
-#endif
+// noinline iff RCCL_DEVICE_LINKER (each devfunc is a standalone shard).
+#ifdef RCCL_DEVICE_LINKER
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ RCCL_DEVFUNC_ATTR void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
+#else
+#define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
+  __device__ void ncclDevFunc_##suffix() { \
+    RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
+  }
+#endif
 
 #endif

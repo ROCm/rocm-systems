@@ -398,20 +398,15 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
   print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
   out = f.write
 
-  # noinline is applied to every ncclDevFunc_* ONLY in the device-linker build.
-  out("#if defined(RCCL_DEVICE_LINKER)\n")
-  out("#define RCCL_DEVFUNC_ATTR __attribute__((noinline))\n")
-  out("#else\n")
-  out("#define RCCL_DEVFUNC_ATTR\n")
-  out("#endif\n\n")
-
+  # Plain forward declarations; noinline (device-linker only) is controlled
+  # solely by DEFINE_ncclDevFunc in common.h.
   for fn in primary_funcs:
     sym = paste("_", "ncclDevFunc", *fn)
     guard = get_arch_guard(fn)
     if guard:
-      out("#if %s\n__device__ RCCL_DEVFUNC_ATTR void %s();\n#endif\n" % (guard, sym))
+      out("#if %s\n__device__ void %s();\n#endif\n" % (guard, sym))
     else:
-      out("__device__ RCCL_DEVFUNC_ATTR void %s();\n" % sym)
+      out("__device__ void %s();\n" % sym)
   out("\n")
 
   index = {val: None for val in all_unrolls}
@@ -452,9 +447,8 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
           "  }\n"
           "};\n\n")
-      i = 0
-      for fn in primary_funcs:
-        if fn.unroll != unroll: continue
+      unroll_fns = [fn for fn in primary_funcs if fn.unroll == unroll]
+      for i, fn in enumerate(unroll_fns):
         sym = paste("_", "ncclDevFunc", *fn)
         guard = get_arch_guard(fn)
         spec = f"template<> struct Caller{unroll}<{i}, {i+1}> {{ static __forceinline__ __device__ void call{unroll}(unsigned short) noexcept"
@@ -469,10 +463,9 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
           out("#endif\n")
         else:
           out(f"{spec} {{ {sym}(); }} }};\n")
-        i += 1
       out("\n")
       out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
-      out(f"  Caller{unroll}<0, {i}>::call{unroll}(funcIndex);\n")
+      out(f"  Caller{unroll}<0, {len(unroll_fns)}>::call{unroll}(funcIndex);\n")
       out("}\n\n")
     out("#endif // !USE_INDIRECT_FUNCTION_CALL && !RCCL_DEVICE_LINKER\n")
 
