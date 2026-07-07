@@ -58,6 +58,50 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Both functions the header declares are C++ symbols, which the version script's `amdsmi_*` export glob does not match, so including the header only ever led to a link error. It joins the `_test` and WSL impl headers that are already build-only.
   - The example is the one shipped file that included that header, so it went with it rather than being left unbuildable against an install tree.
 
+- **Reworked `amd-smi` CLI process exit codes.**  
+  How exit codes are chosen:
+  - Library failures exit with the underlying `AMDSMI_STATUS_*` value (0-56).
+  - CLI-only errors use dedicated codes in the reserved 192-255 band.
+  - When more than one failure with different codes is recorded in a single run — across devices, or across sub-steps of one command (e.g. `reset --clocks`) — the process exits `205`.
+
+  Multi-device `set`/`reset` behavior:
+  - A per-device GPU failure is now recorded, and the command continues to the remaining devices.
+  - The exit code is decided once, after every device has been attempted. Previously a single device failure could abort the loop early.
+
+  Notable value changes (many cases previously aliased onto `1`/`2`; each now has a distinct code):
+
+  | Case | Was | Now |
+  | --- | --- | --- |
+  | Import failure | `1` | `192` |
+  | Invalid command | `1` | `193` |
+  | Invalid parameter | `2` | `194` |
+  | Device not found | `3` | `195` |
+  | Invalid file path | `4` | `196` |
+  | Invalid parameter value | `5` | `197` |
+  | Missing parameter value | `6` | `198` |
+  | Command not supported (CLI, parse-time) | `7` | `199` (distinct from library `NOT_SUPPORTED` = `2`) |
+  | Required target/argument missing | `9` | `201` |
+  | Invalid subcommand | `10` | `202` |
+  | Permission denied | `11` | `10` (real `AMDSMI_STATUS_NO_PERM`) |
+  | Mixed device/field failures (differing codes) | — | `205` |
+  | `amdsmi_init()` watchdog timeout | `2` | `206` |
+  | Drivers not loaded | `1` | `207` |
+  | Interactive confirmation declined | `1` | `208` |
+  | Library (device) failure | `(1000 + status)` wrapped to a byte | underlying `AMDSMI_STATUS_*` (`0`-`56`) |
+  | Unknown/unmapped library error | `100` | `255` (library `UNKNOWN_ERROR` folded to a byte) |
+
+  The `Was`/`Now` values are process exit codes (`$?`). Previously the printed `code` field showed the *negative* of these (e.g. `-7`) while the process exited with the absolute value (`7`); the rework makes the printed `code` and `$?` agree (both `199`).
+
+- **`amd-smi set --power-cap` now applies per GPU instead of aborting on the first out-of-range device.**  
+  - Each GPU is validated against its own reported range.
+  - An out-of-range value on one GPU is reported for that GPU, while in-range GPUs still apply.
+  - The process exit code reflects the per-device failure.
+
+### Removed
+
+- **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
+  These were CLI-internal (not part of the public `amdsmi` Python library), their exit-code behavior is superseded by the reworked CLI process exit codes described above.
+
 ### Optimized
 
 ### Resolved Issues
@@ -107,6 +151,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A crashdump section's registers are now copied into an aligned buffer before decoding. The section sits at a record-supplied offset inside a packed struct, so an odd offset left the decoder loading a `uint64_t` from an address it was not aligned for.
   - A non-standard error section whose `reg_arr_size` exceeds the fixed 128-byte register dump is now rejected and logged. In ACA register context (`reg_ctx_type` 1) that size already produced no AFID, so those records decode as before. In boot context (`reg_ctx_type` 9) the decoder previously read registers from past the end of `reg_dump`, and any AFID it derived from them is gone.
   - A record whose `error_severity` is too large for the severity mask to select is now dropped. Such a value previously wrapped around the 32-bit mask and matched a bit belonging to a different severity, so the record was reported under a severity it never carried.
+
+- **Fixed `amd-smi set`/`reset` on a GPU silently exiting `0` after a per-device failure.**  
+  - A device error during GPU `set`/`reset` is now recorded, so the process exits with a non-zero code instead of reporting success.
+  - Example: `set --memory-partition` on a GPU that does not support it.
 
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
