@@ -430,37 +430,35 @@ def calc_ai_analyze(
 
     workload.roofline_metrics = {}
 
-    kernel_ids_to_process: list[int] = []
     kernel_top_table_id = 1
+    if kernel_top_table_id not in workload.dfs:
+        console_warning("No kernels found to process for roofline")
+        return plot_points.__dict__
 
-    if workload.filter_kernel_ids:
-        if all(isinstance(k, int) for k in workload.filter_kernel_ids):
-            kernel_ids_to_process = workload.filter_kernel_ids
-        elif kernel_top_table_id in workload.dfs:
-            # WebUI sets filter_kernel_ids as strings (kernel names), not
-            # int row indices. Process all IDs here; caller provides
-            # pmc_df already narrowed to the selected kernel(s).
-            kernel_ids_to_process = workload.dfs[kernel_top_table_id].index.tolist()
-    elif kernel_top_table_id in workload.dfs:
-        kernel_top_df = workload.dfs[kernel_top_table_id]
-        kernel_ids_to_process = kernel_top_df.index.tolist()
-        console_debug(
-            "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
+    kernel_top_df = workload.dfs[kernel_top_table_id]
+    kernel_filter = workload.kernel_filter
+
+    # Select the Top Stats rows to process by kernel name. When a filter is
+    # active only the selected kernels are processed; otherwise all are.
+    if kernel_filter.is_active:
+        stripped_names = kernel_top_df["Kernel_Name"].apply(
+            lambda name: name.strip() if isinstance(name, str) else name
         )
+        kernel_ids_to_process = kernel_top_df.index[
+            stripped_names.isin(kernel_filter.names)
+        ].tolist()
+    else:
+        kernel_ids_to_process = kernel_top_df.index.tolist()
+    console_debug(
+        "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
+    )
 
     if not kernel_ids_to_process:
         console_warning("No kernels found to process for roofline")
         return plot_points.__dict__
 
     for kernel_id in kernel_ids_to_process:
-        kernel_name = ""
-        if kernel_top_table_id in workload.dfs:
-            kernel_top_df = workload.dfs[kernel_top_table_id]
-            if kernel_id not in kernel_top_df.index:
-                continue
-            kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
-        else:
-            continue
+        kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
 
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 

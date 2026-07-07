@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from utils import schema
+from utils.kernel_filter import KernelFilter
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     GraphPoints,
@@ -39,7 +40,7 @@ def run_calc_ai_analyze_with_values(
     workload.dfs = {1: pd.DataFrame({"Kernel_Name": [kernel_name]}, index=[kernel_id])}
     workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx90a"}])
     workload.roofline_peaks = pd.DataFrame()
-    workload.filter_kernel_ids = []
+    workload.kernel_filter = KernelFilter()
     workload.path = "/mock/path"
 
     arch_config = schema.ArchConfig()

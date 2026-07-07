@@ -9,6 +9,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from utils import schema
+from utils.kernel_filter import mark_selected_kernels
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
@@ -297,7 +298,7 @@ def apply_filters(
     # Kernel id is unique!
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
-    if workload.filter_kernel_ids or workload.filter_kernel_names:
+    if workload.kernel_filter.is_active:
         filtered_df = apply_kernel_filter(filtered_df, workload)
 
     # Apply dispatch filter
@@ -313,77 +314,22 @@ def apply_filters(
     return filtered_df
 
 
-def resolve_kernel_ids_to_names(
-    filter_kernel_ids: list,
-    kernel_top_df: Optional[pd.DataFrame],
-    mark_selected: bool = False,
-) -> set[str]:
-    """Resolve a -k filter to a set of stripped kernel names.
-    """
-    if all(isinstance(kernel_id, int) for kernel_id in filter_kernel_ids):
-        if kernel_top_df is None:
-            console_error(
-                "Kernel top stats table not loaded. "
-                "Ensure create_df_kernel_top_stats() "
-                "is called before applying kernel filters."
-            )
-
-        num_kernels = len(kernel_top_df["Kernel_Name"])
-        for kernel_id in filter_kernel_ids:
-            if not 0 <= kernel_id < num_kernels:
-                console_error(
-                    f"{kernel_id} is an invalid kernel id. "
-                    f"Please enter an id between 0-{num_kernels - 1}"
-                )
-
-        if mark_selected:
-            kernel_top_df["Selected"] = ""
-            for kernel_id in filter_kernel_ids:
-                kernel_top_df.loc[kernel_id, "Selected"] = "*"
-
-        return {
-            str(kernel_top_df.loc[kernel_id, "Kernel_Name"]).strip()
-            for kernel_id in filter_kernel_ids
-        }
-
-    if all(isinstance(kernel_id, str) for kernel_id in filter_kernel_ids):
-        return {kernel_id.strip() for kernel_id in filter_kernel_ids}
-
-    console_error(
-        "analyze",
-        "Mixing kernel indices and string filters is not supported",
-    )
-    return set()
-
-
 def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply the -k kernel filter and/or the operator kernel-name filter.
-    """
+    """Filter *df* to the workload's selected kernels, matched by name."""
+    kernel_filter = workload.kernel_filter
+    if not kernel_filter.is_active:
+        return df
+
+    kernel_top_df = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+    if kernel_top_df is not None:
+        mark_selected_kernels(kernel_top_df, kernel_filter)
+
     stripped_names = df["Kernel_Name"].apply(
         lambda kernel_name: (
             kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
         )
     )
-
-    if workload.filter_kernel_ids:
-        # The Top Stats table is only needed to resolve integer -k indices.
-        kernel_top_df = None
-        if any(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
-            kernel_top_df = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
-        selected_kernels = resolve_kernel_ids_to_names(
-            workload.filter_kernel_ids,
-            kernel_top_df,
-            mark_selected=True,
-        )
-        if selected_kernels:
-            df = df.loc[stripped_names.isin(selected_kernels)]
-            stripped_names = stripped_names.loc[df.index]
-
-    if workload.filter_kernel_names:
-        operator_kernel_names = {name.strip() for name in workload.filter_kernel_names}
-        df = df.loc[stripped_names.isin(operator_kernel_names)]
-
-    return df
+    return df.loc[stripped_names.isin(kernel_filter.names)]
 
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
@@ -529,7 +475,8 @@ def load_pc_sampling_data(
         return pd.DataFrame()
 
     # No kernel filter: return every kernel's rows.
-    if not workload.filter_kernel_ids:
+    kernel_filter = workload.kernel_filter
+    if not kernel_filter.is_active:
         return load_pc_sampling_data_per_kernel(
             pc_sampling_method,
             tool_data,
@@ -537,7 +484,7 @@ def load_pc_sampling_data(
             num_rows=num_rows,
         )
 
-    if len(workload.filter_kernel_ids) > 1:
+    if len(kernel_filter.names) > 1:
         console_error(
             "PC sampling supports single kernel only! Please specify -k with "
             "single kernel.",
@@ -545,17 +492,8 @@ def load_pc_sampling_data(
         )
         return pd.DataFrame()
 
-    # Exactly one kernel filter.
-    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-    kernel_index = workload.filter_kernel_ids[0]
-    if kernel_index >= len(kernel_top_df):
-        console_warning(
-            f"Kernel index {kernel_index} is out of bounds. "
-            f"kernel_top table has only {len(kernel_top_df)} rows."
-        )
-        return pd.DataFrame()
-
-    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+    # Exactly one selected kernel.
+    kernel_name = next(iter(kernel_filter.names))
     return load_pc_sampling_data_per_kernel(
         pc_sampling_method,
         tool_data,

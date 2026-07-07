@@ -18,6 +18,7 @@ from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
+from utils.kernel_filter import resolve_kernel_filter
 from utils.logger import (
     console_debug,
     console_error,
@@ -903,14 +904,14 @@ class db_analysis(OmniAnalyze_Base):
                     .astype(str)
                     .isin([self._runs[workload_path].filter_gpu_ids])
                 ]
-            # Filter kernel_ids
-            if self._runs[workload_path].filter_kernel_ids:
-                pmc_df = pmc_df.loc[
-                    pmc_df["Kernel_Name"].isin([
-                        top_kernels[id]
-                        for id in self._runs[workload_path].filter_kernel_ids
-                    ])
-                ]
+            # Filter kernels. Resolve the -k selection against the duration-ranked
+            # top_kernels list, then filter by name.
+            top_kernels_df = pd.DataFrame({"Kernel_Name": top_kernels})
+            kernel_filter = resolve_kernel_filter(
+                self._runs[workload_path].kernel_selection, top_kernels_df
+            )
+            if kernel_filter.is_active:
+                pmc_df = pmc_df.loc[pmc_df["Kernel_Name"].isin(kernel_filter.names)]
             # Filter dispatch_ids
             if self._runs[workload_path].filter_dispatch_ids:
                 if ">" in self._runs[workload_path].filter_dispatch_ids[0]:

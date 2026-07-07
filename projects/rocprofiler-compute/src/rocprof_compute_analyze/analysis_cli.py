@@ -11,10 +11,10 @@ import pandas as pd
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
+from utils.kernel_filter import KernelFilter, resolve_kernel_filter
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
-    build_call_trees,
     build_call_trees_with_kernel_ids,
     build_operator_summary,
     decode_marker_name,
@@ -150,8 +150,6 @@ class cli_analysis(OmniAnalyze_Base):
                 self.list_operators(path_info[0], kernel_top_df, list_backend)
                 sys.exit(0)
 
-            # Resolve the operator filter (if any) before building Top Stats so
-            # the tables are built once, scoped to the operator's kernels.
             operator_backend = next(
                 (
                     backend
@@ -160,26 +158,40 @@ class cli_analysis(OmniAnalyze_Base):
                 ),
                 None,
             )
-            operator_filter_kernel_names: list[str] = []
-            if operator_backend is not None:
-                operator_filter_kernel_names = self.apply_operator_filter(
-                    args,
-                    workload,
-                    path_info[0],
-                    operator_backend,
+
+            # Resolve the -k selection. Index-based selections need the full Top
+            # Stats table, so build it once for that case.
+            base_top_stats_built = False
+            if workload.kernel_selection is not None:
+                base_kernel_top_df, _ = self._update_kernel_top_stats(
+                    workload=workload,
+                    workload_path=path_info[0],
+                    args=args,
                 )
+                workload.kernel_filter = resolve_kernel_filter(
+                    workload.kernel_selection, base_kernel_top_df
+                )
+                base_top_stats_built = True
 
-            self._update_kernel_top_stats(
-                workload=workload,
-                workload_path=path_info[0],
-                args=args,
-                filter_kernel_names=operator_filter_kernel_names or None,
-            )
-
-            # Attach matching kernel ids to the operator trace 
-            # so the call tree and Top Stats tables agree.
-            if operator_backend is not None and operator_filter_kernel_names:
-                self._assign_matched_kernel_ids(workload, operator_backend)
+            if operator_backend is not None:
+                # Operator filter narrows the selection and scopes Top Stats to
+                # the selected kernels.
+                self.apply_operator_filter(
+                    args, workload, path_info[0], operator_backend
+                )
+                self._update_kernel_top_stats(
+                    workload=workload,
+                    workload_path=path_info[0],
+                    args=args,
+                    filter_kernel_names=sorted(workload.kernel_filter.names) or None,
+                )
+            elif not base_top_stats_built:
+                # No -k and no operator filter: build the full Top Stats once.
+                self._update_kernel_top_stats(
+                    workload=workload,
+                    workload_path=path_info[0],
+                    args=args,
+                )
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -353,37 +365,20 @@ class cli_analysis(OmniAnalyze_Base):
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         return kernel_top_df, dispatch_info_df
 
-    @staticmethod
-    def _assign_matched_kernel_ids(workload: schema.Workload, backend: str) -> None:
-        """Attach Top Stats kernel ids to the matched operator trace.
-
-        Runs after the scoped Top Stats table is built so the operator call tree
-        and the Top Stats tables reference the same kernel-id space.
-        """
-        matched_df = workload.matched_ml_api_trace_dfs.get(backend)
-        if matched_df is None or matched_df.empty:
-            return
-        kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
-        name_to_id = {
-            str(kernel_name).strip(): idx
-            for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
-        }
-        matched_df["Kernel_ID"] = matched_df["Kernel_Name"].str.strip().map(name_to_id)
-
     def apply_operator_filter(
         self,
         args: argparse.Namespace,
         workload: schema.Workload,
         workload_path: str,
         backend: str,
-    ) -> list[str]:
-        """Select the kernels belonging to a backend's operator filter.
+    ) -> None:
+        """Narrow the workload's kernel filter to a backend's operator.
 
-        Operator matches are intersected with the -k/--kernel filter when set.
-        Matched trace rows are stored in workload.matched_ml_api_trace_dfs[backend]
-        and the selected kernel names in workload.filter_kernel_names. Returns the
-        selected kernel names (used to scope Top Stats), or [] when no operator
-        data is available. Exits when a set filter matches nothing.
+        Operator matches are intersected with any existing -k selection
+        (workload.kernel_filter). Matched trace rows are stored in
+        workload.matched_ml_api_trace_dfs[backend] and the resulting selection in
+        workload.kernel_filter. Returns without narrowing when no operator data
+        is available; exits when a set filter matches nothing.
         """
         cli = _ML_API_ANALYSIS_CLI_OPTIONS[backend]
         label = cli["label"]
@@ -407,7 +402,7 @@ class cli_analysis(OmniAnalyze_Base):
                     f"No {label} operator data found in this workload. "
                     f"Proceeding without {label} operator filter.",
                 )
-                return []
+                return
             write_ml_api_trace_consolidated_csv(consolidated_df, ml_api_trace_path)
 
         consolidated_df = self._filter_by_backend(consolidated_df, backend)
@@ -417,7 +412,7 @@ class cli_analysis(OmniAnalyze_Base):
                 f"No {label} operator data found in this workload. "
                 f"Proceeding without {label} operator filter.",
             )
-            return []
+            return
 
         pattern_list = parse_operator_patterns(args, cli["filter_attr"])
         all_operators = consolidated_df["Operator_Name"].dropna().unique()
@@ -451,46 +446,31 @@ class cli_analysis(OmniAnalyze_Base):
             matched_df["Kernel_Name"].dropna().str.strip().unique()
         )
 
-        # Intersect with the -k filter when present. Integer -k indices require
-        # the full Top Stats table to resolve; string -k names do not.
-        if workload.filter_kernel_ids:
-            kernel_top_df = workload.dfs.get(parser.PMC_KERNEL_TOP_TABLE_ID)
-            needs_top_table = any(
-                isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids
-            )
-            if needs_top_table and kernel_top_df is None:
-                kernel_top_df, _ = self._update_kernel_top_stats(
-                    workload=workload,
-                    workload_path=workload_path,
-                    args=args,
-                )
-            existing_kernel_names = parser.resolve_kernel_ids_to_names(
-                workload.filter_kernel_ids, kernel_top_df
-            )
-            operator_kernel_names &= existing_kernel_names
+        # Intersect with an existing -k selection (already resolved to names).
+        base_filter = workload.kernel_filter
+        if base_filter.is_active:
+            operator_kernel_names &= base_filter.names
 
-        selected_kernel_names = sorted(operator_kernel_names)
-        if selected_kernel_names:
-            workload.filter_kernel_names = selected_kernel_names
+        if operator_kernel_names:
+            workload.kernel_filter = KernelFilter(frozenset(operator_kernel_names))
             console_log(
                 "ml api trace",
-                f"{label} operator filter selected {len(selected_kernel_names)} "
+                f"{label} operator filter selected {len(operator_kernel_names)} "
                 "kernel(s) for metric analysis.",
             )
-            return selected_kernel_names
+            return
 
-        if workload.filter_kernel_ids:
+        if base_filter.is_active:
             console_error(
                 "ml api trace",
-                f"No {label}-operator kernels overlap with the -k filter "
-                f"{workload.filter_kernel_ids}. No kernels to analyze.",
+                f"No {label}-operator kernels overlap with the -k filter. "
+                "No kernels to analyze.",
             )
         else:
             console_error(
                 "ml api trace",
                 "No kernels found for matched operators. No kernels to analyze.",
             )
-        return []
 
     def handle_operator(
         self, args: argparse.Namespace, workload: schema.Workload, backend: str
@@ -502,7 +482,12 @@ class cli_analysis(OmniAnalyze_Base):
         if matched_df is None or matched_df.empty:
             return
 
-        call_trees = build_call_trees(matched_df)
+        # Build ids from the scoped Top Stats table so the call tree and Top
+        # Stats reference the same kernel-id space.
+        call_trees = build_call_trees_with_kernel_ids(
+            consolidated_df=matched_df,
+            kernel_top_df=workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID],
+        )
 
         pattern_list = parse_operator_patterns(args, cli["filter_attr"])
         matched_operators = matched_df["Operator_Name"].dropna().unique()

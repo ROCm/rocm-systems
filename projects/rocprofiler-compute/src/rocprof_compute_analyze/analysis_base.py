@@ -17,6 +17,7 @@ import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
+from utils.kernel_filter import KernelSelectionRequest
 from utils.logger import (
     console_debug,
     console_error,
@@ -659,7 +660,6 @@ class OmniAnalyze_Base:
 
         # set filters
         filter_configs = [
-            (args.gpu_kernel, "filter_kernel_ids"),
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
         ]
@@ -675,6 +675,17 @@ class OmniAnalyze_Base:
             # Apply filters to workloads
             for path_info, filter_value in zip(args.path, filter_list):
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
+
+        # -k kernel ids are stored as an index-based selection request, resolved
+        # against the Top Stats table later in pre_processing.
+        kernel_lists = args.gpu_kernel
+        if kernel_lists:
+            if len(kernel_lists) == 1 and len(args.path) > 1:
+                kernel_lists *= len(args.path)
+            for path_info, kernel_ids in zip(args.path, kernel_lists):
+                self._runs[path_info[0]].kernel_selection = KernelSelectionRequest(
+                    mode="indices", values=kernel_ids
+                )
 
         if not self.pc_sampling_only():
             # Join results_*.csv source files into pmc_perf.csv if needed

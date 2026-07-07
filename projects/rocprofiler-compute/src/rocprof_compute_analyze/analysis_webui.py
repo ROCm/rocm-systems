@@ -19,6 +19,7 @@ from roofline.roofline_main import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
+from utils.kernel_filter import KernelFilter, resolve_kernel_filter
 from utils.logger import (
     console_debug,
     console_error,
@@ -72,11 +73,11 @@ class webui_analysis(OmniAnalyze_Base):
 
         self.app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)"})
 
-        # get filtered kernel names from kernel ids
-        filt_kernel_names: list[str] = []
-        kernel_top_df = base_data.dfs[1]
-        for kernel_id in base_data.filter_kernel_ids:
-            filt_kernel_names.append(str(kernel_top_df.loc[kernel_id, "Kernel_Name"]))
+        # resolve the initial -k selection to kernel names
+        base_data.kernel_filter = resolve_kernel_filter(
+            base_data.kernel_selection, base_data.dfs[1]
+        )
+        filt_kernel_names = sorted(base_data.kernel_filter.names)
         input_filters["kernel"] = filt_kernel_names
 
         # setup app layout
@@ -152,8 +153,10 @@ class webui_analysis(OmniAnalyze_Base):
                 console_debug("analysis", f"gui gpu filter is {gcd_filter}")
                 console_debug("analysis", f"gui top-n filter is {top_n_filt}")
 
-                run_workload.filter_kernel_ids = (
-                    [str(k) for k in kernel_filter] if kernel_filter else []
+                run_workload.kernel_filter = KernelFilter(
+                    frozenset(str(k).strip() for k in kernel_filter)
+                    if kernel_filter
+                    else frozenset()
                 )
                 run_workload.filter_gpu_ids = (
                     [int(g) for g in gcd_filter] if gcd_filter else []
@@ -446,7 +449,8 @@ class webui_analysis(OmniAnalyze_Base):
         args = self.get_args()
 
         input_filters = {
-            "kernel": self._runs[self.dest_dir].filter_kernel_ids,
+            # Resolved to kernel names in build_layout once Top Stats exist.
+            "kernel": sorted(self._runs[self.dest_dir].kernel_filter.names),
             "gpu": self._runs[self.dest_dir].filter_gpu_ids,
             "dispatch": self._runs[self.dest_dir].filter_dispatch_ids,
             "normalization": args.normal_unit,
