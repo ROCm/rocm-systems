@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 177bc45e201c996e1a780e3348fd49ca2c439b8e # 2026-06-25 commit
+          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -101,6 +101,18 @@ jobs:
           python ./build_tools/install_additional_requirements.py \
           --requirements-files=${{ join(fromJSON(inputs.component).additional_requirements_files, ',') }}
 
+      - name: Set thread limits
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          if [[ -n "${KUBE_CPU_REQUEST:-}" ]]; then
+            CPU_COUNT="${KUBE_CPU_REQUEST%.*}"
+            echo "OPENBLAS_NUM_THREADS=${CPU_COUNT}" >> $GITHUB_ENV
+            echo "OMP_NUM_THREADS=${CPU_COUNT}" >> $GITHUB_ENV
+            echo "Thread limits set: OPENBLAS_NUM_THREADS=${CPU_COUNT}, OMP_NUM_THREADS=${CPU_COUNT} (from KUBE_CPU_REQUEST=${KUBE_CPU_REQUEST})"
+          else
+            echo "KUBE_CPU_REQUEST not set, thread limits not configured"
+          fi
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
@@ -111,9 +123,6 @@ jobs:
           # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
-          # Limit thread count to prevent CPU over-subscription during tests
-          OPENBLAS_NUM_THREADS: "24"
-          OMP_NUM_THREADS: "24"
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 

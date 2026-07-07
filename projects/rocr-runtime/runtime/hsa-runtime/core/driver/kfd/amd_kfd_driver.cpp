@@ -239,11 +239,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);

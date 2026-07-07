@@ -163,6 +163,7 @@ declare -A TEST_NUMBERS=(
   ["host_wait_until_all_status"]="146"
   ["host_wait_until_any_status"]="147"
   ["host_wait_until_some_status"]="148"
+  ["teamreducescatter"]="149"
 )
 
 # Detect which runtime to use
@@ -174,6 +175,15 @@ if [[ "${ROCSHMEM_TEST_SLR:-0}" == "1" ]]; then
   echo ""
 else
   USE_SLR=0
+fi
+
+# Detect wavefront size based on GPU architecture
+# gfx1100 and gfx1201 have wavefront size 32, most others have 64
+WAVE_SIZE=64
+if command -v rocminfo >/dev/null 2>&1; then
+  if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201|gfx1250)"; then
+    WAVE_SIZE=32
+  fi
 fi
 
 # Router function - dispatches to appropriate implementation
@@ -737,6 +747,10 @@ TestColl() {
   # check in the ring all-reduce path; this is a pre-existing bug unrelated to
   # work/sync pool alignment, so it is only run at 2 ranks here.
   ExecTest  "teamreduction"    2       1            64        32768
+
+  ExecTest  "teamreducescatter" 2      1            64        32768
+  ExecTest  "teamreducescatter" 4      1            64        32768
+  ExecTest  "teamreducescatter" 8      1            64        32768
 }
 
 TestOnStream() {
@@ -899,15 +913,6 @@ TestTiles() {
   ##############################################################################
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-
-  # Detect wavefront size based on GPU architecture
-  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
-  WAVE_SIZE=64
-  if command -v rocminfo >/dev/null 2>&1; then
-    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
-      WAVE_SIZE=32
-    fi
-  fi
 
   ExecTest  "tile_put_contiguous"       2       1            1
   ExecTest  "tile_put_rowmajor"         2       1            1

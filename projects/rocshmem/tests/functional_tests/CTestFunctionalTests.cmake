@@ -164,6 +164,7 @@ set(TEST_host_wait_until_some_vector 145)
 set(TEST_host_wait_until_all_status 146)
 set(TEST_host_wait_until_any_status 147)
 set(TEST_host_wait_until_some_status 148)
+set(TEST_teamreducescatter 149)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1057,6 +1058,7 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME fcollect RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatter RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 
     # Team split 2D test - requires exactly 4 PEs

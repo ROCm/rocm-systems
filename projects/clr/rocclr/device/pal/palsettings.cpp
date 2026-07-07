@@ -117,7 +117,7 @@ Settings::Settings() {
                                                           : HIP_FORCE_DEV_KERNARG;
 
   limit_blit_wg_ = 16;
-  DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING = 0;  // disable graph performance optimizations for PAL
+  // PAL now uses GraphExecClassic which has no segment scheduling — flag is irrelevant.
 }
 
 bool Settings::create(const Pal::DeviceProperties& palProp,

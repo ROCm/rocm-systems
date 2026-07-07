@@ -553,6 +553,9 @@ memory:
   Unit_hipMemset_2AsyncOperations:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemset_UnalignedKernelCornerCases:
+    <<: *level_2
+    tags: [memset, fillBuffer, unaligned]
   Unit_hipMemset_Capture: *level_2
   Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional:
@@ -822,13 +825,33 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
-  Unit_hipMemcpyBatchAsync_NegativeTsts:
+  Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Attrs_Negative:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Attrs_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess:
+    <<: *level_2
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Mixed_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Stream:
+    <<: *level_2
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Functional:
+    <<: *level_2
+    tags: [transfer, multigpu]
   Unit_hipMemsetD2D8_BasicFunctional:
     <<: *level_2
     disabled: [amd_wsl]

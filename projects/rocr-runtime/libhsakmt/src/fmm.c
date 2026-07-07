@@ -2154,14 +2154,21 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 		mem =  __fmm_allocate_device(ctx, preferred_gpu_id, address, size, aperture,
 					     &mmap_offset, ioc_flags, alignment, &vm_obj);
 
-		if (mem && mflags.ui32.HostAccess) {
-			void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
-						   mflags.ui32.HostAccess,
-						   gpu_drm_fd, mmap_offset);
+		if (mflags.ui32.NoAddress) {
+			aperture = &fmm_ctx->mem_handle_aperture;
+		}
 
-			if (ret == MAP_FAILED) {
-				__fmm_release(ctx, vm_obj, aperture);
-				return NULL;
+		if (mem && mflags.ui32.HostAccess) {
+			/* GTT system memory from mem_handle_aperture has no VA, so skip CPU mapping */
+			if (!mflags.ui32.NoAddress) {
+				void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
+							   mflags.ui32.HostAccess,
+							   gpu_drm_fd, mmap_offset);
+
+				if (ret == MAP_FAILED) {
+					__fmm_release(ctx, vm_obj, aperture);
+					return NULL;
+				}
 			}
 		}
     }
