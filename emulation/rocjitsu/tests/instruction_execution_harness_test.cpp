@@ -903,7 +903,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   }
 
   const uint32_t add_f16_dpp8_words[] = {
-      0x64000000u | amdgpu::SRC_DPP8_LO | (kSrc1 << 9u) | (kDst << 17u),
+      0x64000000u | amdgpu::SRC_DPP8_FI_0 | (kSrc1 << 9u) | (kDst << 17u),
       kSrc0 | (lane_sel << 8u),
   };
   std::unique_ptr<Instruction> inst(decoder->decode(add_f16_dpp8_words));

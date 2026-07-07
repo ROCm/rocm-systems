@@ -49,7 +49,7 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {kOriginalWord};
+  plan.original_words.assign(1, kOriginalWord);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -117,7 +117,7 @@ TEST(TrampolineBuilder, RespectsTargetArchForBranchEncoding) {
   plan.original_size = 4;
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x104;
-  plan.original_words = {0xCAFEF00Du};
+  plan.original_words.assign(1, 0xCAFEF00Du);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kRdna)}}};
   plan.emit_original = true;
 
@@ -143,7 +143,7 @@ TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -164,7 +164,7 @@ TEST(TrampolineBuilder, RejectsOriginalWordsSizeMismatch) {
   plan.original_size = 8; // expects 2 words ...
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x108;
-  plan.original_words = {0xDEADBEEFu}; // ... but only one provided.
+  plan.original_words.assign(1, 0xDEADBEEFu); // ... but only one provided.
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -181,7 +181,7 @@ TEST(TrampolineBuilder, RejectsUnsetArch) {
   plan.original_size = 4;
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x104;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.emit_original = true;
 
   std::string err;
@@ -205,7 +205,7 @@ TEST(TrampolineBuilder, ReturnBranchOverflowFails) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -232,7 +232,7 @@ TEST(TrampolineBuilder, EncodedBranchesRoundTripToPlanCoordinates) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -274,7 +274,7 @@ TEST(TrampolineBuilder, ForwardSimm16AtNegativeLimitSucceeds) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 
@@ -301,7 +301,7 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
   plan.original_size = 4;
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
   plan.emit_original = true;
 

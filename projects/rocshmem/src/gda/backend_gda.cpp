@@ -330,7 +330,7 @@ void GDABackend::setup_ctxs() {
 
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     rocshmem_ctx_array_device[i].ctx_opaque  = &ctx_array[i];
-    rocshmem_ctx_array_device[i].team_opaque = team_tracker.get_team_world()->tinfo_wrt_world;
+    rocshmem_ctx_array_device[i].team_opaque = nullptr;
   }
 
   CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
