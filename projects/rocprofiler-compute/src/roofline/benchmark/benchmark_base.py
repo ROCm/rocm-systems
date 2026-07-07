@@ -78,6 +78,7 @@ class Bench_base(ABC):
         # to keep running time under control.
         self.flops_kernel_iterations = {
             "FP16": 256,
+            "BF16": 256,
             "FP32": 256,
             "FP64": 128,
             "INT8": 128,
@@ -87,6 +88,7 @@ class Bench_base(ABC):
 
         self.flops_kernel_selector = {
             "FP16": [f"flops_benchmark<_Float16, {VALU_NFMA}>", sizeof(c_short)],
+            "BF16": ["bf16_dot_flops", sizeof(c_short)],
             "FP32": [f"flops_benchmark<float, {VALU_NFMA}>", sizeof(c_float)],
             "FP64": [f"flops_benchmark<double, {VALU_NFMA}>", sizeof(c_double)],
             "INT8": [f"flops_benchmark<char, {VALU_NFMA}>", sizeof(c_int8)],
@@ -111,12 +113,7 @@ class Bench_base(ABC):
         self.l1_bw_src: str
         self.l0_bw_src: str
         self.lds_bw_src: str
-        self.fp16_src: str
-        self.fp32_src: str
-        self.fp64_src: str
-        self.int8_src: str
-        self.int32_src: str
-        self.int64_src: str
+        self.bf16_flops_benchmark_src: str
         self.matrix_f4_src: str
         self.matrix_f6_src: str
         self.matrix_f6f4_src: str
@@ -620,7 +617,12 @@ class Bench_base(ABC):
         iterations = self.flops_kernel_iterations[type]
         total_flops = threads * iterations * VALU_NFMA * 2
 
-        prog = self.Program(self.flops_benchmark_src, [kernel_name])
+        src = (
+            self.bf16_flops_benchmark_src
+            if type == "BF16"
+            else self.flops_benchmark_src
+        )
+        prog = self.Program(src, [kernel_name])
 
         func = prog.get_kernel(kernel_name)
 
@@ -766,6 +768,9 @@ class Bench_base(ABC):
 
     def fp16_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP16", "FLOP", "GFLOPS")
+
+    def bf16_benchmark(self, device: int) -> PerfMetrics:
+        return self.flops_bench(device, "BF16", "FLOP", "GFLOPS")
 
     def fp32_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP32", "FLOP", "GFLOPS")

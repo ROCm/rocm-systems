@@ -49,8 +49,6 @@ from utils.metrics.noise_clamper import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
-    MATRIX_DATATYPES,
-    PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
 from utils.utils_analysis import (
@@ -379,13 +377,13 @@ class db_analysis(OmniAnalyze_Base):
 
             for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
                 keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[gpu_arch]:
-                if dtype in PEAK_OPS_DATATYPES:
+            for dtype in SUPPORTED_DATATYPES[gpu_arch].keys():
+                if SUPPORTED_DATATYPES[gpu_arch][dtype] & 1:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         keys.append(f"{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
-                if dtype in MATRIX_DATATYPES:
+                if SUPPORTED_DATATYPES[gpu_arch][dtype] & 2:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         matrix_dtype = dtype.replace("FP", "F")

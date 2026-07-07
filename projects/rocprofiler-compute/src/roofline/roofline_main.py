@@ -21,8 +21,6 @@ from utils.logger import (
 )
 from utils.roofline_calc import (
     CACHE_LEVELS,
-    MATRIX_DATATYPES,
-    PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     construct_roof,
     sanitize_mem_level,
@@ -225,12 +223,13 @@ class Roofline:
             gpu_arch = getattr(self.__mspec, "gpu_arch", "unknown_arch")
             if (
                 "SUPPORTED_DATATYPES" not in globals()
-                or gpu_arch not in SUPPORTED_DATATYPES
-                or str(dt) not in SUPPORTED_DATATYPES[gpu_arch]
+                or gpu_arch not in SUPPORTED_DATATYPES.keys()
+                or str(dt) not in SUPPORTED_DATATYPES[gpu_arch].keys()
             ):
                 console_error(
                     f"{dt} is not a supported datatype for roofline profiling on "
-                    f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {gpu_arch})",
+                    f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {gpu_arch})- "
+                    f"cannot construct HTML plot",
                     exit=False,
                 )
                 continue
@@ -626,10 +625,14 @@ class Roofline:
         # Peak Performance
         #######################
         valu_data = (
-            self.__ceiling_data.get("valu") if dtype in PEAK_OPS_DATATYPES else None
+            self.__ceiling_data.get("valu")
+            if (SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 1)
+            else None
         )
         matrix_data = (
-            self.__ceiling_data.get("matrix_ops") if dtype in MATRIX_DATATYPES else None
+            self.__ceiling_data.get("matrix_ops")
+            if (SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 2)
+            else None
         )
 
         if valu_data:
@@ -1050,11 +1053,11 @@ class Roofline:
         """
         console_debug("roofline", "Generating roofline plot for CLI")
 
-        if not (str(dtype) in SUPPORTED_DATATYPES[str(self.__mspec.gpu_arch)]):
+        if not (str(dtype) in SUPPORTED_DATATYPES[str(self.__mspec.gpu_arch)].keys()):
             console_error(
                 f"{dtype} is not a supported datatype for roofline profiling on "
                 f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
-                f"{self.__mspec.gpu_arch})",
+                f"{self.__mspec.gpu_arch})- cannot construct CLI plot",
                 exit=False,
             )
             return
@@ -1143,7 +1146,7 @@ class Roofline:
 
         # Plot VALU and Matrix Ops Peak
         if (
-            dtype in PEAK_OPS_DATATYPES
+            SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 1
             and self.__ceiling_data["valu"]
             and self.__ceiling_data["valu"][0] is not None
         ):
@@ -1178,7 +1181,7 @@ class Roofline:
             console_warning(f"No PEAK measurement available for {dtype}")
 
         if (
-            dtype in MATRIX_DATATYPES
+            SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 2
             and self.__ceiling_data["matrix_ops"]
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):
