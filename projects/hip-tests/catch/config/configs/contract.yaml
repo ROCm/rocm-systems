@@ -546,6 +546,24 @@ contract:
   Contract_ManagedMemory_PrefetchAsync_SucceedsWhenSupported:
     <<: *level_0
     tags: [managed_memory]
+  Contract_MemAdvise_SetReadMostly_RangeAttributeReflectsAdvice:
+    <<: *level_0
+    tags: [mem_advise]
+  Contract_MemAdvise_SetPreferredLocation_RangeAttributeReturnsDevice:
+    <<: *level_0
+    tags: [mem_advise]
+  Contract_MemAdvise_SetAccessedBy_RangeAttributeReflectsDevice:
+    <<: *level_0
+    tags: [mem_advise]
+  Contract_MemAdvise_RangeGetAttributes_MultipleAttributes_Succeed:
+    <<: *level_0
+    tags: [mem_advise]
+  Contract_MemAdvise_NullPointer_IsRejected:
+    <<: *level_0
+    tags: [mem_advise]
+  Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected:
+    <<: *level_0
+    tags: [mem_advise]
   Contract_MemoryPool_DeviceGetDefaultMemPool_ReturnsPool:
     <<: *level_0
     tags: [memory_pool]

@@ -43,6 +43,7 @@ The first domains are:
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
 - `array_memory`: HIP array allocation and 2D array copy contracts
 - `managed_memory`: managed allocation, visibility, free, and prefetch contracts
+- `mem_advise`: managed-memory advice and range-attribute contracts
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
