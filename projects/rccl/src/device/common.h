@@ -86,7 +86,14 @@ struct ncclShmemData {
   bool profilerEnabled;
   struct ncclShmemGroup groups[NCCL_MAX_GROUPS];
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Explicit arch: HIP has no __CUDA_ARCH__, so the default would size this buffer for
+  // arch 0 (1 KiB) and truncate the AllGatherV batch the host built for the real AMD arch
+  // (>=900 -> 16 KiB). Pass 900 so the device buffer matches the host's batch size.
+  alignas(16) char workStorage[ncclMaxDevWorkBatchBytes(900)];
+#else
   alignas(16) char workStorage[ncclMaxDevWorkBatchBytes()];
+#endif
 
   alignas(16) union {
     unpackShmem unpack;
@@ -308,7 +315,8 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      tid -= 64; // Rotate threads so we use the next two warps for next batch struct.
+      // Rotate to the next two warps for the next batch struct. Use 2*WARP_SIZE.
+      tid -= 2*WARP_SIZE;
       if (tid < 0) tid += tn;
     } else {
       if (tid == 0) {
