@@ -3198,7 +3198,7 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(const auto& itr : rocshmem_api_bf_records)
+        for(const auto& itr : rocshmem_api_ext_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
