@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cassert>
@@ -83,10 +84,10 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = cu.read_vgpr(vbase, lane);
+      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     } else {
-      vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
+              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
@@ -113,10 +114,10 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = cu.read_vgpr(vbase, lane);
+      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     } else {
-      vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
+              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     }
     d.per_lane_addr[lane] = saddr_val + vaddr + offset;
   }
@@ -141,7 +142,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
-    uint32_t vaddr = inst.sve ? cu.read_vgpr(vbase, lane) : 0;
+    uint32_t vaddr = inst.sve ? amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane) : 0;
     d.per_lane_addr[lane] =
         scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
   }
@@ -166,7 +167,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
       continue;
     uint32_t voffset = 0;
     if (inst.offen) {
-      voffset = cu.read_vgpr(wf.vgpr_alloc().base + inst.vaddr, lane);
+      voffset = amdgpu::RegisterAccess(cu).read_vgpr(wf.vgpr_alloc().base + inst.vaddr, lane);
     }
     uint32_t offset_part = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
     d.per_lane_addr[lane] = base_addr + offset_part + soffset_val;

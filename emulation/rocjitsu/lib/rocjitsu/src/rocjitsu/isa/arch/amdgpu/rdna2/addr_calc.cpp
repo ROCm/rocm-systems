@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cassert>
@@ -54,10 +55,10 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     uint64_t vaddr;
     if (inst.saddr != 0x7F) {
-      vaddr = cu.read_vgpr(vbase, lane);
+      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     } else {
-      vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
+              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     }
     d.per_lane_addr[lane] = saddr_val + vaddr + offset;
   }

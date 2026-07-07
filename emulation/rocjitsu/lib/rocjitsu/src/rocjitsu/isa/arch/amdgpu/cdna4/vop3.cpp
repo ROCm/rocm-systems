@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -3905,7 +3906,8 @@ void VCvtScalef32SrPkFp4F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);
     uint32_t seed_lo = static_cast<uint32_t>(src1.read_lane(wf, lane));
     float val0 = std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane)));
-    float val1 = std::bit_cast<float>(cu.read_vgpr(vb + src0.unified_vgpr_index() + 1, lane));
+    float val1 = std::bit_cast<float>(
+        amdgpu::RegisterAccess(cu).read_vgpr(vb + src0.unified_vgpr_index() + 1, lane));
     float s0 = static_cast<float>(static_cast<double>(val0) / scale);
     float s1 = static_cast<float>(static_cast<double>(val1) / scale);
     uint8_t r0 = util::f32_to_fp4_e2m1_sr(s0, seed_lo);
@@ -4713,10 +4715,10 @@ void VCvtScalef322xpk16Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -4918,10 +4920,10 @@ void VCvtScalef322xpk16Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5123,10 +5125,10 @@ void VCvtScalef32SrPk32Fp6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5361,10 +5363,10 @@ void VCvtScalef32SrPk32Bf6F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5597,10 +5599,10 @@ void VCvtScalef32Pk32F32Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5736,10 +5738,10 @@ void VCvtScalef32Pk32F32Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -5875,10 +5877,10 @@ void VCvtScalef32Pk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6062,10 +6064,10 @@ void VCvtScalef32Pk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6249,10 +6251,10 @@ void VCvtScalef32Pk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6436,10 +6438,10 @@ void VCvtScalef32Pk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6625,10 +6627,10 @@ void VCvtScalef32SrPk32Fp6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -6847,10 +6849,10 @@ void VCvtScalef32SrPk32Fp6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7069,10 +7071,10 @@ void VCvtScalef32SrPk32Bf6F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7291,10 +7293,10 @@ void VCvtScalef32SrPk32Bf6Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7511,10 +7513,10 @@ void VCvtScalef32Pk32F16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7666,10 +7668,10 @@ void VCvtScalef32Pk32Bf16Fp6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7821,10 +7823,10 @@ void VCvtScalef32Pk32F16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -7976,10 +7978,10 @@ void VCvtScalef32Pk32Bf16Bf6Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
   auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {
-    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
+    return amdgpu::RegisterAccess(cu).read_vgpr(vb + op.unified_vgpr_index() + dw, lane);
   };
   auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {
-    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
+    amdgpu::RegisterAccess(cu).write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);
   };
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

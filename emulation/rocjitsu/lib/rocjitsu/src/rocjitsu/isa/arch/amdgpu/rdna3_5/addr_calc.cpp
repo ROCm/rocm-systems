@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <cassert>
@@ -70,7 +71,7 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
       uint32_t vaddr = 0;
       if (inst.sve) {
         uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-        vaddr = cu.read_vgpr(vbase, lane);
+        vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
       }
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
@@ -92,10 +93,10 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
-      vaddr = cu.read_vgpr(vbase, lane);
+      vaddr = amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     } else {
-      vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+      vaddr = (static_cast<uint64_t>(amdgpu::RegisterAccess(cu).read_vgpr(vbase + 1, lane)) << 32) |
+              amdgpu::RegisterAccess(cu).read_vgpr(vbase, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (inst.seg == 0 && priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
