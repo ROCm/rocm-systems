@@ -1,8 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Kernel selection filtering for analyze mode.
-"""
+"""Kernel selection filtering for analyze mode."""
 
 from __future__ import annotations
 
@@ -83,6 +82,7 @@ def mark_selected_kernels(
     stripped_names = kernel_top_df["Kernel_Name"].apply(
         lambda name: name.strip() if isinstance(name, str) else name
     )
-    kernel_top_df["Selected"] = stripped_names.isin(kernel_filter.names).map(
-        {True: "*", False: ""}
-    )
+    kernel_top_df["Selected"] = stripped_names.isin(kernel_filter.names).map({
+        True: "*",
+        False: "",
+    })

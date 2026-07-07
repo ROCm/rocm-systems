@@ -449,9 +449,7 @@ def calc_ai_analyze(
         ].tolist()
     else:
         kernel_ids_to_process = kernel_top_df.index.tolist()
-    console_debug(
-        "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
-    )
+    console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
 
     if not kernel_ids_to_process:
         console_warning("No kernels found to process for roofline")

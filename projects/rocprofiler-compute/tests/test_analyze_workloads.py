@@ -33,8 +33,7 @@ def expected_kernel_names_for_operator(
     operator_patterns: list[str],
     backend: str = "torch",
 ) -> set[str]:
-    """Kernel names for operators matching *operator_patterns*.
-    """
+    """Kernel names for operators matching *operator_patterns*."""
     trace_df = pd.read_csv(f"{workload_dir}/ml_api_trace/consolidated.csv")
     if "Backend" in trace_df.columns:
         trace_df = trace_df[trace_df["Backend"] == backend]
@@ -225,9 +224,7 @@ def test_analyze_torch_trace_filter_operator_MI300X_A1(
     assert "relu" in output
     assert "dispatches:" in output
     assert "total:" in output
-    expected_kernel_names = expected_kernel_names_for_operator(
-        workload_dir, ["*relu*"]
-    )
+    expected_kernel_names = expected_kernel_names_for_operator(workload_dir, ["*relu*"])
     assert_top_stats_kernel_names(workload_dir, expected_kernel_names)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
