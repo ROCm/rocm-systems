@@ -128,7 +128,13 @@ __host__ int IPCHostContext::reduce(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest, 
+__host__ int IPCHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  return host_interface->reduce_scatter<T, Op>(team, dest, source, nreduce);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
                                               const T *source, 
                                               int nreduce, 
                                               hipStream_t stream) {

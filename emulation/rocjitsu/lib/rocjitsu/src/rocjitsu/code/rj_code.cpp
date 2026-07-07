@@ -45,6 +45,24 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   }
 }
 
+rj_code_arch_t arch_for_target(rj_code_target_id_t target) {
+  switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX90A:
+    return ROCJITSU_CODE_ARCH_CDNA2;
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  case ROCJITSU_CODE_TARGET_GFX1200:
+  case ROCJITSU_CODE_TARGET_GFX1201:
+    return ROCJITSU_CODE_ARCH_RDNA4;
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    return ROCJITSU_CODE_ARCH_GFX1250;
+  default:
+    return ROCJITSU_CODE_ARCH_INVALID;
+  }
+}
+
 } // namespace
 
 rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec) {
@@ -181,8 +199,12 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
   if (!decoder)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
+  const rj_code_arch_t arch = arch_for_target(target_id);
+  if (arch == ROCJITSU_CODE_ARCH_INVALID)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+
   auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  owned->blocks = BasicBlock::build(*obj->co, *decoder);
+  owned->blocks = BasicBlock::build(*obj->co, *decoder, arch);
 
   *list = owned.release();
   return ROCJITSU_STATUS_SUCCESS;

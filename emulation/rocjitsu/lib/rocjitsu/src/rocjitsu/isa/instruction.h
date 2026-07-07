@@ -81,7 +81,8 @@ public:
   /// @param[in] mnemonic Human-readable mnemonic (must point to static storage
   ///            or storage that outlives the instruction — typically a string
   ///            literal or a member of the encoding base class).
-  Instruction(std::string_view mnemonic, ExecuteFn exec) : execute(exec), mnemonic_(mnemonic) {}
+  Instruction(std::string_view mnemonic, ExecuteFn exec, uint64_t src_loc = 0)
+      : execute(exec), src_loc_(src_loc), mnemonic_(mnemonic) {}
   virtual ~Instruction() = default;
 
   /// @brief Pool allocator hooks, set by the decoder's enable_pool().
@@ -176,6 +177,14 @@ public:
   /// @returns Encoding size in bytes.
   int size() const { return size_; }
 
+  /// @brief Source byte offset of this instruction in the decoded text section.
+  ///
+  /// @details Most decoder users only care about the instruction encoding and
+  /// leave this as zero. CFG builders decode from a text stream and pass the
+  /// stream offset through Decoder::decode() so analyses can carry instruction
+  /// pointers without a parallel offset wrapper.
+  [[nodiscard]] uint64_t src_loc() const { return src_loc_; }
+
   /// @brief Whether this instruction is a direct branch.
   /// @retval true The instruction has BRANCH or COND_BRANCH metadata.
   /// @retval false The instruction is not a direct branch.
@@ -249,6 +258,8 @@ public:
   }
 
 protected:
+  friend class Decoder;
+
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
   /// @brief Instruction's source operands (max 6).
@@ -272,6 +283,8 @@ protected:
   uint16_t encoding_id_ = 0;
   /// @brief Opcode within the encoding format.
   uint16_t opcode_ = 0;
+  /// @brief Source byte offset assigned at construction or by Decoder::decode().
+  uint64_t src_loc_ = 0;
 
 protected:
   std::string_view mnemonic_;
@@ -288,7 +301,8 @@ public:
 
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
-  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}
+  IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn, uint64_t src_loc = 0)
+      : Instruction(mnemonic, exec_fn, src_loc) {}
 
   /// @brief Helper to create an execute dispatch trampoline for a concrete type.
   ///

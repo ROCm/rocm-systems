@@ -31,14 +31,11 @@ RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
-//   ROCm 7.12+   → >= 71200000
-//   ROCm 7.0.2.x → [70051831, 70060000)  (backport range; no device-attribute
-//                  probe exists for the batch API, so the version range is the
-//                  only runtime guard and must include the backport runtime)
+// Window (native 7.12 OR 7.0.2.x backport) is defined once in rocmwrap.h.
 static int ncclCeBatchAsyncSupported() {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return 0;
-  return (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000));
+  return NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(driverVersion);
 }
 #endif
 

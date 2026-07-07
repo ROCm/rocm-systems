@@ -1,8 +1,9 @@
 name: TheRock CI Nightly
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+  # Disabled: Multi-Arch CI Nightly (therock-multi-arch-ci-nightly.yml) handles nightly runs
+  # schedule:
+  #   - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       projects:
@@ -58,7 +59,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: f1e3fc2311fde45bf3e17b0e3349200be9caa4b4 # 2026-06-23
+          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

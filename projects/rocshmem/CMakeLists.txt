@@ -44,8 +44,8 @@ endif()
 ###############################################################################
 
 option(PROFILE "Enable statistics and timing support" OFF)
-option(USE_RO "Enable RO conduit" ON)
-option(USE_IPC "Enable IPC support (using HIP)" OFF)
+option(USE_RO "Enable RO conduit" OFF)
+option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)

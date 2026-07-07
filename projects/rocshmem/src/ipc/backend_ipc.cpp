@@ -116,9 +116,14 @@ void IPCBackend::init() {
 
   rocshmem_collective_init();
 
-  setup_fence_buffer();
-
   teams_init();
+
+  /*
+   * Carve the fence region last. Its size (sizeof(int) * num_pes) is not a
+   * multiple of wrk_sync_pool_alignment for odd num_pes, so allocating it after
+   * every 64-bit-atomic region keeps those regions aligned.
+   */
+  setup_fence_buffer();
 
   setup_team_world();
 
@@ -405,7 +410,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
 
   /**
    * Size of sync arrays for the teams
-  */
+   */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
                            (ROCSHMEM_BARRIER_SYNC_SIZE +
                             ROCSHMEM_REDUCE_SYNC_SIZE +
@@ -415,19 +420,23 @@ void IPCBackend::setup_wrk_sync_buffers() {
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
-  */
+   */
   wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
                            ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
   /**
    * Size of fence array
-  */
+   */
   wrk_sync_pool_size_ += sizeof(int) * num_pes;
+
+  /* Round up so the alignment guards in the carve functions cannot overflow it. */
+  wrk_sync_pool_size_ =
+      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
 
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
-  */
+   */
   psync_allocator_->allocate((void**)&wrk_sync_pool_,
                                     wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
@@ -491,9 +500,7 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
 }
 
 void IPCBackend::setup_fence_buffer() {
-  /*
-  * Allocate memory for fence
-  */
+  /* Must be carved last (see init()); do not add pool regions after this. */
   fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
@@ -505,6 +512,9 @@ void IPCBackend::rocshmem_collective_init() {
   size_t one_sync_size_bytes {sizeof(*barrier_sync)};
   size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
+  /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
@@ -532,6 +542,9 @@ void IPCBackend::teams_init() {
    */
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
+  /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
+  wrk_sync_pool_top_ =
+      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
   barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
                             * max_num_teams;

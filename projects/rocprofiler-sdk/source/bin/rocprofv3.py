@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -332,6 +332,81 @@ class booleanArgAction(argparse.Action):
         setattr(args, self.dest, strtobool(value))
 
 
+# Categories recognized by --ompt-trace
+OMPT_TRACE_CATEGORIES = (
+    "all",
+    "thread",
+    "parallel",
+    "task",
+    "sync",
+    "mutex",
+    "target",
+    "device",
+    "error",
+)
+
+
+class omptTraceArgAction(argparse.Action):
+    def __call__(self, parser, args, values, option_string=None):
+        # nargs="*" with no value -> values is an empty list -> bare bool
+        if not values:
+            setattr(args, self.dest, True)
+            setattr(args, f"{self.dest}_operations", "")
+            return
+
+        tokens = [str(v).strip().lower() for v in values if str(v).strip()]
+
+        # Reject comma-containing tokens with an explicit migration hint, so users
+        # who tried 'parallel,task,target' (a natural-looking but inconsistent
+        # spelling) get an actionable error instead of "unknown category".
+        bad_commas = [t for t in tokens if "," in t]
+        if bad_commas:
+            parser.error(
+                "--ompt-trace: tokens must be space-separated, not comma-separated; "
+                "use e.g. '--ompt-trace parallel task target' (got {bad!r})".format(
+                    bad=" ".join(bad_commas),
+                )
+            )
+
+        # Single bool-like token preserves the historical --ompt-trace=true/false contract
+        if len(tokens) == 1:
+            try:
+                bool_val = strtobool(tokens[0])
+                setattr(args, self.dest, bool_val)
+                setattr(args, f"{self.dest}_operations", "")
+                return
+            except (ValueError, AttributeError):
+                pass
+
+        unknown = [t for t in tokens if t not in OMPT_TRACE_CATEGORIES]
+        if unknown:
+            parser.error(
+                "--ompt-trace: unknown categor{plural} {bad!r}; "
+                "valid categories: {good}".format(
+                    plural="ies" if len(unknown) > 1 else "y",
+                    bad=" ".join(unknown),
+                    good=" ".join(OMPT_TRACE_CATEGORIES),
+                )
+            )
+
+        # "all" is the natural superset and is equivalent to no filter
+        if "all" in tokens:
+            extra = [t for t in tokens if t != "all"]
+            if extra:
+                warning(
+                    "--ompt-trace: 'all' already selects every category; ignoring "
+                    "additional categor{plural} {extra}".format(
+                        plural="ies" if len(extra) > 1 else "y",
+                        extra=" ".join(extra),
+                    )
+                )
+            tokens = []
+        setattr(args, self.dest, True)
+        # The tool-side env var still uses comma separation (env vars are single
+        # strings; the rest of the SDK uses comma for list-valued env vars).
+        setattr(args, f"{self.dest}_operations", ",".join(tokens))
+
+
 def parse_arguments(args=None):
 
     usage_examples = """
@@ -500,6 +575,21 @@ For attachment profiling of running processes:
         basic_tracing_options,
         "--rccl-trace",
         help="For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces",
+    )
+    basic_tracing_options.add_argument(
+        "--ompt-trace",
+        action=omptTraceArgAction,
+        nargs="*",
+        type=str,
+        required=False,
+        default=None,
+        metavar="CATEGORY",
+        help=(
+            "For collecting OMPT (OpenMP Tools) Traces. With no value (or "
+            "'true'/'all') collects every OMPT operation. Pass a space-separated "
+            "list of categories to filter, e.g. '--ompt-trace parallel task "
+            "target'. Categories: " + " ".join(OMPT_TRACE_CATEGORIES)
+        ),
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -1549,10 +1639,6 @@ def run(app_args, args, **kwargs):
     if not args.output_format:
         args.output_format = ["rocpd"]
 
-    update_env(
-        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
-    )
-
     if args.kokkos_trace:
         update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
         for itr in (
@@ -1572,6 +1658,7 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
         ):
@@ -1587,10 +1674,30 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "ompt_trace",
             "rocdecode_trace",
             "rocjpeg_trace",
         ):
             setattrifnone(args, itr, True)
+
+    # OMPT is a rocpd-only trace: it is written to the rocpd database and exported to
+    # other formats via `rocpd convert`; the direct csv/json/pftrace/otf2 emitters do
+    # not contain OMPT records. This runs after the --sys-trace/--runtime-trace folds
+    # have resolved args.ompt_trace, which honors an explicit --ompt-trace=false. If
+    # OMPT tracing is effectively enabled but rocpd was not requested, add it so OMPT
+    # data is not silently dropped, and warn the user.
+    if bool(getattr(args, "ompt_trace", None)) and "rocpd" not in args.output_format:
+        warning(
+            "--ompt-trace: OMPT data is only emitted to the 'rocpd' output format; "
+            "the requested output format(s) {fmts} will not contain OMPT records. "
+            "Adding 'rocpd' to --output-format -- use `rocpd convert` to export OMPT "
+            "to csv/pftrace/otf2.".format(fmts=", ".join(args.output_format))
+        )
+        args.output_format.append("rocpd")
+
+    update_env(
+        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+    )
 
     if args.hip_trace:
         for itr in ("compiler", "runtime"):
@@ -1616,6 +1723,7 @@ def run(app_args, args, **kwargs):
             ["hsa_finalizer_trace", "HSA_FINALIZER_EXT_API_TRACE"],
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
+            ["ompt_trace", "OMPT_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
@@ -1648,6 +1756,14 @@ def run(app_args, args, **kwargs):
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
         update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
+
+    # Propagate the optional OMPT category filter (set by omptTraceArgAction)
+    if getattr(args, "ompt_trace_operations", ""):
+        update_env(
+            "ROCPROF_OMPT_TRACE_OPERATIONS",
+            args.ompt_trace_operations,
+            overwrite_if_true=True,
+        )
 
     if trace_count == 0 and len(app_args) != 0:
         warning("No tracing options were enabled.")
