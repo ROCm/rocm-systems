@@ -1,14 +1,20 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Multi-Arch CI Host ASAN for rocm-systems
+# Multi-Arch CI ASAN for rocm-systems
 #
-# This workflow runs host Address Sanitizer (ASAN) builds and tests
-# using TheRock's multi-arch CI pipeline.
+# This workflow runs Address Sanitizer (ASAN) builds and tests using
+# TheRock's multi-arch CI pipeline.
+#
+# TheRock's configure_multi_arch_ci.py automatically selects:
+# - "host-asan" for push events (post-submit) - faster, host-only sanitization
+# - "asan" (full) for schedule/workflow_dispatch - comprehensive sanitization
 
 name: TheRock Multi-Arch CI ASAN
 
 on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   # TODO: Enable postsubmit ASAN once we have capacity
   # push:
   #   branches:
@@ -49,7 +55,10 @@ jobs:
   setup:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
-      build_variant: "host-asan"
+      # TheRock's configure_multi_arch_ci.py automatically selects:
+      # - "host-asan" for push events (post-submit)
+      # - "asan" (full) for schedule and workflow_dispatch events
+      build_variant: "asan"
       # targets gfx94X and gfx950 are selected to replicate the ASAN coverage in TheRock
       # as ASAN builds and tests require more resources, we only target these two architectures for the timebeing.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}

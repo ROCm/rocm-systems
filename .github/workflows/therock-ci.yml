@@ -47,6 +47,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
+      run_mi455_test: ${{ steps.linux_projects.outputs.run_mi455_test }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -122,7 +123,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -156,6 +157,9 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
+      # TODO(geomin12): Re-enable MI455 tests once bringup is complete
+      # run_mi455_test: ${{ matrix.target_bundle.amdgpu_family == 'gfx125X-dcgpu' && needs.setup.outputs.run_mi455_test || 'false' }}
+      run_mi455_test: "false"
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
