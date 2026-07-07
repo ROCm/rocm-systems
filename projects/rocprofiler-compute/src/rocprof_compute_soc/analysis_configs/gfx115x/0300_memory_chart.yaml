@@ -48,19 +48,19 @@ Panel Config:
           value: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         ICache Utilization:
-          value: SUM(100 * SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          value: 100 * SUM(SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache Hit Rate:
-          value: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
           unit: Percent
         ICache Miss Rate:
-          value: SUM(100 * SQC_ICACHE_MISSES_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          value: 100 * SUM(SQC_ICACHE_MISSES_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
           unit: Percent
         ICache Request Stall Rate:
-          value: SUM(100 * SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          value: 100 * SUM(SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         ICache-GL1 Read Bandwidth:
-          value: SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 128 * SUM(SQC_TC_INST_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -81,16 +81,16 @@ Panel Config:
           value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         Dcache Utilization:
-          value: SUM(100 * SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          value: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache Hit Rate:
-          value: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+          value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
           unit: Percent
         Dcache Request Stall Rate:
-          value: SUM(100 * SQC_DCACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          value: 100 * SUM(SQC_DCACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Percent
         Dcache-GL1 Read Bandwidth:
-          value: SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -121,10 +121,10 @@ Panel Config:
           value: SUM(TCP_REQ_MISS_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL0 Cache Hit Rate (TCP Cache):
-          value: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
+          value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
           unit: Percent
         GL0 Cache BW (TCP Cache):
-          value: SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 64 * SUM(TCP_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -155,10 +155,10 @@ Panel Config:
           value: SUM(SQ_WAIT_INST_LDS_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
         LDS Bank Conflict Rate:
-          value: SUM(100 * SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
+          value: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
           unit: Percent
         LDS Estimated Bandwidth:
-          value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 32 * 4 * SUM(SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -182,10 +182,10 @@ Panel Config:
           value: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         TCP-GL1 Read Bandwidth:
-          value: SUM(TCP_GL1_REQ_READ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 64 * SUM(TCP_GL1_REQ_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         TCP-GL1 Write Bandwidth:
-          value: SUM(TCP_GL1_REQ_WRITE_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 64 * SUM(TCP_GL1_REQ_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -203,7 +203,7 @@ Panel Config:
         unit: Unit
       metric:
         GL1 Cache Utilization:
-          value: SUM(100 * GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
+          value: 100 * SUM(GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
           unit: Percent
         GL1 Cache Total Requests:
           value: SUM(GL1C_REQ_sum) / SUM($denom)
@@ -218,13 +218,13 @@ Panel Config:
           value: SUM(GL1C_REQ_MISS_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL1 Cache Hit Rate:
-          value: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
+          value: 100 * SUM(GL1C_REQ_sum - GL1C_REQ_MISS_sum) / SUM(GL1C_REQ_sum)
           unit: Percent
         GL1 Cache Starve Rate:
-          value: SUM(100 * GL1C_STARVE_sum) / SUM(GL1C_CYCLE_sum)
+          value: 100 * SUM(GL1C_STARVE_sum) / SUM(GL1C_CYCLE_sum)
           unit: Percent
         GL1 Cache Stall GL2 Backpressure:
-          value: SUM(100 * GL1C_STALL_GL2_GL1_sum) / SUM(GL1C_BUSY_sum)
+          value: 100 * SUM(GL1C_STALL_GL2_GL1_sum) / SUM(GL1C_BUSY_sum)
           unit: Percent
 
   # =========================================================================
@@ -248,10 +248,10 @@ Panel Config:
           value: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL1-GL2 Read Bandwidth:
-          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL1-GL2 Write Bandwidth:
-          value: SUM(GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL1-GL2 Read Latency:
           value: SUM(GL1C_GL2_REQ_READ_LATENCY_sum) / SUM(GL1C_GL2_REQ_READ_sum)
@@ -275,7 +275,7 @@ Panel Config:
         unit: Unit
       metric:
         GL2 Cache Utilization:
-          value: SUM(100 * GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
+          value: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
           unit: Percent
         GL2 Cache Total Requests:
           value: SUM(GL2C_REQ_sum) / SUM($denom)
@@ -290,15 +290,15 @@ Panel Config:
           value: SUM(GL2C_ATOMIC_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         GL2 Cache Hit Rate:
-          value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
           unit: Percent
         GL2 Cache Read BW:
           # 32/64/128 B read bins plus 96 B compressed reads; EA 96 B (GL2C_EA_RDREQ_96B) is fabric-side (see Speed-of-Light).
-          value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         GL2 Cache Write BW:
           # Note: GL2C write requests can be 32B or 64B (no 128B writes documented).
-          value: SUM(GL2C_WRITE_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 64 * SUM(GL2C_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
   # =========================================================================
@@ -316,10 +316,10 @@ Panel Config:
         unit: Unit
       metric:
         SARB Utilization:
-          value: SUM(100 * GCEA_SARB_BUSY_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
+          value: 100 * SUM(GCEA_SARB_BUSY_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
           unit: Percent
         SARB Stall Rate:
-          value: SUM(100 * GCEA_SARB_STALLED_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
+          value: 100 * SUM(GCEA_SARB_STALLED_sum) / SUM(GCEA_ALWAYS_COUNT_sum)
           unit: Percent
         DRAM Read Requests:
           value: SUM(GCEA_RDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
@@ -328,10 +328,10 @@ Panel Config:
           value: SUM(GCEA_WDRAM_REQ_PER_CLIGRP_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         DRAM Read Bandwidth:
-          value: SUM(GCEA_RDRAM_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 32 * SUM(GCEA_RDRAM_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         DRAM Write Bandwidth:
-          value: SUM(GCEA_WDRAM_SIZE_REQ_sum * 32) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          value: 32 * SUM(GCEA_WDRAM_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
         Read Returns:
           value: SUM(GCEA_RRET_VLD_sum) / SUM($denom)

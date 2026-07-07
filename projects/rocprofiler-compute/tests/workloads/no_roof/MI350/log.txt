@@ -29,7 +29,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/SQ_IFET
    |-> [rocprofv3] [m[0;31mE20250328 22:43:59.499819 140180820113408 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15737_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_IFETCH_LEVEL.txt, the time it takes was 0 m 0.5342490673065186 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_IFETCH_LEVEL.txt, the time it takes was 0 m 0.5342490673065186 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/SQ_IFETCH_LEVEL.txt is 0 m 0.5495765209197998 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_LDS.txt
@@ -42,7 +42,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/SQ_INST
    |-> [rocprofv3] [m[0;31mE20250328 22:44:00.039437 139673533200384 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15744_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_LDS.txt, the time it takes was 0 m 0.5213537216186523 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_LDS.txt, the time it takes was 0 m 0.5213537216186523 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_LDS.txt is 0 m 0.530348539352417 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_SMEM.txt
@@ -55,7 +55,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/SQ_INST
    |-> [rocprofv3] [m[0;31mE20250328 22:44:00.584250 140472799942656 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15751_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_SMEM.txt, the time it takes was 0 m 0.5386278629302979 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_SMEM.txt, the time it takes was 0 m 0.5386278629302979 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_SMEM.txt is 0 m 0.5522944927215576 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_VMEM.txt
@@ -68,7 +68,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/SQ_INST
    |-> [rocprofv3] [m[0;31mE20250328 22:44:01.139250 140613229746176 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15758_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_VMEM.txt, the time it takes was 0 m 0.5387754440307617 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_VMEM.txt, the time it takes was 0 m 0.5387754440307617 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/SQ_INST_LEVEL_VMEM.txt is 0 m 0.5530288219451904 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/SQ_LEVEL_WAVES.txt
@@ -81,7 +81,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/SQ_LEVE
    |-> [rocprofv3] [m[0;31mE20250328 22:44:01.693434 139667039954944 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15765_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_LEVEL_WAVES.txt, the time it takes was 0 m 0.5417661666870117 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/SQ_LEVEL_WAVES.txt, the time it takes was 0 m 0.5417661666870117 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/SQ_LEVEL_WAVES.txt is 0 m 0.580467700958252 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_0.txt
@@ -93,7 +93,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:02.254238 140133276805120 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15772_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_0.txt, the time it takes was 0 m 0.520763635635376 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_0.txt, the time it takes was 0 m 0.520763635635376 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_0.txt is 0 m 0.5509796142578125 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_1.txt
@@ -105,7 +105,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:02.783965 139877934254080 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15779_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_1.txt, the time it takes was 0 m 0.49741554260253906 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_1.txt, the time it takes was 0 m 0.49741554260253906 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_1.txt is 0 m 0.5275735855102539 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_2.txt
@@ -117,7 +117,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:03.337819 140410203478016 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15786_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_2.txt, the time it takes was 0 m 0.5256781578063965 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_2.txt, the time it takes was 0 m 0.5256781578063965 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_2.txt is 0 m 0.5558264255523682 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_3.txt
@@ -129,7 +129,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:03.887175 139773391017984 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15793_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_3.txt, the time it takes was 0 m 0.5174272060394287 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_3.txt, the time it takes was 0 m 0.5174272060394287 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_3.txt is 0 m 0.5471975803375244 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_4.txt
@@ -141,7 +141,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:04.434992 139659083270144 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15800_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_4.txt, the time it takes was 0 m 0.5173399448394775 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_4.txt, the time it takes was 0 m 0.5173399448394775 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_4.txt is 0 m 0.5455985069274902 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_5.txt
@@ -153,7 +153,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:04.985304 139690974885888 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15807_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_5.txt, the time it takes was 0 m 0.5242176055908203 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_5.txt, the time it takes was 0 m 0.5242176055908203 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_5.txt is 0 m 0.5536882877349854 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_6.txt
@@ -165,7 +165,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:05.538574 139905476130816 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15814_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_6.txt, the time it takes was 0 m 0.5223171710968018 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_6.txt, the time it takes was 0 m 0.5223171710968018 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_6.txt is 0 m 0.5513536930084229 sec
 [profiling] Current input file: /app/workloads/vcopy/MI350/perfmon/pmc_perf_7.txt
@@ -177,7 +177,7 @@ rocprof command: ['rocprofv3', '-E', '/app/workloads/vcopy/MI350/perfmon/pmc_per
    |-> [rocprofv3] [m[0;31mE20250328 22:44:06.088343 140554574170112 output_stream.cpp:105] Opened result file: /app/workloads/vcopy/MI350/out/pmc_1/f77021840818/15821_agent_info.csv
    |-> [rocprofv3] [mvcopy testing on GCD 0
    |-> [rocprofv3] Finished allocating vectors on the CPU
-Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_7.txt, the time it takes was 0 m 0.5185859203338623 sec 
+Finishing subprocess of fname /app/workloads/vcopy/MI350/perfmon/pmc_perf_7.txt, the time it takes was 0 m 0.5185859203338623 sec
 The type of Agent ID from counter csv file is int64
 The time of run_prof of /app/workloads/vcopy/MI350/perfmon/pmc_perf_7.txt is 0 m 0.5476455688476562 sec
 finished "run_profiling" and finished rocprof's workload, time taken was 0 m 7.149999380111694 sec
