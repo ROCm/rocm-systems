@@ -263,7 +263,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
   xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
-  if (link_info.num_hop >= 1) {
+  if (link_info.num_hop >= 1 && !properties_.Integrated) {
     large_bar_enabled_ = true;
   }
 
