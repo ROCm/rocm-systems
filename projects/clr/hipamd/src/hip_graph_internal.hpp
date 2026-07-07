@@ -2919,8 +2919,10 @@ class GraphHostNode : public GraphNode {
     amd::Command::EventWaitList waitList;
     commands_.reserve(1);
     amd::Command* command = new amd::Marker(*stream, !kMarkerDisableFlush, waitList);
-    // This is just to invoke a callback, so no need to flush caches.
-    command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+    // Use system-scope acquire so preceding GPU writes to CPU-accessible memory
+    // (e.g. blit D2H, kernel writing managed/pinned mem) are flushed before
+    // the host callback reads them. (C#1)
+    command->setCommandEntryScope(amd::Device::kCacheStateSystem);
     commands_.emplace_back(command);
     return hipSuccess;
   }

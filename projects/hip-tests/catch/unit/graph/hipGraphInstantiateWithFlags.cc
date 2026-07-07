@@ -639,6 +639,103 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel) {
 /**
  * Test Description
  * ------------------------
+ * - This test case tests hipGraphInstantiateWithFlags with the flag
+ * - hipGraphInstantiateFlagAutoFreeOnLaunch for the same H2D -> kernel -> D2H
+ *   graph as Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel,
+ *   but uses a small D2H copy that should bypass SDMA and use the blit/staging
+ *   path.
+ * - The copy size is below the default GPU_FORCE_BLIT_COPY_SIZE threshold used
+ *   by GraphMemcpyNode1D::WillBypassSdmaEngine().
+ * Test source
+ * ------------------------
+ * - unit/graph/hipGraphInstantiateWithFlags.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernelD2HBypassSdma) {
+  constexpr int kBypassSdmaSize = 1024;
+  constexpr size_t kBypassSdmaBytes = kBypassSdmaSize * sizeof(int);
+
+  std::vector<int> hostMemSrc(kBypassSdmaSize);
+  std::vector<int> hostMemDst(kBypassSdmaSize);
+
+  int* devMem = nullptr;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  hipGraphNode_t memAllocNode, memcpyNodeH2D, kernelNode, memcpyNodeD2H;
+
+  hipMemAllocNodeParams memAllocNodeParams{};
+  memAllocNodeParams.poolProps.allocType = hipMemAllocationTypePinned;
+  memAllocNodeParams.poolProps.handleTypes = hipMemHandleTypeNone;
+  memAllocNodeParams.poolProps.location.type = hipMemLocationTypeDevice;
+  memAllocNodeParams.poolProps.location.id = 0;
+  memAllocNodeParams.bytesize = kBypassSdmaBytes;
+
+  HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode, graph, nullptr, 0, &memAllocNodeParams));
+  devMem = reinterpret_cast<int*>(memAllocNodeParams.dptr);
+  REQUIRE(devMem != nullptr);
+
+  std::vector<hipGraphNode_t> memcpyNodeH2DDependencies;
+  memcpyNodeH2DDependencies.push_back(memAllocNode);
+
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, memcpyNodeH2DDependencies.data(),
+                                    memcpyNodeH2DDependencies.size(), devMem, hostMemSrc.data(),
+                                    kBypassSdmaBytes, hipMemcpyHostToDevice));
+
+  std::vector<hipGraphNode_t> kernelNodeDependencies;
+  kernelNodeDependencies.push_back(memcpyNodeH2D);
+
+  hipKernelNodeParams kernelNodeParams{};
+  kernelNodeParams.func = reinterpret_cast<void*>(doubleKernel);
+  kernelNodeParams.gridDim = dim3(1, 1, 1);
+  kernelNodeParams.blockDim = dim3(1, 1, 1);
+  kernelNodeParams.sharedMemBytes = 0;
+  int size = kBypassSdmaSize;
+  void* kernelArgs[2] = {reinterpret_cast<void*>(&devMem), reinterpret_cast<void*>(&size)};
+  kernelNodeParams.kernelParams = kernelArgs;
+  kernelNodeParams.extra = nullptr;
+
+  HIP_CHECK(hipGraphAddKernelNode(&kernelNode, graph, kernelNodeDependencies.data(),
+                                  kernelNodeDependencies.size(), &kernelNodeParams));
+
+  std::vector<hipGraphNode_t> memcpyNodeD2HDependencies;
+  memcpyNodeD2HDependencies.push_back(kernelNode);
+
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H, graph, memcpyNodeD2HDependencies.data(),
+                                    memcpyNodeD2HDependencies.size(), hostMemDst.data(), devMem,
+                                    kBypassSdmaBytes, hipMemcpyDeviceToHost));
+
+  hipGraphExec_t graphExec;
+  HIP_CHECK(
+      hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
+
+  for (int launch = 1; launch <= 10; launch++) {
+    std::fill(hostMemSrc.begin(), hostMemSrc.end(), launch);
+    std::fill(hostMemDst.begin(), hostMemDst.end(), 0);
+
+    HIP_CHECK(hipGraphLaunch(graphExec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    for (int idx = 0; idx < kBypassSdmaSize; idx++) {
+      INFO("For Launch : " << launch << ", At index : " << idx
+                            << ", Got value : " << hostMemDst[idx]
+                            << ", Expected value : " << (launch + launch) << "\n");
+      REQUIRE(hostMemDst[idx] == (launch + launch));
+    }
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(devMem));
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - This test case tests hipGraphInstantiateWithFlags with the flag 0
  * - and hipGraphInstantiateFlagAutoFreeOnLaunch for following scenario :
  * - 1) Take three host arrays (hostMem1, hostMem2, hostMem3)
