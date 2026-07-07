@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <set>
 #include <string_view>
+#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
@@ -24,10 +25,9 @@ bool pc_sampling_collector_impl_t::is_source_line_token(std::string_view token)
                        [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; });
 }
 
-std::string_view pc_sampling_collector_impl_t::source_frame_separator()
+std::string_view pc_sampling_collector_impl_t::source_frame_separator() const
 {
-    static const auto sdk_wrapper = sdk_wrapper_t::create();
-    return sdk_wrapper->source_frame_separator();
+    return m_sdk_wrapper->source_frame_separator();
 }
 
 std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::string_view frame)
@@ -44,7 +44,7 @@ std::string_view pc_sampling_collector_impl_t::path_from_source_frame(std::strin
 }
 
 void pc_sampling_collector_impl_t::collect_source_paths_from_comment(std::string_view comment,
-                                                                     std::set<std::filesystem::path>& source_paths)
+                                                                     std::set<std::filesystem::path>& source_paths) const
 {
     size_t     frame_start = 0;
     const auto separator   = source_frame_separator();
@@ -70,11 +70,19 @@ void pc_sampling_collector_impl_t::collect_source_paths_from_comment(std::string
 
 pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
 {
-    return std::make_shared<pc_sampling_collector_impl_t>(code_object_translator_t::create());
+    return std::make_shared<pc_sampling_collector_impl_t>(code_object_translator_t::create(),
+                                                          sdk_wrapper_t::create());
 }
 
 pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(code_object_translator_t::ptr translator)
+    : pc_sampling_collector_impl_t(std::move(translator), sdk_wrapper_t::create())
+{
+}
+
+pc_sampling_collector_impl_t::pc_sampling_collector_impl_t(code_object_translator_t::ptr translator,
+                                                           sdk_wrapper_t::ptr sdk_wrapper)
     : m_translator(std::move(translator))
+    , m_sdk_wrapper(std::move(sdk_wrapper))
 {
 }
 

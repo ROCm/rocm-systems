@@ -11,11 +11,14 @@ using namespace rocprofiler_compute_tool;
 
 namespace
 {
-std::set<std::filesystem::path> collect_source_paths_from_comment(std::string comment)
+std::set<std::filesystem::path> collect_source_paths_from_comment(std::string comment,
+                                                                  std::string separator = " -> ")
 {
-    auto translator = std::make_shared<mock_code_object_translator_t>();
-    auto collector  = std::make_shared<pc_sampling_collector_impl_t>(translator);
-    auto writer     = std::make_shared<mock_code_object_writer_t>();
+    auto translator  = std::make_shared<mock_code_object_translator_t>();
+    auto sdk_wrapper = std::make_shared<mock_sdk_wrapper_t>();
+    sdk_wrapper->set_source_frame_separator(std::move(separator));
+    auto collector = std::make_shared<pc_sampling_collector_impl_t>(translator, sdk_wrapper);
+    auto writer    = std::make_shared<mock_code_object_writer_t>();
 
     translator->add_code_object("test_code_object", 1, 0x1000, 0x100);
     translator->add_symbols(1, {{"name0", 0x10, 0x1000, 1}});
@@ -144,6 +147,13 @@ TEST(test_pc_sampling_collector_source_paths_t, ProvidedMultipleFrames_ReturnsAl
     EXPECT_EQ(paths, expected);
 }
 
+TEST(test_pc_sampling_collector_source_paths_t, ProvidedInjectedFrameSeparator_ReturnsAllFilePaths)
+{
+    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 | header.h:8", " | ");
+    const std::set<std::filesystem::path> expected = {"header.h", "kernel.cpp"};
+    EXPECT_EQ(paths, expected);
+}
+
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedUnknownLineToken_ReturnsFilePath)
 {
     const auto                            paths = collect_source_paths_from_comment("kernel.cpp:?");
@@ -212,9 +222,10 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolsAndInstructions_CollectsDedu
 
 void test_pc_sampling_collector_t::SetUp()
 {
-    m_translator            = std::make_shared<mock_code_object_translator_t>();
-    m_pc_sampling_collector = std::make_shared<pc_sampling_collector_impl_t>(m_translator);
-    m_writer                = std::make_shared<mock_code_object_writer_t>();
+    m_translator  = std::make_shared<mock_code_object_translator_t>();
+    m_sdk_wrapper = std::make_shared<mock_sdk_wrapper_t>();
+    m_pc_sampling_collector = std::make_shared<pc_sampling_collector_impl_t>(m_translator, m_sdk_wrapper);
+    m_writer = std::make_shared<mock_code_object_writer_t>();
 
     m_mem_info.storage_type   = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY;
     m_mem_info.memory_base    = 0x1000;

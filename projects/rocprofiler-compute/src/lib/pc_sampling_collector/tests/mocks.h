@@ -4,6 +4,7 @@
 #include "code_object_translator.h"
 #include "code_object_writer.h"
 #include "filesystem_wrapper.h"
+#include "sdk_wrapper.h"
 
 #include <filesystem>
 #include <map>
@@ -89,6 +90,17 @@ private:
     std::vector<rocprofiler_compute_tool::symbol_t>      m_symbol_descriptions;
     std::vector<rocprofiler_compute_tool::instruction_t> m_instructions;
     uint32_t                                             m_end_symbol_count = 0;
+};
+
+class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t
+{
+public:
+    std::string_view source_frame_separator() override;
+
+    void set_source_frame_separator(std::string source_frame_separator);
+
+private:
+    std::string m_source_frame_separator = " -> ";
 };
 
 class mock_filesystem_wrapper_t : public rocprofiler_compute_tool::filesystem_wrapper_t
