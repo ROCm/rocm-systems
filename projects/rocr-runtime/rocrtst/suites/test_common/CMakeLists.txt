@@ -897,7 +897,7 @@ set_tests_properties(hotswap_rewrite PROPERTIES
 # they need no GPU or hsa-runtime library. GoogleTest's gtest_main provides the entry point.
 set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
 add_executable(intercept_queue_logic_test
-  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cpp)
+  ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
 target_include_directories(intercept_queue_logic_test PRIVATE
   ${HSA_RUNTIME_ROOT}
   ${ROCRTST_ROOT}/gtest/include)

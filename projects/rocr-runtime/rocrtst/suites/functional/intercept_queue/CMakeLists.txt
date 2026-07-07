@@ -32,7 +32,7 @@ find_package(Threads REQUIRED)
 
 add_executable(${HSA_INTERCEPT_LOGIC_TEST}
   main.cc
-  intercept_queue_logic_test.cpp)
+  intercept_queue_logic_test.cc)
 
 target_include_directories(${HSA_INTERCEPT_LOGIC_TEST} PRIVATE ${_hsa_runtime_root})
 
