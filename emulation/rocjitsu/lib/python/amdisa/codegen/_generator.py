@@ -1697,10 +1697,15 @@ class CodeGenerator:
                 'static_cast<uint16_t>(inst_.saddr), 2});'
                 '}'
             )
-        # SDWA dst_unused:PRESERVE keeps the untouched bytes of the old
-        # destination, so the instruction reads vdst. DPP with partial
-        # row or bank mask keeps untouched lanes. Surfacing here so
-        # liveness and def/use dataflow see the dependency.
+        # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial
+        # row/bank mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl
+        # that leaves OOB lanes unwritten) read the old vdst, so surface it
+        # as a use for liveness/def-use.
+        #
+        # Only VOP1/VOP2 need this. VOPC/VOPCX apply the same partial-mask
+        # preservation to VCC/EXEC, but liveness tracks only SGPR/VGPR/ACC_VGPR
+        # (see liveness.h) -- VCC/EXEC/SCC are outside the dataflow model, so
+        # there is no tracked register to surface for those encodings.
         if (
             inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
             and 'vdst' in enc_field_names
@@ -1709,7 +1714,9 @@ class CodeGenerator:
                 'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
                 'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;'
                 'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
-                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF); '
+                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                '(dpp_bound_ctrl_ == 0 && '
+                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
                 'if (sdwa_preserve || dpp_partial) '
                 'uses.expand(RegisterRef{RegClass::VGPR, '
                 'static_cast<uint16_t>(inst_.vdst), 1});'

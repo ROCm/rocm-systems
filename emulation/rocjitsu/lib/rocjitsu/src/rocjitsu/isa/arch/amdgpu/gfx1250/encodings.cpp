@@ -174,8 +174,9 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
 void Vop1::implicit_uses(RegisterSet &uses) const {
   bool sdwa_preserve =
       sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
-  bool dpp_partial =
-      inst_.src0 == amdgpu::SRC_DPP && (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF);
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
   if (sdwa_preserve || dpp_partial)
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(inst_.vdst), 1});
 }
@@ -235,8 +236,9 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
 void Vop2::implicit_uses(RegisterSet &uses) const {
   bool sdwa_preserve =
       sdwa_dst_sel_ != amdgpu::sdwa::DWORD && sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;
-  bool dpp_partial =
-      inst_.src0 == amdgpu::SRC_DPP && (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF);
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
   if (sdwa_preserve || dpp_partial)
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(inst_.vdst), 1});
 }

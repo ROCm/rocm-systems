@@ -768,6 +768,17 @@ std::unique_ptr<Instruction> decode_cdna4(const std::array<uint32_t, 2> &words) 
   return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
 }
 
+// DPP word1 fields (CDNA4): vsrc0[7:0], dpp_ctrl[16:8], bound_ctrl[19],
+// bank_mask[27:24], row_mask[31:28]. With full masks, whether vdst is
+// preserved depends on bound_ctrl and whether dpp_ctrl crosses a row/wave
+// edge: bound_ctrl=0 + an edge-crossing ctrl leaves OOB lanes unwritten (reads
+// vdst); bound_ctrl=1 writes a zero source instead (full write); a ctrl that
+// never goes OOB is a full write regardless of bound_ctrl.
+constexpr uint32_t kDppFullMasks = (0xFu << 28) | (0xFu << 24);
+constexpr uint32_t kDppBoundCtrl = (1u << 19);
+constexpr uint32_t kDppCtrlRowShr1 = 0x111u << 8; // row_shr:1 -- crosses the row edge
+constexpr uint32_t kDppCtrlRowRor1 = 0x121u << 8; // row_ror:1 -- rotates within the row
+
 TEST(GeneratedInstDefUse, DppPartialRowMaskReadsDestination) {
   // DPP word1: row_mask[31:28]=0x7 (partial), bank_mask[27:24]=0xF, vsrc0[7:0]=2.
   auto inst = decode_cdna4({kVop1MovWord0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
@@ -780,7 +791,8 @@ TEST(GeneratedInstDefUse, DppPartialRowMaskReadsDestination) {
 }
 
 TEST(GeneratedInstDefUse, DppFullRowMaskDoesNotReadDestination) {
-  // DPP word1: row_mask=0xF and bank_mask=0xF (full) -> every lane written.
+  // DPP word1: row_mask=0xF, bank_mask=0xF (full), dpp_ctrl=0 (quad_perm, never
+  // OOB) -> every lane written, no vdst read even with bound_ctrl=0.
   auto inst = decode_cdna4({kVop1MovWord0Dpp, (0xFu << 28) | (0xFu << 24) | 2u});
   ASSERT_NE(inst, nullptr);
 
@@ -805,6 +817,40 @@ TEST(GeneratedInstDefUse, SdwaPadDoesNotReadDestination) {
   ASSERT_NE(inst, nullptr);
 
   InstDefUse idu(*inst);
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, DppBoundCtrlZeroEdgeCrossingReadsDestination) {
+  // Full masks, bound_ctrl=0, row_shr:1 -> row-edge lanes read OOB and are left
+  // unwritten, preserving vdst.
+  auto inst = decode_cdna4({kVop1MovWord0Dpp, kDppFullMasks | kDppCtrlRowShr1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, DppBoundCtrlOneEdgeCrossingDoesNotReadDestination) {
+  // Full masks, row_shr:1 but bound_ctrl=1 -> OOB lanes read a zero source and
+  // are still written, so every lane is defined and vdst is not read.
+  auto inst =
+      decode_cdna4({kVop1MovWord0Dpp, kDppFullMasks | kDppBoundCtrl | kDppCtrlRowShr1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
+  // Full masks, bound_ctrl=0, row_ror:1 -> a rotate never goes OOB, so every
+  // lane is written and vdst is not read despite bound_ctrl=0.
+  auto inst = decode_cdna4({kVop1MovWord0Dpp, kDppFullMasks | kDppCtrlRowRor1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
@@ -834,7 +880,8 @@ TEST(GeneratedInstDefUse, Vop2DppPartialRowMaskReadsDestination) {
 }
 
 TEST(GeneratedInstDefUse, Vop2DppFullRowMaskDoesNotReadDestination) {
-  // DPP word1: row_mask=0xF and bank_mask=0xF (full) -> every lane written.
+  // DPP word1: row_mask=0xF, bank_mask=0xF (full), dpp_ctrl=0 (quad_perm, never
+  // OOB) -> every lane written, no vdst read even with bound_ctrl=0.
   auto inst = decode_cdna4({kVop2AddWord0Dpp, (0xFu << 28) | (0xFu << 24) | 2u});
   ASSERT_NE(inst, nullptr);
 
@@ -859,6 +906,29 @@ TEST(GeneratedInstDefUse, Vop2SdwaPadDoesNotReadDestination) {
   ASSERT_NE(inst, nullptr);
 
   InstDefUse idu(*inst);
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop2DppBoundCtrlZeroEdgeCrossingReadsDestination) {
+  // Full masks, bound_ctrl=0, row_shr:1 -> row-edge lanes read OOB and are left
+  // unwritten, preserving vdst (mirrors the VOP1 case on the VOP2 path).
+  auto inst = decode_cdna4({kVop2AddWord0Dpp, kDppFullMasks | kDppCtrlRowShr1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop2DppBoundCtrlOneEdgeCrossingDoesNotReadDestination) {
+  // Full masks, row_shr:1 but bound_ctrl=1 -> OOB lanes read zero and are still
+  // written, so every lane is defined and vdst is not read.
+  auto inst =
+      decode_cdna4({kVop2AddWord0Dpp, kDppFullMasks | kDppBoundCtrl | kDppCtrlRowShr1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
