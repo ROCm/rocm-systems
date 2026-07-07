@@ -19,7 +19,12 @@
 #include <numa.h>
 #include <numaif.h>
 #include <sched.h>
+#include <csetjmp>
+#include <csignal>
 
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include <hip_test_kernels.hh>
@@ -574,6 +579,193 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_Negative) {
   }
 
   CTX_DESTROY();
+}
+
+// ================================================================================================
+// Diagnostic-only test. It ALWAYS fails (REQUIRE(false) at the end) so that Catch2
+// dumps the accumulated INFO scope. Purpose: capture the CI machine's NUMA / cpuset
+// / VMM environment and pinpoint whether a direct CPU access to a host-NUMA VMM
+// allocation faults (SIGBUS) and on which node. A SIGBUS/SIGSEGV during the probe
+// is caught via a signal handler + sigsetjmp so the process survives and still
+// reports. Remove this test once the CI failure is understood.
+// ================================================================================================
+namespace {
+
+sigjmp_buf g_faultJmp;
+volatile sig_atomic_t g_faulted = 0;
+volatile int g_faultSignal = 0;
+
+void faultHandler(int sig) {
+  g_faultSignal = sig;
+  g_faulted = 1;
+  siglongjmp(g_faultJmp, 1);
+}
+
+std::string readFileTrim(const char* path) {
+  std::ifstream f(path);
+  if (!f) return std::string("<unavailable>");
+  std::stringstream ss;
+  ss << f.rdbuf();
+  std::string s = ss.str();
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
+  return s;
+}
+
+// Probe a single CPU write into a host-NUMA allocation on the given node.
+// Returns a human-readable outcome string; never throws, never crashes.
+std::string probeNode(int node, int device) {
+  std::stringstream out;
+  out << "node " << node << ": ";
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeHostNuma;
+  prop.location.id = node;
+  prop.requestedHandleTypes = hipMemHandleTypeNone;
+
+  size_t gran = 0;
+  hipError_t e = hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum);
+  if (e != hipSuccess) {
+    out << "granularity failed (" << hipGetErrorString(e) << ")";
+    return out.str();
+  }
+  const size_t size_mem = gran;
+
+  hipMemGenericAllocationHandle_t handle{};
+  e = hipMemCreate(&handle, size_mem, &prop, 0);
+  if (e != hipSuccess) {
+    out << "hipMemCreate failed (" << hipGetErrorString(e) << ")";
+    return out.str();
+  }
+
+  void* ptr = nullptr;
+  e = hipMemAddressReserve(&ptr, size_mem, 0, 0, 0);
+  if (e != hipSuccess) {
+    out << "addressReserve failed (" << hipGetErrorString(e) << ")";
+    (void)hipMemRelease(handle);
+    return out.str();
+  }
+  e = hipMemMap(ptr, size_mem, 0, handle, 0);
+  if (e != hipSuccess) {
+    out << "hipMemMap failed (" << hipGetErrorString(e) << ")";
+    (void)hipMemAddressFree(ptr, size_mem);
+    (void)hipMemRelease(handle);
+    return out.str();
+  }
+
+  hipMemAccessDesc descs[2] = {};
+  descs[0].location.type = hipMemLocationTypeHost;
+  descs[0].location.id = 0;
+  descs[0].flags = hipMemAccessFlagsProtReadWrite;
+  descs[1].location.type = hipMemLocationTypeDevice;
+  descs[1].location.id = device;
+  descs[1].flags = hipMemAccessFlagsProtReadWrite;
+  hipError_t eh = hipMemSetAccess(ptr, size_mem, &descs[0], 1);
+  hipError_t ed = hipMemSetAccess(ptr, size_mem, &descs[1], 1);
+  out << "setAccess(host)=" << (eh == hipSuccess ? "ok" : hipGetErrorString(eh))
+      << " setAccess(dev)=" << (ed == hipSuccess ? "ok" : hipGetErrorString(ed)) << "; ";
+
+  // Install fault handlers around the direct CPU store.
+  g_faulted = 0;
+  g_faultSignal = 0;
+  struct sigaction sa {}, oldBus{}, oldSegv{};
+  sa.sa_handler = faultHandler;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGBUS, &sa, &oldBus);
+  sigaction(SIGSEGV, &sa, &oldSegv);
+
+  if (sigsetjmp(g_faultJmp, 1) == 0) {
+    volatile int* hp = reinterpret_cast<volatile int*>(ptr);
+    hp[0] = 0x1234;              // <-- may fault
+    int rb = hp[0];             // read back
+    out << "CPU write ok (readback=0x" << std::hex << rb << std::dec << ")";
+  } else {
+    out << "FAULTED with signal " << g_faultSignal
+        << (g_faultSignal == SIGBUS ? " (SIGBUS)"
+            : g_faultSignal == SIGSEGV ? " (SIGSEGV)" : "");
+  }
+
+  sigaction(SIGBUS, &oldBus, nullptr);
+  sigaction(SIGSEGV, &oldSegv, nullptr);
+
+  (void)hipMemUnmap(ptr, size_mem);
+  (void)hipMemAddressFree(ptr, size_mem);
+  (void)hipMemRelease(handle);
+  return out.str();
+}
+
+}  // namespace
+
+HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_DiagDump) {
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+
+  int devCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&devCount));
+  hipDeviceProp_t dp{};
+  HIP_CHECK(hipGetDeviceProperties(&dp, 0));
+  int vmm = 0, dmabuf = 0;
+  hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0);
+  hipDeviceGetAttribute(&dmabuf, hipDeviceAttributeDmaBufSupported, 0);
+
+  // UNSCOPED_INFO (not INFO): messages must survive past the block/loop scopes
+  // below and still be attached to the final REQUIRE. Plain INFO is scoped and
+  // would be discarded when each block closes.
+  UNSCOPED_INFO("=== GPU / HIP ===");
+  UNSCOPED_INFO("gpuCount=" << devCount << " arch=" << dp.gcnArchName);
+  UNSCOPED_INFO("vmmSupported=" << vmm << " dmaBufSupported=" << dmabuf);
+
+  UNSCOPED_INFO("=== cpuset / process affinity ===");
+  UNSCOPED_INFO("/proc/self/status Mems_allowed_list: "
+       << [] {
+            std::ifstream f("/proc/self/status");
+            std::string line;
+            while (std::getline(f, line))
+              if (line.rfind("Mems_allowed_list:", 0) == 0) return line;
+            return std::string("<not found>");
+          }());
+  UNSCOPED_INFO("/proc/self/status Cpus_allowed_list: "
+       << [] {
+            std::ifstream f("/proc/self/status");
+            std::string line;
+            while (std::getline(f, line))
+              if (line.rfind("Cpus_allowed_list:", 0) == 0) return line;
+            return std::string("<not found>");
+          }());
+  UNSCOPED_INFO("cgroup v2 cpuset.mems.effective: "
+       << readFileTrim("/sys/fs/cgroup/cpuset.mems.effective"));
+  UNSCOPED_INFO("sys node possible: " << readFileTrim("/sys/devices/system/node/possible"));
+  UNSCOPED_INFO("sys node online: " << readFileTrim("/sys/devices/system/node/online"));
+
+  UNSCOPED_INFO("=== libnuma ===");
+  const int numaAvail = numa_available();
+  UNSCOPED_INFO("numa_available()=" << numaAvail);
+  if (numaAvail >= 0) {
+    UNSCOPED_INFO("numa_max_node()=" << numa_max_node()
+         << " numa_num_configured_nodes()=" << numa_num_configured_nodes()
+         << " numa_num_task_nodes()=" << numa_num_task_nodes());
+    UNSCOPED_INFO("current cpu=" << sched_getcpu()
+         << " current node=" << numa_node_of_cpu(sched_getcpu()));
+
+    std::stringstream allowedSs;
+    struct bitmask* mask = numa_get_mems_allowed();
+    if (mask) {
+      for (int n = 0; n <= numa_max_node(); ++n)
+        if (numa_bitmask_isbitset(mask, n)) allowedSs << n << " ";
+      numa_free_nodemask(mask);
+    }
+    UNSCOPED_INFO("numa_get_mems_allowed() = { " << allowedSs.str() << "}");
+
+    // Probe every hardware node (0..numa_max_node), regardless of allowed set,
+    // so we can see exactly which nodes fault vs. succeed.
+    UNSCOPED_INFO("=== per-node CPU-access probe (all hardware nodes) ===");
+    for (int n = 0; n <= numa_max_node(); ++n) {
+      UNSCOPED_INFO(probeNode(n, device));
+    }
+  }
+
+  // Always fail so Catch2 prints the accumulated UNSCOPED_INFO messages above.
+  REQUIRE(false);
 }
 
 /**

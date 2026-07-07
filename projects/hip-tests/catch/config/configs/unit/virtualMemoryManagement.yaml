@@ -118,6 +118,9 @@ virtualMemoryManagement:
   Unit_hipMemCreate_HostNuma_Negative:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_HostNuma_DiagDump:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
