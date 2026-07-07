@@ -70,14 +70,14 @@ If there is future strong request to return CSV support, we may implement it und
 
 ### AD-2: Remove the rocprofv3 backend so rocprofiler-sdk is the lone backend
 
+Remove `rocprofv3` backend and simplify `rocprofiler-sdk` backend by removing unnecessary inheritance in code.
 Both of these backends collect data via rocprofiler-sdk-tool shared library loaded into the target process.
 `rocprofv3` backend is a legacy mode, which adds a redundant rocprofv3 script invocation layer and this adds complexity to the system.
 This mode is set via environment variable and is expected to be generally not used by customers.
 
-Therefore, the decision is to remove `rocprofv3` backend and simplify `rocprofiler-sdk` backend by removing unnecessary inheritance in code.
-
-
 ### AD-3: Analyze scripts don't generate intermediate `pmc_perf.csv` by default anymore
+
+Eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
 
 Currently, EVERY analyze run materializes `pmc_perf.csv` and then reads it back.
 Therefore all profile formats go through a CSV regardless of how they were stored.
@@ -89,8 +89,7 @@ Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze
 The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work. 
 The reader builds the frame from source **per analysis run** with filters applied in memory and the `pmc_perf.csv` export is derived from that frame.
 
-The decision is to eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
-
+The decision is to 
 However, `pmc_perf.csv` generation could be useful for debugging purposes and some users may use it in their flow.
 Therefore, we will add a new debug option `--gen-pmc` which implements one-way export of this file.
 However, analysis scripts will not read its back.
@@ -100,14 +99,9 @@ However, analysis scripts will not read its back.
 #### Unit tests do not touch disk
 
 Disk I/O lives behind a thin, transparent adapter (like 
-header/row write primitives) that is intentionally left untested. Unit tests
-mock the writer/reader and assert on what is passed rather than writing or
-reading real files.
-
-Tests that write to disk leave stray artifacts when they crash,
-can exhaust CI storage, and depend on system resources. The boundary makes
-disk free testing natural as in the same writer interface that production uses is
-swapped for an in memory fake in tests
+header/row write primitives) that is intentionally left untested. Tests that write to disk leave stray artifacts when they crash, can exhaust CI storage, and depend on system resources.
+Unit tests mock the writer/reader and assert on what is passed rather than writing or
+reading real files. The boundary makes disk free testing natural as in the same writer interface that production uses is swapped for an in memory fake in tests
 
 #### No pandas in profiling
 
