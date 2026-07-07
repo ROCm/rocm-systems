@@ -330,7 +330,7 @@ install(
 
 # Libraries: lib/
 install(
-    TARGETS rocjitsu_shared rocjitsu_hooks
+    TARGETS rocjitsu_shared rocjitsu_hooks rocjitsu_dbi_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 

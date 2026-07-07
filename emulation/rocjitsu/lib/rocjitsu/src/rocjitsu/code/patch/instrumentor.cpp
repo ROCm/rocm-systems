@@ -51,6 +51,17 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
   return false;
 }
 
+[[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
+
+[[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &inst) {
+  if (!is_s_clause(inst) || inst.raw_encoding() == nullptr || inst.size() != sizeof(uint32_t))
+    return 0;
+
+  uint32_t word = 0;
+  std::memcpy(&word, inst.raw_encoding(), sizeof(word));
+  return (word & 0xffffu) + 1u;
+}
+
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
 struct AppliedSite {
@@ -98,6 +109,10 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
   }
   if (is_denylisted_mnemonic(anchor.mnemonic())) {
     report(error_out, "anchor mnemonic is in the PC-relative denylist");
+    return false;
+  }
+  if (is_s_clause(anchor)) {
+    report(error_out, "anchor mnemonic is s_clause");
     return false;
   }
   return true;
@@ -216,8 +231,17 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
+    uint32_t clause_remaining = 0;
     for (const Instruction &inst : block->instructions()) {
+      if (clause_remaining > 0) {
+        clause_blocked_offsets_.insert(cur);
+        --clause_remaining;
+      }
       offset_to_inst_.emplace(cur, &inst);
+      if (is_s_clause(inst)) {
+        clause_blocked_offsets_.insert(cur);
+        clause_remaining = s_clause_following_instruction_count(inst);
+      }
       cur += static_cast<uint64_t>(inst.size());
     }
   }
@@ -277,6 +301,11 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
     auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &err);
     if (!site) {
       result.errors.push_back(std::move(err));
+      continue;
+    }
+    if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
+      result.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
+                                 std::to_string(pt.anchor_offset));
       continue;
     }
     sites.push_back(std::move(*site));

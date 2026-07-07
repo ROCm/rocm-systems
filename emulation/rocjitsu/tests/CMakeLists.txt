@@ -289,6 +289,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
+    patch/supercollider_dbi_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
@@ -1031,6 +1032,69 @@ if(RJ_ENABLE_HIP_TESTS)
     rj_add_hip_test(hip_vector_add_test)
     rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
     rj_add_hip_test(hip_ds_transpose_acc_test)
+    rj_add_hip_test(
+        hip_dbi_supercollider_lds_test
+        ARCH gfx1201
+        SOURCE dbi/hip_dbi_supercollider_lds_test.hip
+    )
+    add_dependencies(hip_dbi_supercollider_lds_test_target rocjitsu_dbi_hooks)
+    if(HAS_GFX1201_GPU)
+        set(
+            RJ_DBI_SUPERCOLLIDER_LDS_CLEAN_TEST
+            "DbiSuperColliderLdsTest.PaddedCleanStoreCompletes"
+        )
+        set(
+            RJ_DBI_SUPERCOLLIDER_LDS_RACY_TEST
+            "DbiSuperColliderLdsTest.PaddedRacyStoreCompletesOrTripsDbiTrap"
+        )
+        rj_add_test(
+            NAME "DbiSuperColliderLdsTest.BaselinePaddedCleanStore"
+            COMMAND
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_dbi_supercollider_lds_test
+                "--gtest_filter=${RJ_DBI_SUPERCOLLIDER_LDS_CLEAN_TEST}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            TIMEOUT 30
+        )
+        rj_add_test(
+            NAME "DbiSuperColliderLdsTest.DbiPaddedCleanStoreDoesNotTrap"
+            COMMAND
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_dbi_supercollider_lds_test
+                "--gtest_filter=${RJ_DBI_SUPERCOLLIDER_LDS_CLEAN_TEST}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_DBI_SUPERCOLLIDER=1"
+                "RJ_DBI_LOG=1"
+                "RJ_DBI_SC_DELAY=2"
+                "RJ_DBI_SC_TMP_VGPR=3"
+                "RJ_DBI_SC_REQUIRE_PATCH=1"
+        )
+        rj_add_test(
+            NAME "DbiSuperColliderLdsTest.BaselinePaddedRacyStore"
+            COMMAND
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_dbi_supercollider_lds_test
+                "--gtest_filter=${RJ_DBI_SUPERCOLLIDER_LDS_RACY_TEST}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            TIMEOUT 30
+        )
+        rj_add_test(
+            NAME "DbiSuperColliderLdsTest.DbiPaddedRacyStoreTripsTrap"
+            COMMAND
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_dbi_supercollider_lds_test
+                "--gtest_filter=${RJ_DBI_SUPERCOLLIDER_LDS_RACY_TEST}"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_DBI_SUPERCOLLIDER=1"
+                "RJ_DBI_LOG=1"
+                "RJ_DBI_SC_DELAY=2"
+                "RJ_DBI_SC_TMP_VGPR=3"
+                "RJ_DBI_SC_REQUIRE_PATCH=1"
+                "RJ_DBI_SC_EXPECT_TRAP=1"
+        )
+    endif()
 
     # --- RCCL collective test ---
     find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)

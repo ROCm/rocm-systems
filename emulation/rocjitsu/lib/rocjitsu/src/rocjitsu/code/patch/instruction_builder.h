@@ -37,6 +37,7 @@ inline constexpr uint32_t kSop1EncodingPrefix = 0x17D;
 inline constexpr uint32_t kSop2EncodingPrefix = 0x2;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
+inline constexpr uint16_t kVectorSourceVgprBase = 256;
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
@@ -63,6 +64,11 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
+}
+
+/// @brief Vector source operand encoding for a VGPR.
+[[nodiscard]] inline constexpr uint16_t vector_source_vgpr(uint16_t vgpr) {
+  return static_cast<uint16_t>(kVectorSourceVgprBase + vgpr);
 }
 
 /// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
@@ -129,6 +135,25 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Get the s_nop opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_nop([[maybe_unused]] rj_code_arch_t arch) {
   return 0; // s_nop is opcode 0 on all ISAs
+}
+
+/// @brief Get the s_sleep opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopp_op_sleep(rj_code_arch_t arch) {
+  // GFX9/RDNA1/RDNA2: opcode 14; GFX12-class ISA: opcode 3.
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return 3;
+  default:
+    return 14;
+  }
+}
+
+/// @brief Get the s_sleep_var opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_sleep_var([[maybe_unused]] rj_code_arch_t arch) {
+  return 0x58;
 }
 
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
@@ -202,6 +227,37 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 [[nodiscard]] inline constexpr uint32_t
 build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   return pack_sopp(sopp_op_nop(arch), cycles);
+}
+
+/// @brief Encode an s_sleep instruction for the given target ISA.
+///
+/// @param delay  ISA-defined sleep delay immediate.
+/// @param arch   Target ISA architecture.
+/// @returns The encoded 32-bit instruction word.
+[[nodiscard]] inline constexpr uint32_t
+build_s_sleep(uint16_t delay, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+  return pack_sopp(sopp_op_sleep(arch), delay);
+}
+
+/// @brief Encode an s_sleep_var instruction for the given target ISA.
+///
+/// @param ssrc0  Scalar source operand encoding that supplies the delay.
+/// @param arch   Target ISA architecture.
+/// @returns The encoded 32-bit instruction word.
+[[nodiscard]] inline constexpr uint32_t
+build_s_sleep_var(uint16_t ssrc0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+  return pack_sop1(sop1_op_sleep_var(arch), 0, ssrc0);
+}
+
+/// @brief Encode v_mov_b32_e32 for the given target ISA.
+///
+/// @param vdst  Destination VGPR.
+/// @param src0  VOP1 source operand encoding.
+/// @param arch  Target ISA architecture.
+/// @returns The encoded 32-bit instruction word.
+[[nodiscard]] inline constexpr uint32_t build_v_mov_b32_e32(uint16_t vdst, uint16_t src0,
+                                                            [[maybe_unused]] rj_code_arch_t arch) {
+  return (0x3Fu << 25) | (static_cast<uint32_t>(vdst) << 17) | (1u << 9) | (src0 & 0x1FFu);
 }
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
