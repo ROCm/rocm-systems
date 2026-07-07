@@ -625,8 +625,75 @@ catch (...) {
 hipFileError_t
 hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
 {
-    (void)stats;
-    return {hipFileInternalError, hipSuccess};
+    try {
+        if (stats == nullptr) {
+            return {hipFileInvalidValue, hipSuccess};
+        }
+        const Stats *s{Context<IStatsServer>::get()->getStats()};
+        if (s == nullptr) {
+            return {hipFileInternalError, hipSuccess};
+        }
+
+        *stats = {};
+
+        static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
+        static constexpr StatsBackend backends[]{StatsBackend::Fastpath, StatsBackend::Fallback};
+
+        for (size_t gpuId{}; gpuId < Stats::MaxGpus; ++gpuId) {
+            for (const auto &backend : backends) {
+                const PerGpuStatsV1 *g{s->getPerGpuStats(gpuId, backend)};
+                if (g == nullptr) {
+                    continue;
+                }
+                for (const auto &ioType : ioTypes) {
+                    const auto [sizeHist, countHist, timeHist, errorHist] = g->getHistograms(ioType);
+                    if (sizeHist == nullptr || countHist == nullptr || timeHist == nullptr ||
+                        errorHist == nullptr) {
+                        continue;
+                    }
+                    uint64_t bytes{sizeHist->accumulate()};
+                    uint64_t count{countHist->accumulate()};
+                    uint64_t timeUs{timeHist->accumulate()};
+                    uint64_t errors{errorHist->accumulate()};
+                    if (ioType == IoType::Read) {
+                        stats->read_ops.ok += count;
+                        stats->read_ops.err += errors;
+                        stats->read_bytes += bytes;
+                        stats->read_lat_sum_us += timeUs;
+                    }
+                    else {
+                        stats->write_ops.ok += count;
+                        stats->write_ops.err += errors;
+                        stats->write_bytes += bytes;
+                        stats->write_lat_sum_us += timeUs;
+                    }
+                }
+            }
+        }
+
+        stats->hdl_register_ops.ok = s->getFileRegistrations().load();
+        stats->buf_register_ops.ok = s->getBufferRegistrations().load();
+
+        if (stats->read_ops.ok > 0) {
+            stats->read_lat_avg_us = stats->read_lat_sum_us / stats->read_ops.ok;
+        }
+        if (stats->write_ops.ok > 0) {
+            stats->write_lat_avg_us = stats->write_lat_sum_us / stats->write_ops.ok;
+        }
+        if (stats->read_lat_sum_us > 0) {
+            stats->read_bw_bytes_per_sec = static_cast<uint64_t>(
+                static_cast<double>(stats->read_bytes) * 1e6 / static_cast<double>(stats->read_lat_sum_us));
+        }
+        if (stats->write_lat_sum_us > 0) {
+            stats->write_bw_bytes_per_sec = static_cast<uint64_t>(
+                static_cast<double>(stats->write_bytes) * 1e6 / static_cast<double>(stats->write_lat_sum_us));
+        }
+
+        return {hipFileSuccess, hipSuccess};
+    }
+    catch (...) {
+        return handle_exception();
+    }
 }
 
 hipFileError_t
