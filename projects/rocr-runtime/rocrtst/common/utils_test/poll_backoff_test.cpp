@@ -57,7 +57,7 @@ TEST(PollBackoffTest, CeilingIsFixedPoint) {
 // value never carries across waits.
 TEST(PollBackoffTest, ResetReturnsToFloor) {
   int nap = kPollNapFloorUs;
-  for (int i = 0; i < 10; ++i) nap = NextPollNapUs(nap);
+  while (nap < kPollNapCeilingUs) nap = NextPollNapUs(nap);
   EXPECT_EQ(nap, kPollNapCeilingUs);
 
   nap = kPollNapFloorUs;  // new wait begins

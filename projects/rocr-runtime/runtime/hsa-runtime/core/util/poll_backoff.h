@@ -2,7 +2,7 @@
 //
 //
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-/// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -55,9 +55,12 @@ constexpr int kPollNapCeilingUs = 2000;
 
 // Given the current nap duration, return the next one: double it, capped at
 // ceiling_us. Saturating at the ceiling is a fixed point, so repeated calls
-// converge to and stay at ceiling_us.
+// converge to and stay at ceiling_us. The multiply is only evaluated when
+// current_us <= ceiling_us/2, so current_us*2 <= ceiling_us and can never
+// overflow even for a ceiling_us up to INT_MAX.
 constexpr int NextPollNapUs(int current_us, int ceiling_us = kPollNapCeilingUs) {
-  return std::min(current_us * 2, ceiling_us);
+  return (current_us > ceiling_us / 2) ? ceiling_us
+                                       : std::min(current_us * 2, ceiling_us);
 }
 
 }  // namespace core

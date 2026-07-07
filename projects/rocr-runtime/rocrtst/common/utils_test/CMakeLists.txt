@@ -13,7 +13,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/utils)
 include_directories(${PROJECT_SOURCE_DIR}/gtest/include)
 # hsa-runtime source root, for the core/util/poll_backoff.h helper under test.
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
+include_directories(${PROJECT_SOURCE_DIR}/../runtime/hsa-runtime)
 
 #
 # Build rule to build an executable object

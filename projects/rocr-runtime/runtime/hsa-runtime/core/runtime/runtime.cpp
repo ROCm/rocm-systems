@@ -2125,9 +2125,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to a 2ms cap, so a wait that completes
           // quickly keeps low observation latency while a long-lived idle
-          // wait costs almost no CPU. Progress resets the escalation: a
-          // processed event leaves this inner loop, and the next wait starts
-          // again from the floor.
+          // wait costs almost no CPU. The nap is re-initialized at the
+          // outer-loop boundary (see poll_nap_us above), so the escalation
+          // only compounds within a single idle wait batch.
           os::uSleep(poll_nap_us);
           poll_nap_us = NextPollNapUs(poll_nap_us);
         }
