@@ -464,6 +464,23 @@ def test_vector_cmp_class_omits_redundant_mask_clears():
     assert 'vcc &= ~(1ULL << lane)' not in body
 
 
+def test_vop3_f16_cmp_class_uses_selected_mask_half():
+    for is_cmpx in (False, True):
+        body = gen_vector_cmp_class(
+            ['sdst'], ['src0', 'src1'], 'f16', is_cmpx=is_cmpx, is_vop3=True
+        )
+
+        assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+        assert (
+            'uint16_t s0_raw = static_cast<uint16_t>('
+            '::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));'
+        ) in body
+        assert (
+            'uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);'
+        ) in body
+        assert 'uint32_t mask = src1.read_lane(wf, lane);' not in body
+
+
 def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
     assert simd_probe_line('v_mul_lo_u16_vop3') is None
     assert simd_probe_line('v_mad_u16_vop3') is None
@@ -915,6 +932,89 @@ def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers():
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in body
     assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result)' in body
+
+
+def test_generated_special_vop3_true16_paths_use_selected_halves():
+    import pathlib
+
+    source_root = pathlib.Path(__file__).resolve().parents[4]
+    execute_shared = (
+        source_root
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'shared'
+        / 'execute_shared.h'
+    ).read_text()
+
+    def shared_body(name: str, next_name: str) -> str:
+        start = execute_shared.index(f'inline void execute_{name}')
+        end = execute_shared.index(f'inline void execute_{next_name}', start)
+        return execute_shared[start:end]
+
+    mad_u32 = shared_body('v_mad_u32_u16_vop3', 'v_mad_u32_u24_vop3')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_u32
+    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
+    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
+    assert 'read_vop3_true16_src(inst.src2' not in mad_u32
+    assert 'uint32_t s2 = inst.src2.read_lane(wf, lane);' in mad_u32
+
+    mad_i32 = shared_body('v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_i32
+    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_i32
+    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
+    assert 'read_vop3_true16_src(inst.src2' not in mad_i32
+    assert (
+        'int32_t s2 = static_cast<int32_t>(inst.src2.read_lane(wf, lane));' in mad_i32
+    )
+
+    div_fixup = shared_body('v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
+    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
+    assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
+    assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits)' in div_fixup
+
+    pack = shared_body('v_pack_b32_f16_vop3', 'v_perm_b32_vop3')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in pack
+    assert 'read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0)' in pack
+    assert 'read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1)' in pack
+
+
+def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves():
+    import pathlib
+
+    rdna4_vop3 = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / 'lib'
+        / 'rocjitsu'
+        / 'src'
+        / 'rocjitsu'
+        / 'isa'
+        / 'arch'
+        / 'amdgpu'
+        / 'rdna4'
+        / 'vop3.cpp'
+    ).read_text()
+
+    def local_body(class_name: str, next_class_name: str) -> str:
+        start = rdna4_vop3.index(f'void {class_name}::execute_impl')
+        end = rdna4_vop3.index(f'{next_class_name}::{next_class_name}', start)
+        return rdna4_vop3[start:end]
+
+    pack = local_body('VPackB32F16Vop3', 'VCvtPkNormI16F16Vop3')
+    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in pack
+    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in pack
+
+    pknorm = local_body('VCvtPkNormI16F16Vop3', 'VCvtPkNormU16F16Vop3')
+    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in pknorm
+    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in pknorm
+    assert 'float s0 = std::bit_cast<float>' not in pknorm
+    assert 'auto cvt_i16 = [](float f) -> int16_t {' in pknorm
 
 
 def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers():

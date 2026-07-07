@@ -13435,12 +13435,16 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float p = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    float p = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
     if (inst_.abs & (1u << 0))
       p = std::fabs(p);
     if (inst_.neg & (1u << 0))
@@ -13486,7 +13490,8 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       result *= 0.5f;
     if (inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    uint32_t result_bits = util::f32_to_f16(result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -13881,11 +13886,12 @@ void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFFu;
-    uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFFu;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     uint32_t s2 = src2.read_lane(wf, lane);
     vdst.write_lane(wf, lane, s0 * s1 + s2);
   }
@@ -13968,11 +13974,14 @@ void VMadI32I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int32_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    int32_t s0 = static_cast<int16_t>(s0_raw);
+    int32_t s1 = static_cast<int16_t>(s1_raw);
     int32_t s2 = static_cast<int32_t>(src2.read_lane(wf, lane));
     vdst.write_lane(wf, lane,
                     static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
@@ -16298,8 +16307,8 @@ void VPackB32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane) & 0xFFFF;
-    uint32_t s1 = src1.read_lane(wf, lane) & 0xFFFF;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.op_sel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.op_sel, 1);
     vdst.write_lane(wf, lane, s0 | (s1 << 16));
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -16378,15 +16387,17 @@ void VCvtPkNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
-    auto cvt_u16 = [](float f) -> uint16_t {
+    float s0 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.op_sel, 0)));
+    float s1 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.op_sel, 1)));
+    auto cvt_i16 = [](float f) -> int16_t {
       if (std::isnan(f))
         return 0;
-      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
     };
-    uint16_t lo = cvt_u16(s0);
-    uint16_t hi = cvt_u16(s1);
+    int16_t lo = cvt_i16(s0);
+    int16_t hi = cvt_i16(s1);
     vdst.write_lane(wf, lane,
                     (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
   }
@@ -16466,8 +16477,10 @@ void VCvtPkNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    float s0 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, inst_.op_sel, 0)));
+    float s1 = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, inst_.op_sel, 1)));
     auto cvt_u16 = [](float f) -> uint16_t {
       if (std::isnan(f))
         return 0;
@@ -26223,7 +26236,7 @@ void VCmpClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       s0_raw &= 0x7FFFu;
     if (inst_.neg & (1u << 0))
       s0_raw ^= 0x8000u;
-    uint32_t mask = src1.read_lane(wf, lane);
+    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     bool match = false;
     uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
     uint16_t f16_mant = s0_raw & 0x3FF;
@@ -34546,7 +34559,7 @@ void VCmpxClassF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       s0_raw &= 0x7FFFu;
     if (inst_.neg & (1u << 0))
       s0_raw ^= 0x8000u;
-    uint32_t mask = src1.read_lane(wf, lane);
+    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
     bool match = false;
     uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
     uint16_t f16_mant = s0_raw & 0x3FF;

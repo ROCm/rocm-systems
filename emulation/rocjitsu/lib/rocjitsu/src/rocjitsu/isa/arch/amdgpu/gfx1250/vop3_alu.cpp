@@ -9233,12 +9233,16 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (dpp_src1_)
     src1.set_delegate(dpp_src1_.get());
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float p = std::bit_cast<float>(src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(src2.read_lane(wf, lane));
+    float p = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
     if (inst_.abs & (1u << 0))
       p = std::fabs(p);
     if (inst_.neg & (1u << 0))
@@ -9284,7 +9288,8 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       result *= 0.5f;
     if (inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    uint32_t result_bits = util::f32_to_f16(result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,

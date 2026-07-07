@@ -274,6 +274,13 @@ inline uint32_t read_vop3_true16_src(const Operand &src, Wavefront &wf, uint32_t
   return value & 0xffffu;
 }
 
+inline util::native<uint32_t> select_vop3_true16_src(util::native<uint32_t> value, uint32_t opsel,
+                                                     uint32_t src_idx) {
+  if (opsel & (1u << src_idx))
+    value >>= 16;
+  return value & util::broadcast<uint32_t>(0xffffu);
+}
+
 template <typename Operand>
 inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t lane, uint32_t opsel,
                                   uint32_t value) {
@@ -499,6 +506,18 @@ inline void write_simd_at(VgprStorage *rd, const Op &op, Wavefront &wf, uint32_t
   alignas(util::native<T>) uint32_t buf[W];
   util::blit_to_buffer<T>(buf, v);
   op.write_lane_chunk(wf, base, static_cast<uint32_t>(W), buf, mask);
+}
+
+template <typename Op>
+  requires(util::has_stdx_simd)
+inline void write_vop3_true16_simd_at(VgprStorage *rd, const Op &op, Wavefront &wf, uint32_t base,
+                                      util::native<uint32_t> value, uint64_t mask, uint32_t opsel) {
+  const auto old = simd_load_or<uint32_t>(rd, base, util::native<uint32_t>{});
+  const auto src_half = value & util::broadcast<uint32_t>(0xffffu);
+  const auto merged = (opsel & 0x8u)
+                          ? ((old & util::broadcast<uint32_t>(0x0000ffffu)) | (src_half << 16))
+                          : ((old & util::broadcast<uint32_t>(0xffff0000u)) | src_half);
+  write_simd_at<uint32_t>(rd, op, wf, base, merged, mask);
 }
 
 /// Narrow (native_width64-wide) counterpart of write_simd_at, for the f64->32-bit
@@ -1460,13 +1479,11 @@ template <typename Inst, typename CmpOp>
 /// from the VOPC form in three ways, all handled here: (1) the result merges into
 /// an arbitrary SGPR-pair dst via `inst.vdst.read_scalar64`/`write_scalar64`, not
 /// the fixed VCC; (2) the per-instruction `abs`/`neg` source modifiers are applied
-/// to src0's raw bits before classification — `abs` clears the sign bit
-/// (`& ~signmask`), `neg` flips it (`^ signmask`), applied abs-then-neg to match
-/// the scalar body's std::fabs/negate (bit-identical incl. NaN); `signmask` is
-/// passed per op (0x8000 for f16, 0x80000000 for f32, since both share a uint32
-/// lane); (3) the class mask is read from `inst.src1`, not `inst.vsrc1`. The
-/// classify functor is identical to the VOPC class functor (it sees the already
-/// modified bits). Pure bit decode, bit-exact with the scalar body.
+/// to src0's selected raw bits before classification; `signmask` is passed per op
+/// (0x8000 for f16, 0x80000000 for f32, since both share a uint32 lane); (3) the
+/// class mask is read from `inst.src1`, not `inst.vsrc1`. For f16, both VOP3
+/// inputs are true16 operands, so op_sel selects each source half before the
+/// classify functor sees the value and mask.
 template <typename Inst, typename CmpOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3_class_b32_simd(Inst &inst, Wavefront &wf,
@@ -1479,6 +1496,8 @@ template <typename Inst, typename CmpOp>
   const uint64_t exec = wf.exec();
   const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
+  const bool true16 = signmask == 0x8000u;
+  const uint32_t opsel = true16 ? vop3_opsel(inst.inst_) : 0u;
   const auto sm = util::broadcast<T>(signmask);
   uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
@@ -1492,11 +1511,15 @@ template <typename Inst, typename CmpOp>
     if (chunk == 0)
       continue;
     auto a = simd_load_or<T>(r0, base, a_bcast);
+    auto b = simd_load_or<T>(r1, base, b_bcast);
+    if (true16) {
+      a = select_vop3_true16_src(a, opsel, 0);
+      b = select_vop3_true16_src(b, opsel, 1);
+    }
     if (do_abs)
       a = a & ~sm;
     if (do_neg)
       a = a ^ sm;
-    const auto b = simd_load_or<T>(r1, base, b_bcast);
     const auto m = cmp_op(a, b);
     uint64_t cmp_bits = 0;
     for (std::size_t i = 0; i < W; ++i)
@@ -1605,19 +1628,85 @@ template <typename T, typename Inst, typename BinOp>
   return false;
 }
 
+/// VOP3 binary operations whose operands are encoded as true16 sources but
+/// whose destination is a full b32 pack result.
+template <typename T, typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_true16_src_simd(Inst &inst, Wavefront &wf,
+                                                                  BinOp bin_op) {
+  static_assert(std::is_same_v<T, uint32_t>);
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
+  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_lane(wf, 0));
+  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_lane(wf, 0));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = select_vop3_true16_src(simd_load_or<T>(r0, base, a_bcast), opsel, 0);
+    const auto b = select_vop3_true16_src(simd_load_or<T>(r1, base, b_bcast), opsel, 1);
+    const auto r = bin_op(a, b);
+    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] bool try_execute_binary_vop3_true16_src_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
 /// VOP3 f16 binary fast path. The packed-f16 binary functors widen f16->f32
 /// inside `bin_op` and narrow back, but do NOT apply the VOP3 abs/neg/omod/clamp
 /// modifiers (there is no fp16 binary modifier glue, unlike the f32 path). The
 /// generated scalar body DOES apply them around the f16<->f32 round trip, so bail
-/// to scalar whenever any modifier field is set. VOP3 true16 op_sel needs packed
-/// source/destination-half merging, so it also stays on the scalar path. The
-/// common unmodified low-half case still takes the integer fast path.
+/// to scalar whenever any modifier field is set. Unmodified true16 OPSEL forms
+/// select source halves and merge the selected destination half here.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
+                                                           BinOp bin_op) {
+  static_assert(std::is_same_v<T, uint32_t>);
   if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
-      inst.inst_.clamp != 0u || vop3_opsel(inst.inst_) != 0u)
+      inst.inst_.clamp != 0u)
     return false;
-  return try_execute_binary_vop3_simd<T>(inst, wf, bin_op);
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  if (!rd)
+    return false;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
+  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
+  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_lane(wf, 0));
+  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_lane(wf, 0));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = select_vop3_true16_src(simd_load_or<T>(r0, base, a_bcast), opsel, 0);
+    const auto b = select_vop3_true16_src(simd_load_or<T>(r1, base, b_bcast), opsel, 1);
+    const auto r = bin_op(a, b);
+    write_vop3_true16_simd_at(rd, inst.vdst, wf, base, r, chunk, opsel);
+  }
+  return true;
+}
+
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &, Wavefront &, BinOp) {
+  return false;
 }
 
 /// VOP3 f32 binary SIMD fast path. Reads `src0`/`src1`, applies the per-source
@@ -1994,20 +2083,22 @@ template <typename Inst, typename UnOp>
 
 /// VOP3 f16 unary SIMD fast path. Mirrors the scalar body's
 /// f16_to_f32 -> abs/neg -> op -> omod/clamp -> f32_to_f16 chain:
-/// read raw uint32 lanes (low 16 = f16 bits), widen via util::f16_to_f32_simd,
+/// read selected true16 source halves, widen via util::f16_to_f32_simd,
 /// apply src0 abs/neg in f32, run `un_op` (`native<float> -> native<float>`),
-/// apply omod/clamp in f32, narrow via util::f32_to_f16_simd, write_simd<uint32_t>.
+/// apply omod/clamp in f32, narrow via util::f32_to_f16_simd, and merge the
+/// selected destination half.
 /// All steps bit-exact per the f16 VOP3 cmp slice's widening probe (f16_to_f32
-/// + f32_to_f16 verified exhaustive incl. NaN payload). High 16 bits of the dst
-/// are written zero (matching write_lane(f32_to_f16(...)) which zero-extends).
+/// + f32_to_f16 verified exhaustive incl. NaN payload).
 template <typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op) {
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (vop3_opsel(inst.inst_) != 0u)
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  if (!rd)
     return false;
   using T = uint32_t;
+  const uint32_t opsel = vop3_opsel(inst.inst_);
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
   const uint32_t omod = inst.inst_.omod;
@@ -2017,17 +2108,17 @@ template <typename Inst, typename UnOp>
   const uint64_t exec = wf.exec();
   // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
+  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_lane(wf, 0));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto in = util::f16_to_f32_simd(simd_load_or<T>(r0, base, a_bcast));
+    const auto in =
+        util::f16_to_f32_simd(select_vop3_true16_src(simd_load_or<T>(r0, base, a_bcast), opsel, 0));
     const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
     const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
-    write_simd_at<T>(rd, inst.vdst, wf, base, out, chunk);
+    write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel);
   }
   return true;
 }
@@ -2078,6 +2169,45 @@ template <typename T, typename Inst, typename TernOp>
 /// Unconstrained fallback for the VOP3 integer ternary path; see binary-path note.
 template <typename T, typename Inst, typename TernOp>
 [[nodiscard]] bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
+  return false;
+}
+
+/// VOP3 ternary operations with true16 SRC0/SRC1 and a full-width SRC2/result,
+/// such as V_MAD_[IU]32_[IU]16.
+template <typename T, typename Inst, typename TernOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_ternary_vop3_true16_src01_simd(Inst &inst, Wavefront &wf,
+                                                                     TernOp tern_op) {
+  static_assert(std::is_same_v<T, uint32_t>);
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
+      !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+    return false;
+  constexpr std::size_t W = util::native_width_v<T>;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
+  const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
+  const VgprStorage *r2 = simd_src_reg(inst.src2, wf);
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_lane(wf, 0));
+  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_lane(wf, 0));
+  const auto c_bcast = r2 ? util::native<T>{} : util::broadcast<T>(inst.src2.read_lane(wf, 0));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = select_vop3_true16_src(simd_load_or<T>(r0, base, a_bcast), opsel, 0);
+    const auto b = select_vop3_true16_src(simd_load_or<T>(r1, base, b_bcast), opsel, 1);
+    const auto c = simd_load_or<T>(r2, base, c_bcast);
+    const auto r = tern_op(a, b, c);
+    write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
+  }
+  return true;
+}
+
+template <typename T, typename Inst, typename TernOp>
+[[nodiscard]] bool try_execute_ternary_vop3_true16_src01_simd(Inst &, Wavefront &, TernOp) {
   return false;
 }
 
@@ -2137,9 +2267,11 @@ template <typename Inst, typename FmaOp>
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  if (vop3_opsel(inst.inst_) != 0u)
+  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
+  if (!rd)
     return false;
   using T = uint32_t;
+  const uint32_t opsel = vop3_opsel(inst.inst_);
   const uint32_t abs = inst.inst_.abs;
   const uint32_t neg = inst.inst_.neg;
   const uint32_t omod = inst.inst_.omod;
@@ -2151,23 +2283,25 @@ template <typename Inst, typename FmaOp>
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const VgprStorage *r2 = simd_src_reg(inst.src2, wf);
-  VgprStorage *rd = simd_dst_reg(inst.vdst, wf);
-  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
-  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_scalar(wf));
-  const auto c_bcast = r2 ? util::native<T>{} : util::broadcast<T>(inst.src2.read_scalar(wf));
+  const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_lane(wf, 0));
+  const auto b_bcast = r1 ? util::native<T>{} : util::broadcast<T>(inst.src1.read_lane(wf, 0));
+  const auto c_bcast = r2 ? util::native<T>{} : util::broadcast<T>(inst.src2.read_lane(wf, 0));
   for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(
-        util::f16_to_f32_simd(simd_load_or<T>(r0, base, a_bcast)), abs, neg);
+        util::f16_to_f32_simd(select_vop3_true16_src(simd_load_or<T>(r0, base, a_bcast), opsel, 0)),
+        abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(
-        util::f16_to_f32_simd(simd_load_or<T>(r1, base, b_bcast)), abs, neg);
+        util::f16_to_f32_simd(select_vop3_true16_src(simd_load_or<T>(r1, base, b_bcast), opsel, 1)),
+        abs, neg);
     const auto c = apply_vop3_src_mod_f32<2>(
-        util::f16_to_f32_simd(simd_load_or<T>(r2, base, c_bcast)), abs, neg);
+        util::f16_to_f32_simd(select_vop3_true16_src(simd_load_or<T>(r2, base, c_bcast), opsel, 2)),
+        abs, neg);
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
-    write_simd_at<T>(rd, inst.vdst, wf, base, out, chunk);
+    write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel);
   }
   return true;
 }
@@ -3857,6 +3991,12 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
   return
 
+/// VOP3 binary counterpart for true16 source selectors with a full b32 result,
+/// such as v_pack_b32_f16.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(T, ...)                                           \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__))       \
+  return
+
 /// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
 /// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
 /// set. `T` is the 32-bit packed lane type; variadic in the functor.
@@ -3925,6 +4065,11 @@ template <bool Vop3, typename Inst>
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
+  return
+
+/// VOP3 ternary counterpart for true16 SRC0/SRC1 plus full-width SRC2/result.
+#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(T, ...)                                        \
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_src01_simd<T>(inst, wf, __VA_ARGS__))    \
   return
 
 /// VOP3 f32 ternary counterpart (per-source abs/neg, result omod/clamp).

@@ -3730,7 +3730,7 @@ inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
       s0_raw &= 0x7FFFu;
     if (inst.inst_.neg & (1u << 0))
       s0_raw ^= 0x8000u;
-    uint32_t mask = inst.src1.read_lane(wf, lane);
+    uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
     bool match = false;
     uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
     uint16_t f16_mant = s0_raw & 0x3FF;
@@ -9315,9 +9315,11 @@ template <typename Inst>
 inline void execute_v_cvt_pk_norm_i16_f32_vop3([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));
-    auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));
-    return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu);
+    using U = util::native<uint32_t>;
+    auto lo = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(a));
+    auto hi = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(b));
+    return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |
+           (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu);
   });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -9325,13 +9327,13 @@ inline void execute_v_cvt_pk_norm_i16_f32_vop3([[maybe_unused]] Inst &inst,
       continue;
     float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
     float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    auto cvt_u16 = [](float f) -> uint16_t {
+    auto cvt_i16 = [](float f) -> int16_t {
       if (std::isnan(f))
         return 0;
-      return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+      return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
     };
-    uint16_t lo = cvt_u16(s0);
-    uint16_t hi = cvt_u16(s1);
+    int16_t lo = cvt_i16(s0);
+    int16_t hi = cvt_i16(s1);
     inst.vdst.write_lane(wf, lane,
                          (static_cast<uint32_t>(hi) << 16) | (static_cast<uint32_t>(lo) & 0xFFFF));
   }
@@ -9746,15 +9748,19 @@ inline void execute_v_cvt_u32_u16_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
       [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float p = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+    float p = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)));
     if (inst.inst_.abs & (1u << 0))
       p = std::fabs(p);
     if (inst.inst_.neg & (1u << 0))
@@ -9800,7 +9806,8 @@ inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
       result *= 0.5f;
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    uint32_t result_bits = util::f32_to_f16(result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits);
   }
 }
 
@@ -9929,15 +9936,19 @@ inline void execute_v_div_fixup_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_legacy_f16_vop3([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
       [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float p = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float b = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    float c = std::bit_cast<float>(inst.src2.read_lane(wf, lane));
+    float p = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(static_cast<uint16_t>(
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)));
     if (inst.inst_.abs & (1u << 0))
       p = std::fabs(p);
     if (inst.inst_.neg & (1u << 0))
@@ -9983,7 +9994,8 @@ inline void execute_v_div_fixup_legacy_f16_vop3([[maybe_unused]] Inst &inst,
       result *= 0.5f;
     if (inst.inst_.clamp)
       result = std::clamp(result, 0.0f, 1.0f);
-    inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(result));
+    uint32_t result_bits = util::f32_to_f16(result);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits);
   }
 }
 
@@ -12960,17 +12972,20 @@ inline void execute_v_mad_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_mad_i32_i16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, [](auto a, auto b, auto c) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(uint32_t, [](auto a, auto b, auto c) {
     auto sa = ::rocjitsu::amdgpu::simd_sign_extend_u32(a, 16);
     auto sb = ::rocjitsu::amdgpu::simd_sign_extend_u32(b, 16);
     return sa * sb + c;
   });
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int32_t s0 = static_cast<int16_t>(inst.src0.read_lane(wf, lane) & 0xFFFF);
-    int32_t s1 = static_cast<int16_t>(inst.src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t s0_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t s1_raw = ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    int32_t s0 = static_cast<int16_t>(s0_raw);
+    int32_t s1 = static_cast<int16_t>(s1_raw);
     int32_t s2 = static_cast<int32_t>(inst.src2.read_lane(wf, lane));
     inst.vdst.write_lane(wf, lane,
                          static_cast<uint32_t>(s0) * static_cast<uint32_t>(s1) +
@@ -13308,14 +13323,15 @@ inline void execute_v_mad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_v_mad_u32_u16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(
       uint32_t, [](auto a, auto b, auto c) { return (a & 0xFFFFu) * (b & 0xFFFFu) + c; });
   uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane) & 0xFFFFu;
-    uint32_t s1 = inst.src1.read_lane(wf, lane) & 0xFFFFu;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
     uint32_t s2 = inst.src2.read_lane(wf, lane);
     inst.vdst.write_lane(wf, lane, s0 * s1 + s2);
   }
@@ -16305,14 +16321,16 @@ inline void execute_v_or_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] 
 template <typename Inst>
 inline void execute_v_pack_b32_f16_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(
       uint32_t, [](auto a, auto b) { return (a & 0xFFFFu) | ((b & 0xFFFFu) << 16); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane) & 0xFFFF;
-    uint32_t s1 = inst.src1.read_lane(wf, lane) & 0xFFFF;
+    uint32_t s0 =
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0);
+    uint32_t s1 =
+        ::rocjitsu::amdgpu::read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1);
     inst.vdst.write_lane(wf, lane, s0 | (s1 << 16));
   }
 }
