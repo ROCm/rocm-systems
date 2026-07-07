@@ -30,18 +30,21 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# rocSHMEM needs an Open MPI launcher (mpirun / mpiexec) to bootstrap the symmetric heap,
-# so this integration test is only enabled when (a) the in-tree rocshmem-demo target is
-# built (which itself depends on rocshmem >= 3.3.0 + rocprofiler-register being
-# installed), and (b) an mpirun / mpiexec executable is on PATH. Allow root execution for
-# container CI (matches the mpi-ranks test pattern).
-find_program(MPIRUN_EXECUTABLE NAMES mpirun mpiexec)
+# Use the launcher (mpiexec) from the same MPI package the demo links against, rather than
+# an independent find_program search, so the launch MPI cannot diverge from the MPI
+# rocSHMEM and the demo were built against. find_package(MPI) provides MPIEXEC_EXECUTABLE
+# for this.
+find_package(MPI COMPONENTS CXX)
 
+# The integration test is only enabled when (a) the in-tree rocshmem-demo target is built
+# (which itself depends on rocshmem >= 3.3.0 + rocprofiler-register being installed), and
+# (b) an MPI launcher was located. The MPI env vars below assume Open MPI (matches the
+# mpi-ranks test pattern; allows root execution in container CI).
 set(IS_DISABLED OFF)
 if(NOT TARGET rocshmem-demo)
     set(IS_DISABLED ON)
 endif()
-if(NOT MPIRUN_EXECUTABLE)
+if(NOT MPIEXEC_EXECUTABLE)
     set(IS_DISABLED ON)
 endif()
 
@@ -68,7 +71,7 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocshmem-tracing
     COMMAND
-        ${MPIRUN_EXECUTABLE} -np 2 bash -c
+        ${MPIEXEC_EXECUTABLE} -np 2 bash -c
         "ROCPROFILER_TOOL_OUTPUT_FILE='${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-'\${OMPI_COMM_WORLD_RANK}.json exec timeout -k 5 30 '$<IF:$<TARGET_EXISTS:rocshmem-demo>,$<TARGET_FILE:rocshmem-demo>,rocshmem-demo>'"
     DEPENDS rocshmem-demo
     TIMEOUT 45
