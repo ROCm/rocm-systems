@@ -4,15 +4,22 @@
  * SPDX-License-Identifier: MIT
  */
 
-// Unit tests for amd::EraseCoveringMemObj -- the range-aware erase primitive
-// shared by MemObjMap::FindAndRemoveMemObj / RemoveMemObj / TryRemoveMemObj.
+// Unit tests for amd::EraseCoveringMemObj / amd::EraseCoveringMemObjIf -- the
+// range-aware erase primitive shared by MemObjMap::FindAndRemoveMemObj and the
+// identity-checked MemObjMap::TryRemoveMemObj.
 //
-// These pin the invariant that makes restoring the RemoveMemObj guarantee safe:
-// removal uses the same [base, base + size) range test as lookup, so any
-// pointer a lookup resolves -- including an interior address, not just the
-// exact base key -- is removable. A true miss (no covering allocation) returns
-// nullptr, which the caller turns into either a fatal guarantee or a logged
-// warning depending on whether absence is legitimate.
+// These pin two invariants:
+//
+// 1. Removal uses the same [base, base + size) range test as lookup
+//    (MemObjMap::FindMemObj), so any pointer a lookup resolves -- including an
+//    interior address, not just the exact base key -- is removable. A true
+//    miss (no covering allocation) returns nullptr and erases nothing.
+//
+// 2. The predicate variant erases only when the covering entry satisfies the
+//    caller's check. TryRemoveMemObj passes an identity predicate so that a
+//    pointer whose range happens to be covered by an *unrelated* allocation
+//    (per-device VA ranges can numerically overlap the global map's entries on
+//    Windows) never de-indexes that live allocation.
 
 #include "device/memobjmap_erase.hpp"
 
@@ -47,7 +54,7 @@ TEST(EraseCoveringMemObjTest, ExactBaseKeyRemovesEntry) {
   EXPECT_EQ(map.size(), 1u);
 }
 
-// The core asymmetry fix: an interior pointer (inside [base, base + size)) that
+// The asymmetry fix: an interior pointer (inside [base, base + size)) that
 // lookup would resolve is removable too, not only the exact base key.
 TEST(EraseCoveringMemObjTest, InteriorPointerRemovesCoveringEntry) {
   FakeMem a{0x1000, 0x1000};
@@ -115,6 +122,54 @@ TEST(EraseCoveringMemObjTest, SelectsCorrectCoveringEntryAmongMany) {
   EXPECT_EQ(removed, &b);
   EXPECT_EQ(map.count(0x2000), 0u);
   EXPECT_EQ(map.size(), 2u);
+}
+
+// When the covering entry is the object the caller expects, it is erased --
+// TryRemoveMemObj's happy path.
+TEST(EraseCoveringMemObjIfTest, MatchingPredicateErases) {
+  FakeMem a{0x1000, 0x1000};
+  Map map{{a.base, &a}};
+  const FakeMem* expected = &a;
+
+  FakeMem* removed = amd::EraseCoveringMemObjIf(
+      map, uintptr_t(0x1500), sizeOf, [expected](const FakeMem* m) { return m == expected; });
+
+  EXPECT_EQ(removed, &a);
+  EXPECT_TRUE(map.empty());
+}
+
+// The wrong-erase regression test: a pointer covered by an *unrelated*
+// allocation (overlapping per-device VA on Windows) must not de-index that
+// live entry when the caller expected a different object.
+TEST(EraseCoveringMemObjIfTest, RejectingPredicateLeavesEntry) {
+  FakeMem a{0x1000, 0x1000};
+  FakeMem other{0x9000, 0x1000};  // what the caller actually resolved
+  Map map{{a.base, &a}};
+  const FakeMem* expected = &other;
+
+  FakeMem* removed = amd::EraseCoveringMemObjIf(
+      map, uintptr_t(0x1500), sizeOf, [expected](const FakeMem* m) { return m == expected; });
+
+  EXPECT_EQ(removed, nullptr);
+  EXPECT_EQ(map.count(0x1000), 1u);  // a survives untouched
+}
+
+// The predicate is consulted only for a covering entry; a range miss returns
+// nullptr without ever invoking it.
+TEST(EraseCoveringMemObjIfTest, PredicateNotInvokedWithoutCoveringEntry) {
+  FakeMem a{0x1000, 0x1000};
+  Map map{{a.base, &a}};
+  int calls = 0;
+
+  FakeMem* removed = amd::EraseCoveringMemObjIf(map, uintptr_t(0x3000), sizeOf,
+                                                [&calls](const FakeMem*) {
+                                                  ++calls;
+                                                  return true;
+                                                });
+
+  EXPECT_EQ(removed, nullptr);
+  EXPECT_EQ(calls, 0);
+  EXPECT_EQ(map.size(), 1u);
 }
 
 }  // namespace
