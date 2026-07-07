@@ -106,6 +106,7 @@ The RCCL build and installation helper script options are as follows:
           --static                Build RCCL as a static library instead of shared library
        -t|--tests_build           Build rccl unit tests, but do not run
           --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
+          --ninja                 Use the Ninja generator instead of Make (requires `ninja-build`; recommended for multi-arch builds)
           --verbose               Show compile commands
 
      Available RCCL-specific CMake options for --cmake-options:
@@ -114,7 +115,6 @@ The RCCL build and installation helper script options are as follows:
        -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
        -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
        -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-       -DPROFILE=ON                          Enable profiling (default: OFF)
        -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
        -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
 
