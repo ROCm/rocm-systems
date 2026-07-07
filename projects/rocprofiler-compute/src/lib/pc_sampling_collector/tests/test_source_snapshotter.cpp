@@ -172,6 +172,28 @@ TEST_F(test_source_snapshotter_t, ProvidedAbsoluteError_SkipsIt)
     expect_no_copy();
 }
 
+TEST_F(test_source_snapshotter_t, ProvidedWeaklyCanonicalError_SkipsItAndContinues)
+{
+    const std::filesystem::path failed_source_path  = "/sources/failed.cpp";
+    const std::filesystem::path present_source_path = "/sources/present.cpp";
+    set_regular_source(failed_source_path);
+    set_regular_source(present_source_path);
+    m_filesystem->set_weakly_canonical_error(failed_source_path, permission_denied_error());
+    m_filesystem->set_weakly_canonical(present_source_path, present_source_path);
+
+    EXPECT_NO_THROW(
+        m_snapshotter->snapshot({failed_source_path, present_source_path}, m_destination_root));
+
+    const std::vector<std::filesystem::path> expected_canonical_calls = {failed_source_path,
+                                                                         present_source_path};
+    EXPECT_EQ(m_filesystem->get_weakly_canonical_calls(), expected_canonical_calls);
+    EXPECT_EQ(m_filesystem->get_relative_path_calls(),
+              std::vector<std::filesystem::path>{present_source_path});
+    ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
+    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].source, present_source_path);
+    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].destination, destination_path(present_source_path));
+}
+
 TEST_F(test_source_snapshotter_t, ProvidedMixedPresentAndMissingSources_CopiesOnlyPresent)
 {
     const std::filesystem::path present_source_path = "/sources/present.cpp";
@@ -227,36 +249,13 @@ TEST_F(test_source_snapshotter_t, ProvidedSameBasenameDifferentDirectories_Copie
                                      destination_path(second_source_path)));
 }
 
-TEST_F(test_source_snapshotter_t, ProvidedSymlinkToRegularFile_CopiesUsingSuppliedPath)
+TEST_F(test_source_snapshotter_t, ProvidedStatusError_SkipsIt)
 {
-    const std::filesystem::path symlink_source_path = "/linked_sources/kernel.cpp";
-    set_regular_source(symlink_source_path);
+    const std::filesystem::path source_path = "/sources/missing.cpp";
+    m_filesystem->set_status_error(source_path, missing_file_error());
 
-    EXPECT_NO_THROW(m_snapshotter->snapshot({symlink_source_path}, m_destination_root));
+    EXPECT_NO_THROW(m_snapshotter->snapshot({source_path}, m_destination_root));
 
-    ASSERT_EQ(m_filesystem->get_copy_file_calls().size(), 1);
-    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].source, symlink_source_path);
-    EXPECT_EQ(m_filesystem->get_copy_file_calls()[0].destination, destination_path(symlink_source_path));
-}
-
-TEST_F(test_source_snapshotter_t, ProvidedBrokenSymlink_SkipsIt)
-{
-    const std::filesystem::path symlink_source_path = "/linked_sources/missing.cpp";
-    m_filesystem->set_status_error(symlink_source_path, missing_file_error());
-
-    EXPECT_NO_THROW(m_snapshotter->snapshot({symlink_source_path}, m_destination_root));
-
-    EXPECT_EQ(m_filesystem->get_status_calls(), std::vector<std::filesystem::path>{symlink_source_path});
-    expect_no_copy();
-}
-
-TEST_F(test_source_snapshotter_t, ProvidedSymlinkToDirectory_SkipsIt)
-{
-    const std::filesystem::path symlink_source_path = "/linked_sources/include";
-    m_filesystem->set_status(symlink_source_path, directory_status());
-
-    EXPECT_NO_THROW(m_snapshotter->snapshot({symlink_source_path}, m_destination_root));
-
-    EXPECT_EQ(m_filesystem->get_status_calls(), std::vector<std::filesystem::path>{symlink_source_path});
+    EXPECT_EQ(m_filesystem->get_status_calls(), std::vector<std::filesystem::path>{source_path});
     expect_no_copy();
 }
