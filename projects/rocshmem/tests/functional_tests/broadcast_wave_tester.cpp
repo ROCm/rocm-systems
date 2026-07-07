@@ -110,7 +110,7 @@ BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
     num_teams = atoi(value);
   }
 
-  if (num_teams < num_warps){
+  if (num_teams < num_warps * args.num_wgs){
     printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
     abort();
   }
