@@ -297,6 +297,18 @@ void HostcallListener::consumePackets() {
         timeout = std::max(kTimeoutFloor, timeout);
         break;
       }
+      // The doorbell wait timed out without observing a value change. On most
+      // architectures the device-side doorbell ring reliably wakes this wait,
+      // but if a doorbell notification is ever missed (observed on some
+      // RDNA4/gfx120X configurations, see ROCm/rocm-systems / TheRock #6357) the
+      // wait would keep timing out forever while a ready SERVICE_PRINTF packet
+      // sits unserviced -- the requesting wave never unblocks and
+      // hipDeviceSynchronize deadlocks. To harden the servicing path against a
+      // lost doorbell wakeup, poll the ready stacks on timeout as well;
+      // processPackets() is a cheap no-op when nothing is ready.
+      if (!idle()) {
+        break;
+      }
       // Increase the timeout since we dont need to check as frequently
       timeout = timeout << 0x1;
       timeout = std::min(kTimeoutCeil, timeout);
