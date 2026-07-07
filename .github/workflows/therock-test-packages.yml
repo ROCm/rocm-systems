@@ -59,10 +59,24 @@ jobs:
           path: ci-config
         continue-on-error: true
 
+      # Skip setup-python for gfx125X runners (MI455) which have pyenv Python installed
+      # and older GLIBC that doesn't support actions/setup-python binaries
       - name: Setting up Python
+        if: ${{ !contains(inputs.amdgpu_families, 'gfx125X') }}
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: 3.12
+
+      # For gfx125X runners, use pyenv Python since system Python is too old
+      - name: Setup pyenv Python for MI455
+        if: ${{ contains(inputs.amdgpu_families, 'gfx125X') }}
+        run: |
+          export PYENV_ROOT="$HOME/.pyenv"
+          export PATH="$PYENV_ROOT/bin:$PATH"
+          eval "$(pyenv init -)"
+          echo "$PYENV_ROOT/bin" >> $GITHUB_PATH
+          echo "$PYENV_ROOT/shims" >> $GITHUB_PATH
+          python --version
 
       - name: "Configuring CI options"
         env:
