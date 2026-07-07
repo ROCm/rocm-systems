@@ -1533,7 +1533,16 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
     void* dev_ptr = nullptr;
     hipError_t r = hipHostGetDevicePointer(&dev_ptr, live_host, a->flags);
     if (r == hipSuccess) {
-        ctx.record_alloc(a->devPtr, dev_ptr, 0, AllocKind::DevicePtrAlias);
+        // For zero-copy host allocations the device pointer equals the host
+        // pointer, so a->devPtr collides with the recorded address of the
+        // owning hipHostMalloc/hipMalloc entry. Recording an alias here would
+        // overwrite that entry and downgrade its AllocKind to DevicePtrAlias,
+        // losing the info teardown needs to hipHostFree the pinned buffer —
+        // leaking it on any path that frees via alloc_map (e.g. the
+        // divergence-abort teardown, which runs before the replayed hipHostFree
+        // event). Only record a genuinely distinct alias.
+        if (!ctx.has_alloc(a->devPtr))
+            ctx.record_alloc(a->devPtr, dev_ptr, 0, AllocKind::DevicePtrAlias);
     }
     return r;
 }
