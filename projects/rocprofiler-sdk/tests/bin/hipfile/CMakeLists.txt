@@ -40,3 +40,16 @@ endif()
 add_executable(hipfile-trace-client hipfile_trace.cpp)
 target_link_libraries(hipfile-trace-client PRIVATE hip::hipfile)
 target_compile_definitions(hipfile-trace-client PRIVATE __HIP_PLATFORM_AMD__)
+
+if(DEFINED ROCM_PATH)
+    set(_hipfile_sysdeps_library_dir "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+elseif(DEFINED ENV{ROCM_PATH})
+    set(_hipfile_sysdeps_library_dir "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
+else()
+    set(_hipfile_sysdeps_library_dir "/opt/rocm/lib/rocm_sysdeps/lib")
+endif()
+
+if(EXISTS "${_hipfile_sysdeps_library_dir}")
+    target_link_options(hipfile-trace-client PRIVATE
+                        "LINKER:-rpath-link,${_hipfile_sysdeps_library_dir}")
+endif()

@@ -34,6 +34,23 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(HIPFILE_TRACE_ENVIRONMENT)
+if(DEFINED ROCM_PATH AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    set(HIPFILE_SYSDEPS_LIBRARY_DIR "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+elseif(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
+    set(HIPFILE_SYSDEPS_LIBRARY_DIR "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
+elseif(EXISTS "/opt/rocm/lib/rocm_sysdeps/lib")
+    set(HIPFILE_SYSDEPS_LIBRARY_DIR "/opt/rocm/lib/rocm_sysdeps/lib")
+endif()
+
+if(HIPFILE_SYSDEPS_LIBRARY_DIR)
+    list(
+        APPEND
+        HIPFILE_TRACE_ENVIRONMENT
+        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:${HIPFILE_SYSDEPS_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+        )
+endif()
+
 set(IS_DISABLED ON)
 if(TARGET hipfile-trace-client)
     set(IS_DISABLED OFF)
@@ -55,6 +72,7 @@ rocprofiler_add_integration_execute_test(
         "ROCPROFILER_TOOL_OUTPUT_FILE=hipfile-tracing-test.json"
         "ROCPROFILER_TOOL_CONTEXTS=HIPFILE_API_CALLBACK HIPFILE_API_BUFFERED HIPFILE_API_EXT_BUFFERED"
         "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
+        ${HIPFILE_TRACE_ENVIRONMENT}
     FIXTURES_SETUP hipfile-tracing)
 
 rocprofiler_add_integration_validate_test(
