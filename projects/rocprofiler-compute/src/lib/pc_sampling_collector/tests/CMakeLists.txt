@@ -19,6 +19,12 @@ target_link_libraries(
 )
 target_include_directories(${target} PUBLIC .)
 
+set_target_properties(
+    ${target}
+    PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME}"
+)
+
 if(INSTALL_TESTS)
     install(
         TARGETS ${target}
