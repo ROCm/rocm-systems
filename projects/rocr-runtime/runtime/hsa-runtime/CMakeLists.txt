@@ -229,6 +229,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/amd_cpu_agent.cpp
            core/runtime/amd_gpu_agent.cpp
            core/runtime/amd_hsa_loader.cpp
+           core/runtime/code_object_uri.cpp
            core/runtime/amd_aql_queue.cpp
            core/runtime/amd_sdma_queue.cpp
            core/runtime/amd_loader_context.cpp

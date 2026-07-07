@@ -503,11 +503,62 @@ TEST(HotswapRewrite, RuntimeLoadUsesRewrittenCodeObject) {
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_NE(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
   EXPECT_GT(load.calls[0].code_object_size, 0u);
-  EXPECT_EQ(load.calls[0].uri, "memory://gfx1250_min.hsaco");
+  // The rewritten object is registered under a memory:// URI that resolves to
+  // the rewritten bytes in this process (see GetUriFromMemoryAddress in
+  // code_object_uri.cpp), not the original code_object.uri.
+  EXPECT_NE(load.calls[0].uri, "memory://gfx1250_min.hsaco");
+  EXPECT_EQ(load.calls[0].uri.rfind("memory://", 0), 0u);
+  EXPECT_NE(load.calls[0].uri.find(
+                "&size=" + std::to_string(load.calls[0].code_object_size)),
+            std::string::npos);
   EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 1u);
 
   rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
   EXPECT_EQ(rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+}
+
+// The debugger (rocgdb / amd-dbgapi) fetches a loaded code object's bytes from
+// the URI the loader registers for it, then disassembles and resolves symbols
+// from those bytes. When hotswap replaces the code object with a rewritten one,
+// the GPU executes the rewritten bytes, so the registered URI must resolve to
+// *those* bytes for the debugger's view to match what actually runs.
+//
+// LoadAgentCodeObjectWithHotswap currently loads the rewritten bytes but
+// registers them under the original code_object.uri (pinned by
+// RuntimeLoadUsesRewrittenCodeObject above), which resolves to the original,
+// un-rewritten ELF. That produces the observed rocgdb behavior on
+// Unit_hipModuleGetGlobal_Functional: the debugger reads the ORIGINAL code
+// object (managed_kernel.code#offset=86016&size=3960, not the 4216-byte
+// transpiled one) and reports &x at the pre-transpilation address 0x...b878,
+// while the kernel actually uses the transpiled address 0x...b978.
+//
+// This FAILS against the current implementation (the rewritten load reuses the
+// original URI) and is expected to pass once the rewritten code object is
+// registered under a URI that resolves to the rewritten bytes (e.g. a memory://
+// URI backed by the retained rewritten buffer). It is the counterpart of the
+// uri check in RuntimeLoadUsesRewrittenCodeObject, which pins the current
+// behavior and should be reconciled when the fix lands.
+TEST(HotswapRewrite, RuntimeLoadRewrittenCodeObjectIsDebuggerVisible) {
+  ResetRuntimeTestEnv();
+  if (!NewComgrHotswapApiAvailable()) return;
+  LoadRecorder load;
+  hsa_loaded_code_object_t loaded{};
+  const hsa_executable_t executable = MakeTestExecutable(0x511);
+
+  const rocr::hotswap::CodeObjectView original = MakeRealCodeObjectView();
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), original, nullptr, &loaded,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 1u);
+  ASSERT_EQ(load.calls[0].path, LoadPath::kRewritten);
+  // The rewritten bytes are what execute; the debugger fetches from the URI, so
+  // the URI must not be the original code object's (which resolves to the
+  // original, un-rewritten bytes).
+  EXPECT_NE(load.calls[0].uri, original.uri);
+
+  rocr::hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
 }
 
 TEST(HotswapRewrite, RuntimeLoadNonA0DefaultsToOriginalWhenEntryTrampolinesUnset) {

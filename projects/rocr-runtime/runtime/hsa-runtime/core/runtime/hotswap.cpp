@@ -62,6 +62,7 @@
 #include <dlfcn.h>
 #endif
 
+#include "core/inc/code_object_uri.hpp"
 #include "core/inc/hotswap_gfx_query.hpp"
 #include "core/util/os.h"
 
@@ -693,9 +694,18 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
   if (retarget_result.status == RetargetCodeObjectStatus::kRewritten) {
     hsa_code_object_t rewritten_code_object = {
         reinterpret_cast<uint64_t>(rewritten_elf_buffer.get())};
+    // Name the loaded code object by the rewritten bytes, not code_object.uri
+    // (which points at the original, un-rewritten object). amd-dbgapi / rocgdb
+    // fetch a code object's contents from its URI to disassemble it and resolve
+    // symbols; reusing the original URI makes the debugger read a different code
+    // object than the one the GPU executes. RetainRewrittenElfBuffer() below
+    // keeps this buffer alive for the executable's lifetime, so the address in
+    // the URI stays valid; the pointer is unchanged by the std::move.
+    const std::string rewritten_uri = amd::hsa::loader::GetUriFromMemoryAddress(
+        rewritten_elf_buffer.get(), rewritten_elf_size);
     hsa_status_t status = callbacks.load_rewritten_code_object(
         callbacks.context, agent, rewritten_code_object, rewritten_elf_size, options,
-        code_object.uri, loaded_code_object);
+        rewritten_uri, loaded_code_object);
     if (status == HSA_STATUS_SUCCESS) {
       RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
       return status;

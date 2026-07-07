@@ -870,6 +870,7 @@ add_executable(hotswap_rewrite
   ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap_gfx_query.cpp
+  ${HSA_RUNTIME_ROOT}/core/runtime/code_object_uri.cpp
   "${HOTSWAP_GFX1250_HSACO_HDR}")
 add_dependencies(hotswap_rewrite hotswap_gfx1250_fixture)
 target_include_directories(hotswap_rewrite PRIVATE
