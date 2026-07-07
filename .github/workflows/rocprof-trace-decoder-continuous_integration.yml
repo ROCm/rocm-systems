@@ -12,6 +12,7 @@ on:
       - '!projects/rocprof-trace-decoder/docs/**'
       - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
   pull_request:
     paths:
       - 'projects/rocprof-trace-decoder/**'
@@ -20,6 +21,7 @@ on:
       - '!projects/rocprof-trace-decoder/docs/**'
       - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,11 +49,32 @@ env:
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocprof-trace-decoder projects/rocr-runtime projects/clr projects/hip"
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   build-and-test-ubuntu:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Build & Test • mi325 • Ubuntu 22.04
 
-    runs-on: linux-gfx942-1gpu-core42-ossci-rocm
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
       credentials:
@@ -117,15 +140,16 @@ jobs:
   # ---------------------------------------------------------------------------
   build-and-test-rocprofiler-sdk-rpm:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-9.5',  runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-    runs-on: ${{ matrix.system.runner }}
+          - { os: 'rhel-9.5',  gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -204,7 +228,7 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          ccache-key: sccache-trace-decoder-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: sccache-trace-decoder-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
       - name: Configure, Build, and Test
@@ -218,7 +242,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-trace-decoder-core \
             --mode ${CI_MODE} \
             --build-jobs 16 \
-            --site ${{ matrix.system.runner }} \
+            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             -- \

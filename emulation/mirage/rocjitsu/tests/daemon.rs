@@ -90,10 +90,12 @@ fn daemon_serves_handshake() {
     let version = u32::from_ne_bytes(payload[0..4].try_into().unwrap());
     let topo_len = u32::from_ne_bytes(payload[8..12].try_into().unwrap()) as usize;
     let drm_len = u32::from_ne_bytes(payload[12..16].try_into().unwrap()) as usize;
-    assert_eq!(version, 2, "protocol version should match the interposer");
+    assert_eq!(version, 3, "protocol version should match the interposer");
+    // RpcHandshakeResponse is 328 bytes (16 fixed fields + 312-byte
+    // RpcGpuInfo), then the topology and DRM path strings.
     assert_eq!(
         payload_bytes,
-        16 + topo_len + drm_len,
+        328 + topo_len + drm_len,
         "handshake payload framing should be self-consistent"
     );
     assert!(topo_len > 0, "daemon should report a sysfs topology path");

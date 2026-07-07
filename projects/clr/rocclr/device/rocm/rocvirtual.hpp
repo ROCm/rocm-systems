@@ -21,6 +21,7 @@
 #include <stack>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace amd::roc {
 class Device;
@@ -301,13 +302,6 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
-    //! Get/Set SDMA profiling
-    bool GetSDMAProfiling() { return sdma_profiling_; }
-    void SetSDMAProfiling(bool profile) {
-      sdma_profiling_ = profile;
-      Hsa::profiling_async_copy_enable(profile);
-    }
-
    private:
     //! Creates HSA signal with the specified scope
     bool CreateSignal(ProfilingSignal* signal, bool interrupt = false) const;
@@ -323,7 +317,6 @@ class VirtualGPU : public device::VirtualDevice {
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
     size_t current_id_ = 0;                          //!< Last submitted signal
-    bool sdma_profiling_ = false;                    //!< If TRUE, then SDMA profiling is enabled
     const VirtualGPU& gpu_;                          //!< VirtualGPU, associated with this tracker
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
@@ -489,6 +482,8 @@ class VirtualGPU : public device::VirtualDevice {
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
   void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
+  void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd);
+  void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
   void submitKernel(amd::NDRangeKernelCommand& cmd);
@@ -652,6 +647,9 @@ class VirtualGPU : public device::VirtualDevice {
   void* getOrCreateHostcallBuffer();
 
  private:
+  //! Release pinned memory after previously submitted work on the queue has completed.
+  void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 
@@ -727,40 +725,21 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
-  //! Track the progress of the queue based on the last write index and completion signal.
-  //! When skip_signal is true, only the write index is advanced and the completion signal
-  //! is cleared. Used for graph pre-patched dispatches whose signals are externally
-  //! managed and freed after graph completion.
+  //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
+  //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
+  //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
     last_write_index_ = index;
-    if (skip_signal) {
-      last_completion_signal_.handle = 0;
-    } else if (packet.completion_signal.handle != 0) {
+    if (!skip_signal && packet.completion_signal.handle != 0) {
       last_packet_with_signal_index_ = index;
-      last_completion_signal_ = packet.completion_signal;
     }
   }
 
-  //! Returns true if the queue is considered as idle. That means all submitted packets are
-  //! complete. Note: it doesn't track the state of caches
-  bool IsQueueIdle() const {
-    if (gpu_queue_ == nullptr) {
-      return true;
-    }
-
-    // Make sure the last packet contained a completion signal
-    if (last_packet_with_signal_index_ == last_write_index_) {
-      if ((last_write_index_ == kInvalidQueueIndex) && (last_completion_signal_.handle == 0)) {
-        return true;
-      } else {
-        return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
-      }
-    }
-
-    return false;
-  }
+  //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.
+  //! Note: it doesn't track the state of caches.
+  bool IsQueueIdle() const;
 
   //! True if this marker records the same event as the preceding barrier with no
   //! intervening dispatch or sync. Caller must hold the execution() lock.
@@ -818,6 +797,7 @@ class VirtualGPU : public device::VirtualDevice {
   };
 
   Timestamp* timestamp_;
+  bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
   amd::Command* command_;   //!< Current command
   //! Monotonic client coalesce id of the last barrier from submitMarker, used to
   //! coalesce consecutive records. Execution() lock only. 0 = no window open.
@@ -895,7 +875,6 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
-  hsa_signal_t last_completion_signal_{};     //!< The last completion signal
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations

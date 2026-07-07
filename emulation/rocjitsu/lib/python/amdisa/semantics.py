@@ -239,6 +239,22 @@ _SCC_NONE_OPS = frozenset(
 # Operations where SCC = (result == src0) i.e. "compare" semantics (min/max).
 _SCC_COMPARE_OPS = frozenset({'min', 'max'})
 
+_SOP1_SCC_NONE_OPS = frozenset(
+    {
+        'bitset0',
+        'bitset1',
+        # SOP1 scalar conversions preserve SCC; only count/bit-scan style
+        # scalar unary ops write SCC from the computed result.
+        'cvt_f16_f32',
+        'cvt_f32_f16',
+        'cvt_f32_i32',
+        'cvt_f32_u32',
+        'cvt_hi_f32_f16',
+        'cvt_i32_f32',
+        'cvt_u32_f32',
+    }
+)
+
 
 def _scalar_binop_scc(op: str, dtype: str) -> str:
     """Determine SCC semantics for a scalar binary operation."""
@@ -296,6 +312,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'branch', branch_condition='always')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
+    if name == 'S_TRAP':
+        # S_TRAP enters the trap handler instead of continuing with the next
+        # instruction. The simulator currently treats the instruction body as a
+        # stub, but DBT/CFG construction still needs the semantic class so the
+        # generated instruction metadata can mark it as a program terminator.
+        return InstructionSemantics(name, 'trap')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
@@ -317,8 +339,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
-    # S_BARRIER: workgroup synchronization. Set WfState::BARRIER.
-    if name == 'S_BARRIER':
+    # S_BARRIER_WAIT uses the existing whole-workgroup barrier model for the
+    # common split form where S_BARRIER_SIGNAL is immediately followed by
+    # S_BARRIER_WAIT. Arrival accounting and named-barrier ids are not modeled
+    # yet: signal stays a no-op, wait parks the wavefront, and CU release logic
+    # keys only on all non-halted sibling waves in the same workgroup.
+    if name in ('S_BARRIER', 'S_BARRIER_WAIT'):
         return InstructionSemantics(name, 'barrier')
 
     if name == 'S_SET_GPR_IDX_OFF':
@@ -472,7 +498,7 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             dtype = entry_dtype
         scc = None
         if cls == 'scalar_unary':
-            if op in ('bitset0', 'bitset1'):
+            if op in _SOP1_SCC_NONE_OPS:
                 scc = 'none'
             else:
                 scc = 'nonzero'
