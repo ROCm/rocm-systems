@@ -22,6 +22,8 @@ namespace rocjitsu {
 
 namespace fs = std::filesystem;
 
+namespace {
+
 uint32_t debug_capability_for(uint32_t gfx_target_version) {
   // gfx9 (CDNA) supports the base KFD debugger API but not the "precise
   // memory/ALU operations" bits, which were only added for later firmware on
@@ -59,6 +61,8 @@ uint64_t debug_prop_for(uint32_t /*gfx_target_version*/) {
           HSA_DBG_WATCH_ADDR_MASK_HI_BIT_MASK) |
          HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
 }
+
+} // namespace
 
 Sysfs::~Sysfs() { cleanup(); }
 

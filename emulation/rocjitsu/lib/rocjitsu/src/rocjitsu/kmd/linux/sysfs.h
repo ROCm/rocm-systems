@@ -13,27 +13,6 @@
 
 namespace rocjitsu {
 
-/// @brief Compute the default (auto-generated) `capability` bits advertised
-/// for a simulated GPU node, gated by its `gfx_target_version`.
-///
-/// @details Used by Sysfs::write_gpu_node() when GpuInfo::capability is left
-/// at 0 (auto-compute). Includes the KFD debugger API bits
-/// (HSA_CAP_TRAP_DEBUG_*) required for rocdbgapi to recognize the agent as
-/// debuggable, with newer "precise" debug bits gated to the architectures
-/// that actually support them.
-uint32_t default_capability_for(uint32_t gfx_target_version);
-
-/// @brief Compute the KFD debugger API capability bits (HSA_CAP_TRAP_DEBUG_*)
-/// for a simulated GPU node, gated by its `gfx_target_version`.
-uint32_t debug_capability_for(uint32_t gfx_target_version);
-
-/// @brief Compute the default (auto-generated) `debug_prop` bits advertised
-/// for a simulated GPU node, gated by its `gfx_target_version`.
-///
-/// @details Used by Sysfs::write_gpu_node() when GpuInfo::debug_prop is left
-/// at 0 (auto-compute).
-uint64_t debug_prop_for(uint32_t gfx_target_version);
-
 /// @brief Generates a sysfs-compatible KFD topology directory for ROCR discovery.
 ///
 /// @details ROCR's libhsakmt reads GPU topology from
