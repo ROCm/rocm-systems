@@ -97,30 +97,32 @@ virtualMemoryManagement:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemCreate_Capture: *level_2
+  # (amd_linux) host-NUMA VMM tests are temporarily disabled on Linux CI: on the
+  # CI kernel/driver stack, direct CPU access to a host-resident VMM allocation
+  # faults with SIGBUS even though hsa_amd_vmem_set_access() reports success. The
+  # same code works on bare-metal gfx942/gfx950; ROCr is investigating. Re-enable
+  # once the runtime fix lands.
   Unit_hipMemCreate_HostNuma_Granularity:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_BasicAllocDealloc:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_ChkWithKerLaunch:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_HostAndDeviceAccess:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_NumaTypedAccess:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemCreate_HostNuma_Negative:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemCreate_HostNuma_DiagDump:
-    <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
