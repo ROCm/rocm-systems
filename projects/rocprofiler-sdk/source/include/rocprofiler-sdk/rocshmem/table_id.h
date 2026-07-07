@@ -26,6 +26,6 @@
 typedef enum rocprofiler_rocshmem_table_id_t
 {
     ROCPROFILER_ROCSHMEM_TABLE_ID_NONE = -1,
-    ROCPROFILER_ROCSHMEM_TABLE_ID      = 0,
+    ROCPROFILER_ROCSHMEM_TABLE_ID_CORE = 0,
     ROCPROFILER_ROCSHMEM_TABLE_ID_LAST,
 } rocprofiler_rocshmem_table_id_t;

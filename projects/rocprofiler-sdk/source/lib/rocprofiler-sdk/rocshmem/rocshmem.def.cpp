@@ -43,7 +43,7 @@ struct rocshmem_domain_info<ROCPROFILER_ROCSHMEM_TABLE_ID_LAST>
 };
 
 template <>
-struct rocshmem_domain_info<ROCPROFILER_ROCSHMEM_TABLE_ID>
+struct rocshmem_domain_info<ROCPROFILER_ROCSHMEM_TABLE_ID_CORE>
 : rocshmem_domain_info<ROCPROFILER_ROCSHMEM_TABLE_ID_LAST>
 {
     using enum_type                               = rocprofiler_rocshmem_api_id_t;
@@ -63,17 +63,17 @@ struct rocshmem_domain_info<ROCPROFILER_ROCSHMEM_TABLE_ID>
     ROCPROFILER_LIB_ROCPROFILER_SDK_ROCSHMEM_ROCSHMEM_CPP_IMPL == 1
 
 // clang-format off
-ROCSHMEM_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_ROCSHMEM_TABLE_ID, rocshmem_api_func_table_t)
+ROCSHMEM_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, rocshmem_api_func_table_t)
 
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_barrier_all_on_stream, barrier_all_on_stream, barrier_all_on_stream_fn, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_quiet_on_stream, quiet_on_stream, quiet_on_stream_fn, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_sync_all_on_stream, sync_all_on_stream, sync_all_on_stream_fn, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_alltoallmem_on_stream, alltoallmem_on_stream, alltoallmem_on_stream_fn, team, dest, source, size, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_broadcastmem_on_stream, broadcastmem_on_stream, broadcastmem_on_stream_fn, team, dest, source, nelems, pe_root, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_getmem_on_stream, getmem_on_stream, getmem_on_stream_fn, dest, source, nelems, pe, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_putmem_on_stream, putmem_on_stream, putmem_on_stream_fn, dest, source, nelems, pe, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_putmem_signal_on_stream, putmem_signal_on_stream, putmem_signal_on_stream_fn, dest, source, nelems, sig_addr, signal, sig_op, pe, stream)
-ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID, ROCPROFILER_ROCSHMEM_API_ID_signal_wait_until_on_stream, signal_wait_until_on_stream, signal_wait_until_on_stream_fn, sig_addr, cmp, cmp_value, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_barrier_all_on_stream, barrier_all_on_stream, barrier_all_on_stream_fn, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_quiet_on_stream, quiet_on_stream, quiet_on_stream_fn, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_sync_all_on_stream, sync_all_on_stream, sync_all_on_stream_fn, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_alltoallmem_on_stream, alltoallmem_on_stream, alltoallmem_on_stream_fn, team, dest, source, size, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_broadcastmem_on_stream, broadcastmem_on_stream, broadcastmem_on_stream_fn, team, dest, source, nelems, pe_root, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_getmem_on_stream, getmem_on_stream, getmem_on_stream_fn, dest, source, nelems, pe, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_putmem_on_stream, putmem_on_stream, putmem_on_stream_fn, dest, source, nelems, pe, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_putmem_signal_on_stream, putmem_signal_on_stream, putmem_signal_on_stream_fn, dest, source, nelems, sig_addr, signal, sig_op, pe, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_signal_wait_until_on_stream, signal_wait_until_on_stream, signal_wait_until_on_stream_fn, sig_addr, cmp, cmp_value, stream)
 // clang-format on
 
 #else

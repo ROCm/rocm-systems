@@ -634,6 +634,6 @@ using rocshmem_op_args_bf_t = rocprofiler_buffer_tracing_operation_args_cb_t;
     template void iterate_args<TABLE_IDX>(                                                                \
         uint32_t, const rocshmem_api_data_t&, rocshmem_op_args_bf_t, void*);
 
-INSTANTIATE_ROCSHMEM_TABLE_FUNC(rocshmem_api_func_table_t, ROCPROFILER_ROCSHMEM_TABLE_ID)
+INSTANTIATE_ROCSHMEM_TABLE_FUNC(rocshmem_api_func_table_t, ROCPROFILER_ROCSHMEM_TABLE_ID_CORE)
 }  // namespace rocshmem
 }  // namespace rocprofiler
