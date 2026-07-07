@@ -841,7 +841,16 @@ namespace elf {
 
     const char* GElfSegment::data() const
     {
-      return (const char*) elf->data() + phdr.p_offset;
+      if (!elf->buffer || elf->bufferSize == 0) {
+        return nullptr;
+      }
+      if (phdr.p_offset > elf->bufferSize) {
+        return nullptr;
+      }
+      if (phdr.p_filesz > elf->bufferSize - phdr.p_offset) {
+        return nullptr;
+      }
+      return elf->buffer + phdr.p_offset;
     }
 
     bool GElfImage::Freeze()
