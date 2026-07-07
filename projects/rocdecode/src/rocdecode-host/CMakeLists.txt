@@ -39,9 +39,11 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+if(NOT WIN32)
+  if (NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 # rocdecode-host Version
@@ -57,10 +59,12 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(Threads QUIET)
-find_package(rocprofiler-register QUIET)
+if(NOT WIN32)
+  find_package(rocprofiler-register QUIET)
+endif()
 find_package(FFmpeg QUIET)
 
-if(HIP_FOUND AND Threads_FOUND AND FFMPEG_FOUND)
+if(HIP_FOUND AND FFMPEG_FOUND AND (WIN32 OR Threads_FOUND))
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
   # FFMPEG
@@ -76,24 +80,28 @@ if(HIP_FOUND AND Threads_FOUND AND FFMPEG_FOUND)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../api ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../rocdecode ${CMAKE_CURRENT_SOURCE_DIR}/../parser)
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-  # rocdecode-host.so
+  # rocdecode-host shared library
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
+  if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  endif()
 
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
   # FFMPEG multi-version support
   if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100) #FFmpeg version <= 4.4
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_58_134=0)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_60_31=0)
   elseif(_FFMPEG_AVCODEC_VERSION VERSION_GREATER 58.134.100 AND _FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 60.31.100) #FFmpeg version >= 4.4 && version < 6.1
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=0)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_58_134=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_60_31=0)
   else()
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0) #FFmpeg version >= 6.1
-    target_compile_definitions(${PROJECT_NAME} PUBLIC USE_AVCODEC_GREATER_THAN_60_31=1)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_58_134=0) #FFmpeg version >= 6.1
+    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_AVCODEC_GREATER_THAN_60_31=1)
   endif() #FFMpeg version >= 7.1
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-  if(USING_THE_ROCK)
+  if(USING_THE_ROCK AND NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
   endif()
 
@@ -104,9 +112,16 @@ if(HIP_FOUND AND Threads_FOUND AND FFMPEG_FOUND)
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/../../api/rocdecode-host_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-host_version.h @ONLY )
 
   # install rocdecode-host libs -- {ROCM_PATH}/lib
-  set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  if(WIN32)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  else()
+    set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  endif()
   # install rocdecode include files -- {ROCM_PATH}/include/rocdecode
   install(FILES ${PROJECT_SOURCE_DIR}/../../api/rocdecode/rocdecode_host.h 
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocdecode)
@@ -163,7 +178,7 @@ else()
   if (NOT HIP_FOUND)
       message(FATAL_ERROR "-- ERROR!: HIP Not Found!")
   endif()
-  if (NOT Threads_FOUND)
+  if (NOT WIN32 AND NOT Threads_FOUND)
       message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
   if (NOT FFMPEG_FOUND)
