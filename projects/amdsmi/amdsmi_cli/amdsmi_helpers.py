@@ -57,6 +57,10 @@ class AMDSMIHelpers:
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR
         )
 
+        # Per-device failure aggregator for the record-then-finalize exit-code
+        # model. See amdsmi_cli_exceptions.AmdSmiErrorCollector.
+        self.error_collector = amdsmi_cli_exceptions.AmdSmiErrorCollector()
+
         # Check if the system is a virtual OS
         if self.operating_system.startswith("Linux"):
             self._is_linux = True
@@ -874,6 +878,65 @@ class AMDSMIHelpers:
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
         )
 
+    def run_device_subcommand(self, subcommand, args, **device_kwarg):
+        """Run one device's subcommand as part of a multi-device loop.
+
+        Safety net for the record-then-finalize model: a DEVICE-severity failure
+        (or a raw library error that a handler forgot to convert) is recorded and
+        we keep going to the next device. A FATAL failure propagates and aborts
+        the whole command, as intended.
+        """
+        try:
+            subcommand(args, multiple_devices=True, **device_kwarg)
+        except amdsmi_cli_exceptions.AmdSmiException as e:
+            if e.severity != amdsmi_cli_exceptions.AmdSmiErrorSeverity.DEVICE:
+                raise
+            # A device-scoped CLI error; prefer its underlying library status
+            # code when present so it matches the record-and-return path.
+            if hasattr(e, "smilibcode"):
+                self.error_collector.record_library_error(e.smilibcode)
+            else:
+                self.error_collector.record(e.value)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            # NO_PERM is the one command-wide fatal: a permission problem affects
+            # every device, so abort the whole command instead of recording it as
+            # a per-device error and continuing. Backstops any handler that failed
+            # to convert NO_PERM before it escapes here.
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            self.error_collector.record_library_error(e.get_error_code())
+
+    def store_device_error(self, logger, device, key, message, exception=None, code=None):
+        """Show a per-device error AND record it for the final exit code.
+
+        Record-then-finalize helper: fuses "show" + "count" so a per-device
+        branch can't display an error but forget to record it (which silently
+        leaves the exit code at 0). Pass ``exception=`` for a library failure
+        (surfaces its AMDSMI_STATUS_*) or ``code=`` for a CLI-level failure.
+        Iteration continues.
+
+        When to use what:
+          - success             -> logger.store_output(...); do NOT record.
+          - per-device failure  -> store_device_error(exception=e | code=X)   <- prefer this
+          - system-wide (gtt)   -> logger.output[key]=... + error_collector.record_library_error(...)
+          - aggregated dict     -> record per failing sub-step, one store_output at the end
+            (e.g. reset --clocks)
+
+        exception= (record_library_error) = a caught AmdSmiLibraryException;
+        code= (record) = a CLI decision with no library call.
+        """
+        if exception is None and code is None:
+            raise TypeError(
+                "store_device_error requires exception= (library failure) or "
+                "code= (CLI failure); showing an error without recording it "
+                "would leave the exit code at 0"
+            )
+        logger.store_output(device, key, message)
+        if exception is not None:
+            self.error_collector.record_library_error(exception.get_error_code())
+        else:
+            self.error_collector.record(code)
+
     def handle_gpus(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of gpus passed in via args.
@@ -894,8 +957,8 @@ class AMDSMIHelpers:
         if isinstance(args.gpu, list):
             if len(args.gpu) > 1:
                 for device_handle in args.gpu:
-                    # Handle multiple_devices to print all output at once
-                    subcommand(args, multiple_devices=True, gpu=device_handle)
+                    # Record per-device failures and keep going; print all at once
+                    self.run_device_subcommand(subcommand, args, gpu=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.gpu
             elif len(args.gpu) == 1:
@@ -1048,8 +1111,8 @@ class AMDSMIHelpers:
         if isinstance(args.cpu, list):
             if len(args.cpu) > 1:
                 for device_handle in args.cpu:
-                    # Handle multiple_devices to print all output at once
-                    subcommand(args, multiple_devices=True, cpu=device_handle)
+                    # Record per-device failures and keep going; print all at once
+                    self.run_device_subcommand(subcommand, args, cpu=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.cpu
             elif len(args.cpu) == 1:
@@ -1078,8 +1141,8 @@ class AMDSMIHelpers:
         if isinstance(args.core, list):
             if len(args.core) > 1:
                 for device_handle in args.core:
-                    # Handle multiple_devices to print all output at once
-                    subcommand(args, multiple_devices=True, core=device_handle)
+                    # Record per-device failures and keep going; print all at once
+                    self.run_device_subcommand(subcommand, args, core=device_handle)
                 logger.print_output(multiple_device_enabled=True)
                 return True, args.core
             elif len(args.core) == 1:
@@ -1827,7 +1890,8 @@ class AMDSMIHelpers:
         if user_input in ["y", "Y", "yes", "Yes", "YES"]:
             return
         else:
-            sys.exit("Confirmation not given. Exiting without setting value")
+            print("Confirmation not given. Exiting without setting value", file=sys.stderr)
+            sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
 
     def confirm_changing_memory_partition_gpu_reload_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
@@ -1867,7 +1931,7 @@ class AMDSMIHelpers:
             return
         else:
             print("Confirmation not given. Exiting without setting value")
-            sys.exit(1)
+            sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
 
     def is_valid_profile(self, profile):
         profile_presets = (
@@ -3176,6 +3240,9 @@ class AMDSMIHelpers:
                     }
                 return f"{power_type_key} power cap is already set to {requested_power_cap}W"
             elif current_power_cap == 0:
+                self.error_collector.record(
+                    int(amdsmi_cli_exceptions.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
+                )
                 if logger.is_json_format() or logger.is_csv_format():
                     return {
                         "status": "error",
@@ -3186,13 +3253,25 @@ class AMDSMIHelpers:
                     }
                 return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
             elif not min_power_cap <= requested_power_cap <= max_power_cap:
-                # Raise so the caller exits with a non-zero return code
-                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
-                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
-                    f"{requested_power_cap}W",
-                    self.get_output_format(),
-                    hint=f"Power cap must be between {min_power_cap}W and {max_power_cap}W",
+                # Record this device's out-of-range failure and keep going:
+                # another device may have a different valid range (e.g. a higher
+                # max), so it could still succeed. Raising here would abort the
+                # whole loop before the other GPUs are tried (record-then-finalize).
+                self.error_collector.record(
+                    int(amdsmi_cli_exceptions.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
                 )
+                message = (
+                    f"Unable to set {power_type_key} power cap to {requested_power_cap}W. "
+                    f"Power cap must be between {min_power_cap}W and {max_power_cap}W"
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "sensor": power_type_key,
+                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                        "message": message,
+                    }
+                return message
             # Set the power cap
             new_power_cap = self.convert_SI_unit(
                 requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO
@@ -3210,6 +3289,7 @@ class AMDSMIHelpers:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                 raise PermissionError("Command requires elevation") from e
             error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap}W"
+            self.error_collector.record_library_error(e.get_error_code())
             if logger.is_json_format() or logger.is_csv_format():
                 return {
                     "status": "error",
