@@ -794,8 +794,10 @@ bool Segment::IsAddressInSegment(uint64_t addr, size_t copy_size)
 {
   if (addr < vaddr) { return false; }
   const uint64_t offset = addr - vaddr;
-  // Overflow-safe check of offset + copy_size <= size.
-  return offset <= size && copy_size <= size - offset;
+  // Mirror the 1-arg bound (offset < size, i.e. addr < vaddr + size). Express
+  // the exclusive end offset + copy_size <= size without overflow via
+  // copy_size <= size - offset (equivalent to addr + copy_size <= vaddr + size).
+  return offset < size && copy_size <= size - offset;
 }
 
 bool Segment::Copy(uint64_t addr, const void* src, size_t size)
@@ -1524,6 +1526,8 @@ hsa_status_t ExecutableImpl::LoadSegmentV1(hsa_agent_t agent,
     void* ptr = context_->SegmentAlloc(segment, agent, s->memSize(), s->align(), true);
     if (!ptr) { return HSA_STATUS_ERROR_OUT_OF_RESOURCES; }
     new_seg = std::make_shared<Segment>(this, agent, segment, ptr, s->memSize(), s->vaddr(), s->offset());
+    // Copy() return unchecked: imageSize <= memSize was validated above and the
+    // destination is this segment's own [vaddr, vaddr + imageSize) range.
     new_seg->Copy(s->vaddr(), segment_data, s->imageSize());
     objects.push_back(new_seg);
 
@@ -1769,6 +1773,8 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
       // removed.
       uint64_t target_address = sym->GetSection()->addr() + sym->SectionOffset() + ((size_t)(&((amd_kernel_code_t*)0)->runtime_loader_kernel_symbol));
       uint64_t source_value = (uint64_t) (uintptr_t) &kernel_symbol->debug_info;
+      // Copy() return unchecked: debugger backdoor for compiler-generated kernel
+      // symbols; target is a fixed offsetof within the symbol's loaded section.
       SymbolSegment(agent, sym)->Copy(target_address, &source_value, sizeof(source_value));
   } else {
     assert(!"Unexpected symbol type in LoadDefinitionSymbol");
@@ -1900,6 +1906,8 @@ hsa_status_t ExecutableImpl::ApplyStaticRelocation(hsa_agent_t agent, amd::hsa::
   // SectionSegment() returns nullptr when no loaded segment covers the target
   // section (crafted sh_info/sh_addr); reject rather than dereferencing it.
   if (!rseg) { return HSA_STATUS_ERROR_INVALID_CODE_OBJECT; }
+  // sec->addr() + rel->offset() can wrap on crafted input; Copy()'s range check
+  // rejects any wrapped destination that falls outside the target segment.
   size_t reladdr = sec->addr() + rel->offset();
   switch (rel->type()) {
     case R_AMDGPU_V1_32_LOW:
