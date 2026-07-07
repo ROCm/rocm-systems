@@ -174,6 +174,12 @@ runs:
         export HIP_PLATFORM=amd
         export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
+        if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then
+          install -D -m 0644 \
+            "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" \
+            "${ROCM_PATH}/include/libmount/libmount.h"
+        fi
         echo "Install hipFILE..."
         cmake -B build-hipfile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
