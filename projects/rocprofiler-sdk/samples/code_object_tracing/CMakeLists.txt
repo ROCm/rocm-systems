@@ -43,10 +43,12 @@ target_link_libraries(
     code-object-tracing PRIVATE code-object-tracing-client Threads::Threads
                                 rocprofiler-sdk::samples-build-flags)
 
+rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
+set(code-object-tracing-env ${ROCPROFILER_MEMCHECK_PRELOAD_ENV} ${LIBRARY_PATH_ENV})
+
 add_test(NAME code-object-tracing COMMAND $<TARGET_FILE:code-object-tracing>)
 
 set_tests_properties(
     code-object-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${code-object-tracing-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

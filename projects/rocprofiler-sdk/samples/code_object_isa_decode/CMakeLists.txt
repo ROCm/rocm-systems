@@ -48,10 +48,12 @@ target_link_libraries(
             amd_comgr rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV)
+rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
+set(code-object-isa-decode-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
 add_test(NAME code-object-isa-decode COMMAND $<TARGET_FILE:code-object-isa-decode>)
 
 set_tests_properties(
     code-object-isa-decode
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${PRELOAD_ENV}"
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${code-object-isa-decode-env}"
                FAIL_REGULAR_EXPRESSION "threw an exception")

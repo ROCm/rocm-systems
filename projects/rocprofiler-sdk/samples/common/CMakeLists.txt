@@ -84,6 +84,13 @@ function(rocprofiler_samples_get_ld_library_path_env _VAR)
         endif()
         string(APPEND _LDLIB_PATH "$<TARGET_FILE_DIR:${_TARG}>:")
     endforeach()
+    get_target_property(_LIBDW_LIBRARIES libdw::libdw INTERFACE_LINK_LIBRARIES)
+    foreach(_LIBDW_LIBRARY IN LISTS _LIBDW_LIBRARIES)
+        if(IS_ABSOLUTE "${_LIBDW_LIBRARY}" AND _LIBDW_LIBRARY MATCHES "/rocm_sysdeps/")
+            cmake_path(GET _LIBDW_LIBRARY PARENT_PATH _LIBDW_LIBRARY_DIR)
+            string(APPEND _LDLIB_PATH "${_LIBDW_LIBRARY_DIR}:")
+        endif()
+    endforeach()
     # append the environments current LD_LIBRARY_PATH
     string(APPEND _LDLIB_PATH "$ENV{LD_LIBRARY_PATH}")
 
