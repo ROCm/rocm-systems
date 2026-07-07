@@ -56,30 +56,34 @@ __global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start
                                   long long int *end_time, T1 *source_buf,
                                   T1 *dest_buf, int size,
                                   ShmemContextType ctx_type,
-                                  rocshmem_team_t *teams) {
+                                  rocshmem_team_t *teams, int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
+  int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
+  int wf_id = t_id / wf_size;
+  int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
 
-  rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
+  int flat_wf_id = wf_id + wg_offset;
+
+  rocshmem_wg_team_create_ctx(teams[flat_wf_id], ctx_type, &ctx);
 
   [[maybe_unused]] int n_pes = rocshmem_ctx_n_pes(ctx);
-  source_buf += wg_id * size;
-  dest_buf += wg_id * size;
+  source_buf += flat_wf_id * size;
+  dest_buf += flat_wf_id * size;
 
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip && hipThreadIdx_x == 0) {
-      start_time[wg_id] = wall_clock64();
+    if (i == skip && t_id % wf_size == 0) {
+      start_time[flat_wf_id] = wall_clock64();
     }
-    if (threadIdx.x < warpSize)
-    wave_broadcast<T1>(ctx, teams[wg_id], dest_buf, source_buf, size, 0);
+    wave_broadcast<T1>(ctx, teams[flat_wf_id], dest_buf, source_buf, size, 0);
   }
 
   __syncthreads();
 
-  if (hipThreadIdx_x == 0) {
-    end_time[wg_id] = wall_clock64();
+  if (t_id % wf_size == 0) {
+    end_time[flat_wf_id] = wall_clock64();
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -95,7 +99,7 @@ BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs * num_warps;
   int buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
@@ -104,6 +108,11 @@ BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
+  }
+
+  if (num_teams < num_warps){
+    printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
+    abort();
   }
 
   CHECK_HIP(hipMalloc(&bcast_wave_world_dup,
@@ -142,10 +151,10 @@ void BroadcastWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(BroadcastWaveTestKernel<T1>, gridSize, blockSize,
                      shared_bytes, stream, loop, args.skip,
                      start_time, end_time, source_buf, dest_buf,
-                     num_elems, _shmem_context, bcast_wave_world_dup);
+                     num_elems, _shmem_context, bcast_wave_world_dup, wf_size);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop * gridSize.x;
+  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_timed_msgs = loop * gridSize.x * num_warps;
 }
 
 template <typename T1>
@@ -165,19 +174,13 @@ void BroadcastWaveTester<T1>::resetBuffers(size_t size) {
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
       idx = wg_id * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
-                    std::is_same<T1, unsigned char>::value) {
-        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id);
-        dest_buf[idx] = static_cast<T1>('a' + wg_id);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id);
         dest_buf[idx] = static_cast<T1>(3.14 + wg_id);
       }
-      else if constexpr (std::is_integral<T1>::value) {
-        source_buf[idx] = static_cast<T1>(n_pes + wg_id);
-        dest_buf[idx] = static_cast<T1>(wg_id);
+      else {
+        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id);
+        dest_buf[idx] = static_cast<T1>('a' + wg_id);
       }
     }
   }
@@ -195,16 +198,11 @@ void BroadcastWaveTester<T1>::verifyResults(size_t size) {
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
-                    std::is_same<T1, unsigned char>::value) {
-        expected = static_cast<T1>('a' + wg_id + n_pes);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
+      if constexpr (std::is_floating_point<T1>::value) {
         expected = static_cast<T1>(3.14 + wg_id + n_pes);
       }
-      else if constexpr (std::is_integral<T1>::value) {
-        expected = static_cast<T1>(wg_id + n_pes);
+      else {
+        expected = static_cast<T1>('a' + wg_id + n_pes);
       }
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at idx " << idx << std::endl;
