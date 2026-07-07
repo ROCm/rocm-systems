@@ -128,7 +128,7 @@ class AieAqlQueue : public core::Queue,
   std::atomic<bool> active_ = false;
   /// @brief Set when the queue is suspended after an error; no further packets are submitted.
   /// Only accessed on the packet-submission path, so it does not need to be atomic.
-  bool suspended_;
+  bool suspended_ = false;
   /// @brief Per-queue error callback registered at queue creation.
   AMD::callback_t<core::HsaEventCallback> errors_callback_;
   /// @brief User data passed to @ref errors_callback_.
