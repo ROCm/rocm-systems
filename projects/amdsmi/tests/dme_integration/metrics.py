@@ -13,7 +13,7 @@ a real Prometheus exposition-format check that asserts:
 When ``--gpu-agent-pid-file`` is provided, the verification is aware of GPU
 Agent health.  If GPU Agent crashed (common with ABI mismatches between
 AMDSMI versions), the step emits a warning and exits 0 rather than blocking
-the entire CI — the underlying infrastructure (build, deploy, service
+the entire CI. The underlying infrastructure (build, deploy, service
 management) is still validated.
 """
 
@@ -46,10 +46,24 @@ _SAMPLE_RE = re.compile(
 # Device Metrics Exporter once GPU Agent is up. Override via CLI flag.
 _DEFAULT_REQUIRED_METRICS = ("gpu_edge_temperature", "gpu_power_usage", "gpu_gfx_activity")
 
+# Anchored crash indicators for GPU Agent logs. Word-boundary/line-anchored
+# regexes avoid false positives on benign gRPC lines like
+# "Connection Aborted by peer" or "core dumped".
+_CRASH_RES = [
+    re.compile(p, re.MULTILINE)
+    for p in (
+        r"\*\*\* stack smashing detected",
+        r"^Segmentation fault",
+        r"^Aborted$",
+        r"\bSIGSEGV\b",
+        r"\bSIGABRT\b",
+    )
+]
+
 
 def _fetch(url: str, timeout: float) -> tuple[int, str]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
             return resp.status, resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, ""
@@ -98,15 +112,7 @@ def _gpu_agent_crashed(log_file: Path) -> bool:
         return False
     try:
         log_content = log_file.read_text(errors="replace")
-        crash_indicators = [
-            "stack smashing detected",
-            "Segmentation fault",
-            "Aborted",
-            "core dumped",
-            "SIGSEGV",
-            "SIGABRT",
-        ]
-        return any(indicator in log_content for indicator in crash_indicators)
+        return any(r.search(log_content) for r in _CRASH_RES)
     except OSError:
         return False
 
@@ -124,13 +130,13 @@ def verify(
 ) -> None:
     body = ""
     last_status = 0
+    exposed: set[str] = set()
     for attempt in range(1, max_retries + 1):
         logger.info("attempt %d/%d: GET %s", attempt, max_retries, url)
         status, body = _fetch(url, timeout=request_timeout)
         last_status = status
         if status == 200 and body:
-            # Check if required metrics are present; if not, retry
-            # (the GPU Agent → DME pipeline may need warm-up time).
+            # Retry if required metrics are missing; the pipeline may need warm-up.
             exposed = _exposed_metric_names(body)
             missing = [m for m in required_metrics if m not in exposed]
             if not missing:
@@ -142,13 +148,19 @@ def verify(
             )
         else:
             logger.info("HTTP %s -- retrying in %.1fs", status, retry_delay)
-        time.sleep(retry_delay)
+        if attempt < max_retries:
+            time.sleep(retry_delay)
     else:
-        # All retries exhausted — either endpoint unreachable or metrics incomplete.
+        # All retries exhausted: endpoint unreachable or metrics incomplete.
         if last_status != 200:
             gh_error(
                 f"Metrics endpoint unreachable after {max_retries} attempts "
                 f"(last status {last_status})"
+            )
+            raise SystemExit(1)
+        if not body:
+            gh_error(
+                f"Metrics endpoint returned HTTP 200 with empty body after {max_retries} attempts"
             )
             raise SystemExit(1)
 
@@ -160,7 +172,7 @@ def verify(
     _assert_prometheus_format(body)
     logger.info("Prometheus exposition format OK")
 
-    exposed = _exposed_metric_names(body)
+    # Reuse the ``exposed`` set already computed in the retry loop above.
     missing = [m for m in required_metrics if m not in exposed]
     if not missing:
         logger.info(
@@ -170,25 +182,20 @@ def verify(
         )
         return
 
-    # Required metrics are missing after all retries. Check if GPU Agent is
-    # alive — if it crashed, this is an upstream ABI compatibility issue, not
-    # a bug in our code.
+    # Metrics missing: a crashed GPU Agent is an upstream ABI issue, not our bug.
     gpu_agent_alive = True
     if gpu_agent_pid_file is not None:
         pid = _read_pid_file(gpu_agent_pid_file)
         logger.info("GPU Agent PID file: %s, PID: %s", gpu_agent_pid_file, pid)
         if pid is None:
-            # PID file missing or invalid → assume GPU Agent crashed
             logger.info("GPU Agent PID file invalid or missing")
             gpu_agent_alive = False
         else:
-            # Check both process status AND log file for crash indicators.
-            # GPU Agent may be in zombie state after crash, so os.kill(pid, 0)
-            # succeeds but the process is actually dead.
+            # A crashed process can linger as a zombie, so os.kill(pid, 0)
+            # succeeds; also scan the log for crash indicators.
             gpu_agent_alive = _process_alive(pid)
             logger.info("GPU Agent process (PID %s) alive: %s", pid, gpu_agent_alive)
 
-            # Even if process appears alive, check log for crash indicators
             if gpu_agent_alive and gpu_agent_log_file is not None:
                 if _gpu_agent_crashed(gpu_agent_log_file):
                     logger.info("GPU Agent log contains crash indicators (zombie process)")
@@ -207,7 +214,7 @@ def verify(
         )
         return
 
-    # GPU Agent is alive (or we can't check) but metrics are still missing — hard fail.
+    # GPU Agent is alive (or uncheckable) but metrics are still missing: hard fail.
     gh_error("Required GPU metrics missing from /metrics: " + ", ".join(missing))
     sample = ", ".join(sorted(exposed)[:20])
     gh_warning(f"Exposed metrics (sample): {sample}")

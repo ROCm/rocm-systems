@@ -1,6 +1,6 @@
 # dme_integration
 
-CI helpers for the **DME ↔ AMDSMI integration workflow**
+CI helpers for the **DME <-> AMDSMI integration workflow**
 ([`.github/workflows/dme-amdsmi-ci.yml`](../../../../.github/workflows/dme-amdsmi-ci.yml)).
 
 The workflow used to inline ~340 lines of bash across a dozen `run:`
@@ -17,10 +17,10 @@ blocks. Those blocks moved here so they are:
 
 | Module | Replaces |
 | --- | --- |
-| `submodules.py` | DME clone + `.gitmodules` SSH→HTTPS rewrite + protobuf-submodule guard |
+| `submodules.py` | DME clone + `.gitmodules` SSH->HTTPS rewrite + protobuf-submodule guard |
 | `build_env.py` | gpu-agent symlink + AMDSMI header/lib copies |
 | `gpp_wrapper.py` | The inline `printf '#!/bin/sh\nexec g++ "$@" -lunwind\n'` heredoc |
-| `services.py` | `nohup … &` start blocks + cleanup loop, with real TCP port-readiness checks |
+| `services.py` | `nohup ... &` start blocks + cleanup loop, with real TCP port-readiness checks |
 | `metrics.py` | The curl/grep loop, with assertions on required GPU metric names |
 | `__main__.py` | Single CLI dispatcher (`python3 -m dme_integration <subcommand>`) |
 | `_common.py` | Shared subprocess + GitHub Actions log helpers |
@@ -31,7 +31,7 @@ blocks. Those blocks moved here so they are:
 
 | Requirement | Notes |
 | --- | --- |
-| Python ≥ 3.9 | Uses only the standard library. No `pip install`, no `requirements.txt`. |
+| Python >= 3.9 | Uses only the standard library. No `pip install`, no `requirements.txt`. |
 | `git` | For `prepare-submodules`. |
 | `make`, `cmake`, `g++` | For Phase 1/3 of the workflow (these are *not* invoked by the helpers; the workflow calls them directly). |
 | AMDSMI installed under `/opt/rocm` (or another prefix you pass) | Required only by `prepare-build-env`. |
@@ -47,11 +47,11 @@ The package is not on `PYTHONPATH` by default, so run from the
 `projects/amdsmi/tests/` directory **or** export `PYTHONPATH`:
 
 ```bash
-# Option A — change into the package's parent directory
+# Option A - change into the package's parent directory
 cd projects/amdsmi/tests
 python3 -m dme_integration --help
 
-# Option B — set PYTHONPATH from anywhere in the repo
+# Option B - set PYTHONPATH from anywhere in the repo
 PYTHONPATH=projects/amdsmi/tests python3 -m dme_integration --help
 ```
 
@@ -59,7 +59,7 @@ Every subcommand supports `--help` and `--verbose`. Errors from CI
 helpers print `::error::` markers that GitHub Actions surfaces in the
 job summary; locally they just go to stderr.
 
-### `write-gpp-wrapper` — emit the g++ shim
+### `write-gpp-wrapper` - emit the g++ shim
 
 ```bash
 python3 -m dme_integration write-gpp-wrapper --output /tmp/g++-wrap
@@ -68,7 +68,7 @@ cat /tmp/g++-wrap
 # exec g++ "$@" -lunwind
 ```
 
-### `verify-metrics` — Prometheus endpoint check
+### `verify-metrics` - Prometheus endpoint check
 
 Asserts that the endpoint returns HTTP 200, parses as Prometheus
 exposition text, and contains the named metrics. Default required set
@@ -81,8 +81,20 @@ python3 -m dme_integration verify-metrics \
     --max-retries 5 --retry-delay 2 \
     --required-metric gpu_edge_temperature \
     --required-metric gpu_power_usage \
+    --gpu-agent-pid-file /tmp/gpuagent.pid \
+    --gpu-agent-log-file /tmp/gpuagent.log \
     --output /tmp/captured.txt
 ```
+
+`--gpu-agent-pid-file` and `--gpu-agent-log-file` make the check aware of
+GPU Agent health. When the required GPU metrics are missing **and** the
+GPU Agent is detected as crashed (dead PID, missing PID file, or crash
+indicators such as `Segmentation fault` / `stack smashing detected` in
+its log, typically an ABI mismatch with `libamd_smi.so`),
+`verify-metrics` emits a `::warning::` and exits 0 (**soft-pass**) instead
+of failing. The build/deploy/service-management infrastructure is still
+validated; only the GPU-metric assertion is skipped. If the GPU Agent is
+alive but the metrics are still missing, the check hard-fails (exit 1).
 
 Failure path against a closed port:
 
@@ -93,7 +105,7 @@ python3 -m dme_integration verify-metrics \
 # exit code 1
 ```
 
-### `start-service` / `stop-service` — supervised process
+### `start-service` / `stop-service` - supervised process
 
 Starts a binary detached, redirects stdout+stderr to `--log-file`,
 writes its PID to `--pid-file`, and waits for `--ready-port` to accept
@@ -112,11 +124,28 @@ python3 -m dme_integration start-service \
     --ready-timeout 30 \
     --ld-library-path /opt/rocm/lib
 
-# Stop (SIGTERM → SIGKILL after 2s if still alive)
+# Stop (SIGTERM -> SIGKILL after 2s if still alive)
 python3 -m dme_integration stop-service --name dme --pid-file /tmp/dme.pid
 ```
 
-### `prepare-submodules` — clone DME and init nested submodules
+### `check-alive`: post-start liveness check
+
+Waits `--delay` seconds and then verifies the process recorded in
+`--pid-file` is still running. Used as a post-start health check to catch
+services that launch but crash immediately (e.g. ABI-mismatch segfaults
+or stack-smashing aborts that `start-service` may miss). Exits 0 if the
+process is alive, or 1 with an `::error::` (tailing `--log-file` when
+given) if it died.
+
+```bash
+python3 -m dme_integration check-alive \
+    --name gpuagent \
+    --pid-file /tmp/gpuagent.pid \
+    --log-file /tmp/gpuagent.log \
+    --delay 2
+```
+
+### `prepare-submodules` - clone DME and init nested submodules
 
 > **Destructive.** Removes `--dme-dir` if it exists. Runs network git
 > clones. Don't point this at a directory you care about.
@@ -130,7 +159,7 @@ python3 -m dme_integration prepare-submodules \
     --gpu-agent-branch main
 ```
 
-### `prepare-build-env` — lay out gpu-agent build tree
+### `prepare-build-env` - lay out gpu-agent build tree
 
 > **Destructive.** Symlinks `--gpu-agent-workdir` (replacing it if it
 > exists) and copies AMDSMI headers/libs into the gpu-agent tree.
@@ -221,7 +250,7 @@ self-hosted) Ubuntu container:
 - Every step in
   [`dme-amdsmi-ci.yml`](../../../../.github/workflows/dme-amdsmi-ci.yml)
   sets `working-directory: ${{ env.AMDSMI_TESTS_DIR }}` before invoking
-  `python3 -m dme_integration …`, which puts CWD on `sys.path` so the
+  `python3 -m dme_integration ...`, which puts CWD on `sys.path` so the
   package imports cleanly without `PYTHONPATH`.
 - Log lines that need to surface in the GitHub Actions UI use the
   workflow-command markers (`::group::`, `::error::`, `::warning::`)
@@ -241,9 +270,21 @@ cd "$AMDSMI_TESTS_DIR"
 python3 -m dme_integration prepare-submodules \
     --dme-repo "$DME_REPO" --dme-branch "$DME_BRANCH" --dme-dir "$DME_DIR" \
     --gpu-agent-repo "$GPU_AGENT_REPO" --gpu-agent-branch "$GPU_AGENT_BRANCH"
-# … then prepare-build-env, build with cmake/make as in the workflow,
+# ... then prepare-build-env, build with cmake/make as in the workflow,
 #    start-service for gpuagent + dme, verify-metrics, stop-service.
 ```
+
+---
+
+## CI gating status
+
+GPU-metric verification is currently **non-gating**: when the GPU Agent
+crashes (see `verify-metrics` above), the step soft-passes with a
+`::warning::` and exits 0. A green check therefore only guarantees that
+the build, deploy, and service-management path works. It does **not** by
+itself confirm that GPU metrics were validated. Check the job log for the
+`GPU Agent process died` warning to tell a real GPU-metric pass from a
+soft-pass.
 
 ---
 
@@ -252,11 +293,11 @@ python3 -m dme_integration prepare-submodules \
 These helpers exist because of bugs upstream that we cannot easily fix
 in this repo. When upstream lands a fix, delete the matching helper:
 
-- **`gpp_wrapper.py`** — appends `-lunwind` to every `g++` link line
+- **`gpp_wrapper.py`** - appends `-lunwind` to every `g++` link line
   because gpu-agent's hard-coded `LDFLAGS` omit it but `libzmq.a`
   references libunwind symbols. Delete when upstream gpu-agent fixes
   its `LDFLAGS`.
-- **`submodules._rewrite_gitmodules_ssh_to_https`** — rewrites SSH
+- **`submodules._rewrite_gitmodules_ssh_to_https`** - rewrites SSH
   GitHub URLs in gpu-agent's nested `.gitmodules`. Delete once upstream
   switches all dependency URLs to HTTPS.
 

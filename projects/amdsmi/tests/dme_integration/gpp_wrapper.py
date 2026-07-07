@@ -15,8 +15,8 @@ fixed.
 """
 
 import argparse
-import os
 import sys
+import tempfile
 from pathlib import Path
 
 _WRAPPER_TEMPLATE = '#!/bin/sh\nexec g++ "$@" -lunwind\n'
@@ -26,7 +26,6 @@ def write_wrapper(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(_WRAPPER_TEMPLATE)
     destination.chmod(0o755)
-    os.sync()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("/tmp/g++-wrap"),
+        default=Path(tempfile.gettempdir()) / "g++-wrap",
         help="Path to write the wrapper script.",
     )
     args = parser.parse_args(argv)

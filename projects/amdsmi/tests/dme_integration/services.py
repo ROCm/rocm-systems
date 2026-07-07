@@ -84,10 +84,10 @@ def start(
 
     cmd = [str(binary), *(args or [])]
     logger.info("starting %s: %s", name, " ".join(cmd))
-    log_handle = log_file.open("wb")
-    proc = subprocess.Popen(
-        cmd, stdout=log_handle, stderr=subprocess.STDOUT, env=env, start_new_session=True
-    )
+    with log_file.open("wb") as log_handle:
+        proc = subprocess.Popen(
+            cmd, stdout=log_handle, stderr=subprocess.STDOUT, env=env, start_new_session=True
+        )
     pid_file.parent.mkdir(parents=True, exist_ok=True)
     pid_file.write_text(str(proc.pid))
     logger.info("%s pid=%s log=%s", name, proc.pid, log_file)

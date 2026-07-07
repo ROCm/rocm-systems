@@ -1,15 +1,15 @@
-# ──────────────────────────────────────────────────────────────
-# DME ↔ AMDSMI Integration CI
-# ──────────────────────────────────────────────────────────────
+# --------------------------------------------------------------
+# DME <-> AMDSMI Integration CI
+# --------------------------------------------------------------
 # Architecture:
-#   GPU-Agent (C++) ──gRPC──▶ DME (Go) ──▶ Prometheus /metrics
-#       │                        │
-#       └── libamdsmi.so ◀───────┘  (built from projects/amdsmi)
+#   GPU-Agent (C++) --gRPC--> DME (Go) --> Prometheus /metrics
+#       |                        |
+#       +-- libamdsmi.so <-------+  (built from projects/amdsmi)
 #
 # The heavy lifting lives in Python helpers under
 # projects/amdsmi/tests/dme_integration/. Run any phase locally with:
 #     python3 -m dme_integration <subcommand>
-# ──────────────────────────────────────────────────────────────
+# --------------------------------------------------------------
 
 name: DME AMDSMI Integration CI
 
@@ -67,14 +67,18 @@ env:
   # Pinned versions for go-installed protobuf plugins (reproducible builds)
   PROTOC_GEN_GO_VERSION: v1.34.2
   PROTOC_GEN_GO_GRPC_VERSION: v1.5.1
-  # TODO: gogo/protobuf is archived upstream — track gpu-agent migration
+  # TODO: gogo/protobuf is archived upstream - track gpu-agent migration
   # away from gogofast and remove this pin when it is no longer needed.
   PROTOC_GEN_GOGOFAST_VERSION: v1.3.2
 
 jobs:
   integration-test:
-    name: DME Integration • ${{ matrix.os }}
-    runs-on: ${{ vars.RUNNER_TYPE }}
+    name: DME Integration * ${{ matrix.os }}
+    # Privileged self-hosted GPU runner: never auto-run untrusted fork-PR code on it.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -89,16 +93,19 @@ jobs:
         --group-add video
 
     steps:
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
       # Setup
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
       - name: Checkout Super-repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Locate AMDSMI Project
         run: |
-          PROJECT_DIR=$(find "$(pwd)" -maxdepth 3 -name "CMakeLists.txt" \
-            -path "*/amdsmi/*" -exec dirname {} \; | head -1)
+          set -euo pipefail
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE" -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \; | head -1)
           if [ -z "${PROJECT_DIR}" ]; then
             echo "::error::Could not locate projects/amdsmi/CMakeLists.txt"
             exit 1
@@ -126,11 +133,10 @@ jobs:
             autoconf automake libtool unzip \
             libunwind-dev python3
 
-      # actions/setup-go pins by version + checksum. Resolves the previous
-      # wget-and-trust pattern that performed no integrity check on the
-      # downloaded Go toolchain.
+      # actions/setup-go verifies the toolchain by version + checksum,
+      # unlike a bare wget download.
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -142,9 +148,9 @@ jobs:
           go install github.com/gogo/protobuf/protoc-gen-gogofast@${{ env.PROTOC_GEN_GOGOFAST_VERSION }}
           echo "${HOME}/go/bin" >> "$GITHUB_PATH"
 
-      # ────────────────────────────────────────────────────────
-      # Phase 1 — Build AMDSMI from the mono-repo
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
+      # Phase 1 - Build AMDSMI from the mono-repo
+      # --------------------------------------------------------
       - name: Build and Install AMDSMI
         run: |
           set -euo pipefail
@@ -166,9 +172,9 @@ jobs:
           ls -la /opt/rocm/lib/libamd_smi.so*
           ls /opt/rocm/include/amd_smi/ | head -10
 
-      # ────────────────────────────────────────────────────────
-      # Phase 2 — Clone DME and prepare submodules
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
+      # Phase 2 - Clone DME and prepare submodules
+      # --------------------------------------------------------
       - name: Prepare DME Submodules
         working-directory: ${{ env.AMDSMI_TESTS_DIR }}
         run: |
@@ -187,16 +193,15 @@ jobs:
             --gpu-agent-workdir "${GPU_AGENT_WORKDIR}" \
             --rocm-dir /opt/rocm
 
-      # ────────────────────────────────────────────────────────
-      # Phase 3 — Build GPU Agent (C++ binary)
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
+      # Phase 3 - Build GPU Agent (C++ binary)
+      # --------------------------------------------------------
       - name: Build GPU Agent Third-party Libraries
         timeout-minutes: 60
         working-directory: ${{ env.GPU_AGENT_WORKDIR }}/sw/nic/gpuagent
         run: |
           set -euo pipefail
-          set -o pipefail
-          echo "Building third-party C++ libraries (protobuf, gRPC, abseil, …)"
+          echo "Building third-party C++ libraries (protobuf, gRPC, abseil, ...)"
           echo "::group::build-libs"
           make build-libs 2>&1 | tee /tmp/build-libs.log | tail -200
           echo "::endgroup::"
@@ -215,7 +220,7 @@ jobs:
           # libzmq.a references libunwind symbols (_Ux86_64_getcontext etc.)
           # but the Makefile's hardcoded LDFLAGS omit -lunwind. The wrapper
           # appends -lunwind to every g++ link line. See
-          # projects/amdsmi/tests/dme_integration/gpp_wrapper.py — delete
+          # projects/amdsmi/tests/dme_integration/gpp_wrapper.py - delete
           # both this CC override and that module when upstream gpu-agent
           # fixes its LDFLAGS.
           GPP_WRAP=$(cd "${AMDSMI_TESTS_DIR}" && python3 -m dme_integration write-gpp-wrapper --output /tmp/g++-wrap)
@@ -226,9 +231,9 @@ jobs:
           BLD_BIN="${GPU_AGENT_WORKDIR}/sw/nic/build/x86_64/sim/bin"
           ls -la "${BLD_BIN}/"
 
-      # ────────────────────────────────────────────────────────
-      # Phase 4 — Build Device Metrics Exporter (Go binary)
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
+      # Phase 4 - Build Device Metrics Exporter (Go binary)
+      # --------------------------------------------------------
       - name: Build Device Metrics Exporter
         timeout-minutes: 15
         working-directory: ${{ env.DME_DIR }}
@@ -239,9 +244,9 @@ jobs:
             -o "$(pwd)/bin/amd-metrics-exporter"
           ls -la bin/amd-metrics-exporter
 
-      # ────────────────────────────────────────────────────────
-      # Phase 5 — Integration Test
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
+      # Phase 5 - Integration Test
+      # --------------------------------------------------------
       - name: Start GPU Agent
         working-directory: ${{ env.AMDSMI_TESTS_DIR }}
         run: |
@@ -266,7 +271,7 @@ jobs:
             --log-file /tmp/gpuagent.log \
             --delay 3
         # GPU Agent may crash due to ABI mismatch with the AMDSMI version on
-        # this branch. Don't block the pipeline — verify-metrics handles this
+        # this branch. Don't block the pipeline - verify-metrics handles this
         # gracefully when --gpu-agent-pid-file is provided.
         continue-on-error: true
 
@@ -295,13 +300,13 @@ jobs:
             --max-retries 10 \
             --retry-delay 3
 
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
       # Cleanup & artifacts
-      # ────────────────────────────────────────────────────────
+      # --------------------------------------------------------
       - name: Collect Logs
         if: always()
         run: |
-          set -u
+          set -euo pipefail
           mkdir -p /tmp/integration-logs
           for src in /tmp/gpuagent.log /tmp/dme.log /tmp/build-libs.log /tmp/metrics_output.txt; do
             [ -f "${src}" ] && cp "${src}" /tmp/integration-logs/ || true
@@ -317,7 +322,7 @@ jobs:
 
       - name: Upload Integration Test Logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dme-integration-logs-${{ matrix.os }}
           path: /tmp/integration-logs/
