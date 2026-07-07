@@ -25,15 +25,23 @@
 #ifndef LIBRARY_SRC_GDA_ENUMS_HPP_
 #define LIBRARY_SRC_GDA_ENUMS_HPP_
 
-#include "team.hpp"
-
 namespace rocshmem {
 namespace gda {
+  enum provider {
+    UNSET,
+    IONIC,
+    BNXT,
+    MLX5
+  };
+
   enum alltoallv_wg_algos {
     ALLTOALLV_WG_ALGO_GET = 0,
     ALLTOALLV_WG_ALGO_COPY,
   };
 }  // namespace gda
+
+using GDAProvider = gda::provider;
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_ENUMS_HPP_

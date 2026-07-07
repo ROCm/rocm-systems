@@ -53,7 +53,7 @@ struct trace_data_t
     double rt_clock_frequency = 1E8;
 };
 
-static bool supress = std::getenv("ATT_SUPPRESS_WARNING") != nullptr;
+static bool suppress = std::getenv("ATT_SUPPRESS_WARNING") != nullptr;
 
 rocprofiler_thread_trace_decoder_status_t
 get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
@@ -68,7 +68,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     CHECK_TRUE(trace_data.tool);
     ToolData& tool = *trace_data.tool;
 
-    if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO && !supress)
+    if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO && !suppress)
     {
         auto* infos = (rocprofiler_thread_trace_decoder_info_t*) trace_events;
         for(size_t i = 0; i < trace_size; i++)

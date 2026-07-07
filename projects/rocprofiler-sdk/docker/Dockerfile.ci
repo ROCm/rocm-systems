@@ -100,5 +100,5 @@ RUN set -euo pipefail; \
     aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" /tmp/rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
     rm -rf /opt/rocm* && \
     mkdir -p /opt/rocm && \
-    mv /tmp/rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz && \
-    tar -xf /opt/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm;
+    tar -xf /tmp/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm && \
+    rm -f /tmp/rocm-${GPU_TYPE}.tar.gz;

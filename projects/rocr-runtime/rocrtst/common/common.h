@@ -187,6 +187,15 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
 hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data);
 
+/// If the provided agent is associated with an AIE, return that agent through
+/// output parameter. This function is meant to be the call-back function used
+/// with hsa_iterate_agents to find  all the AIE agents.
+/// \param[in] agent Agent to evaluate if AIE
+/// \param[out] data If agent is associated with an AIE, this pointer will point
+///  to the agent upon return
+/// \returns HSA_STATUS_SUCCESS if no errors are encountered.
+hsa_status_t IterateAIEAgents(hsa_agent_t agent, void* data);
+
 /// Find a GLOBAL memory pool. By this, we mean not a kernel args pool.
 /// This function is meant to be the call-back function used
 /// with hsa_amd_agent_iterate_memory_pools.

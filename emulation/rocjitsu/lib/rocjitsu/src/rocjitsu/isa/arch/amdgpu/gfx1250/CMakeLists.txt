@@ -5,7 +5,8 @@ file(
     GLOB gfx1250_vop3_sources
     CONFIGURE_DEPENDS
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    "vop3_part*.cpp"
+    "vop3.cpp"
+    "vop3_*.cpp"
 )
 list(SORT gfx1250_vop3_sources)
 
@@ -13,7 +14,8 @@ file(
     GLOB gfx1250_vopc_sources
     CONFIGURE_DEPENDS
     RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
-    "vopc_part*.cpp"
+    "vopc.cpp"
+    "vopc_*.cpp"
 )
 list(SORT gfx1250_vopc_sources)
 

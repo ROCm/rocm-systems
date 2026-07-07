@@ -390,6 +390,11 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   flags_ |= INDIRECT_CALL;
 }
 
+std::optional<int64_t> SCallB64Sopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
   sdst.write_scalar64(wf, wf.pc + size_);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
@@ -409,8 +414,8 @@ SWaitcntVscntSopk::SWaitcntVscntSopk(const MachineInst *inst)
 }
 
 void SWaitcntVscntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));
 }
 
 SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
@@ -426,8 +431,8 @@ SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntVmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));
 }
 
 SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
@@ -443,8 +448,8 @@ SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntExpcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  wf.set_wait_counter("wait_expcnt", cnt);
 }
 
 SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
@@ -460,8 +465,9 @@ SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
 }
 
 void SWaitcntLgkmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
+  const auto current_wait = wf.wait_target();
+  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);
 }
 
 } // namespace rdna3

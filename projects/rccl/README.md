@@ -5,13 +5,22 @@ ROCm Communication Collectives Library
 [![RCCL](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frccl?repoName=ROCm%2Frccl&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=107&repoName=ROCm%2Frccl&branchName=develop)
 [![TheRock CI](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml)
 
-> **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rccl/tree/develop/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## Introduction
 
 RCCL (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, gather, scatter, and all-to-all. There is also initial support for direct GPU-to-GPU send and receive operations.  It has been optimized to achieve high bandwidth on platforms using PCIe, xGMI as well as networking using InfiniBand Verbs or TCP/IP sockets. RCCL supports an arbitrary number of GPUs installed in a single node or multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
 
 The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
+
+Additionally, RCCL supports zero-CU (zero-CTA) collectives for selected operations,
+including all-gather, all-to-all, gather, and scatter. These collectives use SDMA/Copy
+Engine (CE) hardware to offload data movement, enabling communication without consuming
+GPU compute units. This path is opt-in: initialize the communicator with
+NCCL_CTA_POLICY_ZERO and register symmetric buffers via ncclCommWindowRegister
+with NCCL_WIN_COLL_SYMMETRIC (single-node only; requires ROCm 7.12+). On MI350,
+CE collectives can outperform CU-based collectives for large message sizes and improve
+overlap when computation and communication run concurrently.
 
 ## Requirements
 
@@ -58,7 +67,6 @@ RCCL build & installation helper script
     -l|--local_gpu_only        Only compile for local GPU architecture
        --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)

@@ -18,7 +18,8 @@ struct VectorMemState;
 
 namespace rocjitsu::gfx1250 {
 
-uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
+                                uint32_t access_size_bytes);
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);

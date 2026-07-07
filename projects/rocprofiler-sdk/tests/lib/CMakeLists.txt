@@ -10,9 +10,15 @@ set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 # libraries used by integration test apps which DO NOT link to rocprofiler-sdk-roctx
 add_subdirectory(vector-operations)
 
-set(CMAKE_BUILD_RPATH
-    "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
-    )
+# Only add the roctx shared-library directory to the build RPATH when the target exists
+# (it may be absent when configuring tests against an installed SDK).
+if(TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
+    set(CMAKE_BUILD_RPATH
+        "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"
+        )
+else()
+    set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
+endif()
 
 # libraries used by integration test apps which DO link to rocprofiler-sdk-roctx
 add_subdirectory(transpose)

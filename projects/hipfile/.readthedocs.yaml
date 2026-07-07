@@ -10,9 +10,14 @@ formats: []
 
 python:
   install:
-    - requirements: projects/hipfile/docs/sphinx/requirements.in
+    - requirements: projects/hipfile/docs/sphinx/requirements.txt
 
 build:
   os: ubuntu-24.04
   tools:
     python: "3.12"
+  apt_packages:
+    - doxygen
+  jobs:
+    pre_build:
+      - cd projects/hipfile/docs/doxygen && doxygen Doxyfile

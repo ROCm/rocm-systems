@@ -37,9 +37,16 @@ if(CMAKE_SCRIPT_MODE_FILE)
 
     # Macro to create individual tests with optional test properties.
     macro(create_test NAME IDENTIFIERS)
-        string(APPEND _content "add_test([==[${NAME}]==] \"${PYTEST_EXECUTABLE}\"")
+        if(PYTEST_PYTHON_EXECUTABLE)
+            string(APPEND _content
+                   "add_test([==[${NAME}]==] \"${PYTEST_PYTHON_EXECUTABLE}\"")
+            set(_IDENTIFIERS "${PYTEST_EXECUTABLE}" ${IDENTIFIERS})
+        else()
+            string(APPEND _content "add_test([==[${NAME}]==] \"${PYTEST_EXECUTABLE}\"")
+            set(_IDENTIFIERS ${IDENTIFIERS})
+        endif()
 
-        foreach(identifier ${IDENTIFIERS})
+        foreach(identifier ${_IDENTIFIERS})
             string(APPEND _content " [==[${identifier}]==]")
         endforeach()
 

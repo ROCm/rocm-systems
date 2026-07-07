@@ -618,6 +618,15 @@ class Common:
                 (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
             )
 
+        self.compute_partition_mem_alloc_mode_types = []
+        for member in amdsmi.AmdSmiComputePartitionMemAllocModeType:
+            cond = self.PASS
+            if member.name in ["INVALID"]:
+                cond = self.FAIL
+            self.compute_partition_mem_alloc_mode_types.append(
+                (member.name, amdsmi.AmdSmiComputePartitionMemAllocModeType(member.value), cond)
+            )
+
         self.freq_inds = []
         for member in amdsmi.AmdSmiFreqInd:
             cond = self.PASS

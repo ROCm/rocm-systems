@@ -361,7 +361,7 @@ public:
                 is_spm_inited = true;
                 if(block_info->attr & CounterBlockSpmGlobalAttr)
                 {
-                    // for each instance of a global block we progam its delay
+                    // for each instance of a global block we program its delay
                     for(size_t j = 0; j < block_info->instance_count; ++j)
                     {
                         builder.BuildWriteUConfigRegPacket(
