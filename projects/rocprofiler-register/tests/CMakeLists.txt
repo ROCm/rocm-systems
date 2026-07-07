@@ -172,9 +172,8 @@ function(rocp_register_test_executable _NAME)
         set(_BASE_PRELOAD "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}")
     endif()
 
-    rocp_register_add_test(
-        ${_NAME} ${_NAME} "${_BASE_PRELOAD}"
-        "${RRTE_CORE_PASS_REGEX}" "${RRTE_CORE_FAIL_REGEX}")
+    rocp_register_add_test(${_NAME} ${_NAME} "${_BASE_PRELOAD}" "${RRTE_CORE_PASS_REGEX}"
+                           "${RRTE_CORE_FAIL_REGEX}")
 
     # Build LD_PRELOAD list for -preload tests
     set(_PRELOAD_LIBS "librocprofiler-register.so" "libgeneric-tool.so")
@@ -183,10 +182,8 @@ function(rocp_register_test_executable _NAME)
     endif()
     list(JOIN _PRELOAD_LIBS ":" _PRELOAD_STRING)
 
-    rocp_register_add_test(
-        ${_NAME}-preload ${_NAME}
-        "LD_PRELOAD=${_PRELOAD_STRING}"
-        "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
+    rocp_register_add_test(${_NAME}-preload ${_NAME} "LD_PRELOAD=${_PRELOAD_STRING}"
+                           "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
         ${_NAME}-env
@@ -196,16 +193,16 @@ function(rocp_register_test_executable _NAME)
         "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-wrap ${_NAME}
+        ${_NAME}-wrap
+        ${_NAME}
         "LD_PRELOAD=librocprofiler-register.so;ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
-        "${RRTE_WRAP_PASS_REGEX}" "${RRTE_WRAP_FAIL_REGEX}")
+        "${RRTE_WRAP_PASS_REGEX}"
+        "${RRTE_WRAP_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-preload-wrap
-        ${_NAME}
+        ${_NAME}-preload-wrap ${_NAME}
         "LD_PRELOAD=${_PRELOAD_STRING};ROCP_REG_TEST_WRAP=1"
-        "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
-        "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+        "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
     rocp_register_add_test(
         ${_NAME}-env-wrap
@@ -309,12 +306,10 @@ rocp_register_test_executable(
     SECURE ON
     SOURCES test-hipfile.cpp
     LIBRARIES rocprofiler-register::tests-strong hipfile::hipfile
-    CORE_PASS_REGEX
-        ".hipfile.cpp. hipFileGetVersion\n"
+    CORE_PASS_REGEX ".hipfile.cpp. hipFileGetVersion\n"
     PRELOAD_PASS_REGEX
         ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.hipfile.cpp. hipFileGetVersion\n"
-    WRAP_PASS_REGEX
-        ".hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX ".hipfile.cpp. hipFileGetVersion\n"
     PRELOAD_WRAP_PASS_REGEX
         ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.rocprofiler.cpp. hipFileGetVersion\n"
     )
@@ -323,12 +318,10 @@ rocp_register_test_executable(
     test-hipfile-weak
     SOURCES test-hipfile.cpp
     LIBRARIES rocprofiler-register::tests-weak
-    CORE_PASS_REGEX
-        ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    CORE_PASS_REGEX ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
     PRELOAD_PASS_REGEX
         ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.hipfile.cpp. hipFileGetVersion\n"
-    WRAP_PASS_REGEX
-        ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
+    WRAP_PASS_REGEX ".fwd.hpp. dlopen libhipfile.so, 1\n.hipfile.cpp. hipFileGetVersion\n"
     PRELOAD_WRAP_PASS_REGEX
         ".fwd.hpp. dlopen libhipfile.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hipFile :: 200 :: 0 :: 1\n.hipfile.cpp. hipFile identifier 48\n.rocprofiler.cpp. hipFileGetVersion\n"
     )

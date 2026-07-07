@@ -20,11 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <amdhip/amdhip.hpp>
-#include <hsa-runtime/hsa-runtime.hpp>
 #include <hipfile/hipfile.hpp>
+#include <hsa-runtime/hsa-runtime.hpp>
 #include <rccl/rccl.hpp>
 #include <rocdecode/rocdecode.hpp>
 #include <rocjpeg/rocjpeg.hpp>
@@ -244,13 +243,13 @@ rocprofiler_set_api_table(const char* name,
         }
         else if(std::string_view{ name } == "hipFile")
         {
-            hipfile_table_t* _table          = static_cast<hipfile_table_t*>(tables[0]);
+            hipfile_table_t* _table         = static_cast<hipfile_table_t*>(tables[0]);
             _table->pfn_hipfile_get_version = &rocprofiler::hipFileGetVersion;
         }
         else if(std::string_view{ name } == "rocshmem")
         {
-            rocshmem_table_t* _table  = static_cast<rocshmem_table_t*>(tables[0]);
-            _table->rocshmem_init_fn  = &::rocprofiler::rocshmem_init_mock;
+            rocshmem_table_t* _table = static_cast<rocshmem_table_t*>(tables[0]);
+            _table->rocshmem_init_fn = &::rocprofiler::rocshmem_init_mock;
         }
     }
 
