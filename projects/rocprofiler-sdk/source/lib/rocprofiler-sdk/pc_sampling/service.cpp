@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2023-2026 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -232,9 +232,10 @@ bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
 {
     return get_global_pc_sampling_sessions().rlock([agent_id](const auto& sessions) {
-        // If the agent_id is in the global sessions map,
-        // then the PC sampling service is configured on this agent.
-        return sessions.find(agent_id) != sessions.end();
+        // Require hsa_agent to be set so that get_pcs_session_of() (which matches by
+        // hsa_agent handle) will succeed whenever this function returns true.
+        auto it = sessions.find(agent_id);
+        return it != sessions.end() && it->second->hsa_agent.has_value();
     });
 }
 
