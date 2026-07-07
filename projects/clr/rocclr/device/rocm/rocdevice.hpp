@@ -27,6 +27,7 @@
 
 
 #include <atomic>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -661,25 +662,22 @@ class Device : public NullDevice {
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
   void WaitForHsaAsyncHandlersIdle() override;
 
-  //! Destroy all queues whose destroy was deferred from the async-events thread.
-  //! Must only be called on an app thread (e.g. acquireQueue, ~Device).
-  void DrainDeferredQueueDestroys();
+  //! Enqueue a cleanup action to run later on an app thread. Used to move
+  //! blocking teardown (HW-queue destroy, HostQueue release) off the
+  //! async-events thread, where it would self-deadlock.
+  void DeferCleanup(std::function<void()> action);
 
-  //! Current number of queues pending deferred destroy.
-  size_t DeferredQueueCount();
+  //! Run all deferred cleanup actions. App threads only (e.g. acquireQueue, ~Device).
+  void DrainDeferredCleanup();
+
+  //! Current number of pending deferred cleanup actions.
+  size_t DeferredCleanupCount();
 
   //! True while on the ROCr async-events thread (HsaAmdSignalHandler).
   bool isInAsyncSignalHandler() const override { return InAsyncSignalHandler(); }
 
   //! Release obj, or defer to an app thread if called from the async-events thread.
   void deferReleaseObject(amd::ReferenceCountedObject* obj) override;
-
-  //! Release all objects whose release was deferred from the async-events
-  //! thread. Must only be called on an app thread (e.g. acquireQueue, ~Device).
-  void DrainDeferredObjectReleases();
-
-  //! Current number of objects pending deferred release.
-  size_t DeferredObjectReleaseCount();
 
  private:
   bool create();
@@ -689,14 +687,11 @@ class Device : public NullDevice {
 
   static constexpr int kDefaultNumaNode = -1;
 
-  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
-  static constexpr size_t kDeferredQueueDrainThreshold = 8;
-  std::vector<hsa_queue_t*> deferredQueueDestroy_;
-  std::mutex deferredQueueDestroyLock_;
-
-  //! Objects whose release was deferred from an async handler, drained on app threads.
-  std::vector<amd::ReferenceCountedObject*> deferredObjectRelease_;
-  std::mutex deferredObjectReleaseLock_;
+  //! Cleanup actions deferred from the async-events thread (HW-queue destroy,
+  //! HostQueue release), drained on app threads and bounded by the threshold.
+  static constexpr size_t kDeferredCleanupThreshold = 8;
+  std::vector<std::function<void()>> deferredCleanup_;
+  std::mutex deferredCleanupLock_;
 
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,

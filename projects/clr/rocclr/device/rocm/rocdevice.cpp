@@ -228,11 +228,10 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-  // Final drain before hsa_shut_down. Objects first: a deferred HostQueue
-  // teardown re-runs terminate() and may release HW queues that the destroy
-  // drain below then frees.
-  DrainDeferredObjectReleases();
-  DrainDeferredQueueDestroys();
+  // Final drain of deferred cleanup on the main thread before hsa_shut_down.
+  // A deferred HostQueue teardown re-runs terminate() here; running on an app
+  // thread its HW-queue release destroys inline, so a single pass suffices.
+  DrainDeferredCleanup();
 
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
@@ -3243,12 +3242,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
                                   void** metadata_ring_buffer) {
-  // App thread: bound deferred queues/objects by draining past a threshold.
-  if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
-    DrainDeferredQueueDestroys();
-  }
-  if (DeferredObjectReleaseCount() >= kDeferredQueueDrainThreshold) {
-    DrainDeferredObjectReleases();
+  // App thread: bound the deferred cleanup backlog by draining past a threshold.
+  if (DeferredCleanupCount() >= kDeferredCleanupThreshold) {
+    DrainDeferredCleanup();
   }
 
   hsa_amd_queue_priority_t queue_priority;
@@ -3547,8 +3543,11 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
     if (InAsyncSignalHandler() && !coop_queue) {
       ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring CG enabled hardware queue %p destroy",
               queue->base_address);
-      std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
-      deferredQueueDestroy_.push_back(queue);
+      DeferCleanup([this, queue] {
+        ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p",
+                queue->base_address);
+        Hsa::queue_destroy(queue);
+      });
     } else {
       ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting CG enabled hardware queue %p ",
               queue->base_address);
@@ -3557,22 +3556,27 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   }
 }
 
-size_t Device::DeferredQueueCount() {
-  std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
-  return deferredQueueDestroy_.size();
+void Device::DeferCleanup(std::function<void()> action) {
+  std::scoped_lock<std::mutex> lock(deferredCleanupLock_);
+  deferredCleanup_.push_back(std::move(action));
 }
 
-void Device::DrainDeferredQueueDestroys() {
-  // Swap out the batch under lock, then destroy without holding it: queue_destroy
-  // is blocking and may run runtime callbacks.
-  std::vector<hsa_queue_t*> pending;
+size_t Device::DeferredCleanupCount() {
+  std::scoped_lock<std::mutex> lock(deferredCleanupLock_);
+  return deferredCleanup_.size();
+}
+
+void Device::DrainDeferredCleanup() {
+  // Swap out the batch under lock, then run without holding it: actions block
+  // (queue_destroy, HostQueue teardown) and may take other locks. Running on an
+  // app thread, any nested release/destroy runs inline rather than re-deferring.
+  std::vector<std::function<void()>> pending;
   {
-    std::scoped_lock<std::mutex> lock(deferredQueueDestroyLock_);
-    pending.swap(deferredQueueDestroy_);
+    std::scoped_lock<std::mutex> lock(deferredCleanupLock_);
+    pending.swap(deferredCleanup_);
   }
-  for (hsa_queue_t* queue : pending) {
-    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
-    Hsa::queue_destroy(queue);
+  for (auto& action : pending) {
+    action();
   }
 }
 
@@ -3585,31 +3589,10 @@ void Device::deferReleaseObject(amd::ReferenceCountedObject* obj) {
   // that self-deadlocks; hand it to an app thread instead.
   if (InAsyncSignalHandler()) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring object %p release from async handler", obj);
-    std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
-    deferredObjectRelease_.push_back(obj);
+    DeferCleanup([obj] { obj->release(); });
     return;
   }
   obj->release();
-}
-
-// ================================================================================================
-size_t Device::DeferredObjectReleaseCount() {
-  std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
-  return deferredObjectRelease_.size();
-}
-
-// ================================================================================================
-void Device::DrainDeferredObjectReleases() {
-  // Swap out the batch under lock, then release without holding it: release() may
-  // run object destructors that take other locks or block (e.g. queue teardown).
-  std::vector<amd::ReferenceCountedObject*> pending;
-  {
-    std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
-    pending.swap(deferredObjectRelease_);
-  }
-  for (amd::ReferenceCountedObject* obj : pending) {
-    obj->release();
-  }
 }
 
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {
