@@ -218,20 +218,9 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
 };
+#endif  // HIP_VERSION >= 70000000
 
-// Forward declarations for fabric handle support (part of future HIP releases)
-#ifndef hipMemFabricHandle_t
-typedef uint64_t hipMemFabricHandle_t;
-#endif
-
-#ifndef hipMemHandleTypeFabric
-#define hipMemHandleTypeFabric (hipMemAllocationHandleType)3
-#endif
-
-#ifndef hipDeviceAttributeHandleTypeFabricSupported
-#define hipDeviceAttributeHandleTypeFabricSupported (hipDeviceAttribute_t)999
-#endif
-
+#ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
 /**
  * Fabric handle structure for IPC
  */
@@ -286,7 +275,7 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
 };
-#endif
+#endif  // HAVE_AMDSMI_GPU_FABRIC_INFO
 
 class HIPHostAllocator : public MemoryAllocator {
  public:
