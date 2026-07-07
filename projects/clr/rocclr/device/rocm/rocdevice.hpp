@@ -668,6 +668,19 @@ class Device : public NullDevice {
   //! Current number of queues pending deferred destroy.
   size_t DeferredQueueCount();
 
+  //! True while on the ROCr async-events thread (HsaAmdSignalHandler).
+  bool isInAsyncSignalHandler() const override { return InAsyncSignalHandler(); }
+
+  //! Release obj, or defer to an app thread if called from the async-events thread.
+  void deferReleaseObject(amd::ReferenceCountedObject* obj) override;
+
+  //! Release all objects whose release was deferred from the async-events
+  //! thread. Must only be called on an app thread (e.g. acquireQueue, ~Device).
+  void DrainDeferredObjectReleases();
+
+  //! Current number of objects pending deferred release.
+  size_t DeferredObjectReleaseCount();
+
  private:
   bool create();
 
@@ -680,6 +693,10 @@ class Device : public NullDevice {
   static constexpr size_t kDeferredQueueDrainThreshold = 8;
   std::vector<hsa_queue_t*> deferredQueueDestroy_;
   std::mutex deferredQueueDestroyLock_;
+
+  //! Objects whose release was deferred from an async handler, drained on app threads.
+  std::vector<amd::ReferenceCountedObject*> deferredObjectRelease_;
+  std::mutex deferredObjectReleaseLock_;
 
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,

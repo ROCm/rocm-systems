@@ -52,6 +52,14 @@ bool HostQueue::terminate() {
   // In case of force destroy skip checking on the last command
   if (AMD_DIRECT_DISPATCH) {
     if (!forceDestroy_ && vdev() != nullptr) {
+      // The blocking drain below self-deadlocks if run on the async-events
+      // thread. Re-arm and hand to an app thread; return false gates off delete
+      // so it re-runs terminate() off the async thread.
+      if (device().isInAsyncSignalHandler()) {
+        retain();
+        device().deferReleaseObject(this);
+        return false;
+      }
       // If the queue still has the last command, then wait and release it
       // We must be in protected way to get last command when calling
       // awaitCompletion() where lastCommand will be released and possibly

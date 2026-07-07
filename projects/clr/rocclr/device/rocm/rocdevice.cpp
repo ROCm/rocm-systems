@@ -228,7 +228,10 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-  // Final drain of deferred destroys on the main thread before hsa_shut_down.
+  // Final drain before hsa_shut_down. Objects first: a deferred HostQueue
+  // teardown re-runs terminate() and may release HW queues that the destroy
+  // drain below then frees.
+  DrainDeferredObjectReleases();
   DrainDeferredQueueDestroys();
 
   for (auto& it : queuePool_) {
@@ -3240,10 +3243,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                                   bool dedicated_queue, hsa_queue_t* preferred,
                                   const std::unordered_set<uint64_t>* excluded_ids,
                                   void** metadata_ring_buffer) {
-  // App-thread context: flush queues deferred from the async thread once they
-  // reach the batch threshold, bounding live deferred queues.
+  // App thread: bound deferred queues/objects by draining past a threshold.
   if (DeferredQueueCount() >= kDeferredQueueDrainThreshold) {
     DrainDeferredQueueDestroys();
+  }
+  if (DeferredObjectReleaseCount() >= kDeferredQueueDrainThreshold) {
+    DrainDeferredObjectReleases();
   }
 
   hsa_amd_queue_priority_t queue_priority;
@@ -3568,6 +3573,42 @@ void Device::DrainDeferredQueueDestroys() {
   for (hsa_queue_t* queue : pending) {
     ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deleting deferred hardware queue %p", queue->base_address);
     Hsa::queue_destroy(queue);
+  }
+}
+
+// ================================================================================================
+void Device::deferReleaseObject(amd::ReferenceCountedObject* obj) {
+  if (obj == nullptr) {
+    return;
+  }
+  // On the async-events thread the last-reference drop can run blocking teardown
+  // that self-deadlocks; hand it to an app thread instead.
+  if (InAsyncSignalHandler()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Deferring object %p release from async handler", obj);
+    std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
+    deferredObjectRelease_.push_back(obj);
+    return;
+  }
+  obj->release();
+}
+
+// ================================================================================================
+size_t Device::DeferredObjectReleaseCount() {
+  std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
+  return deferredObjectRelease_.size();
+}
+
+// ================================================================================================
+void Device::DrainDeferredObjectReleases() {
+  // Swap out the batch under lock, then release without holding it: release() may
+  // run object destructors that take other locks or block (e.g. queue teardown).
+  std::vector<amd::ReferenceCountedObject*> pending;
+  {
+    std::scoped_lock<std::mutex> lock(deferredObjectReleaseLock_);
+    pending.swap(deferredObjectRelease_);
+  }
+  for (amd::ReferenceCountedObject* obj : pending) {
+    obj->release();
   }
 }
 

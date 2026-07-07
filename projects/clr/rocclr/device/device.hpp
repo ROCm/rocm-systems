@@ -2409,6 +2409,18 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
+  //! True if the calling thread is inside a device async completion handler,
+  //! where blocking on GPU completion self-deadlocks. Base returns false.
+  virtual bool isInAsyncSignalHandler() const { return false; }
+
+  //! Release `obj`, deferring to an app thread if called from an async handler
+  //! (where blocking teardown self-deadlocks). Base releases inline.
+  virtual void deferReleaseObject(ReferenceCountedObject* obj) {
+    if (obj != nullptr) {
+      obj->release();
+    }
+  }
+
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
   // Registers a memory object allocated via hostcall for later cleanup.
