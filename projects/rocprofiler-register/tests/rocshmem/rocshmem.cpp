@@ -30,7 +30,7 @@
 #include <string_view>
 
 #define ROCP_REG_VERSION                                                                 \
-    ROCPROFILER_REGISTER_COMPUTE_VERSION_2(ROCSHMEM_API_TRACE_VERSION_MAJOR,              \
+    ROCPROFILER_REGISTER_COMPUTE_VERSION_2(ROCSHMEM_API_TRACE_VERSION_MAJOR,             \
                                            ROCSHMEM_API_TRACE_VERSION_PATCH)
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(rocshmem, ROCP_REG_VERSION)
