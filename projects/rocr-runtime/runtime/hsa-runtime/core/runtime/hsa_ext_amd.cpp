@@ -1079,10 +1079,16 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t valid_signal_count = valid_signals.size();
 
   std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
-  uint32_t first_satysifying_signal_idx =
+  uint32_t first_satisfying_signal_idx =
       core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), valid_conds.data(),
                                  valid_values.data(), timeout_hint, wait_hint, satisfying_values_vec, true);
 
+  // Note: on timeout (or if a signal became invalid mid-wait), WaitMultiple() returns
+  // uint32_t(-1) and satisfying_values_vec is only partially filled -- entries for
+  // signals whose condition was never met remain at their zero-initialized value and do
+  // not represent a real satisfying value. satisfying_values is still populated below in
+  // that case; callers must check the return value before treating its contents as
+  // meaningful.
   if (satisfying_values) {
     // Set 0 as satisfying value for NULL and invalid signals
     std::vector<hsa_signal_value_t> satisfying_values_vec_result(signal_count, 0);
@@ -1092,7 +1098,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
     std::copy(satisfying_values_vec_result.begin(), satisfying_values_vec_result.end(), satisfying_values);
   }
 
-  return first_satysifying_signal_idx;
+  return first_satisfying_signal_idx;
   CATCHRET(uint32_t);
 }
 
