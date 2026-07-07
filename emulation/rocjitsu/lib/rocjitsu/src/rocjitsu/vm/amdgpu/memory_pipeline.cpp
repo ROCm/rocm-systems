@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -17,6 +19,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <format>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -35,49 +41,92 @@ uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_
   return value;
 }
 
-/// Shared complete_access logic for vector/LDS loads (write VGPRs from
-/// response data). Used by both GlobalMemPipeline and LocalMemPipeline.
-///
-/// For atomics with elem_size=8 and num_elems=1, the 8-byte old value
-/// occupies two consecutive VGPRs (low dword in vdst, high in vdst+1).
-void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
+std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavefront &wf,
+                                                        ComputeUnitCore &cu) {
+  std::vector<ClusterLdsTarget> targets;
+  if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
+    if (auto *cp = cu.command_processor())
+      targets = cp->cluster_lds_targets(wf.dispatch_id(), wf.wg_id(), d.cluster_mcast_mask);
+  }
+
+  const bool writes_self =
+      !d.cluster_multicast || d.cluster_mcast_mask == 0 ||
+      (d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())) != 0;
+  if (targets.empty() && writes_self)
+    targets.push_back({&cu, wf.wg_id(), d.lds_base, wf.cluster_rank()});
+  return targets;
+}
+
+void write_lds_dst_load_direct(const VectorMemState &d, ComputeUnitCore &cu,
+                               uint32_t per_lane_bytes) {
+  for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+    if ((d.lane_mask & (1ULL << lane)) == 0)
+      continue;
+    uint32_t data_offset = lane * per_lane_bytes;
+    if (data_offset + per_lane_bytes > d.response_data.size()) {
+      throw std::runtime_error(std::format(
+          "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
+          data_offset, per_lane_bytes, d.response_data.size()));
+    }
+    uint32_t lds_addr =
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+    cu.lds().write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+  }
+}
+
+MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, ComputeUnitCore &cu,
+                                             MemoryAccessDeferredCompletion complete) {
+  uint32_t per_lane_bytes = d.num_elems * d.elem_size;
+  std::vector<ClusterLdsTarget> targets;
+  size_t target_count = 1;
+  const bool cluster_downgrades_to_ordinary = d.cluster_multicast && wf.cluster_size() <= 1;
+  if (d.cluster_multicast && !cluster_downgrades_to_ordinary) {
+    targets = resolve_lds_write_targets(d, wf, cu);
+    target_count = targets.size();
+  }
+
+  // Per-lane LDS-dst buffer load trace.
+  util::Logger::vm([&](auto &os) {
+    static thread_local uint64_t lds_dst_trace = 0;
+    if (++lds_dst_trace > 80)
+      return;
+    os << std::format("{} wg[{}] wf[{}] BUF->LDS: lds_base={:#x} plb={} mcast={:#x} targets={}",
+                      d.cu_path, d.wg_id, d.wf_id, d.lds_base, per_lane_bytes, d.cluster_mcast_mask,
+                      target_count);
+    for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
+      if (!(d.lane_mask & (1ULL << ln)))
+        continue;
+      uint32_t v = 0;
+      if (per_lane_bytes >= 4)
+        std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
+      uint32_t lds_addr =
+          d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
+      os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
+    }
+  });
+
+  if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
+    write_lds_dst_load_direct(d, cu, per_lane_bytes);
+    return MemoryAccessCompletion::Complete;
+  }
+
+  auto txn = make_cluster_lds_multicast_transaction(d, wf, std::move(targets));
+  auto result = cu.cluster_lds_multicast_engine().submit(std::move(txn), std::move(complete));
+
+  return result == ClusterLdsMulticastResult::Deferred ? MemoryAccessCompletion::Deferred
+                                                       : MemoryAccessCompletion::Complete;
+}
+
+MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf,
+                                       MemoryAccessDeferredCompletion complete) {
+  ComputeUnitCore &cu = wf.cu();
   if (!d.is_load)
-    return;
+    return MemoryAccessCompletion::Complete;
 
   // Buffer load with LDS bit: scatter loaded data into LDS instead of VGPRs.
   // Each lane writes num_elems * elem_size bytes to LDS at lds_base + lane_offset.
-  if (d.lds_dst) {
-    auto &lds = cu.lds();
-    uint32_t per_lane_bytes = d.num_elems * d.elem_size;
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (!(d.lane_mask & (1ULL << lane)))
-        continue;
-      uint32_t lds_addr =
-          d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
-      uint32_t data_offset = lane * per_lane_bytes;
-      for (uint32_t b = 0; b < per_lane_bytes; ++b)
-        lds.write8(lds_addr + b, d.response_data[data_offset + b]);
-    }
-    // Per-lane LDS-dst buffer load trace.
-    util::Logger::vm([&](auto &os) {
-      static thread_local uint64_t lds_dst_trace = 0;
-      if (++lds_dst_trace > 80)
-        return;
-      os << std::format("{} wg[{}] wf[{}] BUF->LDS: lds_base={:#x} plb={}", d.cu_path, d.wg_id,
-                        d.wf_id, d.lds_base, per_lane_bytes);
-      for (uint32_t ln = 0; ln < d.wf_size; ++ln) {
-        if (!(d.lane_mask & (1ULL << ln)))
-          continue;
-        uint32_t v = 0;
-        if (per_lane_bytes >= 4)
-          std::memcpy(&v, &d.response_data[ln * per_lane_bytes], 4);
-        uint32_t lds_addr =
-            d.lds_per_lane_addr ? d.per_lane_lds_addr[ln] : d.lds_base + ln * per_lane_bytes;
-        os << std::format(" L{}:@{:#x}->lds[{:#x}]={:#x}", ln, d.per_lane_addr[ln], lds_addr, v);
-      }
-    });
-    return;
-  }
+  if (d.lds_dst)
+    return complete_lds_dst_load(d, wf, cu, std::move(complete));
 
   // Atomics: response layout is [lane * elem_size], regular loads are
   // [lane * (num_elems * elem_size) + elem * elem_size].
@@ -148,6 +197,7 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       cu.write_vgpr(d.dst_reg_base + i, lane, val);
     }
   }
+  return MemoryAccessCompletion::Complete;
 }
 
 } // namespace
@@ -167,10 +217,12 @@ void ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 }
 
-void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
+MemoryAccessCompletion
+ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                   MemoryAccessDeferredCompletion /*complete*/) {
   auto &d = *inst.data_as<ScalarMemState>();
   if (!d.is_load)
-    return;
+    return MemoryAccessCompletion::Complete;
   auto &cu = wf.cu();
   for (uint32_t i = 0; i < d.num_dwords; ++i) {
     cu.write_sgpr(d.dst_reg_base + i, d.response_data[i]);
@@ -188,6 +240,7 @@ void ScalarMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
       }
     }
   });
+  return MemoryAccessCompletion::Complete;
 }
 
 namespace {
@@ -437,18 +490,19 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, wf.process_id());
+              d.mtype, d.non_temporal, d.request_force_l1_bypass, wf.process_id());
   } else {
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
                d.mtype, d.non_temporal, wf.process_id());
   }
 }
 
-void GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
+MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                                          MemoryAccessDeferredCompletion complete) {
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  vector_complete(d, wf.cu());
+  return vector_complete(d, wf, std::move(complete));
 }
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
@@ -543,11 +597,12 @@ void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   }
 }
 
-void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
+MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
+                                                         MemoryAccessDeferredCompletion complete) {
   auto &d = *inst.data_as<VectorMemState>();
   if (d.transpose != 0)
     transpose_response(d);
-  vector_complete(d, wf.cu());
+  MemoryAccessCompletion completion = vector_complete(d, wf, std::move(complete));
 
   // DS dual-access (ds_read2/ds_write2): write the second access results.
   if (d.ds2_active && d.is_load) {
@@ -580,6 +635,7 @@ void LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
       }
     });
   }
+  return completion;
 }
 
 } // namespace amdgpu

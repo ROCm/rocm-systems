@@ -50,6 +50,8 @@ ais_add_test_executable(
 # Add gtest
 target_link_libraries(internal_tests PRIVATE GTest::gmock)
 target_link_libraries(internal_tests PRIVATE GTest::gtest)
+target_compile_options(internal_tests PRIVATE -pthread)
+target_link_options(internal_tests PRIVATE -pthread)
 
 ais_gtest_discover_tests(
     internal_tests

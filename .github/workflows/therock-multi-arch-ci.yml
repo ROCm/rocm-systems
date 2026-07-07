@@ -14,6 +14,16 @@
 
 # We are keeping the branch main until this gets to post-submit. Then, we will use commit hashes
 
+# =============================================================================
+# TEMPORARY: MI455 (gfx125X) bringup configuration
+# TODO(geomin12): Remove this block once MI455 is fully enabled in therock-ci-config
+#
+# The gfx125x_family_overrides JSON configures MI455-specific test settings:
+# - test-runs-on: Custom runner label for MI455 hardware
+# - test_labels_for_family: Limit tests to hip-tests, rocrtst (sanity always runs)
+# - Container options with ulimit for RCCL compatibility
+# =============================================================================
+
 name: TheRock Multi-Arch CI
 
 on:
@@ -61,7 +71,8 @@ jobs:
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
-      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
@@ -69,7 +80,22 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
       ref: main
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
+      # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "family_overrides": {
+            "gfx125x": {
+              "linux": {
+                "test-runs-on": "linux-mi455-gpu-rocm",
+                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
+                "fetch-gfx-targets": ["gfx1250"]
+              }
+            }
+          }
+        }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}

@@ -20,12 +20,14 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
 
@@ -35,11 +37,14 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "rocjitsu/base/rj_compiler.h"
+#ifndef HSA_LARGE_MODEL
 #define HSA_LARGE_MODEL 1
+#endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
@@ -155,6 +160,10 @@ public:
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
+  /// @brief Return LDS targets selected by a cluster multicast mask.
+  std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
+                                                    uint32_t mcast_mask);
+
 private:
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
@@ -173,12 +182,18 @@ private:
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs);
+                          uint64_t pkt_addr, HwQueueState &qs,
+                          ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
+
+  void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
+                                  uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
+  void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
+  void erase_cluster_workgroups(uint32_t dispatch_id);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
   /// active queues to SPIs and run CUs to completion.
@@ -235,6 +250,17 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+
+  struct ClusterWorkgroupPlacement {
+    ComputeUnitCore *cu = nullptr;
+    uint32_t lds_base = 0;
+    uint64_t cluster_key = 0;
+    uint32_t cluster_rank = 0;
+    uint32_t cluster_size = 1;
+    bool completed = false;
+    std::vector<uint32_t> peer_wg_ids;
+  };
+  std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;

@@ -42,4 +42,9 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf)
 
+if(ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS)
+    target_compile_definitions(rocprofiler-sdk-att-parser
+                               PRIVATE ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS=1)
+endif()
+
 add_subdirectory(waitcnt)

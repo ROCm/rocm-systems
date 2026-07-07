@@ -1288,12 +1288,9 @@ const char *TrapHandlerIsa =
     "V_ADD_CO_U32 v6, v6, v5\n"\
     ".if (.amdgcn.gfx_generation_number >= 12)\n"\
     "flat_store_dword v[2:3], v6 scope:SCOPE_SYS\n"\
-    "s_wait_storecnt 0\n"\
-    ".else\n"\
-    "flat_store_dword v[2:3], v6\n"\
-    ".if (.amdgcn.gfx_generation_number >= 12)\n"\
     "s_wait_idle\n"\
     ".else\n"\
+    "flat_store_dword v[2:3], v6\n"\
     "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
     ".endif\n"\
     "s_endpgm\n"

@@ -25,10 +25,12 @@
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+
 #include <atomic>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 /*! \addtogroup HSA
  *  @{
@@ -560,6 +562,12 @@ class Device : public NullDevice {
   //! Returns the lock object for the virtual gpus list
   std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
+#ifdef _WIN32
+  //! D3D interop accessors - return adapter LUID for device matching
+  const LUID& getDeviceLUID() const { return deviceLuid_; }
+  bool hasValidLUID() const { return luidValid_; }
+#endif
+
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
   const VirtualGPUs& vgpus() const { return vgpus_; }
@@ -653,6 +661,13 @@ class Device : public NullDevice {
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
   void WaitForHsaAsyncHandlersIdle() override;
 
+  //! Destroy all queues whose destroy was deferred from the async-events thread.
+  //! Must only be called on an app thread (e.g. acquireQueue, ~Device).
+  void DrainDeferredQueueDestroys();
+
+  //! Current number of queues pending deferred destroy.
+  size_t DeferredQueueCount();
+
  private:
   bool create();
 
@@ -660,6 +675,11 @@ class Device : public NullDevice {
   Device(hsa_agent_t bkendDevice);
 
   static constexpr int kDefaultNumaNode = -1;
+
+  //! Queues with destroy deferred from an async-handler-driven ~VirtualGPU, drained on app threads.
+  static constexpr size_t kDeferredQueueDrainThreshold = 8;
+  std::vector<hsa_queue_t*> deferredQueueDestroy_;
+  std::mutex deferredQueueDestroyLock_;
 
   bool SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                            bool first_alloc = false, bool use_cpu = false,
@@ -707,6 +727,12 @@ class Device : public NullDevice {
   uint32_t metadata_version_header_ = 0;
   bool metadata_version_queried_ = false;
 
+#ifdef _WIN32
+  // D3D interop device properties
+  LUID deviceLuid_;     //!< Adapter LUID for D3D interop validation
+  bool luidValid_;      //!< True if LUID was successfully extracted from HSA
+#endif
+
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
@@ -737,18 +763,8 @@ class Device : public NullDevice {
   };
 
   struct QueueCompare {
-    const Device* device_;
-
-    QueueCompare(const Device* dev = nullptr) : device_(dev) {}
-
     // Customized queue compare operator to make sure the queues are sorted in the creation order
-    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const {
-      if (device_ != nullptr && device_->settings().dynamic_queues_ > 0) {
-        return (lhs->id < rhs->id) ? true : false;
-      } else {
-        return (lhs < rhs) ? true : false;
-      }
-    }
+    bool operator()(hsa_queue_t* lhs, hsa_queue_t* rhs) const { return lhs->id < rhs->id; }
   };
   //! a vector for keeping Pool of HSA queues with low, normal and high priorities for recycling
   std::vector<std::map<hsa_queue_t*, QueueInfo, QueueCompare>> queuePool_;

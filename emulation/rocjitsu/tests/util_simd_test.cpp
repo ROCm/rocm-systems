@@ -47,6 +47,21 @@ inline int sweep_iters() {
 
 constexpr std::size_t kW = util::native_width_v<uint32_t>;
 
+TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
+  constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+  constexpr int user_override = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
+  static_assert(workaround == 0 || workaround == 1);
+  static_assert(user_override == 0 || user_override == 1);
+
+  if constexpr (!user_override) {
+#if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
+    EXPECT_EQ(workaround, 1);
+#else
+    EXPECT_EQ(workaround, 0);
+#endif
+  }
+}
+
 TEST(UtilSimd, Load_Contiguous_U32) {
   SKIP_IF_NO_SIMD();
   alignas(util::native<uint32_t>) uint32_t src[kW];

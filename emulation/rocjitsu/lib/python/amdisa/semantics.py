@@ -239,6 +239,22 @@ _SCC_NONE_OPS = frozenset(
 # Operations where SCC = (result == src0) i.e. "compare" semantics (min/max).
 _SCC_COMPARE_OPS = frozenset({'min', 'max'})
 
+_SOP1_SCC_NONE_OPS = frozenset(
+    {
+        'bitset0',
+        'bitset1',
+        # SOP1 scalar conversions preserve SCC; only count/bit-scan style
+        # scalar unary ops write SCC from the computed result.
+        'cvt_f16_f32',
+        'cvt_f32_f16',
+        'cvt_f32_i32',
+        'cvt_f32_u32',
+        'cvt_hi_f32_f16',
+        'cvt_i32_f32',
+        'cvt_u32_f32',
+    }
+)
+
 
 def _scalar_binop_scc(op: str, dtype: str) -> str:
     """Determine SCC semantics for a scalar binary operation."""
@@ -278,6 +294,13 @@ _CBRANCH_COND = {
     'S_CBRANCH_EXECNZ': 'execnz',
 }
 
+_NAMED_WAITCNT_COUNTERS = {
+    'S_WAITCNT_VSCNT': 'waitcnt_vscnt',
+    'S_WAITCNT_VMCNT': 'waitcnt_vmcnt',
+    'S_WAITCNT_LGKMCNT': 'waitcnt_lgkmcnt',
+    'S_WAITCNT_EXPCNT': 'waitcnt_expcnt',
+}
+
 
 def _derive_sopp(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOPP (Scalar One-operand Program) instruction."""
@@ -289,20 +312,16 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'branch', branch_condition='always')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
+    if name == 'S_TRAP':
+        # S_TRAP enters the trap handler instead of continuing with the next
+        # instruction. The simulator currently treats the instruction body as a
+        # stub, but DBT/CFG construction still needs the semantic class so the
+        # generated instruction metadata can mark it as a program terminator.
+        return InstructionSemantics(name, 'trap')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
         return InstructionSemantics(name, 'set_vgpr_msb')
-    # RDNA3/3.5 named per-counter wait instructions (GFX11 — these coexist with
-    # S_WAITCNT; each waits on a single counter via its immediate operand).
-    _NAMED_WAIT = {
-        'S_WAITCNT_VSCNT': 'waitcnt_vscnt',
-        'S_WAITCNT_VMCNT': 'waitcnt_vmcnt',
-        'S_WAITCNT_LGKMCNT': 'waitcnt_lgkmcnt',
-        'S_WAITCNT_EXPCNT': 'waitcnt_expcnt',
-    }
-    if name in _NAMED_WAIT:
-        return InstructionSemantics(name, 'wait_counter', operation=_NAMED_WAIT[name])
     # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
     # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {
@@ -320,8 +339,12 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     }
     if name in _SPLIT_WAIT:
         return InstructionSemantics(name, 'wait_counter', operation=name[2:].lower())
-    # S_BARRIER: workgroup synchronization. Set WfState::BARRIER.
-    if name == 'S_BARRIER':
+    # S_BARRIER_WAIT uses the existing whole-workgroup barrier model for the
+    # common split form where S_BARRIER_SIGNAL is immediately followed by
+    # S_BARRIER_WAIT. Arrival accounting and named-barrier ids are not modeled
+    # yet: signal stays a no-op, wait parks the wavefront, and CU release logic
+    # keys only on all non-halted sibling waves in the same workgroup.
+    if name in ('S_BARRIER', 'S_BARRIER_WAIT'):
         return InstructionSemantics(name, 'barrier')
 
     if name == 'S_SET_GPR_IDX_OFF':
@@ -475,7 +498,7 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
             dtype = entry_dtype
         scc = None
         if cls == 'scalar_unary':
-            if op in ('bitset0', 'bitset1'):
+            if op in _SOP1_SCC_NONE_OPS:
                 scc = 'none'
             else:
                 scc = 'nonzero'
@@ -582,7 +605,9 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         )
     op = _SOP2_OP_MAP.get(stem)
     if op is not None and dtype is not None:
-        if stem == 'S_ADD_CO':
+        if stem in ('S_ADD_CO', 'S_SUB_CO') and dtype == 'i32':
+            scc = 'overflow'
+        elif stem == 'S_ADD_CO':
             scc = 'carry'
         elif stem == 'S_SUB_CO':
             scc = 'borrow'
@@ -624,6 +649,10 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
 
 def _derive_sopk(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOPK (Scalar with 16-bit Immediate) instruction."""
+    if name in _NAMED_WAITCNT_COUNTERS:
+        return InstructionSemantics(
+            name, 'wait_counter', operation=_NAMED_WAITCNT_COUNTERS[name]
+        )
     if name == 'S_VERSION':
         return InstructionSemantics(name, 'true_nop')
     if name == 'S_MOVK_I32':
@@ -905,11 +934,15 @@ def _derive_vop2(name: str) -> InstructionSemantics | None:
             name, 'vector_binop', operation='mul', data_type='u16'
         )
 
-    # Packed FP16 FMA and DOT2ACC VOP2 forms (nop; VOP3P forms are functional)
-    if name in ('V_PK_FMAC_F16', 'V_DOT2ACC_F32_F16'):
+    # Packed FP16 FMA VOP2 form (the VOP3P form is functional).
+    if name == 'V_PK_FMAC_F16':
         return InstructionSemantics(name, 'nop')
 
     # DOT product instructions
+    if name == 'V_DOT2ACC_F32_F16':
+        return InstructionSemantics(
+            name, 'vector_dot', operation='dot2c', data_type='f32'
+        )
     if name == 'V_DOT2C_F32_F16':
         return InstructionSemantics(
             name, 'vector_dot', operation='dot2c', data_type='f32'
@@ -1214,8 +1247,10 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_binop', operation=op, data_type=dt)
 
     # Dot product with F16/BF16 output
-    if name in ('V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'):
-        return InstructionSemantics(name, 'nop')
+    if name == 'V_DOT2_F16_F16':
+        return InstructionSemantics(name, 'dot2_f16_f16')
+    if name == 'V_DOT2_BF16_BF16':
+        return InstructionSemantics(name, 'dot2_bf16_bf16')
 
     # Pack/convert variants
     if name == 'V_CVT_PK_I16_F32':

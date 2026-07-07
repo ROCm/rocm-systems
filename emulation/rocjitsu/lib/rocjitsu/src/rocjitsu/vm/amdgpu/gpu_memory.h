@@ -18,6 +18,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <sys/uio.h>
 #include <unordered_map>
 #include <utility>
 
@@ -66,6 +67,13 @@ public:
                      std::dec);
     std::unique_lock lk(vmid_mutex_);
     vmid_table_.erase(pid);
+  }
+
+  void set_process_client_pid(uint32_t pid, pid_t client_pid) {
+    std::unique_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(pid);
+    if (it != vmid_table_.end())
+      it->second.client_pid = client_pid;
   }
 
   /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
@@ -126,6 +134,9 @@ public:
   uint8_t read8(uint64_t addr, uint32_t vmid = 0) const {
     if (auto *p = translate(addr, vmid))
       return p[addr & PAGE_MASK];
+    uint8_t val = 0;
+    if (vmid > 0 && read_client_memory(addr, &val, 1, vmid))
+      return val;
     return SparseMemory::read8(addr);
   }
 
@@ -135,6 +146,9 @@ public:
       std::memcpy(&val, p + (addr & PAGE_MASK), 2);
       return val;
     }
+    uint16_t val = 0;
+    if (vmid > 0 && read_client_memory(addr, &val, 2, vmid))
+      return val;
     return SparseMemory::read16(addr);
   }
 
@@ -144,6 +158,9 @@ public:
       std::memcpy(&val, p + (addr & PAGE_MASK), 4);
       return val;
     }
+    uint32_t val = 0;
+    if (vmid > 0 && read_client_memory(addr, &val, 4, vmid))
+      return val;
     return SparseMemory::read32(addr);
   }
 
@@ -153,6 +170,9 @@ public:
       std::memcpy(&val, p + (addr & PAGE_MASK), 8);
       return val;
     }
+    uint64_t val = 0;
+    if (vmid > 0 && read_client_memory(addr, &val, 8, vmid))
+      return val;
     return SparseMemory::read64(addr);
   }
 
@@ -161,6 +181,8 @@ public:
       p[addr & PAGE_MASK] = val;
       return;
     }
+    if (vmid > 0 && write_client_memory(addr, &val, 1, vmid))
+      return;
     SparseMemory::write8(addr, val);
   }
 
@@ -169,6 +191,8 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 2);
       return;
     }
+    if (vmid > 0 && write_client_memory(addr, &val, 2, vmid))
+      return;
     SparseMemory::write16(addr, val);
   }
 
@@ -177,6 +201,8 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 4);
       return;
     }
+    if (vmid > 0 && write_client_memory(addr, &val, 4, vmid))
+      return;
     SparseMemory::write32(addr, val);
   }
 
@@ -185,6 +211,8 @@ public:
       std::memcpy(p + (addr & PAGE_MASK), &val, 8);
       return;
     }
+    if (vmid > 0 && write_client_memory(addr, &val, 8, vmid))
+      return;
     SparseMemory::write64(addr, val);
   }
 
@@ -192,6 +220,7 @@ private:
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;
+    pid_t client_pid = 0;
   };
 
   uint8_t *translate(uint64_t addr, uint32_t vmid) const {
@@ -212,6 +241,42 @@ private:
     if (passthrough_ && addr < kUserSpaceLimit)
       return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
     return nullptr;
+  }
+
+  pid_t client_pid_for_vmid(uint32_t vmid) const {
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    return (it != vmid_table_.end()) ? it->second.client_pid : 0;
+  }
+
+  bool read_client_memory(uint64_t addr, void *dst, size_t len, uint32_t vmid) const {
+    pid_t pid = client_pid_for_vmid(vmid);
+    if (pid <= 0)
+      return false;
+    iovec local{dst, len};
+    iovec remote{reinterpret_cast<void *>(addr), len};
+    ssize_t rc = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+    if (rc != static_cast<ssize_t>(len)) {
+      util::Logger::warn("process_vm_readv failed: addr=0x", std::hex, addr, " pid=", std::dec, pid,
+                         " rc=", rc, " errno=", errno);
+      return false;
+    }
+    return true;
+  }
+
+  bool write_client_memory(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
+    pid_t pid = client_pid_for_vmid(vmid);
+    if (pid <= 0)
+      return false;
+    iovec local{const_cast<void *>(src), len};
+    iovec remote{reinterpret_cast<void *>(addr), len};
+    ssize_t rc = process_vm_writev(pid, &local, 1, &remote, 1, 0);
+    if (rc != static_cast<ssize_t>(len)) {
+      util::Logger::warn("process_vm_writev failed: addr=0x", std::hex, addr, " pid=", std::dec,
+                         pid, " rc=", rc, " errno=", errno);
+      return false;
+    }
+    return true;
   }
 
   simdojo::Port *cpl_ = nullptr;
