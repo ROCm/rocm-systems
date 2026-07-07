@@ -293,7 +293,10 @@ static void createOversizedMemAllocGraph(hipGraph_t* graph, hipGraphExec_t* grap
     HIP_SKIP_TEST("Oversized graph mem-alloc node failed before launch-time allocation.");
   }
   HIP_CHECK(ret);
-  REQUIRE(alloc_param.dptr != nullptr);
+  if (alloc_param.dptr == nullptr) {
+    HIP_CHECK(hipGraphDestroy(*graph));
+    FAIL("hipGraphAddMemAllocNode succeeded but returned a null device pointer.");
+  }
   HIP_CHECK(hipGraphInstantiate(graph_exec, *graph, nullptr, nullptr, 0));
 }
 
