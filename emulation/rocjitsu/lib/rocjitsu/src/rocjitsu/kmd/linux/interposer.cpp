@@ -148,6 +148,10 @@ void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, o
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
 }
 
+int raw_munmap_syscall(void *addr, size_t length) {
+  return static_cast<int>(syscall(SYS_munmap, addr, length));
+}
+
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -1247,6 +1251,9 @@ RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
+    return raw_munmap_syscall(addr, length);
+
   assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);

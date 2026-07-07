@@ -687,7 +687,7 @@ set_tests_properties(
     "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
     PROPERTIES
         ENVIRONMENT
-            "LD_PRELOAD=$<TARGET_FILE:early_mmap_preload>:$<TARGET_FILE:rocjitsu_shared>"
+            "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
 )
 
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
