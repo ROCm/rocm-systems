@@ -574,20 +574,27 @@ private:
     {
         const auto& u = m_uuid;
 
-        // region intervals: start/end resolved through the timestamp spine.
+        // region intervals: start/end resolved through the timestamp spine. Category is
+        // resolved in-SQL to its display string via rocpd_info_category (v4's category
+        // source; v3 uses rocpd_string), keeping the reader version-agnostic. rocpd_event
+        // / rocpd_info_category are LEFT JOINed so the row set is unchanged — additive.
         m_region_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
-                    fmt::format("SELECT r.id, ts_s.value, ts_e.value, r.name_id "
-                                "FROM rocpd_region_{u} r "
-                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = r.start_id "
-                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = r.end_id "
-                                "WHERE r.track_id = ? ORDER BY ts_s.value",
-                                fmt::arg("u", u)),
+                    fmt::format(
+                        "SELECT r.id, ts_s.value, ts_e.value, r.name_id, IC.name "
+                        "FROM rocpd_region_{u} r "
+                        "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = r.start_id "
+                        "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = r.end_id "
+                        "LEFT JOIN rocpd_event_{u} E ON E.id = r.event_id "
+                        "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                        "WHERE r.track_id = ? ORDER BY ts_s.value",
+                        fmt::arg("u", u)),
                     &interval_row_result::id,
                     &interval_row_result::start,
                     &interval_row_result::end,
-                    &interval_row_result::name_ref);
+                    &interval_row_result::name_ref,
+                    &interval_row_result::category);
 
         // kernel dispatch intervals: name_ref is the kernel_symbol id.
         m_kernel_dispatch_interval_track_v4 =

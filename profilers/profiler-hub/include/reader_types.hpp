@@ -555,7 +555,9 @@ struct interval_event_t
     timestamp_ns_t start{};  ///< Event start (nanoseconds).
     timestamp_ns_t end{};    ///< Event end (nanoseconds).
     std::string    display_name;  ///< Human-readable label for the bar.
-    int            level{};       ///< Nesting depth; 0 = outermost. Computed in-reader.
+    std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
+                           ///< "timer_sampling"); empty when the event carries none.
+    int level{};  ///< Nesting depth; 0 = outermost. Computed in-reader.
     std::optional<size_t>
         parent_id{};  ///< opaque_id of the enclosing event when truly nested;
                       ///< nullopt when overlapping-but-not-nested.

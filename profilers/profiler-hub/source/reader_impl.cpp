@@ -1809,6 +1809,10 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         ev.start     = r.start;
         ev.end       = r.end;
 
+        // Category is resolved to its display string in each backend's SQL (v3 via
+        // rocpd_string, v4 via rocpd_info_category), so just carry it through.
+        if(r.category.has_value()) ev.category = r.category.value();
+
         if(r.name_ref.has_value())
         {
             if(name_from_kernel_symbol)

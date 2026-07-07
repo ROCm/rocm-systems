@@ -154,8 +154,8 @@ struct reader_t
      * @param track_id Track identifier from track_info_t::id (cpu_thread/gpu_queue/dma)
      * @param filter Optional time-window / pagination filter
      * @return Interval events ordered by start ascending, with level and parent_id
-     *         precomputed. Empty (not an error) if track_id is unknown or a counter
-     * track.
+     *         precomputed and per-event category resolved to its display string. Empty
+     *         (not an error) if track_id is unknown or a counter track.
      */
     [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
         size_t                              track_id,

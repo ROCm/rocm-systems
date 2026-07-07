@@ -348,13 +348,16 @@ struct time_range_result
 
 /// One interval row on a track. name_ref is a string id for region/memory_copy
 /// tracks and a kernel_symbol id for kernel_dispatch tracks; the reader resolves
-/// it to a display_name based on the track type.
+/// it to a display_name based on the track type. category is the event's already-
+/// resolved category display string (v3 via rocpd_string, v4 via rocpd_info_category);
+/// nullopt when the interval query does not join a category source.
 struct interval_row_result
 {
-    size_t                id{};
-    size_t                start{};
-    size_t                end{};
-    std::optional<size_t> name_ref;
+    size_t                     id{};
+    size_t                     start{};
+    size_t                     end{};
+    std::optional<size_t>      name_ref;
+    std::optional<std::string> category;
 };
 
 /// One scalar (counter) sample on a counter track.

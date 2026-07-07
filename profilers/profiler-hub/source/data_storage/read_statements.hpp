@@ -1258,33 +1258,45 @@ private:
         // main = regions whose event has no rocpd_sample; sample = regions whose event
         // does. Together they partition the thread's regions, matching the two
         // synthesized region tracks (region_track_kind_t main / sample).
+        // Category is resolved in-SQL to its display string (rocpd_string via
+        // rocpd_event.category_id), mirroring the timeline-event category_name pattern.
+        // rocpd_event / rocpd_string are LEFT JOINed so the returned row set stays
+        // identical to the pre-category query (and to get_track_stats' count) — category
+        // is purely additive, NULL when an event or category is absent.
         m_region_interval_track_main =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
                 fmt::format(
-                    "SELECT r.id, r.start, r.\"end\", r.name_id FROM rocpd_region_{u} r "
+                    "SELECT r.id, r.start, r.\"end\", r.name_id, CS.string "
+                    "FROM rocpd_region_{u} r "
                     "LEFT JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = r.event_id "
+                    "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
                     "WHERE r.nid = ? AND r.pid = ? AND r.tid = ? AND s.event_id IS NULL "
                     "ORDER BY r.start",
                     fmt::arg("u", u)),
                 &interval_row_result::id,
                 &interval_row_result::start,
                 &interval_row_result::end,
-                &interval_row_result::name_ref);
+                &interval_row_result::name_ref,
+                &interval_row_result::category);
 
         m_region_interval_track_sample =
             m_backend->create_read_statement_executor<interval_row_result,
                                                       bind_types<size_t, size_t, size_t>>(
                 fmt::format(
-                    "SELECT DISTINCT r.id, r.start, r.\"end\", r.name_id "
+                    "SELECT DISTINCT r.id, r.start, r.\"end\", r.name_id, CS.string "
                     "FROM rocpd_region_{u} r "
                     "INNER JOIN rocpd_sample_{u} s ON s.event_id = r.event_id "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = r.event_id "
+                    "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
                     "WHERE r.nid = ? AND r.pid = ? AND r.tid = ? ORDER BY r.start",
                     fmt::arg("u", u)),
                 &interval_row_result::id,
                 &interval_row_result::start,
                 &interval_row_result::end,
-                &interval_row_result::name_ref);
+                &interval_row_result::name_ref,
+                &interval_row_result::category);
 
         // gpu_queue: kernel dispatches keyed on (nid, pid, agent_id, queue_id)
         m_kernel_dispatch_interval_track = m_backend->create_read_statement_executor<
