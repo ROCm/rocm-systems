@@ -172,9 +172,8 @@ struct backend
                 dims.reserve(dim_inst->dimensions_count);
                 for(std::uint64_t d = 0; d < dim_inst->dimensions_count; ++d)
                 {
-                    dims.push_back(
-                        { std::string{ dim_inst->dimensions[d]->dimension_name },
-                          dim_inst->dimensions[d]->index });
+                    dims.push_back({ safe_str(dim_inst->dimensions[d]->dimension_name),
+                                     dim_inst->dimensions[d]->index });
                 }
                 result.push_back(counter_metadata{
                     dim_inst->instance_id, name_str, desc_str, blk_str, expr_str,
