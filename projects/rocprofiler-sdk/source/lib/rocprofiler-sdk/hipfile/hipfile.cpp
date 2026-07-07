@@ -22,7 +22,9 @@
 
 #include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/mpl.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -130,6 +132,27 @@ template <size_t TableIdx>
 auto*
 get_table();
 
+template <typename Tp>
+decltype(auto)
+convert_arg(Tp&& val)
+{
+    using data_type = common::mpl::unqualified_type_t<Tp>;
+    if constexpr(std::is_same<data_type, const char*>::value)
+    {
+        return common::get_string_entry(val ? val : "")->c_str();
+    }
+    else if constexpr(std::is_same<data_type, char*>::value)
+    {
+        return std::forward<Tp>(val);
+    }
+    else
+    {
+        static_assert(!common::mpl::is_string_type<data_type>::value,
+                      "argument type is a string type. preceding if constexpr is incorrect");
+        return std::forward<Tp>(val);
+    }
+}
+
 }  // namespace
 
 template <size_t TableIdx, size_t OpIdx>
@@ -234,7 +257,8 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     if(!callback_contexts.empty() || !extended_contexts.empty())
     {
-        set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
+        set_data_args(info_type::get_api_data_args(tracer_data.args),
+                      convert_arg(std::forward<Args>(args))...);
     }
 
     if(!callback_contexts.empty())

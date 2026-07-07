@@ -545,8 +545,9 @@ write_perfetto(
         for(auto ditr : hipfile_api_gen)
             for(auto itr : hipfile_api_gen.get(ditr))
             {
-                auto  name  = buffer_names.at(itr.kind, itr.operation);
-                auto& track = thread_tracks.at(itr.thread_id);
+                auto  name         = buffer_names.at(itr.kind, itr.operation);
+                auto& track        = thread_tracks.at(itr.thread_id);
+                auto  hipfile_args = sdk::serialization::get_buffer_tracing_args(itr);
 
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hipfile_api>::name,
                                   ::perfetto::StaticString(name.data()),
@@ -568,7 +569,14 @@ write_perfetto(
                                   "corr_id",
                                   itr.correlation_id.internal,
                                   "ancestor_id",
-                                  itr.correlation_id.ancestor);
+                                  itr.correlation_id.ancestor,
+                                  [&](::perfetto::EventContext ctx) {
+                                      for(const auto& hipfile_arg : hipfile_args)
+                                      {
+                                          sdk::add_perfetto_annotation(
+                                              ctx, hipfile_arg.name, hipfile_arg.value);
+                                      }
+                                  });
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::hipfile_api>::name,
                                 track,
                                 itr.end_timestamp);
