@@ -321,7 +321,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
           }));
       break;
     case ReduceWaveTestType:
-      test_name = "Wave-level Team-based Reduction";
+      test_name = "Wave-level Reduction";
       testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
           args,
           [](float& f1, float& f2) {

@@ -24,7 +24,7 @@
 
 /* Declare the template with a generic implementation */
 template <typename T, ROCSHMEM_OP Op>
-__device__ int wave_team_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
+__device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
                                 [[maybe_unused]] rocshmem_team_t team,
                                 [[maybe_unused]] T *dest,
                                 [[maybe_unused]] const T *source,
@@ -33,39 +33,39 @@ __device__ int wave_team_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
 }
 
 /* Define templates to call rocSHMEM */
-#define TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                        \
+#define REDUCTION_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                              \
   template <>                                                                     \
-  __device__ int wave_team_reduce<T, Op>(rocshmem_ctx_t ctx,                     \
+  __device__ int wave_reduce<T, Op>(rocshmem_ctx_t ctx,                           \
                                          rocshmem_team_t team, T *dest,           \
                                          const T *source, int nreduce) {          \
     return rocshmem_ctx_##TNAME##_##Op_API##_reduce_wave(ctx, team, dest,         \
                                                           source, nreduce);       \
   }
 
-#define TEAM_ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)              \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)       \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)       \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)       \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
+#define ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)              \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)       \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)       \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)       \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
 
-#define TEAM_BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)            \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)         \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)       \
-  TEAM_REDUCTION_WAVE_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
+#define BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)            \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)         \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)       \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
-#define TEAM_INT_REDUCTION_WAVE_DEF_GEN(T, TNAME)  \
-  TEAM_ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)      \
-  TEAM_BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)
+#define INT_REDUCTION_WAVE_DEF_GEN(T, TNAME)  \
+  ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)      \
+  BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
-#define TEAM_FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
-  TEAM_ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
+#define FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
+  ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
-TEAM_INT_REDUCTION_WAVE_DEF_GEN(int, int)
-TEAM_INT_REDUCTION_WAVE_DEF_GEN(short, short)
-TEAM_INT_REDUCTION_WAVE_DEF_GEN(long, long)
-TEAM_INT_REDUCTION_WAVE_DEF_GEN(long long, longlong)
-TEAM_FLOAT_REDUCTION_WAVE_DEF_GEN(float, float)
-TEAM_FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
+INT_REDUCTION_WAVE_DEF_GEN(int, int)
+INT_REDUCTION_WAVE_DEF_GEN(short, short)
+INT_REDUCTION_WAVE_DEF_GEN(long, long)
+INT_REDUCTION_WAVE_DEF_GEN(long long, longlong)
+FLOAT_REDUCTION_WAVE_DEF_GEN(float, float)
+FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -94,7 +94,7 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
       start_time[flat_wf_id] = wall_clock64();
     }
     if (wf_id == 0) {
-      wave_team_reduce<T1, T2>(ctx, teams[flat_wf_id],
+      wave_reduce<T1, T2>(ctx, teams[flat_wf_id],
                              r_buf + flat_wf_id * size,
                              s_buf + flat_wf_id * size, size);
     }

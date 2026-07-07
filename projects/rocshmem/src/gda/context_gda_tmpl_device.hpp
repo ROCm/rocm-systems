@@ -464,8 +464,9 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
         int p_chunk = p_count / PE_size;
 
         if (p_chunk > 0) {
-          internal_ring_allreduce_wave<T, Op>(p_dst, p_src, (p_chunk * PE_size),
-            team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
+          internal_ring_allreduce_wave<T, Op>(p_dst, p_src, 
+            (p_chunk * PE_size), team_obj, 1, 
+            (p_chunk * PE_size), p_chunk, wf_info);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -647,14 +648,14 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
 
-      internal_putmem_nbi_wave(reinterpret_cast<void *>(&pWrk[off_send]),
+      internal_putmem_wave(reinterpret_cast<void *>(&pWrk[off_send]),
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
 
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 100;
-        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
@@ -676,7 +677,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       if (is_thread_zero_in_wave()) {
         qps[send_pe].quiet(wf_info);
         wait_val = seg + 10;
-        internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
+        internal_putmem_wave(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
 #if defined(__gfx90a__)
         __threadfence_system();
