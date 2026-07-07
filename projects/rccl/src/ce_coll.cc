@@ -206,6 +206,7 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
+    case ncclFuncAlltoAllv:
     case ncclFuncScatter:
     case ncclFuncGather:
       return true;
@@ -637,6 +638,88 @@ fail:
   goto exit;
 }
 
+ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+
+  if (args->sizes == nullptr) {
+    WARN("CE AlltoAllv: missing size metadata");
+    return ncclInvalidUsage;
+  }
+
+  size_t* sendSizes = args->sizes + 4 * comm->nRanks * comm->rank;
+  size_t* sendDispls = args->sizes + 4 * comm->nRanks * comm->rank + 1 * comm->nRanks;
+  size_t* recvDispls = args->sizes + 4 * comm->nRanks * comm->rank + 3 * comm->nRanks;
+  size_t peerDispls = 0;
+  size_t peerRcvSize = 0;
+
+  uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
+  uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
+  void* peerRecvBuff;
+  size_t offset, winOff;
+  size_t totalBytes = 0;
+  struct ncclCeBatchOpsParams batchOpsParams = {};
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
+
+  // Ensure all ranks are ready before starting transfers
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
+
+  // Copy data to other ranks: send variable-sized chunk for each destination rank
+  for (int r = 0; r < comm->nRanks; r++) {
+    int dstRank = (comm->rank + r) % comm->nRanks;
+    const size_t chunkBytes = sendSizes[dstRank];
+    if (chunkBytes == 0) continue;
+
+    uint8_t* srcPtr = mySendBuff + sendDispls[dstRank];
+    uint8_t* dstPtr = myRecvBuff + recvDispls[comm->rank];
+    totalBytes += chunkBytes;
+    
+    if (dstRank == comm->rank) {
+      // Local copy for own data
+      if (srcPtr != dstPtr) {
+        batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
+        batchOpsParams.dsts[batchOpsParams.numOps] = (void*)dstPtr;
+        batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
+        batchOpsParams.numOps++;
+      }
+    } else {
+      // Remote copy to other ranks: send to rank dstRank's receive buffer at position comm->rank
+        size_t* peerRecvSizes = args->sizes + 4 * comm->nRanks * dstRank + 2 * comm->nRanks;
+        size_t* peerRecvDispls = args->sizes + 4 * comm->nRanks * dstRank + 3 * comm->nRanks;
+        peerDispls = peerRecvDispls[comm->rank];
+        peerRcvSize = peerRecvSizes[comm->rank];
+
+        uint8_t* dstPtr = (uint8_t*)myRecvBuff + peerDispls;
+        offset = dstPtr - (uint8_t*)args->recvBuff;
+        winOff = offset + ((uint8_t*)args->recvBuff - (uint8_t*)args->recvWin->userPtr);
+
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, args->recvWin, winOff, dstRank, &peerRecvBuff), ret, fail);
+
+
+        batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcPtr;
+        batchOpsParams.dsts[batchOpsParams.numOps] = (void*)peerRecvBuff;
+        batchOpsParams.sizes[batchOpsParams.numOps] = chunkBytes;
+        batchOpsParams.numOps++;
+    }
+  }
+
+  // Check if we need to perform intra-batch synchronization
+  batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq &&
+      totalBytes >= comm->ceColl.intraBatchSyncMsgThreshold);
+
+  // Launch the batch operations
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
+
+  // Ensure all transfers are complete across all ranks
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
+
+exit:
+  ncclCeFreeBatchOpsParams(&batchOpsParams);
+  return ret;
+fail:
+  goto exit;
+}
+
+
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
@@ -754,20 +837,28 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream), ret, fail);
 
   switch (args->func) {
-  case ncclFuncAllGather:
-    NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncAlltoAll:
-    NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncScatter:
-    NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
-    break;
-  case ncclFuncGather:
-    NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
-    break;
-  default:
-    ret = ncclInvalidUsage;
+    case ncclFuncAllGather:
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream),
+                    ret, fail);
+      break;
+    case ncclFuncAlltoAll:
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream),
+                    ret, fail);
+      break;
+    case ncclFuncAlltoAllv:
+      NCCLCHECKGOTO(ncclCeAlltoAllv(comm, args, stream),
+                    ret, fail);
+      break;
+    case ncclFuncScatter:
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream),
+                    ret, fail);
+      break;
+    case ncclFuncGather:
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream),
+                    ret, fail);
+      break;
+    default:
+      ret = ncclInvalidUsage;
   }
 
 exit:
