@@ -286,7 +286,7 @@ TEST(InlineNopGuardrail, RejectsNonCanonicalBody) {
     p.original_size = 4;
     p.trampoline_offset = 0x200;
     p.return_target = 0x104;
-    p.original_words = {0xDEADBEEFu};
+    p.original_words.assign(1, 0xDEADBEEFu);
     p.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
     p.emit_original = true;
     return p;
