@@ -69,6 +69,7 @@ template <typename T> class lazy_ptr {
   lazy_ptr& operator=(lazy_ptr&& rhs) {
     obj = std::move(rhs.obj);
     func = std::move(rhs.func);
+    return *this;
   }
 
   lazy_ptr(lazy_ptr&) = delete;
