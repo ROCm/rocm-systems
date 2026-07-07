@@ -699,8 +699,16 @@ hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
 hipFileError_t
 hipFileGetStatsL2(hipFileStatsLevel2_t *stats)
 {
-    (void)stats;
-    return {hipFileInternalError, hipSuccess};
+    try {
+        if (stats == nullptr) {
+            return {hipFileInvalidValue, hipSuccess};
+        }
+        *stats = {};
+        return hipFile::hipFileGetStatsL1(&stats->basic);
+    }
+    catch (...) {
+        return handle_exception();
+    }
 }
 
 hipFileError_t

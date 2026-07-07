@@ -486,4 +486,55 @@ TEST_F(HipFileGetStatsL1, ZeroLatencySumLeavesAverageAndBandwidthZero)
     EXPECT_EQ(out.read_bw_bytes_per_sec, 0u);
 }
 
+// ***********************************************************************
+//  hipFileGetStatsL2 tests
+// ***********************************************************************
+
+struct HipFileGetStatsL2 : public HipFileUnopened {
+    Stats                    stats{};
+    StrictMock<MStatsServer> mstats{};
+
+    void SetUp() override
+    {
+        EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+        stats.setLevel(StatsLevel::Basic);
+    }
+};
+
+TEST_F(HipFileGetStatsL2, NullptrReturnsInvalidValue)
+{
+    EXPECT_EQ(hipFileGetStatsL2(nullptr), HIPFILE_INVALID_VALUE);
+}
+
+TEST_F(HipFileGetStatsL2, PopulatesL1BasicFields)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
+        .buckets[0] = 256;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioCount[static_cast<size_t>(IoType::Read)].buckets[0] =
+        1;
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioTimeUs[static_cast<size_t>(IoType::Read)].buckets[0] =
+        500;
+
+    hipFileStatsLevel2_t out{};
+    ASSERT_EQ(hipFileGetStatsL2(&out), HIPFILE_SUCCESS);
+    EXPECT_EQ(out.basic.read_bytes, 256u);
+    EXPECT_EQ(out.basic.read_ops.ok, 1u);
+    EXPECT_EQ(out.basic.read_lat_sum_us, 500u);
+}
+
+TEST_F(HipFileGetStatsL2, SizeHistogramsAreZeroFilled)
+{
+    stats.getPerGpuStats(0, StatsBackend::Fastpath)
+        ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
+        .buckets[0] = 1024;
+
+    hipFileStatsLevel2_t out{};
+    ASSERT_EQ(hipFileGetStatsL2(&out), HIPFILE_SUCCESS);
+    for (size_t i = 0; i < 32; ++i) {
+        EXPECT_EQ(out.read_size_kb_hist[i], 0u) << "read_size_kb_hist[" << i << "] should be zero";
+        EXPECT_EQ(out.write_size_kb_hist[i], 0u) << "write_size_kb_hist[" << i << "] should be zero";
+    }
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
