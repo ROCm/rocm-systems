@@ -30,10 +30,12 @@ THE SOFTWARE.
 //   putmem_on_stream           putmem_signal_on_stream
 //   signal_wait_until_on_stream
 //
-// rocSHMEM requires an Open MPI launcher (mpirun / mpiexec) to bootstrap the
-// symmetric heap. If launched without one, exit cleanly with status 0 so the
-// validator interprets the trace as "unavailable" and skips rather than
-// reporting a hard failure.
+// The demo must be launched by an MPI/PMI launcher (mpirun / mpiexec / srun) that exposes
+// the node-local rank via an environment variable; it uses that to pin each process to a
+// GPU before rocshmem_init(). If launched without one, exit cleanly with status 0 so the
+// validator interprets the trace as "unavailable" and skips rather than reporting a hard
+// failure. rocSHMEM itself is not tied to Open MPI -- it bootstraps against whatever MPI it
+// was built with (OpenMPI, MPICH, MVAPICH); the lookup below just covers common launchers.
 
 #include <hip/hip_runtime.h>
 #include <rocshmem/rocshmem.hpp>
@@ -43,6 +45,7 @@ THE SOFTWARE.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #define CHECK_HIP(cmd)                                                                             \
     do                                                                                             \
@@ -64,13 +67,25 @@ using namespace rocshmem;
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    const char* ompi_local_rank = std::getenv("OMPI_COMM_WORLD_LOCAL_RANK");
-    if(ompi_local_rank == nullptr)
+    // The node-local rank env var name varies by launcher, so check the common ones instead
+    // of tying the demo to a single MPI implementation.
+    const char* local_rank = nullptr;
+    for(const char* _var : {"OMPI_COMM_WORLD_LOCAL_RANK",  // Open MPI
+                            "MV2_COMM_WORLD_LOCAL_RANK",   // MVAPICH2
+                            "MPI_LOCALRANKID",             // MPICH / Hydra
+                            "SLURM_LOCALID"})              // Slurm
+    {
+        local_rank = std::getenv(_var);
+        if(local_rank != nullptr) break;
+    }
+    if(local_rank == nullptr)
     {
         std::fprintf(stderr,
-                     "[rocshmem-demo] OMPI_COMM_WORLD_LOCAL_RANK is not set; this demo must be "
-                     "launched via Open MPI's mpirun/mpiexec. Exiting without exercising the "
-                     "rocSHMEM API so the integration test reports tracing as unavailable.\n");
+                     "[rocshmem-demo] no node-local rank env var set (checked "
+                     "OMPI_COMM_WORLD_LOCAL_RANK, MV2_COMM_WORLD_LOCAL_RANK, MPI_LOCALRANKID, "
+                     "SLURM_LOCALID); this demo must be launched via an MPI/PMI launcher "
+                     "(mpirun/mpiexec/srun). Exiting without exercising the rocSHMEM API so the "
+                     "integration test reports tracing as unavailable.\n");
         return 0;
     }
 
@@ -86,7 +101,7 @@ main(int /*argc*/, char** /*argv*/)
                      "[rocshmem-demo] no HIP devices visible; skipping rocSHMEM exercise.\n");
         return 0;
     }
-    CHECK_HIP(hipSetDevice(std::atoi(ompi_local_rank) % device_count));
+    CHECK_HIP(hipSetDevice(std::atoi(local_rank) % device_count));
 
     rocshmem_init();
 
