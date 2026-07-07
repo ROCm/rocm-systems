@@ -10,6 +10,12 @@
 # cross-workgroup synchronization checking.
 rj_add_hip_test(hip_race_tests SOURCE hip_race_tests.hip)
 set(RJ_RACE_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
+if(RJ_INSTALL_TESTS)
+    install(
+        FILES ${RJ_RACE_CONFIG}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs
+    )
+endif()
 
 function(rj_add_race_test_case TEST_CASE)
     set(SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/racetest_${TEST_CASE})

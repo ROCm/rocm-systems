@@ -12,6 +12,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -26,6 +27,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -74,8 +76,29 @@ env:
   ENABLE_ROCJPEG_BUILD: "true"
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   code-coverage:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Code Coverage • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     permissions:
       contents: write
@@ -84,9 +107,9 @@ jobs:
       # fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -99,7 +122,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: ${{ matrix.system.runner }}
+      GPU_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       GCC_COMPILER_VERSION: 11
 
     steps:
@@ -218,7 +241,7 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
-        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 
     - name: Configure, Build, and Test (Total Code Coverage)
@@ -229,7 +252,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
@@ -252,7 +275,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
@@ -275,7 +298,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16
-          --site ${{ matrix.system.runner }}
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}

@@ -151,7 +151,7 @@ static ncclResult_t canConnect(int* ret, struct ncclComm* comm, struct ncclTopoG
 // Returns the flags to be used by a call to cuMemGetHandleForAddressRange.
 static inline int getHandleForAddressRangeFlags(ncclTopoGdrMode useGdr) {
   int flags = 0;
-#if CUDA_VERSION >= 12080 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 12080 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   // Force mapping on PCIe on systems with both PCI and C2C attachments.
   if (useGdr == ncclTopoGdrModePci) flags = CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE;
 #endif
@@ -520,7 +520,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
   bool needReg = true;
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_send);
@@ -617,7 +617,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   int dmabuf_fd = -1;
   (void)dmabuf_fd; /*compiler warnings fix - unused variable*/
   bool needReg = true;
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)mapMem->cpuPtr, mapMem->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem_recv);
@@ -1358,7 +1358,7 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(respSize == sizeof(void*));
 
   int dmabuf_fd = -1;
-  #if CUDART_VERSION >= 11070 || HIP_VERSION >= 71260540
+  #if CUDART_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
@@ -1408,7 +1408,7 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
   assert(reqSize == sizeof(struct collnetRegInfo));
   assert(respSize == sizeof(void*));
   int dmabuf_fd = -1;
-#if CUDART_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDART_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   /* DMA-BUF support */
   if (resources->useGdr && resources->useDmaBuf && ncclCuMemEnable()) {
     CUCHECKGOTO(cuMemGetHandleForAddressRange((void *)&dmabuf_fd, (CUdeviceptr)info->buffer, info->size, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, getHandleForAddressRangeFlags(resources->useGdr)), ret, peermem);
