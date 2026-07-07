@@ -26,10 +26,19 @@ target_link_libraries(
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
-        profiler-hub-sqlite3
         spdlog::spdlog
         nlohmann_json::nlohmann_json
 )
+
+if(WIN32)
+    target_include_directories(
+        profiler-hub_unit_tests
+        PRIVATE
+            $<TARGET_PROPERTY:profiler-hub-sqlite3,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+else()
+    target_link_libraries(profiler-hub_unit_tests PRIVATE profiler-hub-sqlite3)
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/rocpd.db
@@ -81,7 +90,7 @@ else()
     )
 endif()
 
-target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_17)
+target_compile_features(profiler-hub_unit_tests PRIVATE cxx_std_20)
 
 if(PROFILER_HUB_ENABLE_COVERAGE)
     profiler_hub_add_coverage_flags(profiler-hub_unit_tests)
