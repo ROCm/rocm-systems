@@ -67,22 +67,46 @@ hsa_agent_t first_aie_agent(bool& found) {
 
 }  // namespace
 
+// Shared fixture: initializes the HSA runtime once for the suite (always tearing it down, even when
+// individual tests skip) and resolves the first AIE agent per test, skipping when no NPU is present.
+class ErrorCallback : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    initialized_ = true;
+  }
+
+  static void TearDownTestSuite() {
+    if (initialized_) {
+      EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+      initialized_ = false;
+    }
+  }
+
+  void SetUp() override {
+    bool found = false;
+    agent_ = first_aie_agent(found);
+    if (!found) {
+      GTEST_SKIP() << "No AIE device found; skipping test";
+    }
+  }
+
+  hsa_agent_t agent_{};
+  static bool initialized_;
+};
+
+bool ErrorCallback::initialized_ = false;
+
 // Creating a queue with an error callback must succeed, and the callback must not fire while no
 // error has occurred.
-TEST(ErrorCallback, QueueCreateWithCallback) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  bool found = false;
-  const hsa_agent_t agent = first_aie_agent(found);
-  ASSERT_TRUE(found);
-
+TEST_F(ErrorCallback, QueueCreateWithCallback) {
   uint32_t min_queue_size = 0;
-  ASSERT_EQ(hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+  ASSERT_EQ(hsa_agent_get_info(agent_, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
             HSA_STATUS_SUCCESS);
 
   error_capture capture;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(agent, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
+  ASSERT_EQ(hsa_queue_create(agent_, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
                              0, 0, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_NE(queue, nullptr);
@@ -90,25 +114,18 @@ TEST(ErrorCallback, QueueCreateWithCallback) {
   EXPECT_FALSE(capture.invoked.load(std::memory_order_acquire));
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
 
 // Submitting a packet that references an unregistered (invalid) buffer must be rejected by the
 // driver and reported through the per-queue error callback.
-TEST(ErrorCallback, InvalidDispatchInvokesCallback) {
-  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-  bool found = false;
-  const hsa_agent_t agent = first_aie_agent(found);
-  ASSERT_TRUE(found);
-
+TEST_F(ErrorCallback, InvalidDispatchInvokesCallback) {
   uint32_t min_queue_size = 0;
-  ASSERT_EQ(hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+  ASSERT_EQ(hsa_agent_get_info(agent_, HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
             HSA_STATUS_SUCCESS);
 
   error_capture capture;
   hsa_queue_t* queue = nullptr;
-  ASSERT_EQ(hsa_queue_create(agent, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
+  ASSERT_EQ(hsa_queue_create(agent_, min_queue_size, HSA_QUEUE_TYPE_SINGLE, error_callback, &capture,
                              0, 0, &queue),
             HSA_STATUS_SUCCESS);
   ASSERT_NE(queue, nullptr);
@@ -138,5 +155,4 @@ TEST(ErrorCallback, InvalidDispatchInvokesCallback) {
   EXPECT_EQ(capture.source, queue);
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
 }
