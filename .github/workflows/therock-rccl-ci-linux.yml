@@ -3,6 +3,10 @@ name: TheRock CI Linux for rccl
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
+        description: "TheRock commit hash to use"
       amdgpu_families:
         type: string
       artifact_group:
@@ -41,7 +45,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -135,6 +139,7 @@ jobs:
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-multi-node.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
@@ -147,6 +152,7 @@ jobs:
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: linux-gfx942-8gpu-ossci-rocm

@@ -1,0 +1,14 @@
+name: "CI Environment"
+description: "Single source of truth for shared CI constants (TheRock ref)"
+
+outputs:
+  therock-ref:
+    description: "TheRock commit hash to use"
+    value: "02b806948e0e1e5a1a2bf28dd3940a13c8939ccb" # 2026-07-01
+
+runs:
+  using: "composite"
+  steps:
+    - name: Export CI environment
+      shell: bash
+      run: echo "CI environment loaded"

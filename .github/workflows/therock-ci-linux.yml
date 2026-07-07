@@ -3,6 +3,10 @@ name: TheRock CI Linux
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
+        description: "TheRock commit hash to use"
       cmake_options:
         type: string
       projects_to_test:
@@ -54,7 +58,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -143,6 +147,7 @@ jobs:
     if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
@@ -157,6 +162,7 @@ jobs:
     if: ${{ inputs.amdgpu_families == 'gfx125X-dcgpu' && inputs.run_mi455_test == 'true' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: "hip-tests, rocrtst"
       amdgpu_families: "gfx125X-dcgpu"
       test_runs_on: "linux-mi455-gpu-rocm"

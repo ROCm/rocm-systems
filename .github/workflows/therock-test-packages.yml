@@ -3,6 +3,9 @@ name: TheRock Test Packages
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        description: "TheRock commit hash to use"
       projects_to_test:
         type: string
       amdgpu_families:
@@ -49,7 +52,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
+          ref: ${{ inputs.therock_ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -92,6 +95,7 @@ jobs:
     needs: configure_test_matrix
     uses: './.github/workflows/therock-test-component.yml'
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       # Use the runner selected by fetch_test_configurations.py
@@ -110,6 +114,7 @@ jobs:
         components: ${{ fromJSON(needs.configure_test_matrix.outputs.components) }}
     uses: './.github/workflows/therock-test-component.yml'
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       # Route to the appropriate runner:

@@ -38,6 +38,7 @@ jobs:
       # parent will be the tip of the base branch.
       BASE_REF: HEAD^
     outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
@@ -54,12 +55,18 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 2
 
+      # Loads shared CI constants (TheRock ref) from the ci-env composite action
+      # so they are defined in one place.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 02b806948e0e1e5a1a2bf28dd3940a13c8939ccb # 2026-07-01
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -131,6 +138,7 @@ jobs:
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -152,6 +160,7 @@ jobs:
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
     secrets: inherit
     with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -178,6 +187,7 @@ jobs:
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       package_version: ${{ needs.setup.outputs.package_version }}
