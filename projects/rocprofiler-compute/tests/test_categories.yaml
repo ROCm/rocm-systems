@@ -5,6 +5,7 @@ test_categories:
       - test_profile_misc
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_profile_section
       - test_pc_sampling
       - test_analyze_workloads
@@ -18,18 +19,26 @@ test_categories:
       - test_torch_trace_coverage
       - test_L1_cache_counters
       - test_data_imputation
-      - test_roofline_calc_ai_analyze
+      - test_roofline_calc
+      - test_roofline_analyze
+      - test_roofline_main
       - test_num_xcds_spec_class
       - test_profiler_base
       - test_pc_sampling_profile
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_autogen_config
       - test_import_guard
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_soc_base
+      - test-pc-sampling-collector
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
     exclude:
       - test_profile_live_attach_detach
@@ -64,6 +73,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -72,7 +82,9 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils
       - test_L1_cache_counters
-      - test_roofline_calc_ai_analyze
+      - test_roofline_calc
+      - test_roofline_analyze
+      - test_roofline_main
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_tui_components
@@ -81,11 +93,21 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_soc_base
+      - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_triton_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
     exclude:
       - test_profile_live_attach_detach
@@ -119,6 +141,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -127,7 +150,9 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils
       - test_L1_cache_counters
-      - test_roofline_calc_ai_analyze
+      - test_roofline_calc
+      - test_roofline_analyze
+      - test_roofline_main
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_tui_components
@@ -136,11 +161,21 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_soc_base
+      - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_triton_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
     exclude:
       - test_profile_live_attach_detach
@@ -174,6 +209,7 @@ test_categories:
       - test_profile_iteration_multiplexing_stochastic
       - test_metric_utils
       - test_parser
+      - test_argparser
       - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
@@ -182,7 +218,9 @@ test_categories:
       - test_mi_gpu_spec
       - test_utils
       - test_L1_cache_counters
-      - test_roofline_calc_ai_analyze
+      - test_roofline_calc
+      - test_roofline_analyze
+      - test_roofline_main
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_tui_components
@@ -191,11 +229,21 @@ test_categories:
       - test_analysis_db
       - test_pc_sampling_analysis
       - test_utils_profile_csv
+      - test_inject_roctx_package
+      - test_torch_cpp_loader
       - test_profiler_base
       - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
+      - test_metrics_common
+      - test_tty
       - test-rocprofiler-compute-tool
+      - test_soc_base
+      - test-pc-sampling-collector
+      - test_profile_torch_trace
+      - test_profile_triton_trace
+      - test_profile_live_attach_detach
+      - test_metric_validation
     # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
     exclude:
       - test_profile_live_attach_detach
@@ -208,6 +256,14 @@ test_categories:
     labels:
       - "full"
       - "weekly"
+
+  sanitizer:
+    description: "Native cpp unit tests run under sanitizers (no GPU, no workload)"
+    test_patterns:
+      - test-rocprofiler-compute-tool
+      - test-pc-sampling-collector
+    labels:
+      - "sanitizer"
 
 execution_settings:
   default_timeout: 300
