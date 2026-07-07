@@ -68,14 +68,15 @@ struct Case {
   const char *name;
   uint32_t opcode;
   bool ternary;
+  bool minmax;
 };
 
 const std::array<Case, 5> kCases = {{
-    {"v_pk_add_f16_vop3p", 15, false},
-    {"v_pk_mul_f16_vop3p", 16, false},
-    {"v_pk_max_f16_vop3p", 18, false},
-    {"v_pk_min_f16_vop3p", 17, false},
-    {"v_pk_fma_f16_vop3p", 14, true},
+    {"v_pk_add_f16_vop3p", 15, false, false},
+    {"v_pk_mul_f16_vop3p", 16, false, false},
+    {"v_pk_max_f16_vop3p", 18, false, true},
+    {"v_pk_min_f16_vop3p", 17, false, true},
+    {"v_pk_fma_f16_vop3p", 14, true, false},
 }};
 
 // f16 bit patterns covering normals + corners. Each 32-bit lane carries
@@ -99,6 +100,14 @@ const std::array<uint16_t, 14> kF16Bits = {{
 }};
 
 bool is_f16_nan(uint16_t b) { return ((b >> 10) & 0x1Fu) == 0x1Fu && (b & 0x3FFu) != 0u; }
+
+// A signed-zero tie (both min/max operands zero, of either sign) is an accepted
+// SIMD-vs-scalar carve-out: scalar std::fmax/fmin returns the first operand, the
+// packed vmaxps/vminps the second, so e.g. max(+0,-0) is -0 (scalar) vs +0 (SIMD)
+// — numerically equal. neg/neg_hi only flip the sign of a zero, never its
+// magnitude, so the tie condition is modifier-independent. Same skip as
+// vop2_minmax_simd_correctness.
+bool is_f16_zero(uint16_t b) { return (b & 0x7FFFu) == 0u; }
 
 struct Fixture {
   amdgpu::GpuMemory gpu_mem;
@@ -198,6 +207,11 @@ void check_case(const Case &c, uint64_t exec, uint32_t neg, uint32_t neg_hi) {
           uint16_t c_lo = kF16Bits[(lane + 2 * rot + 1) % kF16Bits.size()];
           uint16_t c_hi = kF16Bits[(lane + 2 * rot + 7) % kF16Bits.size()];
           skip = is_f16_nan(c_lo) || is_f16_nan(c_hi);
+        }
+        if (!skip && c.minmax) {
+          // Either packed half being a ±0 tie diverges the whole 32-bit result.
+          skip =
+              (is_f16_zero(a_lo) && is_f16_zero(b_lo)) || (is_f16_zero(a_hi) && is_f16_zero(b_hi));
         }
         if (skip)
           continue;

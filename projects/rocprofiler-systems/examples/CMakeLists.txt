@@ -99,7 +99,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     hpc
     shmem
     scratch-memory
-    sdma_test
+    sdma-test
     unified-memory
     minimal
 )

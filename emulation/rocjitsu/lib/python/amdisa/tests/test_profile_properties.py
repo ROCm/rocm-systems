@@ -5,7 +5,9 @@
 
 from types import SimpleNamespace
 
-from amdisa.codegen._generator import CodeGenerator
+import pytest
+
+from amdisa.codegen._generator import CodeGenerator, _SourceImplUnit
 from amdisa.__main__ import _detect_profile
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_profile import (
@@ -167,6 +169,30 @@ class TestRdna3Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
+    def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
+        generator = CodeGenerator(
+            SimpleNamespace(
+                arch_name='rdna3',
+                opnd_selectors=[],
+                operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+                profile=Rdna3Profile(),
+            ),
+            str(tmp_path),
+        )
+
+        generator.gen_operand()
+        operand_cpp = (tmp_path / 'rdna3' / 'operand.cpp').read_text()
+
+        assert (
+            'if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));'
+        ) in operand_cpp
+        assert 'return read_immediate64(opr_type_, ev);' in operand_cpp
+        assert 'return read_immediate64(opr_type_, encoding_value_);' in operand_cpp
+
 
 class TestRdna4Profile:
     def setup_method(self):
@@ -187,6 +213,9 @@ class TestRdna4Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
 
 class TestGfx1250Profile:
     def setup_method(self):
@@ -197,6 +226,9 @@ class TestGfx1250Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_has_vopd3(self):
+        assert self.p.has_vopd3 is True
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
@@ -229,8 +261,104 @@ class TestGfx1250Profile:
 
     def test_source_split_limits_leave_precommit_margin(self):
         limits = self.p.source_split_max_bytes
-        assert limits['ENC_VOP3'] <= 340 * 1024
-        assert limits['ENC_VOPC'] <= 340 * 1024
+        assert limits['ENC_VOP3'] <= 450 * 1024
+        assert limits['ENC_VOPC'] <= 450 * 1024
+
+    def test_source_split_file_stems_are_logical(self):
+        assert self.p.source_split_file_stem('ENC_VOPC', 'V_CMP_LT_F32', None) == 'cmp'
+        assert (
+            self.p.source_split_file_stem('ENC_VOPC', 'V_CMPX_CLASS_F64', None)
+            == 'cmpx'
+        )
+        assert (
+            self.p.source_split_file_stem('ENC_VOP3', 'V_CVT_PK_FP8_F32', None) == 'cvt'
+        )
+        assert (
+            self.p.source_split_file_stem(
+                'ENC_VOP3',
+                'V_MAD_CO_U64_U32',
+                SimpleNamespace(data_type='u64'),
+            )
+            == 'alu'
+        )
+
+    def test_generated_source_split_file_matcher_is_scoped(self):
+        units = [_SourceImplUnit('alu', ['impl']), _SourceImplUnit('cmpx', ['impl'])]
+
+        assert CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_part1.cpp', units
+        )
+        assert CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_alu.cpp', units
+        )
+        assert CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_alu_2.cpp', units
+        )
+        assert CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_cmpx.cpp', units
+        )
+        assert not CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_helper.cpp', units
+        )
+        assert not CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_alu_helper.cpp', units
+        )
+
+        mixed_units = [
+            _SourceImplUnit('alu', ['impl']),
+            _SourceImplUnit(None, ['impl']),
+        ]
+        assert CodeGenerator._is_generated_source_split_file(
+            'vop3', 'vop3_misc.cpp', mixed_units
+        )
+
+    def test_logical_source_chunks_put_extra_impls_in_support_chunk(self):
+        gen = object.__new__(CodeGenerator)
+        inst_impl = 'instruction'
+        chunks = gen._build_logical_source_chunks(
+            'vop3',
+            ['support', inst_impl],
+            [_SourceImplUnit('alu', [inst_impl])],
+            max_bytes=1024,
+            chunk_overhead=0,
+        )
+
+        assert chunks == [
+            ('vop3_support', ['support']),
+            ('vop3_alu', [inst_impl]),
+        ]
+
+    def test_logical_source_chunks_size_support_impls(self):
+        gen = object.__new__(CodeGenerator)
+        chunks = gen._build_logical_source_chunks(
+            'vop3',
+            ['support-one', 'support-two', 'instruction'],
+            [_SourceImplUnit('alu', ['instruction'])],
+            max_bytes=len('support-one\n\nsupport-two\n\n') - 1,
+            chunk_overhead=0,
+        )
+
+        assert chunks[:2] == [
+            ('vop3_support', ['support-one']),
+            ('vop3_support_2', ['support-two']),
+        ]
+
+    def test_logical_source_chunks_reject_duplicate_filenames(self):
+        gen = object.__new__(CodeGenerator)
+        with pytest.raises(
+            AssertionError, match='duplicate generated source file name'
+        ):
+            gen._build_logical_source_chunks(
+                'vop3',
+                ['first', 'second', 'third'],
+                [
+                    _SourceImplUnit('alu', ['first']),
+                    _SourceImplUnit('alu', ['second']),
+                    _SourceImplUnit('alu_2', ['third']),
+                ],
+                max_bytes=len('first\n\nsecond\n\n') - 1,
+                chunk_overhead=0,
+            )
 
     def test_hwreg_ids(self):
         assert self.p.hwreg_mode_id == 1

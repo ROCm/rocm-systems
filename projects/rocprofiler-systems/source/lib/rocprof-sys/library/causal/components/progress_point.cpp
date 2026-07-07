@@ -11,7 +11,6 @@
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/units.hpp>
 
 namespace rocprofsys
 {

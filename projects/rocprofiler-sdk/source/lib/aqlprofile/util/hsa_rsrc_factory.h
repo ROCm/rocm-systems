@@ -23,15 +23,6 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-// Deliberate include cycle: aqlprofile.hpp -> hsa_rsrc_factory.h (when
-// ROCPROFILER_EXTERNAL_AQLPROFILE == 0) -> aqlprofile.hpp. The cycle is safe
-// because aqlprofile.hpp drives the ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
-// gate and includes aql_profile_v2.h *before* including this header, and our
-// own include guard (SRC_UTIL_HSA_RSRC_FACTORY_H_) short-circuits the
-// re-entry. Do not reorder the includes in aqlprofile.hpp, or this cycle
-// will produce an incomplete aqlprofile_cu_bitmap_t at AgentInfo's point of
-// use below.
-#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
 #include "lib/aqlprofile/hsa_includes.h"
 
 #include <cstdint>
@@ -156,13 +147,6 @@ struct AgentInfo
     // Timestamp frequency for realtime clock
     uint32_t timestamp_freq{0};
 
-    // Per-SE/SA active CU bitmap from DRM. Bit set = active CU. All-zero
-    // means the bitmap is unavailable, in which case GFX11+ WGP iteration
-    // falls back to the legacy sequential formula based on cu_num. Uses the
-    // shared aqlprofile_cu_bitmap_t so this internal cache cannot drift
-    // from the public V2 ABI layout.
-    aqlprofile_cu_bitmap_t cu_bitmap{};
-
     // Number of XCC per AID
     uint32_t xcc_per_aid{1};
 
@@ -187,7 +171,7 @@ public:
         sysclock_factor_ = (freq_t) 1000000000 / (freq_t) sysclock_hz;
     }
 
-    // Methids for system-clock/ns conversion
+    // Methods for system-clock/ns conversion
     timestamp_t sysclock_to_ns(const timestamp_t& sysclock) const
     {
         return timestamp_t((freq_t) sysclock * sysclock_factor_);
@@ -288,14 +272,14 @@ public:
     uint8_t* AllocateLocalMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate memory tp pass kernel parameters
-    // Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+    // Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.
     uint8_t* AllocateKernArgMemory(const AgentInfo* agent_info, size_t size);
 
     // Allocate system memory accessible from both CPU and GPU
-    // Memory is alocated accessible to all CPU agents and AgentInfo parameter is ignored.
+    // Memory is allocated accessible to all CPU agents and AgentInfo parameter is ignored.
     // @param agent_info Agent from whose memory region to allocate
     // @param size Size of memory in terms of bytes
     // @return uint8_t* Pointer to buffer, null if allocation fails.

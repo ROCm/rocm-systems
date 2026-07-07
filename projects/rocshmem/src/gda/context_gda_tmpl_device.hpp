@@ -46,7 +46,7 @@ namespace rocshmem {
 template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
     return;
@@ -68,7 +68,7 @@ template <typename T>
 __device__ T GDAContext::g(const T *source, int pe) {
   T ret{};
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
@@ -94,7 +94,7 @@ __device__ void GDAContext::get_nbi(T *dest, const T *source, size_t nelems, int
 template <typename T>
 __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -118,7 +118,7 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -148,7 +148,7 @@ __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_and(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_and not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -180,7 +180,7 @@ __device__ void GDAContext::amo_and(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_or(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_or not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -212,7 +212,7 @@ __device__ void GDAContext::amo_or(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_xor(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fetch_xor not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -244,7 +244,7 @@ __device__ void GDAContext::amo_xor(void *dst, T value, int pe) {
 template <typename T>
 __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_cas not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -263,7 +263,7 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   T ret_val = 0;
@@ -284,7 +284,7 @@ __device__ T GDAContext::amo_fetch_add(void *dst, T value, int pe) {
 template <typename T>
 __device__ T GDAContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fcas not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   bool need_turn {true};
@@ -322,7 +322,7 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
 
   int finish = PE_start + stride * PE_size;
-  int pe = my_pe;
+  int pe = constmem.my_pe;
 
   int wg_id = get_flat_block_id();
   int wg_size = get_flat_block_size();
@@ -364,7 +364,7 @@ __device__ void GDAContext::internal_direct_allreduce(T *dst, const T *src,
 
   __syncthreads();
 
-  for (int i = wg_id; i < num_pes; i += wg_size) {
+  for (int i = wg_id; i < constmem.num_pes; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   threadfence_system();
@@ -500,7 +500,7 @@ __device__ void GDAContext::internal_ring_allreduce(T *dst, const T *src,
   }
   __syncthreads();
 
-  for (int i = wg_id; i < 2 * num_pes - 2; i += wg_size) {
+  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -570,24 +570,116 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the reduction algorithm;
+ * all workgroups participate in the per-chunk barrier_wg so the barrier
+ * call counts match.  This prevents concurrent accumulation races when
+ * multiple workgroups share the same team pSync/pWrk/dest buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long *pSync = team_obj->reduce_pSync;
+  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
+
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
+      }
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i, i, wf_info);
+          if (is_thread_zero_in_block()) {
+            fence();
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i, i, wf_info);
+          }
+        }
+      }
+      threadfence_system();
+      __syncthreads();
+
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          gda_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
+        }
+      }
+      __syncthreads();
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
+      }
+      threadfence_system();
+      __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
+  if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (i != my_pe) {
+      if (constmem.my_pe != i)
         internal_putmem_nbi_wg(dst, src, nelems * sizeof(T), i, i, wf_info);
-      }
     }
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
 __device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
     int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (my_pe != pe_root) {
+  if (constmem.my_pe == pe_root) {
+    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+  } else {
     internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   }
 }
@@ -613,7 +705,7 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     long *p_sync) {  // NOLINT(runtime/int)
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (num_pes < 4) { //TODO: optimized for IPC
+  if (constmem.num_pes < 4) { //TODO: optimized for IPC
     internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
       pe_size, wf_info);
   } else {
@@ -621,7 +713,7 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 template <typename T>
@@ -665,13 +757,13 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     size_t nelems = source_nelems[dest_pe] * sizeof(T);
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
 
     if (nelems != 0) {
       T* src = (T*)((char*)source + (source_displs[j] * sizeof(T)));
-      T* dst = (T*)((char*)&tmp_buf[my_pe * tmp_buf_off] + base_heap_offset);
+      T* dst = (T*)((char*)&tmp_buf[constmem.my_pe * tmp_buf_off] + base_heap_offset);
       qps[dest_pe].put_nbi_single(dst, src, nelems, false);
     }
 
@@ -682,8 +774,8 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -737,7 +829,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     uint64_t displ_bits;
 
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
 
     /* Pack Ctrl Message * 16 bits seq | 48bit displ */
     seq_bits = (seq_mask & (a2a_sn + 1)) << seq_shift;
@@ -746,13 +838,13 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Prepare Ctrl Message */
     src = (uint64_t*)&ctrl_msg;
-    dst = (uint64_t*)((char*)&tmp_buf[my_pe] + base_heap_offset);
+    dst = (uint64_t*)((char*)&tmp_buf[constmem.my_pe] + base_heap_offset);
 
     qps[dest_pe].put_nbi_single(dst, src, sizeof(uint64_t), true);
 
     /* Wait for Ctrl Message */
     uint64_t ctrl_value;
-    volatile uint64_t *vol_ctrl = &tmp_buf[dest_pe];
+    uint64_t *vol_ctrl = &tmp_buf[dest_pe];
 
     do {
       ctrl_value = uncached_load(vol_ctrl);
@@ -771,8 +863,8 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
     qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -814,7 +906,7 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
   }
 
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 template <typename T>
@@ -833,7 +925,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
+    uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[constmem.my_pe];
     qps[dest_pe].put_nbi_single(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
       &src[j * nelems], nelems * sizeof(T), false);
@@ -846,8 +938,8 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -894,7 +986,7 @@ __device__ void GDAContext::fcollect_linear(rocshmem_team_t team, T *dst,
     }
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 }
 
 // Block/wave functions
@@ -962,7 +1054,7 @@ template <typename T>
 __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_add not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   while (turns) {
@@ -980,7 +1072,7 @@ template <typename T>
 __device__ T GDAContext::internal_amo_fetch_add(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_fadd not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   T ret_val = 0;
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
@@ -1000,7 +1092,7 @@ template <typename T>
 __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
     int qp_index, ActiveWFInfo &wf_info) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
-  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
   bool need_turn {true};
   uint64_t turns = __ballot(need_turn);
   T ret_val;
@@ -1067,7 +1159,7 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
     //                                        __HIP_MEMORY_SCOPE_AGENT);
     // local_qp_counter %= num_qps_per_pe;
     // qp_index = (local_qp_counter * num_pes) + pe;
-    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * num_pes + pe;
+    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;
   }
 
   // Broadcast the qp_index value to other lanes in the wavefront

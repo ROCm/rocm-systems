@@ -6068,6 +6068,10 @@ rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
 
+  // Unlike rsmi_dev_compute_partition_set, do not read-before-write here.
+  // The mem-alloc-mode sysfs attribute is a cheap store; writing the same value
+  // again is a no-op with no hardware reconfigure side effects, so an unconditional
+  // write is correct and avoids a TOCTOU window between the read and write.
   std::string newModeStr;
   switch (mode) {
     case RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING:

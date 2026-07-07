@@ -43,7 +43,11 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   // Compute signed 13-bit offset for GLOBAL/SCRATCH, unsigned 12-bit for FLAT.
   int64_t offset;
   if (inst.seg != 0) {
-    uint32_t raw = inst.offset | (inst.pad_12 << 12);
+    uint32_t raw;
+    if constexpr (requires { inst.pad_12; })
+      raw = inst.offset | (inst.pad_12 << 12);
+    else
+      raw = inst.offset;
     offset = static_cast<int64_t>(static_cast<int32_t>(raw << 19) >> 19);
   } else {
     offset = inst.offset & 0xFFF;
@@ -65,6 +69,8 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     bool has_vaddr = true;
     if constexpr (requires { inst.sve; })
       has_vaddr = (inst.sve == 1);
+    else if (inst.seg == 1)
+      has_vaddr = (inst.lds == 1);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
@@ -100,13 +106,23 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     }
   } else {
     // FLAT: 64-bit VGPR pair + unsigned 12-bit offset.
+    // Real hardware checks the address against private/shared apertures and
+    // routes accordingly. We perform the same conversion here so that private
+    // (scratch) accesses reach the mapped scratch buffer instead of the
+    // unmapped aperture VA range.
+    uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
+    uint64_t scratch_base = wf.scratch_base();
+    uint32_t lane_stride = wf.scratch_lane_size();
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
       uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
       uint64_t vaddr =
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
-      d.per_lane_addr[lane] = vaddr + offset;
+      uint64_t addr = vaddr + offset;
+      if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
+        addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
+      d.per_lane_addr[lane] = addr;
     }
   }
 }

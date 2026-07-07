@@ -103,7 +103,7 @@ class VersionCommands:
         nic_version_str = "N/A"
         if args.nic_version:
             try:
-                ainic_device_handles = amdsmi_interface.get_ainic_handles()
+                ainic_device_handles = self.helpers.get_ainic_handles()
                 for nic_id, device_handle in enumerate(ainic_device_handles):
                     nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle, True)
                     if nic_version_str != "":
@@ -131,7 +131,7 @@ class VersionCommands:
                 )
             if args.nic_version:
                 human_readable_output = (
-                    human_readable_output + f" | AINIC version: {nic_version_str}"
+                    human_readable_output + f" | ionic version: {nic_version_str}"
                 )
             # Custom human readable handling for version
             if self.logger.destination == "stdout":

@@ -137,7 +137,7 @@ def diff_strings(cnt_r, cnt, metric):
       for tid in sorted (events_order.keys()):
         print ("- " + str(events_order[tid]) + "\n")
 
-# check trace againt golden reference and returns 0 for pass, 1 for fail
+# check trace against golden reference and returns 0 for pass, 1 for fail
 def check_trace_status(tracename, verbose, check_trace_flag):
   global events_order_r
   global events_order

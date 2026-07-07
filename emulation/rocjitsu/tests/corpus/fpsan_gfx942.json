@@ -1,0 +1,7 @@
+{
+  "config_name": "cdna3",
+  "hip_architectures": [
+    "gfx942"
+  ],
+  "tests": []
+}

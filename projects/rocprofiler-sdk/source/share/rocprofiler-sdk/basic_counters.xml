@@ -236,7 +236,7 @@
   <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=99 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_SCA" block=SQ event=100 descr="Number of cycles the SQ instruction arbiter is working on a SALU or SMEM instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_EXP_GDS" block=SQ event=101 descr="Number of cycles the SQ instruction arbiter is working on an EXPORT or GDS instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
-  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=102 descr="Number of cycles the SQ instruction aribter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=102 descr="Number of cycles the SQ instruction arbiter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_FLAT" block=SQ event=103 descr="Number of cycles the SQ instruction arbiter is working on a FLAT instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_VMEM_WR" block=SQ event=104 descr="Number of cycles needed to send addr and cmd data for VMEM write instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_VMEM_RD" block=SQ event=105 descr="Number of cycles needed to send addr and cmd data for VMEM read instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
@@ -502,7 +502,7 @@
   <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=104 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_SCA" block=SQ event=105 descr="Number of cycles the SQ instruction arbiter is working on a SALU or SMEM instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_EXP_GDS" block=SQ event=106 descr="Number of cycles the SQ instruction arbiter is working on an EXPORT or GDS instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
-  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=107 descr="Number of cycles the SQ instruction aribter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=107 descr="Number of cycles the SQ instruction arbiter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_ACTIVE_INST_FLAT" block=SQ event=108 descr="Number of cycles the SQ instruction arbiter is working on a FLAT instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_VMEM_WR" block=SQ event=109 descr="Number of cycles needed to send addr and cmd data for VMEM write instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_VMEM_RD" block=SQ event=110 descr="Number of cycles needed to send addr and cmd data for VMEM read instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>

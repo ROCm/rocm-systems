@@ -336,6 +336,7 @@ def validate_rocpd_database(
     tests_dir: Path,
     rules_files: Optional[list[Path]] = None,
     timeout: int = 60,
+    gpu_category_to_skip: Optional[list[str]] = None,
 ) -> ValidationResult:
     """Validate a ROCpd database file using validate-rocpd.py.
 
@@ -344,6 +345,8 @@ def validate_rocpd_database(
         tests_dir: Path to directory containing validation scripts
         rules_files: List of JSON rules files to use for validation
         timeout: Validation timeout in seconds
+        gpu_category_to_skip: GPU categories to skip tagged validation queries for
+            (instinct, radeon, apu). Omit or pass empty to run all queries
 
     Returns:
         ValidationResult with validation status
@@ -357,6 +360,9 @@ def validate_rocpd_database(
         existing_rules = [str(r) for r in rules_files if r.exists()]
         if existing_rules:
             args.extend(["-r"] + existing_rules)
+
+    if gpu_category_to_skip:
+        args.extend(["--gpu-category-to-skip"] + gpu_category_to_skip)
 
     return _run_validation_script("validate-rocpd.py", args, tests_dir, timeout)
 

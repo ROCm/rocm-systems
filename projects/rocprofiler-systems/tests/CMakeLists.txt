@@ -7,10 +7,7 @@
 include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-if(NOT ROCPROFSYS_USE_PYTESTS)
-    # TODO: Will be the default once TheRock is switched to CTests
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
 
 # ------------------------------------------------------------------------------#
 #
@@ -49,6 +46,15 @@ set_target_properties(
         RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
 )
 
+# test_categories.yaml drives tier (quick/standard/comprehensive/full) label
+# injection at CTest-generate time (see conftest.py:_load_test_categories).
+set(ROCPROFSYS_TEST_CATEGORIES_YAML ${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml)
+configure_file(
+    ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+    ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/test_categories.yaml
+    COPYONLY
+)
+
 add_custom_target(
     copy-test-files
     ALL
@@ -60,6 +66,9 @@ add_custom_target(
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_CATEGORIES_YAML}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_directory
@@ -101,5 +110,11 @@ if(ROCPROFSYS_INSTALL_TESTING)
         RUNTIME
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
+    )
+    # Test categories policy
+    install(
+        FILES ${ROCPROFSYS_TEST_CATEGORIES_YAML}
+        DESTINATION share/rocprofiler-systems/tests
+        COMPONENT rocprofiler-systems-tests
     )
 endif()

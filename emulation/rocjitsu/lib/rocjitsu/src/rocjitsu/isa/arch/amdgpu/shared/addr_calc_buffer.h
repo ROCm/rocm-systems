@@ -23,6 +23,17 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
+constexpr uint32_t buffer_offset_part(uint32_t voffset, int64_t inst_offset) {
+  // Hardware forms this sub-expression in 32-bit offset space before it is
+  // widened and added to the descriptor base address.
+  return voffset + static_cast<uint32_t>(inst_offset);
+}
+
+constexpr uint64_t buffer_total_offset(uint32_t index, uint32_t stride, uint32_t offset_part,
+                                       uint32_t soffset) {
+  return static_cast<uint64_t>(index) * stride + offset_part + soffset;
+}
+
 /// @brief Compute per-lane addresses for MUBUF encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
@@ -94,8 +105,8 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
     } else if (inst.offen) {
       voffset = cu.read_vgpr(vgpr_base, lane);
     }
-    uint64_t offset_part = static_cast<uint64_t>(voffset) + inst.offset;
-    uint64_t total_offset = static_cast<uint64_t>(index) * stride + offset_part + soffset_val;
+    uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
+    uint64_t total_offset = buffer_total_offset(index, stride, offset_part, soffset_val);
     // OOB check.
     bool oob;
     if (oob_raw) {
@@ -170,8 +181,8 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
     } else if (inst.offen) {
       voffset = cu.read_vgpr(vgpr_base, lane);
     }
-    uint64_t offset_part = static_cast<uint64_t>(voffset) + inst.offset;
-    uint64_t total_offset = static_cast<uint64_t>(index) * stride + offset_part + soffset_val;
+    uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
+    uint64_t total_offset = buffer_total_offset(index, stride, offset_part, soffset_val);
     bool oob;
     if (oob_raw) {
       oob = offset_part >= num_records;

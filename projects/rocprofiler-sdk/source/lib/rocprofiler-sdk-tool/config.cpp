@@ -83,7 +83,7 @@ trim(std::string s, bool (*f)(int) = not_is_space)
     return s;
 }
 
-// replace unsuported specail chars with space
+// replace unsupported special chars with space
 void
 handle_special_chars(std::string& str)
 {

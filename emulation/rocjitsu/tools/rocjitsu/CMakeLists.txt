@@ -5,7 +5,10 @@ include(rj_configure_target)
 
 add_executable(rocjitsu_bin main.cpp)
 
-target_include_directories(rocjitsu_bin PRIVATE ${GENERATED_DIR})
+target_include_directories(
+    rocjitsu_bin
+    PRIVATE ${GENERATED_DIR} ${RJ_VERSION_INCLUDE_DIR}
+)
 
 target_link_libraries(
     rocjitsu_bin
@@ -39,3 +42,8 @@ target_link_libraries(
 set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
 
 rj_configure_target(rocjitsu_bin TOOL)
+
+# Install the rocjitsu CLI so it is usable from a packaged dist (the default
+# entrypoint for driving emulation when mirage is not present).
+include(GNUInstallDirs)
+install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

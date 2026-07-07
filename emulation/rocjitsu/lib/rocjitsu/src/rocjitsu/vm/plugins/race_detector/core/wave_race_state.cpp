@@ -64,6 +64,7 @@ void WaveRaceState::registerEventWithIntervals(uint64_t pc, MemoryEventType type
       regEventCountInc(type, reg);
     }
   }
+
   auto eventId = detector->allocateEventId(waveId, pc, type, std::move(regIds), execMask, byteMask,
                                            std::move(ldsIntervals));
   for (uint32_t reg : detector->events().registers(eventId)) {
@@ -181,6 +182,9 @@ void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
   }
 }
 
+// Like checkVgprRead but for instructions that read all lanes (e.g. cross-lane ops).
+// countr_zero picks the first active lane from the event's exec mask as the
+// representative lane for the violation report.
 void WaveRaceState::checkVgprReadAllLanes(int reg) const {
   if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
       getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {

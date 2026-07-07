@@ -10,7 +10,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
-#include "tools/tool_result.h"
+#include "tool_result.h"
 
 #include <cstddef>
 #include <cstdint>

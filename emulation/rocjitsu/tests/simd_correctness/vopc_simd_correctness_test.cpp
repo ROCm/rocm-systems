@@ -6,13 +6,12 @@
 /// compares wired into SIMD_VOPC / SIMD_VOPC64: the f32/f16/f64 relations
 /// (eq/ge/gt/le/lg/lt/neq/nge/ngt/nle/nlg/nlt/o/u/f/tru) and the
 /// i32/u32/i16/u16/i64/u64 relations (eq/ge/gt/le/lt/ne/f/t). Each writes one bit
-/// per active EXEC lane into VCC, preserving inactive bits. Each (opcode,
+/// per active EXEC lane into VCC, zeroing inactive-lane bits. Each (opcode,
 /// vcc_in) runs TWICE in the same process -- once forcing the scalar body, once
 /// the SIMD fast path, with identical inputs/EXEC/VCC-in -- and the full 64-bit
 /// VCC compare results are asserted equal with EXPECT_EQ
-/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive-lane VCC bits must stay
-/// preserved under full and partial EXEC. The 64-bit relations exercise the
+/// (util::set_force_scalar_for_testing flips the gate in-process). Inactive-lane
+/// VCC bits are zeroed under full and partial EXEC. The 64-bit relations exercise the
 /// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
 /// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
 
@@ -198,10 +197,10 @@ void check_all(uint64_t exec) {
                                       << vcc_in << ": SIMD VCC diverged from scalar body";
 
       const uint64_t inactive = ~exec;
-      EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
-      EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-          << "VOPC opcode " << c.opcode << ": altered an inactive-lane VCC bit";
+      EXPECT_EQ(simd_vcc & inactive, 0ULL)
+          << "VOPC opcode " << c.opcode << ": inactive-lane VCC bit not zeroed";
+      EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+          << "VOPC opcode " << c.opcode << ": inactive-lane VCC bit not zeroed";
     }
   }
 }

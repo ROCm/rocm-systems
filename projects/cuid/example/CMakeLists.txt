@@ -18,17 +18,31 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
 project(amdcuid_example)
 
 set(CMAKE_CXX_STANDARD 14)
 
-find_package(OpenSSL REQUIRED)
+set(AMDCUID_EXAMPLE_EXECUTABLE amdcuid_example)
+set(SRC_LIST main.cc)
 
-add_executable(amdcuid_example main.cc)
+add_executable(${AMDCUID_EXAMPLE_EXECUTABLE} ${SRC_LIST})
 
-target_include_directories(amdcuid_example PRIVATE ${CMAKE_SOURCE_DIR}/lib)
-target_link_libraries(amdcuid_example PRIVATE amdcuid_static OpenSSL::Crypto pthread)
+target_include_directories(
+    ${AMDCUID_EXAMPLE_EXECUTABLE}
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib
+)
 
-# Install example source and binary into documentation
-install(FILES main.cc DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT example)
+# Link against the CUID library (public API only)
+# The example now uses only the public API defined in amd_cuid.h
+target_link_libraries(${AMDCUID_EXAMPLE_EXECUTABLE} amdcuid_static pthread)
+
+# Install example source into documentation
+install(
+    FILES ${SRC_LIST}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT ${EXAMPLE_COMPONENT}
+)
+
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                  Finished Cmake amdcuid_example                   ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

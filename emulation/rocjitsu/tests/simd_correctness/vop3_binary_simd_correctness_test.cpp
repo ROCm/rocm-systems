@@ -127,15 +127,46 @@ const std::array<uint32_t, 16> kU32B = {{
     0x01234567u,
 }};
 
-enum class Kind { F32, INT };
+// f16 corner set (normals, ±0, ±Inf, NaN, denormals, ±max-normal) — packed two
+// per 32-bit lane (see f16_src0/f16_src1) so both halves see distinct values.
+const std::array<uint16_t, 16> kF16 = {{
+    0x3C00u,
+    0xBC00u,
+    0x4000u,
+    0xC000u,
+    0x0000u,
+    0x8000u,
+    0x7C00u,
+    0xFC00u,
+    0x7E00u,
+    0x4900u,
+    0xC900u,
+    0x3800u,
+    0x0400u,
+    0x8400u,
+    0x7BFFu,
+    0xFBFFu,
+}};
+bool is_f16_nan(uint16_t b) { return ((b >> 10) & 0x1Fu) == 0x1Fu && (b & 0x3FFu) != 0u; }
+bool is_f16_zero(uint16_t b) { return (b & 0x7FFFu) == 0u; }
+uint32_t f16_src0(uint32_t lane) {
+  return kF16[lane % kF16.size()] | (static_cast<uint32_t>(kF16[(lane + 3) % kF16.size()]) << 16);
+}
+uint32_t f16_src1(uint32_t lane) {
+  return kF16[(lane + 5) % kF16.size()] |
+         (static_cast<uint32_t>(kF16[(lane + 9) % kF16.size()]) << 16);
+}
+
+enum class Kind { F32, INT, F16 };
 
 struct Case {
   const char *name;
   uint32_t opcode;
   Kind kind;
+  bool minmax = false;
 };
 
-const std::array<Case, 10> kCases = {{
+const std::array<Case, 16> kCases = {{
     {"v_add_f32", 257, Kind::F32},
     {"v_sub_f32", 258, Kind::F32},
     {"v_mul_f32", 261, Kind::F32},
@@ -146,6 +177,15 @@ const std::array<Case, 10> kCases = {{
     {"v_xor_b32", 277, Kind::INT},
     {"v_add_u32", 308, Kind::INT},
     {"v_mul_legacy_f32", 673, Kind::F32},
+    // f16 VOP3 binaries: the scalar body applies abs/neg/omod/clamp around the
+    // f16<->f32 round trip; the packed SIMD path bails to scalar when any
+    // modifier is set, otherwise runs the unmodified packed op.
+    {"v_add_f16", 287, Kind::F16},
+    {"v_sub_f16", 288, Kind::F16},
+    {"v_subrev_f16", 289, Kind::F16},
+    {"v_mul_f16", 290, Kind::F16},
+    {"v_max_f16", 301, Kind::F16, true},
+    {"v_min_f16", 302, Kind::F16, true},
 }};
 
 struct Fixture {
@@ -173,6 +213,9 @@ struct Fixture {
       if (k == Kind::F32) {
         cu->write_vgpr(vb + 0, lane, kF32A[lane % kF32A.size()]);
         cu->write_vgpr(vb + 1, lane, kF32B[lane % kF32B.size()]);
+      } else if (k == Kind::F16) {
+        cu->write_vgpr(vb + 0, lane, f16_src0(lane));
+        cu->write_vgpr(vb + 1, lane, f16_src1(lane));
       } else {
         cu->write_vgpr(vb + 0, lane, kU32A[lane % kU32A.size()]);
         cu->write_vgpr(vb + 1, lane, kU32B[lane % kU32B.size()]);
@@ -284,6 +327,82 @@ TEST(Vop3BinarySimdCorrectness, Int_FullAndPartialExec) {
     check(c, 0, 0, 0, 0, /*exec=*/~0ULL);
     check(c, 0, 0, 0, 0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
   }
+}
+
+// f16 ops: sweep every modifier combination. The packed SIMD path applies no
+// modifiers and bails to the scalar body whenever any is set; the unmodified
+// case runs the packed op. Per-lane compare with the usual input-derived skips
+// (NaN payload may diverge; ±0 min/max ties are an accepted carve-out). Without
+// the modifier bail, the abs/neg/omod/clamp cases would return the unmodified
+// result and diverge from the scalar body — this is the regression guard.
+void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
+               uint64_t exec) {
+  ForceScalarGuard gate_guard;
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, abs, neg, omod, clamp,
+                words);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    auto out = fx.run(inst, c.kind, exec);
+    delete inst;
+    return out;
+  };
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL) << c.name << ": clobbered inactive lane " << lane;
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << c.name << ": clobbered inactive lane " << lane;
+      continue;
+    }
+    const uint32_t s0 = f16_src0(lane), s1 = f16_src1(lane);
+    const uint16_t a_lo = s0 & 0xFFFFu, a_hi = static_cast<uint16_t>(s0 >> 16);
+    const uint16_t b_lo = s1 & 0xFFFFu, b_hi = static_cast<uint16_t>(s1 >> 16);
+    bool skip = is_f16_nan(a_lo) || is_f16_nan(a_hi) || is_f16_nan(b_lo) || is_f16_nan(b_hi);
+    if (!skip && c.minmax)
+      skip = (is_f16_zero(a_lo) && is_f16_zero(b_lo)) || (is_f16_zero(a_hi) && is_f16_zero(b_hi));
+    if (skip)
+      continue;
+    EXPECT_EQ(scalar_out[lane], simd_out[lane])
+        << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
+        << " (exec=0x" << std::hex << exec << "): SIMD path diverged from scalar body, lane "
+        << std::dec << lane;
+  }
+}
+
+void check_f16_all_mods(const Case &c, uint64_t exec) {
+  for (uint32_t abs = 0; abs < 4; ++abs)
+    for (uint32_t neg = 0; neg < 4; ++neg)
+      for (uint32_t omod = 0; omod < 4; ++omod)
+        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+          check_f16(c, abs, neg, omod, clamp, exec);
+}
+
+TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_FullExec) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  for (const auto &c : kCases)
+    if (c.kind == Kind::F16)
+      check_f16_all_mods(c, /*exec=*/~0ULL);
+}
+
+TEST(Vop3BinarySimdCorrectness, F16_AllModifiers_PartialExec) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  for (const auto &c : kCases)
+    if (c.kind == Kind::F16)
+      check_f16_all_mods(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 } // namespace

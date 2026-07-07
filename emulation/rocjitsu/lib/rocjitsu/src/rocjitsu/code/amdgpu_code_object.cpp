@@ -45,14 +45,12 @@ private:
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
 
-bool is_executable_section(const Elf64_Shdr &shdr) {
-  return shdr.sh_type == SHT_PROGBITS && (shdr.sh_flags & SHF_EXECINSTR) != 0;
-}
-
 using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
+    return ROCJITSU_CODE_TARGET_GFX90A;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX942)
     return ROCJITSU_CODE_TARGET_GFX942;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX950)
@@ -67,6 +65,8 @@ rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
 }
 
 rj_code_target_id_t target_from_triple(const std::string &triple) {
+  if (triple == "gfx90a")
+    return ROCJITSU_CODE_TARGET_GFX90A;
   if (triple == "gfx942")
     return ROCJITSU_CODE_TARGET_GFX942;
   if (triple == "gfx950")
@@ -90,7 +90,6 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
-  code_sections_ = std::move(other.code_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
 
@@ -224,9 +223,6 @@ void AmdGpuCodeObject::load_sections() {
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
       rodata_sections_.push_back(sections_.back().get());
-
-    if (is_executable_section(shdr))
-      code_sections_.push_back(sections_.back().get());
   }
 
   // Parse symbol table for kernel descriptor offsets.

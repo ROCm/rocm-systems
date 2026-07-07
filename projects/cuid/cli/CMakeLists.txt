@@ -18,23 +18,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
 project(amdcuid_tool)
 
 set(CMAKE_CXX_STANDARD 14)
 
-# Find OpenSSL
-find_package(OpenSSL REQUIRED)
+set(AMDCUID_TOOL_EXECUTABLE amdcuid_tool)
+set(SRC_LIST amdcuid_tool.cc)
 
 # Add the tool executable
-add_executable(amdcuid_tool amdcuid_tool.cc)
+add_executable(${AMDCUID_TOOL_EXECUTABLE} ${SRC_LIST})
 
-# Link against the CUID library (public API only)
-# The tool now uses only the public API defined in amd_cuid.h
-target_link_libraries(amdcuid_tool amdcuid_static OpenSSL::Crypto)
+# Link against the CUID library
+target_link_libraries(${AMDCUID_TOOL_EXECUTABLE} amdcuid_static)
 
 # Include directories - only need access to public headers
-target_include_directories(amdcuid_tool PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+target_include_directories(
+    ${AMDCUID_TOOL_EXECUTABLE}
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib
+)
 
 # Install the tool
-install(TARGETS amdcuid_tool DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS ${AMDCUID_TOOL_EXECUTABLE} DESTINATION ${CMAKE_INSTALL_BINDIR})

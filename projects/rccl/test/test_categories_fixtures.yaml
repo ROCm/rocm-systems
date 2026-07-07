@@ -25,6 +25,7 @@ test_categories:
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "CommTests.*"
       - "EnqueueCountTests.*"
+      - "DdaCollCommon.*"
       - "PackRoundtripTest.LdStVolatileGlobalPtr"
       - "PackRoundtripTest.LdStRelaxedSysGlobal"
       - "PackRoundtripTest.LdStAcquireReleaseSysGlobal"
@@ -51,6 +52,7 @@ test_categories:
     test_patterns:
       - "CommTests.*"
       - "EnqueueCountTests.*"
+      - "DdaCollCommon.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"

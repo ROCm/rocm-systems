@@ -117,7 +117,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto sgprs_vec =
               builder.CreateVector(cu->sgpr_data(w->sgpr_alloc().base), w->num_sgprs());
-          size_t vgpr_bytes = static_cast<size_t>(w->num_vgprs()) *
+          size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
                               static_cast<size_t>(w->wf_size()) * sizeof(uint32_t);
           auto vgprs_vec = builder.CreateVector(cu->vgpr_data(w->vgpr_alloc().base), vgpr_bytes);
 
@@ -252,7 +252,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           }
 
           if (auto *vgprs = wf_state->vgprs()) {
-            size_t vgpr_bytes = static_cast<size_t>(wf->num_vgprs()) *
+            size_t vgpr_bytes = static_cast<size_t>(cu->vgpr_allocation_block_size()) *
                                 static_cast<size_t>(wf->wf_size()) * sizeof(uint32_t);
             size_t copy_size = std::min<size_t>(vgprs->size(), vgpr_bytes);
             std::memcpy(cu->vgpr_data(wf->vgpr_alloc().base), vgprs->data(), copy_size);

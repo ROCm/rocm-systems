@@ -3,6 +3,11 @@ name: "rocjitsu-formatting"
 
 on:
   pull_request:
+    # NOTE: Only files under these paths trigger CI formatting checks.
+    # Shared files (e.g. .github/scripts/) are not covered — run
+    # `pre-commit run --all-files` locally to catch issues outside this
+    # scope. We should incrementally add more paths here as projects
+    # adopt pre-commit.
     paths:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-*.yml"

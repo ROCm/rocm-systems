@@ -1043,6 +1043,22 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
     }
     llvm_code_object_view =
         std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
+  } else if (is_bundled_ && input_type == hipJitInputLLVMBundledBitcode) {
+    if (!findIsa()) {
+      return false;
+    }
+    std::string bundle_entry_id = "hip-" + isa_;
+    const char* bundleEntryIDs[] = {bundle_entry_id.c_str()};
+    size_t bundleEntryIDsCount = 1;
+    if (!helpers::UnbundleUsingComgr(link_data, isa_, link_options_, build_log_,
+                                     llvm_code_object_storage, bundleEntryIDs,
+                                     bundleEntryIDsCount)) {
+      LogError("Error in hip Linker: Unable to unbundle LLVM Bundled Bitcode using COMGR");
+      return false;
+    }
+    llvm_code_object_view =
+        std::string_view(llvm_code_object_storage.data(), llvm_code_object_storage.size());
+    input_type = hipJitInputLLVMBitcode;
   }
 
   if ((data_kind_ = GetCOMGRDataKind(input_type)) == AMD_COMGR_DATA_KIND_UNDEF) {

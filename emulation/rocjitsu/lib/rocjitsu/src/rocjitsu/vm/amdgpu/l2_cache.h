@@ -32,7 +32,8 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// (HBM controller or memory-side cache) via the requester port.
 ///
 /// Mtype-aware behavior:
-///   - UC: Bypass L2, forward directly to backing store.
+///   - UC: Flush/invalidate any resident L2 line, then bypass L2 and
+///         forward directly to backing store.
 ///   - CC: Allocate in L2, MOESI coherence state tracking for CPU-GPU
 ///         shared memory. Write-through on CC stores.
 ///   - RW/WB: Allocate in L2, with functional-mode stores written through to
