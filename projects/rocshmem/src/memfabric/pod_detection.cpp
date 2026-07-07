@@ -26,6 +26,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
 #include "amdsmi_loader.hpp"
 #endif

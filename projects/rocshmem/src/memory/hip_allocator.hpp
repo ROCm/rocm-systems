@@ -256,7 +256,7 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   struct VMMFabricAllocationInfo {
     hipMemGenericAllocationHandle_t handle;
     size_t size;
-    uint64_t fabric_id;  // Fabric handle ID, 0 if not exported
+    hipMemFabricHandle_t fabric_id;
   };
 
   static std::map<void*, VMMFabricAllocationInfo> allocations_;
