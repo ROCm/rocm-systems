@@ -1356,29 +1356,37 @@ private:
 
         // dma: memory copies keyed on (nid, pid, queue_id, stream_id). NULL queue_id /
         // stream_id are distinct group values, so prepare one variant per NULL pattern.
+        // Category is resolved in-SQL via rocpd_event/rocpd_string (LEFT JOIN, additive —
+        // mirrors the region/kernel_dispatch/stream interval queries); the row set stays
+        // identical to get_track_stats' count, category NULL when event/category absent.
         auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
-                fmt::format(
-                    "SELECT id, start, \"end\", name_id FROM rocpd_memory_copy_{} "
-                    "WHERE nid = ? AND pid = ? AND {} ORDER BY start",
-                    u,
-                    qs_clause),
+                fmt::format("SELECT mc.id, mc.start, mc.\"end\", mc.name_id, CS.string "
+                            "FROM rocpd_memory_copy_{u} mc "
+                            "LEFT JOIN rocpd_event_{u} E ON E.id = mc.event_id "
+                            "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                            "WHERE mc.nid = ? AND mc.pid = ? AND {qs} ORDER BY mc.start",
+                            fmt::arg("u", u),
+                            fmt::arg("qs", qs_clause)),
                 &interval_row_result::id,
                 &interval_row_result::start,
                 &interval_row_result::end,
-                &interval_row_result::name_ref);
+                &interval_row_result::name_ref,
+                &interval_row_result::category);
         };
 
         m_memory_copy_interval_qs =
-            make_mc_interval("queue_id = ? AND stream_id = ?",
+            make_mc_interval("mc.queue_id = ? AND mc.stream_id = ?",
                              bind_types<size_t, size_t, size_t, size_t>{});
-        m_memory_copy_interval_q_only = make_mc_interval(
-            "queue_id = ? AND stream_id IS NULL", bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_interval_s_only = make_mc_interval(
-            "queue_id IS NULL AND stream_id = ?", bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_q_only =
+            make_mc_interval("mc.queue_id = ? AND mc.stream_id IS NULL",
+                             bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_interval_s_only =
+            make_mc_interval("mc.queue_id IS NULL AND mc.stream_id = ?",
+                             bind_types<size_t, size_t, size_t>{});
         m_memory_copy_interval_neither = make_mc_interval(
-            "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
+            "mc.queue_id IS NULL AND mc.stream_id IS NULL", bind_types<size_t, size_t>{});
 
         // stream: a single track aggregates kernel_dispatch + memory_copy +
         // memory_allocate events sharing a stream_id (inline on each table in v3). A

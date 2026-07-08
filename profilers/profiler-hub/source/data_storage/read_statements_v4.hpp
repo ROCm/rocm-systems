@@ -647,20 +647,26 @@ private:
                     &interval_row_result::name_ref,
                     &interval_row_result::category);
 
-        // memory copy intervals.
+        // memory copy intervals. Category is resolved in-SQL via
+        // rocpd_event/rocpd_info_category (LEFT JOIN, additive — mirrors the
+        // kernel_dispatch and stream interval queries); the row set is unchanged.
         m_memory_copy_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
-                    fmt::format("SELECT mc.id, ts_s.value, ts_e.value, mc.name_id "
-                                "FROM rocpd_memory_copy_{u} mc "
-                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
-                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
-                                "WHERE mc.track_id = ? ORDER BY ts_s.value",
-                                fmt::arg("u", u)),
+                    fmt::format(
+                        "SELECT mc.id, ts_s.value, ts_e.value, mc.name_id, IC.name "
+                        "FROM rocpd_memory_copy_{u} mc "
+                        "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
+                        "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
+                        "LEFT JOIN rocpd_event_{u} E ON E.id = mc.event_id "
+                        "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                        "WHERE mc.track_id = ? ORDER BY ts_s.value",
+                        fmt::arg("u", u)),
                     &interval_row_result::id,
                     &interval_row_result::start,
                     &interval_row_result::end,
-                    &interval_row_result::name_ref);
+                    &interval_row_result::name_ref,
+                    &interval_row_result::category);
 
         // stream: aggregates kernel_dispatch + memory_copy + memory_allocate sharing a
         // stream. v4 stream_id is on rocpd_track, so each leg joins its event table to
