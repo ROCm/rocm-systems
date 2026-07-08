@@ -1,10 +1,6 @@
 {
   "iree": [],
-  "cts": [
-    "fpsan_mfma_cdna3_test",
-    "fpsan_smfmac_cdna3_test",
-    "fpsan_wave_test"
-  ],
+  "cts": [],
   "kernels": [
     "hip_streamk_two_tile::m256_n256_k256",
     "llama_mul_mat_vec_q::default",

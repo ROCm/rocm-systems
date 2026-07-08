@@ -1,11 +1,5 @@
 {
   "iree": [],
-  "cts": [
-    "fpsan_mfma_gfx950_test",
-    "fpsan_cvt_scalef32_fp6_gfx950_test",
-    "fpsan_cvt_scalef32_sr_gfx950_test",
-    "fpsan_xlane_gfx950_test",
-    "fpsan_wave_test"
-  ],
+  "cts": [],
   "kernels": []
 }

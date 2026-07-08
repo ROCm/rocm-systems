@@ -1,14 +1,6 @@
 {
   "iree": [],
-  "cts": [
-    "fpsan_xlane_test",
-    "fpsan_wave_test",
-    "fpsan_wmma_gfx12_w64_test",
-    "fpsan_swmmac_gfx12_w64_test",
-    "fpsan_xlane_gfx12_w64_test",
-    "fpsan_classify_gfx12_w64_test",
-    "fpsan_wave_gfx12_w64_test"
-  ],
+  "cts": [],
   "kernels": [
     "hip_matmul_matvec::m256_n1_k1024",
     "llama_mul_mat_vec_q::default",
