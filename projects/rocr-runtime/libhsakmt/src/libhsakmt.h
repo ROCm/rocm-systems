@@ -33,6 +33,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
 
@@ -280,4 +282,29 @@ bool hsakmt_is_forked_child(void);
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
 uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+static inline int hsakmt_safe_env_to_int(const char* envvar, int default_val) {
+  if (envvar == NULL) return default_val;
+  char* endptr;
+  errno = 0;
+  long val = strtol(envvar, &endptr, 10);
+  if (endptr == envvar) return default_val;
+  // Allow trailing whitespace from shell/.env files; reject other trailing content.
+  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
+    ++endptr;
+  }
+  if (*endptr != '\0') return default_val;
+  // On LLP64 (Windows), long is 32-bit so rely on errno for overflow.
+  if (errno == ERANGE || val < INT_MIN || val > INT_MAX) return default_val;
+  return (int)val;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

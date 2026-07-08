@@ -42,7 +42,7 @@
 #include <cassert>
 #include <mutex>
 #include <algorithm>
-#include "../hsakmt_env.h"
+#include "../libhsakmt.h"
 #include "util/os.h"
 #include "util/utils.h"
 

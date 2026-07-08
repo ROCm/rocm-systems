@@ -22,7 +22,7 @@
 
 #include "hsakmt/hsakmt_virtio.h"
 #include "hsakmt_virtio_device.h"
-#include "hsakmt_env.h"
+#include "libhsakmt.h"
 
 pthread_mutex_t dev_mutex = PTHREAD_MUTEX_INITIALIZER;
 vhsakmt_device_handle dev_list = NULL;

@@ -30,7 +30,6 @@
 
 #include "libhsakmt.h"
 #include "hsakmt/hsakmtmodel.h"
-#include "hsakmt_env.h"
 
 #include <stdlib.h>
 #include <sys/types.h>
