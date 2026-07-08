@@ -2685,8 +2685,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     const size_t nLocal = 4 * (size_t)comm->nRanks;
     const size_t nGather = nLocal * (size_t)comm->nRanks;
 
-    NCCLCHECK(ncclCudaMalloc(&comm->localSizes, nLocal, comm->memManager));
-    hipMallocManaged(&comm->gatheredSizes, nGather);
+    NCCLCHECK(ncclCudaMalloc(&comm->localSizes, nLocal * sizeof(size_t), comm->memManager));
+    CUDACHECK(hipMallocManaged(&comm->gatheredSizes, nGather * sizeof(size_t)));
 
   }
 
