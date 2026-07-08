@@ -34,7 +34,7 @@ These apply to both Linux and Windows builds:
 ## Requirements (Linux)
 
 - CMake 3.21+
-- A C++17 compiler (GCC or Clang)
+- A C++20 compiler (GCC or Clang)
 - SQLite3, spdlog, fmt (fetched automatically by CMake if not installed)
 - Optional: `rocprofiler-sdk-rocpd` for schema compatibility
 
@@ -101,7 +101,7 @@ spdlog, nlohmann_json, or SQLite is required — CMake fetches or builds them au
 
 | Tool | Notes |
 |------|-------|
-| **Visual Studio 2022 or 2026 Build Tools** | Install the **Desktop development with C++** workload (MSVC compiler + Windows SDK). |
+| **Visual Studio 2022 or 2026 Build Tools** | Install the **Desktop development with C++** workload (MSVC compiler + Windows SDK). Builds as **C++20**. |
 | **CMake 3.21+** | Bundled with Visual Studio, or install standalone: `winget install -e --id Kitware.CMake` |
 | **Git for Windows** | Used by some dependencies. SQLite on Windows is downloaded from sqlite.org (no git clone for SQLite). |
 
@@ -174,8 +174,7 @@ targets use distinct base names: `profiler-hub.lib` (import lib, pairs with the 
   `profiler-hub.dll` so the whole process shares a single SQLite instance.
 - **Dependencies:** fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are
   fetched via CMake `FetchContent` when not found on the system.
-- **Tests/benchmarks:** built as **C++20** on MSVC (they use designated initializers,
-  which GCC/Clang accept as a C++17 extension).
+- **Language standard:** library, tests, benchmarks, and examples are built as **C++20**.
 
 ## Install (Windows)
 
