@@ -1500,7 +1500,6 @@ rocprofiler_context_id_t kfd_page_fault_records_ctx         = {0};
 rocprofiler_context_id_t kfd_queue_records_ctx              = {0};
 rocprofiler_context_id_t spm_buffer_dispatch_collection_ctx = {0};
 
-
 // buffers
 rocprofiler_buffer_id_t runtime_init_buffered_buffer    = {};
 rocprofiler_buffer_id_t hsa_api_buffered_buffer         = {};
