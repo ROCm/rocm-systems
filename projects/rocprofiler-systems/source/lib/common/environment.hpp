@@ -59,17 +59,20 @@ struct posix_env
 
 /// @brief Parse a string into a boolean.
 ///
-/// All-digit strings are truthy when non-zero (an overflowing digit string is
-/// also truthy); other values are matched case-insensitively against the false
-/// tokens off/false/no/n/f/0 (anything else is truthy). An empty string yields
-/// @p fallback.
+/// Surrounding whitespace is ignored. All-digit strings are truthy when non-zero
+/// (an overflowing digit string is also truthy); other values are matched
+/// case-insensitively against the false tokens off/false/no/n/f (anything else is
+/// truthy). An empty or all-whitespace string yields @p fallback.
 /// @param value    The string to interpret.
-/// @param fallback Returned when @p value is empty.
+/// @param fallback Returned when @p value is empty or all whitespace.
 /// @return The parsed boolean.
 [[nodiscard]] inline bool
 to_bool(std::string_view value, bool fallback = false)
 {
-    if(value.empty()) return fallback;
+    constexpr std::string_view whitespace = " \t\n\r\f\v";
+    const auto                 first      = value.find_first_not_of(whitespace);
+    if(first == std::string_view::npos) return fallback;
+    value = value.substr(first, value.find_last_not_of(whitespace) - first + 1);
 
     if(value.find_first_not_of("0123456789") == std::string_view::npos)
     {

@@ -50,3 +50,30 @@ TEST(to_bool_test, empty_returns_fallback)
 }
 
 TEST(to_bool_test, default_fallback_is_false) { EXPECT_FALSE(to_bool("")); }
+
+// Surrounding whitespace is trimmed before parsing, so padded values behave
+// identically to their trimmed forms.
+TEST(to_bool_test, surrounding_whitespace_trimmed)
+{
+    EXPECT_TRUE(to_bool(" 1"));
+    EXPECT_TRUE(to_bool("1 "));
+    EXPECT_TRUE(to_bool("\t1\n"));
+    EXPECT_FALSE(to_bool(" off"));
+    EXPECT_FALSE(to_bool("off "));
+    EXPECT_FALSE(to_bool("  false  "));
+    EXPECT_FALSE(to_bool(" 0"));
+    EXPECT_FALSE(to_bool("0 "));
+}
+
+TEST(to_bool_test, all_whitespace_returns_fallback)
+{
+    EXPECT_FALSE(to_bool("   ", false));
+    EXPECT_TRUE(to_bool("   ", true));
+    EXPECT_FALSE(to_bool("\t\n", false));
+}
+
+TEST(to_bool_test, mixed_alphanumeric_is_truthy)
+{
+    EXPECT_TRUE(to_bool("1a"));
+    EXPECT_TRUE(to_bool("a1"));
+}
