@@ -2594,3 +2594,8 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "bin/hip_cvt_narrow_test"
     )
 endif()
+
+# --- vfio-user integration tests ---
+if(RJ_ENABLE_VFIO_USER)
+    add_subdirectory(vfu)
+endif()

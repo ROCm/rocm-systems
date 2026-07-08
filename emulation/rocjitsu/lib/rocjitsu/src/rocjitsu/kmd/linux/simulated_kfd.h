@@ -123,6 +123,32 @@ public:
   void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
   bool is_doorbell_range(const void *addr, size_t length) const override;
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
+
+  /// @brief vfio-user: write a doorbell slot and wake the CP poll thread.
+  ///
+  /// @details Called by the BAR2 doorbell handler when the guest amdgpu driver
+  /// writes a queue doorbell. The CP's polling thread detects the change and
+  /// fetches new AQL packets from the corresponding ring buffer.
+  ///
+  /// @param process_id  Guest-side process ID registered via open_process().
+  /// @param doorbell_byte_offset  Byte offset within the doorbell BAR (matches
+  ///   the slot assigned in create_queue_ioctl).
+  /// @param value  64-bit doorbell value written by the guest driver.
+  void trigger_doorbell(uint32_t process_id, uint32_t doorbell_byte_offset, uint64_t value);
+
+  /// @brief vfio-user: register or unregister a guest DMA memory range.
+  ///
+  /// @details Maps a guest physical (IOVA) range into rocjitsu's GPU VA space
+  /// so the CP can fetch AQL ring buffers and kernel descriptors from guest
+  /// memory. Called by DmaMapper on QEMU DMA_MAP / DMA_UNMAP messages.
+  ///
+  /// @param process_id  Guest-side process ID.
+  /// @param iova   Guest physical base address of the region.
+  /// @param vaddr  Host virtual address of the region (nullptr to unmap).
+  /// @param length Length in bytes.
+  /// @param map    true to map, false to unmap.
+  void register_guest_dma(uint32_t process_id, uint64_t iova, void *vaddr,
+                           size_t length, bool map);
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
   const Sysfs &topology() const { return topology_; }
   std::string topology_path() const override { return topology_.path(); }

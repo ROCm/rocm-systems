@@ -1,0 +1,55 @@
+From: rocjitsu vfio-user development
+Subject: [PATCH] amdgpu: replace BUG() with pr_warn_once in invalid_rreg for vfio-user probe
+
+When rocjitsu exposes a virtual GFX950 GPU via libvfio-user, the amdgpu
+driver probes it via the CHIP_IP_DISCOVERY path. During
+amdgpu_discovery_set_ip_blocks(), the driver calls RREG32(0x16061)
+(mmMP0_SMN_C2PMSG_33) to poll for firmware-ready. That register address
+(0x16061 * 4 = 0x58184) exceeds the direct BAR5 window (256 KB), so
+amdgpu_device_rreg() routes it through adev->pcie_rreg, which is not
+yet initialized at this point in probe. The result is a call to
+amdgpu_invalid_rreg() which hits BUG() and crashes the kernel.
+
+Replace BUG() with pr_warn_once() + return 0 so the driver survives the
+unimplemented register access. The C2PMSG_33 polling loop in
+amdgpu_discovery_read_binary_from_mem() proceeds after exhausting its
+1000 iterations with value 0 (bit 31 never set), then correctly reads
+mmRCC_CONFIG_MEMSIZE (0xde3 * 4 = 0x378C, within BAR5) which returns
+the VRAM size in MB, and locates the IP discovery binary in VRAM.
+
+The rocjitsu BAR5 model (bar5_mmio.cpp) returns 256 for
+mmRCC_CONFIG_MEMSIZE, so the driver reads the discovery table from VRAM
+at offset (256 MB - DISCOVERY_TMR_OFFSET). The discovery table is
+written by Bar0Vram into the VRAM memfd at construction time.
+
+A companion fix in amd/amdgpu/Makefile adds -Wno-unused-variable to
+suppress a pre-existing warning (dev_attr_pcie_replay_count) that the
+DKMS build treats as -Werror.
+
+This patch is intended for the amdgpu-dkms package used with rocjitsu
+vfio-user GPU emulation. It is not appropriate for upstream submission
+as-is; the correct long-term fix is to initialize pcie_rreg before
+ip_discovery runs, or to stub C2PMSG_33 via the NBIO IP block.
+
+Applies to: amdgpu-dkms 6.12.12-2147987.24.04 (ROCm 6.4), 6.19.4-2337710.24.04 (ROCm 6.4+)
+Tested on:  kernel 6.8.0-134-generic, 6.17.0-35-generic, Ubuntu 24.04 Noble
+
+Note: The Makefile -Wno-unused-variable fix is applied separately via sed
+in rebuild-and-reload.sh because the Makefile header varies across versions.
+
+--- a/amd/amdgpu/amdgpu_device.c
++++ b/amd/amdgpu/amdgpu_device.c
+@@ -1270,10 +1270,12 @@ static uint32_t amdgpu_invalid_rreg(struct amdgpu_device *adev, uint32_t reg)
+ {
+-	DRM_ERROR("Invalid callback to read register 0x%04X\n", reg);
+-	BUG();
+-	return 0;
++	/* rocjitsu-vfu: pcie_rreg may be uninitialized during ip_discovery probe.
++	 * pr_warn instead of BUG so the driver survives unimplemented register
++	 * accesses (e.g. mmMP0_SMN_C2PMSG_33 = 0x16061) and falls through to
++	 * read RCC_CONFIG_MEMSIZE from direct BAR5 to locate the IP discovery
++	 * table in VRAM. */
++	pr_warn_once("amdgpu: rreg 0x%04X via unset pcie_rreg\n", reg);
++	return 0;
+ }
+

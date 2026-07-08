@@ -2369,4 +2369,43 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
   return -1;
 }
 
+// ---------------------------------------------------------------------------
+// vfio-user extensions: doorbell trigger and guest DMA registration.
+// ---------------------------------------------------------------------------
+
+void SimulatedKfd::trigger_doorbell(uint32_t process_id,
+                                     uint32_t doorbell_byte_offset,
+                                     uint64_t value) {
+  auto proc = find_process(process_id);
+  if (!proc)
+    return;
+
+  // Write the value into the host-side doorbell page at the matching slot.
+  // The CP's polling thread detects the change via scan_doorbells() and
+  // schedules a fetch from the corresponding AQL ring buffer.
+  for (uint32_t i = 0; i < static_cast<uint32_t>(gpus_.size()); ++i) {
+    auto &gs = proc->gpu(i);
+    if (!gs.doorbell_page || gs.doorbell_page_size == 0)
+      continue;
+    if (doorbell_byte_offset + sizeof(uint64_t) > gs.doorbell_page_size)
+      continue;
+    auto *slot = reinterpret_cast<uint64_t *>(
+        static_cast<char *>(gs.doorbell_page) + doorbell_byte_offset);
+    std::atomic_ref<uint64_t>(*slot).store(value, std::memory_order_release);
+  }
+}
+
+void SimulatedKfd::register_guest_dma(uint32_t process_id, uint64_t iova,
+                                       void *vaddr, size_t length, bool map) {
+  auto proc = find_process(process_id);
+  if (!proc)
+    return;
+
+  if (map && vaddr) {
+    map_to_gpu(*proc, iova, vaddr, length, amdgpu::Mtype::UC);
+  } else if (!map) {
+    unmap_from_gpu(*proc, iova, length);
+  }
+}
+
 } // namespace rocjitsu
