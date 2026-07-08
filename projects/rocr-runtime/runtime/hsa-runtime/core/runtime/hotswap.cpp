@@ -44,8 +44,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -68,6 +70,48 @@ namespace {
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
+
+// -- Per-code-object retarget cache -------------------------------------------
+//
+// Caches the output of RetargetCodeObject keyed by (code object content,
+// source ISA, target ISA, entry trampoline flag). When the same code object
+// is loaded for multiple GPUs of the same stepping, the COMGR retarget runs
+// once; subsequent loads return a shared reference to the cached result.
+// Only deterministic failures (COMGR returned an error) are cached; transient
+// allocation failures are not, so a later attempt can succeed.
+
+uint64_t FnvHash(const void* data, size_t size) {
+  constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
+  constexpr uint64_t kFnvPrime = 1099511628211ULL;
+  uint64_t hash = kFnvOffset;
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  for (size_t i = 0; i < size; ++i) {
+    hash ^= bytes[i];
+    hash *= kFnvPrime;
+  }
+  return hash;
+}
+
+uint64_t ComputeRetargetCacheKey(const void* elf_data, size_t elf_size,
+                                 const std::string& source_isa,
+                                 const std::string& target_isa,
+                                 bool entry_trampolines) {
+  uint64_t hash = FnvHash(elf_data, elf_size);
+  hash ^= FnvHash(source_isa.data(), source_isa.size()) * 31;
+  hash ^= FnvHash(target_isa.data(), target_isa.size()) * 37;
+  hash ^= entry_trampolines ? 0x1ULL : 0x0ULL;
+  return hash;
+}
+
+struct CachedRetargetResult {
+  bool succeeded = false;
+  // Ref-counted so callers can grab a cheap handle under the mutex
+  // and copy into the output buffer after releasing it.
+  std::shared_ptr<std::vector<uint8_t>> elf_bytes;
+};
+
+std::mutex g_retarget_cache_mutex;
+std::unordered_map<uint64_t, CachedRetargetResult> g_retarget_cache;
 
 constexpr char kGfx1250[] = "gfx1250";
 constexpr char kGfx1250B0Feature[] = ":gfx1250-b0-specific+";
@@ -454,11 +498,70 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
     return false;
   }
 
+  const uint64_t cache_key = ComputeRetargetCacheKey(
+      code_object.data, code_object.size, decision->source_isa,
+      decision->target_isa, decision->request_entry_trampolines);
+
+  // Cache lookup: grab a shared_ptr under the lock, then copy outside it.
+  {
+    std::shared_ptr<std::vector<uint8_t>> cached_bytes;
+    bool cached_failed = false;
+
+    {
+      std::scoped_lock lock(g_retarget_cache_mutex);
+      auto it = g_retarget_cache.find(cache_key);
+      if (it != g_retarget_cache.end()) {
+        if (it->second.succeeded) {
+          cached_bytes = it->second.elf_bytes;
+        } else {
+          cached_failed = true;
+        }
+      }
+    }
+
+    if (cached_failed) {
+      HOTSWAP_LOG("hotswap: cache hit (failed) src=%s tgt=%s entry_trampolines=%d in=%zu\n",
+                  decision->source_isa.c_str(), decision->target_isa.c_str(),
+                  decision->request_entry_trampolines, code_object.size);
+      return false;
+    }
+
+    if (cached_bytes) {
+      OwnedElfBuffer buf(std::malloc(cached_bytes->size()), &std::free);
+      if (buf) {
+        std::memcpy(buf.get(), cached_bytes->data(), cached_bytes->size());
+        *out_elf_buffer = std::move(buf);
+        *out_elf_size = cached_bytes->size();
+        HOTSWAP_LOG("hotswap: cache hit (success) src=%s tgt=%s entry_trampolines=%d "
+                    "in=%zu out=%zu\n",
+                    decision->source_isa.c_str(), decision->target_isa.c_str(),
+                    decision->request_entry_trampolines, code_object.size,
+                    cached_bytes->size());
+        return true;
+      }
+    }
+  }
+
   const bool rewritten =
       RetargetCodeObject(code_object.data, code_object.size,
                          decision->source_isa.c_str(), decision->target_isa.c_str(),
                          out_elf_buffer, out_elf_size,
                          decision->request_entry_trampolines);
+
+  // Cache the result. Only deterministic COMGR failures are cached;
+  // transient allocation failures in this function are not, so a
+  // later attempt with the same code object can still succeed.
+  {
+    std::scoped_lock lock(g_retarget_cache_mutex);
+    CachedRetargetResult entry;
+    entry.succeeded = rewritten;
+    if (rewritten) {
+      const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
+      entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
+    }
+    g_retarget_cache.emplace(cache_key, std::move(entry));
+  }
+
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
               decision->request_entry_trampolines, code_object.size,
@@ -540,6 +643,16 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
 bool EntryTrampolineRewriteAvailableForTesting() {
   ComgrApi* api = GetComgrApi();
   return api && api->hotswap_rewrite_with_options;
+}
+
+size_t RetargetCacheSizeForTesting() {
+  std::scoped_lock lock(g_retarget_cache_mutex);
+  return g_retarget_cache.size();
+}
+
+void ClearRetargetCacheForTesting() {
+  std::scoped_lock lock(g_retarget_cache_mutex);
+  g_retarget_cache.clear();
 }
 #endif
 

@@ -122,6 +122,8 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
     const std::string& target_isa, const RewriteOptions& options);
 size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
 bool EntryTrampolineRewriteAvailableForTesting();
+size_t RetargetCacheSizeForTesting();
+void ClearRetargetCacheForTesting();
 #endif
 
 }  // namespace hotswap
