@@ -176,16 +176,11 @@ void AlltoallWaveTester<T1>::resetBuffers(size_t size) {
     for(int pe = 0; pe < n_pes; pe++) {
       for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
         idx = (wf_id * n_pes + pe) * num_elems + i;
-        if constexpr (std::is_same<T1, char>::value ||
-                      std::is_same<T1, signed char>::value ||
-                      std::is_same<T1, unsigned char>::value) {
-          source_buf[idx] = static_cast<T1>('a' + my_pe + pe + wf_id);
-        }
-        else if constexpr (std::is_floating_point<T1>::value) {
+        if constexpr (std::is_floating_point<T1>::value) {
           source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe + wf_id);
         }
-        else if constexpr (std::is_integral<T1>::value) {
-          source_buf[idx] = static_cast<T1>(my_pe + pe + wf_id);
+        else {
+          source_buf[idx] = static_cast<T1>('a' + my_pe + pe + wf_id);
         }
       }
     }
