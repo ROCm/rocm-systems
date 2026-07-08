@@ -103,7 +103,7 @@ __device__ void GDAContext::amo_add(void *dst, T value, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_add_nbi(base_heap[pe] + L_offset, value, wf_info);
+      qps[qp_index].atomic_add(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
@@ -791,7 +791,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
       qps[dest_pe].put_nbi_single(dst, src, nelems, PostOpt{RingDB<false>});
     }
 
-    qps[dest_pe].atomic_add_nbi_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_single(amo_dst, 1);
   }
 
   // wait until everyone has obtained their designated data
@@ -887,7 +887,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
 
     /* Put Completion */
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
-    qps[dest_pe].atomic_add_nbi_single(amo_dst, 1);
+    qps[dest_pe].atomic_add_single(amo_dst, 1);
 
     long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(sync_flags) != 1) { }
@@ -955,7 +955,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     qps[dest_pe].put_nbi_single(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
       &src[j * nelems], nelems * sizeof(T), PostOpt{RingDB<false>});
-    qps[dest_pe].atomic_add_nbi_single(
+    qps[dest_pe].atomic_add_single(
       reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
       base_heap_offset, 1);
   }
@@ -1087,7 +1087,7 @@ __device__ void GDAContext::internal_amo_add(void *dst, T value, int pe,
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_add_nbi(base_heap[pe] + L_offset, value, wf_info);
+      qps[qp_index].atomic_add(base_heap[pe] + L_offset, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
