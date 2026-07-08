@@ -44,7 +44,6 @@ struct backend
     using counter_id_t                 = Wrapper::counter_id;
     using counter_config_id_t          = Wrapper::counter_config_id;
     using counter_record_t             = Wrapper::counter_record;
-    using counter_instance_id_t        = Wrapper::counter_instance_id_t;
     using counter_flag_t               = Wrapper::counter_flag_t;
     using user_data_t                  = Wrapper::user_data_t;
     using available_counters_cb_t      = Wrapper::available_counters_cb_t;
@@ -77,7 +76,6 @@ struct backend
     static constexpr status_t       status_error   = Wrapper::STATUS_ERROR;
     static constexpr status_t       status_hsa_not_loaded =
         Wrapper::STATUS_ERROR_HSA_NOT_LOADED;
-    static constexpr status_t status_context_error = Wrapper::STATUS_ERROR_CONTEXT_ERROR;
 
     static agent_id_t make_agent_id(std::uint64_t handle) { return agent_id_t{ handle }; }
 

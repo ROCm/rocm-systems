@@ -794,7 +794,7 @@ struct backend
     }
 
     // ─── Tracing name tables ──────────────────────────────────────────────────────
-    // Wrapped here so sdk_core<Backend> routes all SDK interactions through Backend.
+    // Wrapped here so backend<Wrapper> routes all SDK interactions through Backend.
 
     using callback_name_info_t = rocprofiler::sdk::callback_name_info;
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info;
