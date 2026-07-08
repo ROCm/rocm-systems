@@ -393,6 +393,9 @@ public:
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
 
+  /// @brief Read a vector register lane while notifying plugins with a byte mask.
+  virtual uint32_t read_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint8_t byte_mask) const = 0;
+
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
   /// @returns Pointer to the contiguous SGPR data.
@@ -622,6 +625,13 @@ public:
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
     if (auto *wf = vgpr_to_wave_[reg_idx]) {
       this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
+    }
+    return vgpr_file_[reg_idx][lane];
+  }
+
+  uint32_t read_vgpr_masked(uint32_t reg_idx, uint32_t lane, uint8_t byte_mask) const override {
+    if (auto *wf = vgpr_to_wave_[reg_idx]) {
+      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1, byte_mask);
     }
     return vgpr_file_[reg_idx][lane];
   }

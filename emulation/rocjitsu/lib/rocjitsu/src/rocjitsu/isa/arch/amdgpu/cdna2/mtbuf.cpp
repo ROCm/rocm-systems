@@ -520,9 +520,10 @@ void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = cu.read_vgpr_masked(data_base, lane, 0x3u);
     std::memcpy(&d->store_data[lane * 4 + 0], &val0, 2);
-    uint32_t val1 = cu.read_vgpr(data_base, lane);
+    uint32_t val1 = cu.read_vgpr_masked(data_base, lane, 0xCu);
+    val1 >>= 16;
     std::memcpy(&d->store_data[lane * 4 + 2], &val1, 2);
   }
   set_data(std::move(d));
@@ -562,11 +563,12 @@ void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = cu.read_vgpr_masked(data_base, lane, 0x3u);
     std::memcpy(&d->store_data[lane * 6 + 0], &val0, 2);
-    uint32_t val1 = cu.read_vgpr(data_base, lane);
+    uint32_t val1 = cu.read_vgpr_masked(data_base, lane, 0xCu);
+    val1 >>= 16;
     std::memcpy(&d->store_data[lane * 6 + 2], &val1, 2);
-    uint32_t val2 = cu.read_vgpr(data_base, lane);
+    uint32_t val2 = cu.read_vgpr_masked(data_base + 1, lane, 0x3u);
     std::memcpy(&d->store_data[lane * 6 + 4], &val2, 2);
   }
   set_data(std::move(d));
@@ -606,13 +608,15 @@ void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = cu.read_vgpr(data_base, lane);
+    uint32_t val0 = cu.read_vgpr_masked(data_base, lane, 0x3u);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 2);
-    uint32_t val1 = cu.read_vgpr(data_base, lane);
+    uint32_t val1 = cu.read_vgpr_masked(data_base, lane, 0xCu);
+    val1 >>= 16;
     std::memcpy(&d->store_data[lane * 8 + 2], &val1, 2);
-    uint32_t val2 = cu.read_vgpr(data_base, lane);
+    uint32_t val2 = cu.read_vgpr_masked(data_base + 1, lane, 0x3u);
     std::memcpy(&d->store_data[lane * 8 + 4], &val2, 2);
-    uint32_t val3 = cu.read_vgpr(data_base, lane);
+    uint32_t val3 = cu.read_vgpr_masked(data_base + 1, lane, 0xCu);
+    val3 >>= 16;
     std::memcpy(&d->store_data[lane * 8 + 6], &val3, 2);
   }
   set_data(std::move(d));

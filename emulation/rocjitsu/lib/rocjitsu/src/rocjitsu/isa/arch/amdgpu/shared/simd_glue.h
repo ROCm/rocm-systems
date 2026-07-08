@@ -278,9 +278,11 @@ inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t la
     uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
-    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
-    uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                                     : ((old_dst & 0xffff0000u) | src_half);
+    const bool high_dst = (opsel & 0x8u) != 0;
+    const uint8_t read_mask = high_dst ? 0x3u : 0xCu;
+    uint32_t old_dst = wf.cu().read_vgpr_masked(idx, lane, read_mask);
+    uint32_t merged = high_dst ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                               : ((old_dst & 0xffff0000u) | src_half);
     wf.cu().write_vgpr(idx, lane, merged);
     return;
   }
@@ -444,11 +446,12 @@ util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base, util::
 /// remove this overload from the candidate set entirely.
 template <typename T, typename Op>
   requires(util::has_stdx_simd)
-inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base) {
+inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base,
+                                 uint8_t byte_mask = 0xF) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
   if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
     constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
-    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
+    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, byte_mask);
     return r->template simd_load<T>(lane_base);
   }
   return util::broadcast<T>(op.read_scalar(wf));
@@ -3019,7 +3022,8 @@ template <FmaMixDst DstMode, typename Inst>
       write_simd<float>(inst.vdst, wf, base, r, chunk);
     } else {
       U h = util::f32_to_f16_simd(r); // low16 = f16, high16 zero
-      U prev = read_simd<uint32_t>(inst.vdst, wf, base);
+      constexpr uint8_t kPreserveMask = DstMode == FmaMixDst::F16_LO ? 0xCu : 0x3u;
+      U prev = read_simd<uint32_t>(inst.vdst, wf, base, kPreserveMask);
       U packed;
       if constexpr (DstMode == FmaMixDst::F16_LO) {
         packed = (prev & 0xFFFF0000u) | h;

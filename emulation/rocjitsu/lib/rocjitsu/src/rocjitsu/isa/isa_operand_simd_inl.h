@@ -51,7 +51,9 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
   }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
     uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;
-    const uint8_t *src = wf.cu().vgpr_data(wf.vgpr_alloc().base + voff);
+    const uint32_t reg = wf.vgpr_alloc().base + voff;
+    wf.cu().notify_vgpr_read(&wf, reg, lane_base, lane_base + count);
+    const uint8_t *src = wf.cu().vgpr_data(reg);
     std::memcpy(out, src + lane_base * sizeof(uint32_t), count * sizeof(uint32_t));
     return;
   }

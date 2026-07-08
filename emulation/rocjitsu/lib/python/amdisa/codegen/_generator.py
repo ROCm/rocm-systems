@@ -3894,6 +3894,29 @@ class CodeGenerator:
             return f'wf.vgpr_alloc().base + {self._acc_vgpr_expr} + inst_.{field}'
         return f'wf.vgpr_alloc().base + inst_.{field}'
 
+    @staticmethod
+    def _vgpr_lane_read_expr(
+        reg_expr: str, lane_expr: str, byte_mask: str | None = None
+    ) -> str:
+        if byte_mask is None:
+            return f'cu.read_vgpr({reg_expr}, {lane_expr})'
+        return f'cu.read_vgpr_masked({reg_expr}, {lane_expr}, {byte_mask})'
+
+    @staticmethod
+    def _subdword_store_byte_mask(sem: InstructionSemantics) -> str:
+        return '0xCu' if sem.d16_hi else '0x3u'
+
+    @staticmethod
+    def _subdword_store_component_read(
+        sem: InstructionSemantics, elem_index: int
+    ) -> tuple[str, str, bool]:
+        if sem.elem_size == 2 and sem.num_elems and sem.num_elems > 1:
+            reg_offset = elem_index // 2
+            reg_expr = 'data_base' if reg_offset == 0 else f'data_base + {reg_offset}'
+            high_half = (elem_index % 2) == 1
+            return reg_expr, '0xCu' if high_half else '0x3u', high_half
+        return 'data_base', CodeGenerator._subdword_store_byte_mask(sem), sem.d16_hi
+
     def _gen_flat_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -3958,14 +3981,21 @@ class CodeGenerator:
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 4);'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
-                if sem.d16_hi:
+                reg_expr, byte_mask, high_half = self._subdword_store_component_read(
+                    sem, i
+                )
+                read_expr = self._vgpr_lane_read_expr(reg_expr, 'lane', byte_mask)
+                L.append(f'    uint32_t val{i} = {read_expr};')
+                if high_half:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                read_expr = self._vgpr_lane_read_expr(
+                    'data_base', 'lane', self._subdword_store_byte_mask(sem)
+                )
+                L.append(f'    uint32_t val{i} = {read_expr};')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -4500,14 +4530,21 @@ class CodeGenerator:
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, {esz});'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
-                if sem.d16_hi:
+                reg_expr, byte_mask, high_half = self._subdword_store_component_read(
+                    sem, i
+                )
+                read_expr = self._vgpr_lane_read_expr(reg_expr, 'lane', byte_mask)
+                L.append(f'    uint32_t val{i} = {read_expr};')
+                if high_half:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {i * esz}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                read_expr = self._vgpr_lane_read_expr(
+                    'data_base', 'lane', self._subdword_store_byte_mask(sem)
+                )
+                L.append(f'    uint32_t val{i} = {read_expr};')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
@@ -4610,7 +4647,10 @@ class CodeGenerator:
         L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(f'    uint32_t val0 = cu.read_vgpr(data_base, lane);')
+        read_expr = self._vgpr_lane_read_expr(
+            'data_base', 'lane', '0x3u' if sem.elem_size <= 2 else None
+        )
+        L.append(f'    uint32_t val0 = {read_expr};')
         L.append(
             f'    std::memcpy(&d->store_data[lane * {sem.elem_size}], &val0, {sem.elem_size});'
         )
@@ -4698,14 +4738,21 @@ class CodeGenerator:
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 4);'
                 )
             elif esz == 2:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
-                if sem.d16_hi:
+                reg_expr, byte_mask, high_half = self._subdword_store_component_read(
+                    sem, i
+                )
+                read_expr = self._vgpr_lane_read_expr(reg_expr, 'lane', byte_mask)
+                L.append(f'    uint32_t val{i} = {read_expr};')
+                if high_half:
                     L.append(f'    val{i} >>= 16;')
                 L.append(
                     f'    std::memcpy(&d->store_data[lane * {stride} + {off}], &val{i}, 2);'
                 )
             elif esz == 1:
-                L.append(f'    uint32_t val{i} = cu.read_vgpr(data_base, lane);')
+                read_expr = self._vgpr_lane_read_expr(
+                    'data_base', 'lane', self._subdword_store_byte_mask(sem)
+                )
+                L.append(f'    uint32_t val{i} = {read_expr};')
                 if sem.d16_hi:
                     L.append(f'    val{i} >>= 16;')
                 L.append(

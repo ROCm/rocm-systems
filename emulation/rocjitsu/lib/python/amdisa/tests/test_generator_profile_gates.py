@@ -202,6 +202,67 @@ def test_vopc_full_dpp_write_mask_requires_vopc_dpp16_on_rdna():
     assert codegen._uses_full_dpp_write_mask('ENC_VOPC')
 
 
+def _fake_memory_codegen():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        profile=SimpleNamespace(
+            uses_vgpr_msb_indexing=False,
+            flat_store_src_field='vdata',
+        )
+    )
+    codegen._coherency_exprs = lambda: ('0', '0', '0')
+    codegen._mtype_expr = lambda: 'amdgpu::Mtype::RW'
+    codegen._wait_counter_type = lambda _sem_class: None
+    return codegen
+
+
+def test_subdword_store_emitters_use_masked_vgpr_source_reads():
+    codegen = _fake_memory_codegen()
+    lo = InstructionSemantics(
+        name='DS_WRITE_B16',
+        semantic_class='ds_write',
+        elem_size=2,
+        num_elems=1,
+    )
+    hi = InstructionSemantics(
+        name='DS_WRITE_B16_D16_HI',
+        semantic_class='ds_write',
+        elem_size=2,
+        num_elems=1,
+        d16_hi=True,
+    )
+
+    assert 'cu.read_vgpr_masked(data_base, lane, 0x3u)' in codegen._gen_ds_write(
+        [], [], lo
+    )
+    assert 'cu.read_vgpr_masked(data_base, lane, 0xCu)' in codegen._gen_flat_store(
+        [], [], hi
+    )
+    assert 'cu.read_vgpr_masked(data_base, lane, 0xCu)' in codegen._gen_buffer_store(
+        [], [], hi
+    )
+
+
+def test_packed_d16_vector_stores_read_alternating_vgpr_halves():
+    codegen = _fake_memory_codegen()
+    xyzw = InstructionSemantics(
+        name='TBUFFER_STORE_FORMAT_D16_XYZW',
+        semantic_class='tbuffer_store',
+        elem_size=2,
+        num_elems=4,
+        d16_lo=True,
+    )
+
+    body = codegen._gen_buffer_store([], [], xyzw, cls='tbuffer_store')
+
+    assert 'uint32_t val0 = cu.read_vgpr_masked(data_base, lane, 0x3u);' in body
+    assert 'uint32_t val1 = cu.read_vgpr_masked(data_base, lane, 0xCu);' in body
+    assert 'uint32_t val2 = cu.read_vgpr_masked(data_base + 1, lane, 0x3u);' in body
+    assert 'uint32_t val3 = cu.read_vgpr_masked(data_base + 1, lane, 0xCu);' in body
+    assert 'val1 >>= 16;' in body
+    assert 'val3 >>= 16;' in body
+
+
 def test_rdna4_parser_injects_s_waitcnt_compat():
     import pathlib
 
