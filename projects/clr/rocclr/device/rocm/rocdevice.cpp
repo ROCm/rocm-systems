@@ -2407,9 +2407,15 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
     return 0;
   }
 
+  // Host/CPU-pool VMM handles must use MEMORY_TYPE_NONE, not MEMORY_TYPE_PINNED.
+  // With MEMORY_TYPE_PINNED the CPU mapping of the resulting host BO is not
+  // faultable on some kernel/driver stacks, so a direct CPU access to the mapped
+  // VA raises SIGBUS even though hsa_amd_vmem_set_access() succeeds. ROCr's own
+  // rocrtst host VMM tests create host-pool handles with MEMORY_TYPE_NONE; device
+  // pool allocations (deviceVmemAlloc) keep MEMORY_TYPE_PINNED.
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_status_t hsa_status =
-      Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_PINNED, 0, &hsa_vmem_handle);
+      Hsa::vmem_handle_create(pool, size, MEMORY_TYPE_NONE, 0, &hsa_vmem_handle);
   if (hsa_status != HSA_STATUS_SUCCESS) {
     LogPrintfError("hostVmemAlloc: hsa_amd_vmem_handle_create failed with status: %d", hsa_status);
     return 0;
