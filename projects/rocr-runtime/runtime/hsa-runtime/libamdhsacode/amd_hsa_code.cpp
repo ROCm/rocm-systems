@@ -46,6 +46,7 @@
 #include <iomanip>
 #include <algorithm>
 #include "core/inc/amd_hsa_code.hpp"
+#include "amd_hsa_note_bounds.hpp"
 #include "amd_hsa_code_util.hpp"
 #include <libelf.h>
 #include "inc/amd_hsa_elf.h"
@@ -549,13 +550,22 @@ namespace code {
       // variable-length name array against the actual descriptor size before
       // reading, otherwise GetNoteString reads past the descriptor into
       // adjacent heap memory. See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_isa_t) >
+                        offsetof(amdgpu_hsa_note_isa_t, vendor_and_architecture_name));
       const size_t name_offset = offsetof(amdgpu_hsa_note_isa_t, vendor_and_architecture_name);
-      if (desc_size < name_offset) { return false; }
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, name_offset,
+                                                    desc->vendor_name_size)) {
+        return false;
+      }
       const size_t name_room = desc_size - name_offset;
-      if (desc->vendor_name_size > name_room) { return false; }
       vendor_name = GetNoteString(desc->vendor_name_size, desc->vendor_and_architecture_name);
+      // arch_offset follows GetNoteString's parsed length plus one byte (the NUL when
+      // present). Well-formed notes set vendor_name_size to include a trailing NUL, so
+      // arch_offset equals vendor_name_size; crafted notes without NUL stay in-bounds but
+      // may mis-parse the architecture name.
       const size_t arch_offset = vendor_name.length() + 1;
-      if (arch_offset > name_room || desc->architecture_name_size > name_room - arch_offset) {
+      if (!detail::IsNoteStringSizeWithinRoom(name_room, arch_offset,
+                                              desc->architecture_name_size)) {
         return false;
       }
       architecture_name = GetNoteString(desc->architecture_name_size, desc->vendor_and_architecture_name + arch_offset);
@@ -847,8 +857,11 @@ namespace code {
       *minor = desc->producer_minor_version;
       // Bound the attacker-controlled producer_name_size against the descriptor.
       // See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_producer_t) >
+                        offsetof(amdgpu_hsa_note_producer_t, producer_name));
       const size_t name_offset = offsetof(amdgpu_hsa_note_producer_t, producer_name);
-      if (desc_size < name_offset || desc->producer_name_size > desc_size - name_offset) {
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, name_offset,
+                                                    desc->producer_name_size)) {
         return false;
       }
       producer_name = GetNoteString(desc->producer_name_size, desc->producer_name);
@@ -885,8 +898,11 @@ namespace code {
       if (!GetAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, &desc, &desc_size)) { return false; }
       // Bound the attacker-controlled producer_options_size against the
       // descriptor. See ROCM-26177 finding #3.
+      static_assert(sizeof(amdgpu_hsa_note_producer_options_t) >
+                        offsetof(amdgpu_hsa_note_producer_options_t, producer_options));
       const size_t opts_offset = offsetof(amdgpu_hsa_note_producer_options_t, producer_options);
-      if (desc_size < opts_offset || desc->producer_options_size > desc_size - opts_offset) {
+      if (!detail::IsNoteStringSizeWithinDescriptor(desc_size, opts_offset,
+                                                    desc->producer_options_size)) {
         return false;
       }
       options = GetNoteString(desc->producer_options_size, desc->producer_options);
