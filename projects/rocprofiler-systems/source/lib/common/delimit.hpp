@@ -65,16 +65,15 @@ delimit(const std::string& line, std::string_view delimiters)
     ContainerT _result{};
     size_t     _beginp = 0;  // position that is the beginning of the new string
     size_t     _delimp = 0;  // position of the delimiter in the string
+    // for reservable containers, pre-count the delimiter characters as a cheap
+    // upper bound on the token count (it over-counts consecutive/edge delimiters,
+    // which is fine for a reserve hint) so the container allocates at most once
     if(reserve(_result, 0))
     {
+        // tally every character in the line that is one of the delimiters
         size_t _nmax = 0;
-        for(char itr : line)
-        {
-            for(size_t j = 0; j < delimiters.size(); ++j)
-            {
-                if(itr == delimiters[j]) ++_nmax;
-            }
-        }
+        for(char c : line)
+            if(delimiters.find(c) != std::string_view::npos) ++_nmax;
         reserve(_result, _nmax);
     }
     while(_beginp < line.length() && _delimp < line.length())
