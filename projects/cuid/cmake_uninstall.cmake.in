@@ -18,27 +18,30 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-
 # Run the pre-removal script to stop daemon, remove udev rules, systemd service symlink, and cron job.
-set(_prerm "$ENV{DESTDIR}@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_prerm.sh")
+set(_prerm "$ENV{DESTDIR}@CMAKE_INSTALL_DATADIR@/@AMDCUID@/amdcuid_prerm.sh")
 
 if(EXISTS "${_prerm}")
     message(STATUS "Running pre-removal script: ${_prerm}")
-    execute_process(
-        COMMAND sh "${_prerm}"
-        RESULT_VARIABLE _prerm_result
-    )
+    execute_process(COMMAND sh "${_prerm}" RESULT_VARIABLE _prerm_result)
     if(NOT _prerm_result EQUAL 0)
-        message(WARNING "Pre-removal script exited with code ${_prerm_result}. "
-                        "Continuing with file removal anyway.")
+        message(
+            WARNING
+            "Pre-removal script exited with code ${_prerm_result}. "
+            "Continuing with file removal anyway."
+        )
     endif()
 else()
-    message(STATUS "Pre-removal script not found (${_prerm}); skipping daemon teardown.")
+    message(
+        STATUS
+        "Pre-removal script not found (${_prerm}); skipping daemon teardown."
+    )
 endif()
 
 # Remove all files tracked by cmake --install via install_manifest.txt
 if(NOT EXISTS "@CMAKE_BINARY_DIR@/install_manifest.txt")
-    message(FATAL_ERROR
+    message(
+        FATAL_ERROR
         "Cannot find install manifest: @CMAKE_BINARY_DIR@/install_manifest.txt\n"
         "Run 'cmake --install' before attempting to uninstall."
     )
@@ -70,8 +73,9 @@ endforeach()
 # Subdirectories are listed before parents so each rmdir call finds them empty.
 # ---------------------------------------------------------------------------
 set(_amdcuid_dirs
-    "$ENV{DESTDIR}@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/config"
-    "$ENV{DESTDIR}@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@"
+    "$ENV{DESTDIR}@CMAKE_INSTALL_DATADIR@/@AMDCUID@/config"
+    "$ENV{DESTDIR}@CMAKE_INSTALL_DATADIR@/@AMDCUID@"
+    "$ENV{DESTDIR}@CMAKE_INSTALL_LIBEXECDIR@/@AMDCUID@"
 )
 
 foreach(_dir ${_amdcuid_dirs})

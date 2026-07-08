@@ -155,15 +155,8 @@ if(UNIX AND NOT APPLE)
         ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
         @ONLY
     )
-    configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/postinst.in
-        ${CMAKE_CURRENT_BINARY_DIR}/postinst
-        @ONLY
-    )
     install(
-        PROGRAMS
-            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
-            ${CMAKE_CURRENT_BINARY_DIR}/postinst
+        PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
         DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
         COMPONENT ${LIB_COMPONENT}
     )

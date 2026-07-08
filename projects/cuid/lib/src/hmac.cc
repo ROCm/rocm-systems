@@ -33,7 +33,7 @@
 #include <iostream>
 
 #ifndef AMDCUID_CONFIG_DIR
-#error "#error "AMDCUID_CONFIG_DIR must be defined via CMake"
+#error "AMDCUID_CONFIG_DIR must be defined via CMake"
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────

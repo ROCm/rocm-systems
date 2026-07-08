@@ -26,9 +26,10 @@
 # Always runs the library post-install (provisions the HMAC key).
 # Automatically runs the daemon post-install when the daemon binary is present.
 
-LIB_POSTINST="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/postinst"
-DAEMON_POSTINST="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_daemon_postinst.sh"
-DAEMON_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+LIB_POSTINST="$SCRIPT_DIR/amdcuid_setup_hmac.sh"
+DAEMON_POSTINST="$SCRIPT_DIR/amdcuid_daemon_postinst.sh"
+DAEMON_BIN="$SCRIPT_DIR/../../bin/amdcuid_daemon"
 
 echo "=== amdcuid post-installation ==="
 

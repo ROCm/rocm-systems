@@ -25,10 +25,11 @@
 # This script reads the daemon config file to decide whether to install udev
 # rules (daemonize=true) or a one-shot boot service (daemonize=false) for the daemon.
 
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 CONFIG_DIR="@AMDCUID_SHARED_CONFIG_DIR@"
-VERSIONED_CONFIG_FILE="@CMAKE_INSTALL_PREFIX@/@CONFIG_INSTALL_DIR@/amdcuid_daemon.conf"
+VERSIONED_CONFIG_FILE="$SCRIPT_DIR/config/amdcuid_daemon.conf"
 CONFIG_FILE="$CONFIG_DIR/amdcuid_daemon.conf"
-TOOL_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_tool"
+TOOL_BIN="$SCRIPT_DIR/../../bin/amdcuid_tool"
 UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
 SERVICE_NAME="amdcuid_daemon"
 
@@ -53,7 +54,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-SETUP_HMAC="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_setup_hmac.sh"
+SETUP_HMAC="$SCRIPT_DIR/amdcuid_setup_hmac.sh"
 if [ -x "$SETUP_HMAC" ]; then
     "$SETUP_HMAC"
 else
@@ -110,8 +111,10 @@ fi
 # To apply future config changes, edit the config file then run:
 #   sudo systemctl restart amdcuid_daemon
 if [ -d /run/systemd/system ]; then
-    ln -s -f -r @CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service \
-        "$SYSTEMD_UNIT_DIR/amdcuid_daemon.service"
+    SERVICE_FILE="$SCRIPT_DIR/../../libexec/amdcuid/amdcuid_daemon.service"
+    ACTUAL_DAEMON_BIN="$SCRIPT_DIR/../../bin/amdcuid_daemon"
+    sed -i "s|^ExecStart=.*|ExecStart=${ACTUAL_DAEMON_BIN}|" "$SERVICE_FILE"
+    ln -s -f -r "$SERVICE_FILE" "$SYSTEMD_UNIT_DIR/amdcuid_daemon.service"
 fi
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
