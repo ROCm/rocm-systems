@@ -179,6 +179,25 @@ inline bool should_skip_inst(std::string_view mn) {
   return false;
 }
 
+struct HarnessCoverageExpectation {
+  std::string_view arch_name;
+  double min_coverage;
+  size_t max_unimplemented;
+};
+
+constexpr HarnessCoverageExpectation HARNESS_COVERAGE_EXPECTATIONS[] = {
+    {"cdna1", 99.0, 1},  {"cdna2", 99.0, 1},    {"cdna3", 99.0, 1},  {"cdna4", 99.0, 1},
+    {"rdna1", 98.0, 3},  {"rdna2", 98.5, 2},    {"rdna3", 100.0, 0}, {"rdna3_5", 100.0, 0},
+    {"rdna4", 100.0, 0}, {"gfx1250", 100.0, 0},
+};
+
+const HarnessCoverageExpectation *harness_coverage_expectation(std::string_view arch_name) {
+  for (const auto &expectation : HARNESS_COVERAGE_EXPECTATIONS)
+    if (expectation.arch_name == arch_name)
+      return &expectation;
+  return nullptr;
+}
+
 /// @brief Helper to run all test encodings for a given ISA.
 void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
                            const TestEncEntry *encodings, size_t num_encodings) {
@@ -274,12 +293,19 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     std::printf("\n");
   }
 
-  // Decode failures are expected for sub-decoded encodings where the
-  // synthesized test word doesn't match the decoder's sub-dispatch path.
-  // The primary coverage metric is: of the instructions that DO decode,
-  // how many execute without throwing UnimplementedInst?
+  // Decode failures are a hard regression: every listed test encoding should
+  // decode for its target architecture. The primary coverage metric is: of the
+  // instructions that decode, how many execute without throwing
+  // UnimplementedInst?
   // Unimplemented instructions are tracked in coverage_exceptions files.
   EXPECT_GT(decoded, 0u) << "No instructions decoded for " << arch_name;
+  if (const auto *expectation = harness_coverage_expectation(arch_name)) {
+    EXPECT_GE(coverage, expectation->min_coverage)
+        << arch_name << " instruction execution harness coverage regressed";
+    EXPECT_LE(unimplemented, expectation->max_unimplemented)
+        << arch_name << " gained new unimplemented instructions";
+    EXPECT_EQ(decode_fail_list.size(), 0u) << arch_name << " gained decode failures";
+  }
 }
 
 // --- Parameterized tests per ISA ---
@@ -367,6 +393,78 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 }
 
 #undef RUN_HARNESS
+
+TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_memory_harness_mem");
+  amdgpu::L2Cache l2("gfx1250_memory_harness_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  Gfx1250MemoryTestCu cu("gfx1250", cfg, &gpu_mem, &l2);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+
+  auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  constexpr uint64_t kGlobalAddr = 0x2000;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kGlobalAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kGlobalAddr >> 32));
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    gpu_mem.write32(kGlobalAddr + lane * sizeof(uint32_t), 0u);
+    cu.write_vgpr(vb + 0, lane, lane * sizeof(uint32_t));
+    cu.write_vgpr(vb + 1, lane, 0x11000000u + lane);
+  }
+
+  // global_store_b32 v0, v1, s[4:5]
+  const uint32_t global_store_words[] = {0xEE068004u, 0x00800000u, 0x00000000u};
+  std::unique_ptr<Instruction> global_store(decoder->decode(global_store_words));
+  ASSERT_NE(global_store, nullptr);
+  ASSERT_EQ(std::string_view(global_store->mnemonic()), "global_store_b32");
+  cu.execute_and_route(global_store.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr), 0x11000000u);
+  EXPECT_EQ(gpu_mem.read32(kGlobalAddr + sizeof(uint32_t)), 0x11000001u);
+
+  constexpr uint64_t kBufferAddr = 0x3000;
+  cu.write_sgpr(sb + 4, static_cast<uint32_t>(kBufferAddr));
+  cu.write_sgpr(sb + 5, static_cast<uint32_t>(kBufferAddr >> 32));
+  cu.write_sgpr(sb + 6, 0x1000u);
+  cu.write_sgpr(sb + 7, 0u);
+  wf->set_m0(16u);
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    gpu_mem.write32(kBufferAddr + lane * 32, 0u);
+    gpu_mem.write32(kBufferAddr + 16 + lane * 32, 0u);
+    cu.write_vgpr(vb + 0, lane, 0x22000000u + lane);
+    cu.write_vgpr(vb + 5, lane, lane * 32);
+  }
+
+  // buffer_store_b32 v0, v5, s[4:7], m0 offen
+  const uint32_t buffer_store_words[] = {0xC406807Du, 0x40800800u, 0x00000005u};
+  std::unique_ptr<Instruction> buffer_store(decoder->decode(buffer_store_words));
+  ASSERT_NE(buffer_store, nullptr);
+  ASSERT_EQ(std::string_view(buffer_store->mnemonic()), "buffer_store_b32");
+  cu.execute_and_route(buffer_store.release(), *wf);
+  cu.flush_all();
+
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 16), 0x22000000u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 32), 0u);
+  EXPECT_EQ(gpu_mem.read32(kBufferAddr + 48), 0x22000001u);
+
+  cu.reset_all_wf();
+}
 
 TEST(Rdna4ScalarSccTest, AddSubCoI32UseSignedOverflow) {
   amdgpu::GpuMemory gpu_mem("rdna4_scc_i32_overflow_mem");
