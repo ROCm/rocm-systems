@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "drivers/gpu/drm/amd/amdkfd/kfd_topology.h"
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
@@ -24,42 +25,96 @@ namespace fs = std::filesystem;
 
 namespace {
 
-uint32_t debug_capability_for(uint32_t gfx_target_version) {
-  // gfx9 (CDNA) supports the base KFD debugger API but not the "precise
-  // memory/ALU operations" bits, which were only added for later firmware on
-  // gfx10+ architectures.
-  const bool is_gfx9 = kmd::decode_gfx_target_version(gfx_target_version).major == 9;
+/// @brief Debug-related topology bits derived from a GPU's GFXIP version.
+///
+/// @details Mirrors the per-node values the amdkfd driver programs in
+/// kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c):
+/// the trap-debugger capability flags, the capability2 flags, and the
+/// debug_prop address-watch-mask range that libhsakmt and rocdbgapi read back.
+struct DebugTopology {
+  uint32_t capability = 0;
+  uint32_t capability2 = 0;
+  uint64_t debug_prop = 0;
+};
 
-  uint32_t cap =
-      HSA_CAP_TRAP_DEBUG_SUPPORT | HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
-      HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED | HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
-  if (!is_gfx9) {
-    cap |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
-           HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+/// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
+/// identified by @p gfx_target_version.
+///
+/// @details The driver keys every decision on the GC hardware IP version, which
+/// is not the same number as gfx_target_version for CDNA parts (see
+/// kmd::gc_ip_version_for_gfx_target_version), so we translate first and then
+/// apply the driver's exact IP_VERSION thresholds.
+DebugTopology debug_topology_for(uint32_t gfx_target_version) {
+  using kmd::make_gc_ip_version;
+  const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(gfx_target_version);
+
+  DebugTopology topo;
+
+  // Trap-based debugging is advertised for every debug-capable GPU.
+  topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
+
+  // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
+  // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
+  // MES firmware (sched_version >= 70), which the simulator always models.
+  const bool ttmps_always_setup =
+      (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
+      gc >= make_gc_ip_version(11, 0, 0);
+  if (ttmps_always_setup)
+    topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+
+  if (gc < make_gc_ip_version(10, 0, 0)) {
+    // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
+    // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
+    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
+      topo.debug_prop |=
+          HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX9_4_3 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT_GFX9_4_3;
+    else
+      topo.debug_prop |= HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX9 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT;
+
+    if (gc >= make_gc_ip_version(9, 4, 2))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
+
+    // Per-queue reset is withheld only from SR-IOV virtual functions, which the
+    // simulator never models.
+    topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+  } else {
+    // gfx10+ (RDNA).
+    topo.debug_prop |= HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX10 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT;
+
+    if (gc >= make_gc_ip_version(12, 0, 0))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+
+    if (gc >= make_gc_ip_version(12, 1, 0)) {
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
+                         HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+      topo.capability2 |= HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
+    }
   }
-  return cap;
+
+  // Firmware-backed trap debugging (kfd_topology_set_dbg_firmware_support()).
+  // The simulator always provides compatible "firmware", so advertise it.
+  topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
+
+  return topo;
 }
 
-uint32_t default_capability_for(uint32_t gfx_target_version) {
+/// @brief Non-debug capability bits advertised for the data-center compute GPUs
+/// the simulator models.
+///
+/// @details On real hardware these originate from the ASIC's CRAT tables rather
+/// than kfd_topology_set_capabilities(); reproducing per-ASIC CRAT variation is
+/// out of scope, so the simulator advertises the common data-center feature set
+/// (ECC/RAS, ATS, SVM, coherent host access). The version-specific debug bits
+/// are contributed separately by debug_topology_for().
+uint32_t default_non_debug_capability() {
   return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
          ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
          ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
           HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
          HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
-         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS |
-         HSA_CAP_PER_QUEUE_RESET_SUPPORTED | debug_capability_for(gfx_target_version);
-}
-
-uint64_t debug_prop_for(uint32_t /*gfx_target_version*/) {
-  // Same address-watch mask range advertised for all simulated architectures;
-  // ttmps (dispatch info) are always valid in the simulator.
-  constexpr uint32_t kWatchAddrMaskLoBits = 6;
-  constexpr uint32_t kWatchAddrMaskHiBits = 47;
-  return ((kWatchAddrMaskLoBits << HSA_DBG_WATCH_ADDR_MASK_LO_BIT_SHIFT) &
-          HSA_DBG_WATCH_ADDR_MASK_LO_BIT_MASK) |
-         ((kWatchAddrMaskHiBits << HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT) &
-          HSA_DBG_WATCH_ADDR_MASK_HI_BIT_MASK) |
-         HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
 }
 
 } // namespace
@@ -212,16 +267,22 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/gpu_id", gpu_id.str());
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
+  const DebugTopology dbg = debug_topology_for(gpu.gfx_target_version);
+
   uint32_t cap = gpu.capability;
   if (cap == 0)
-    cap = default_capability_for(gpu.gfx_target_version);
+    cap = default_non_debug_capability() | dbg.capability;
   const uint32_t asic_revision = gpu.revision_id;
   cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
         ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
 
+  uint32_t cap2 = gpu.capability2;
+  if (cap2 == 0)
+    cap2 = dbg.capability2;
+
   uint64_t debug_prop = gpu.debug_prop;
   if (debug_prop == 0)
-    debug_prop = debug_prop_for(gpu.gfx_target_version);
+    debug_prop = dbg.debug_prop;
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
@@ -260,7 +321,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "local_mem_size " << gpu.local_mem_size << "\n"
         << "fw_version " << gpu.fw_version << "\n"
         << "capability " << cap << "\n"
-        << "capability2 " << gpu.capability2 << "\n"
+        << "capability2 " << cap2 << "\n"
         << "debug_prop " << debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"

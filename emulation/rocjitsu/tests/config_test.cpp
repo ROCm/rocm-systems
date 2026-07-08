@@ -226,7 +226,7 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
 
   // Not specified in JSON: 0 means "auto-compute" (see
-  // rocjitsu::default_capability_for()/debug_prop_for()).
+  // rocjitsu::default_non_debug_capability()/debug_topology_for()).
   EXPECT_EQ(loaded.device.capability, 0u);
   EXPECT_EQ(loaded.device.capability2, 0u);
   EXPECT_EQ(loaded.device.debug_prop, 0u);
