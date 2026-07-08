@@ -159,6 +159,7 @@ class MockCodeObjectWriter : public rocprofiler_compute_tool::code_object_writer
 public:
     void        start_code_obj(size_t obj_id) override;
     void        end_code_obj() override;
+    void        write_kernel(uint64_t kernel_id, const std::string& name) override;
     void        start_symbol(const rocprofiler_compute_tool::symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const rocprofiler_compute_tool::instruction_t& inst) override;
@@ -178,19 +179,29 @@ private:
 class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_collector_t
 {
 public:
+    struct kernel_symbol_register_call_t
+    {
+        size_t      code_object_id = 0;
+        uint64_t    kernel_id      = 0;
+        std::string name;
+    };
+
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    void on_kernel_symbol_register(size_t code_object_id, uint64_t kernel_id, const std::string& name) override;
     void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
     void set_has_code_objects(bool has_code_objects);
     void set_source_paths(const std::set<std::filesystem::path>& source_paths);
+    const std::vector<kernel_symbol_register_call_t>& get_kernel_symbol_register_calls() const;
 
     int load_count     = 0;
     int finalize_count = 0;
 
 private:
-    bool                            m_has_code_objects = false;
-    std::set<std::filesystem::path> m_source_paths;
+    bool                                       m_has_code_objects = false;
+    std::set<std::filesystem::path>            m_source_paths;
+    std::vector<kernel_symbol_register_call_t> m_kernel_symbol_register_calls;
 };
 
 class MockSourceSnapshotter : public rocprofiler_compute_tool::source_snapshotter_t

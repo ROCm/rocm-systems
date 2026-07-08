@@ -265,6 +265,11 @@ void MockCodeObjectWriter::start_code_obj(size_t obj_id)
 
 void MockCodeObjectWriter::end_code_obj() {}
 
+void MockCodeObjectWriter::write_kernel(uint64_t, const std::string&)
+{
+    m_empty = false;
+}
+
 void MockCodeObjectWriter::start_symbol(const rocprofiler_compute_tool::symbol_t& /*symbol*/)
 {
     m_empty = false;
@@ -308,6 +313,13 @@ void MockPcSamplingCollector::on_code_object_load(
     ++load_count;
 }
 
+void MockPcSamplingCollector::on_kernel_symbol_register(size_t             code_object_id,
+                                                        uint64_t           kernel_id,
+                                                        const std::string& name)
+{
+    m_kernel_symbol_register_calls.push_back({code_object_id, kernel_id, name});
+}
+
 void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer)
 {
     ++finalize_count;
@@ -331,6 +343,12 @@ const std::set<std::filesystem::path>& MockPcSamplingCollector::get_source_paths
 void MockPcSamplingCollector::set_source_paths(const std::set<std::filesystem::path>& source_paths)
 {
     m_source_paths = source_paths;
+}
+
+const std::vector<MockPcSamplingCollector::kernel_symbol_register_call_t>&
+    MockPcSamplingCollector::get_kernel_symbol_register_calls() const
+{
+    return m_kernel_symbol_register_calls;
 }
 
 void MockSourceSnapshotter::snapshot(const std::set<std::filesystem::path>& source_paths,

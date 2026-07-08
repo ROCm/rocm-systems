@@ -3,6 +3,7 @@
 #include "test_pc_sampling_feature.h"
 
 #include <set>
+#include <string>
 
 using namespace rocprofiler_compute_tool;
 
@@ -34,6 +35,23 @@ TEST_F(TestPcSamplingFeature, OnCodeObjectLoad_ForwardsToCollector)
     feature.on_code_object_load(payload);
 
     EXPECT_EQ(m_collector->load_count, 1);
+}
+
+TEST_F(TestPcSamplingFeature, OnKernelSymbolRegister_ForwardsToCollector)
+{
+    auto feature = create_feature();
+
+    constexpr size_t   code_object_id = 222;
+    constexpr uint64_t kernel_id      = 99;
+    const std::string  name           = "kernel0";
+
+    feature.on_kernel_symbol_register(code_object_id, kernel_id, name);
+
+    const auto& calls = m_collector->get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_EQ(calls[0].name, name);
 }
 
 TEST_F(TestPcSamplingFeature, Finalize_WritesCollectorAndSnapshotsCollectorSourcePaths)

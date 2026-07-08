@@ -187,6 +187,42 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
     EXPECT_EQ(collector->load_count, 1);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedKernelSymbolRegisterWithPcSamplingEnabled_ForwardsToCollector)
+{
+    constexpr size_t   code_object_id = 123;
+    constexpr uint64_t kernel_id      = 10;
+    const std::string  kernel_name    = "_Z9my_kernelv";
+
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused.json",
+                                                     "unused_sources",
+                                                     collector,
+                                                     snapshotter};
+
+    rocprofiler_callback_tracing_record_t                                  record  = {};
+    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
+    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
+    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
+    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+
+    payload.code_object_id = code_object_id;
+    payload.kernel_id      = kernel_id;
+    payload.kernel_name    = kernel_name.c_str();
+
+    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
+
+    const auto& calls = collector->get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_EQ(calls[0].name, "my_kernel");
+    ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id);
+}
+
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
     constexpr uint64_t kernel_id_0           = 10;
