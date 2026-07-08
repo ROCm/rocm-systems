@@ -49,6 +49,8 @@ using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
+  if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
+    return ROCJITSU_CODE_TARGET_GFX90A;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX942)
     return ROCJITSU_CODE_TARGET_GFX942;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX950)
@@ -63,6 +65,8 @@ rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
 }
 
 rj_code_target_id_t target_from_triple(const std::string &triple) {
+  if (triple == "gfx90a")
+    return ROCJITSU_CODE_TARGET_GFX90A;
   if (triple == "gfx942")
     return ROCJITSU_CODE_TARGET_GFX942;
   if (triple == "gfx950")

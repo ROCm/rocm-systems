@@ -8,12 +8,12 @@ Compute unit (CU)
 *****************
 
 The compute unit (CU) is responsible for executing a user's kernels on
-CDNA™-based accelerators. All :ref:`wavefronts <desc-wavefront>` of a
+AMD Instinct™ MI-series GPUs based on CDNA-CDNA4 architectures. All :ref:`wavefronts <desc-wavefront>` of a
 :ref:`workgroup <desc-workgroup>` are scheduled on the same CU.
 
 .. image:: ../../data/performance-model/gcn_compute_unit.png
    :align: center
-   :alt: AMD CDNA accelerator compute unit diagram
+   :alt: AMD CDNA architecture compute unit diagram
    :width: 800
 
 The CU consists of several independent execution pipelines and functional units.
@@ -26,7 +26,7 @@ presented by ROCm Compute Profiler for these pipelines are described in
 * The :ref:`desc-valu` is composed of multiple SIMD (single
   instruction, multiple data) vector processors, vector general purpose
   registers (VGPRs) and instruction buffers. The VALU is responsible for
-  executing much of the computational work on CDNA accelerators, including but
+  executing much of the computational work on CDNA architecture-based GPUs, including but
   not limited to floating-point operations (FLOPs) and integer operations
   (IOPs).
 
@@ -47,13 +47,13 @@ presented by ROCm Compute Profiler for these pipelines are described in
   for all the :ref:`wavefronts <desc-wavefront>` on the compute unit.
 
 * The :doc:`vector L1 data cache (vL1D) <vector-l1-cache>` is the first level
-  cache local to the compute unit. On current CDNA accelerators, the vL1D is
+  cache local to the compute unit. On current CDNA architecture-based GPUs, the vL1D is
   write-through. The vL1D caches from multiple compute units are kept coherent
   with one another through software instructions.
 
-* CDNA accelerators -- that is, AMD Instinct™ MI100 and newer -- contain
+* CDNA-CDNA4 architecture-based GPUs (AMD Instinct MI100 and newer) contain
   specialized matrix-multiplication accelerator pipelines known as the
   :ref:`desc-mfma`.
 
-For a more in-depth description of a compute unit on a CDNA accelerator, see
+For a more in-depth description of a compute unit on CDNA-CDNA4 architecture-based GPUs, see
 :hip-training-pdf:`22` and :gcn-crash-course:`27`.

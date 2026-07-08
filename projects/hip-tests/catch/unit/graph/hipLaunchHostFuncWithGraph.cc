@@ -245,9 +245,16 @@ HIP_TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
 
 
 namespace {
-__global__ void spin_then_set(int* flag, long long spin_cycles) {
+__global__ void spin_then_set(int* flag, long long spin_ticks) {
+#if HT_NVIDIA
   long long start = clock64();
-  while ((clock64() - start) < spin_cycles) { /* spin */ }
+  while ((clock64() - start) < spin_ticks) { /* spin */ }
+#else
+  unsigned long long start = wall_clock64();
+  while ((wall_clock64() - start) < static_cast<unsigned long long>(spin_ticks)) {
+    __builtin_amdgcn_s_sleep(10);
+  }
+#endif
   *flag = 1;
 }
 __global__ void noop() {}
@@ -288,8 +295,19 @@ __global__ void noop() {}
  */
 HIP_TEST_CASE(Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode) {
   // ~500ms spin ensures K_prod is still running when HW queue 0 hits the
-  // host_node markers (microseconds) if the barrier is missing.
-  constexpr long long kSpin = 1000000000LL;
+  // host_node markers (microseconds) if the barrier is missing. The budget is
+  // scaled by the device's wall-clock rate so the duration is identical across
+  // architectures and clock states (see catch/include/utils.hh).
+  int ticks_per_ms = 0;
+#if HT_NVIDIA
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeClockRate, 0));
+#else
+  HIP_CHECK(hipDeviceGetAttribute(&ticks_per_ms, hipDeviceAttributeWallClockRate, 0));
+#endif
+  if (ticks_per_ms == 0) {
+    ticks_per_ms = 1000;  // 1000 kHz fallback when the attribute is unavailable
+  }
+  const long long kSpin = static_cast<long long>(ticks_per_ms) * 500;  // ~500 ms
   constexpr int kExpected = 1;
 
   int* h_flag{};   // written by K_prod's captured DtoH on HW queue 1

@@ -321,8 +321,64 @@ class Parser:
         """
         self.parse_encodings()
         self.parse_insts()
+        self._inject_compat_insts()
         self.parse_operand_types()
         return self.isa_spec
+
+    def _inject_compat_insts(self) -> None:
+        """Add instructions accepted by LLVM but missing from selected XML specs."""
+        if self.isa_spec.arch_name not in {'rdna4', 'gfx1250'}:
+            return
+
+        # The RDNA4/GFX12 XML only lists split S_WAIT_* instructions, but LLVM
+        # still accepts and emits the monolithic SOPP opcode-9 S_WAITCNT
+        # compatibility form for sources such as "s_waitcnt lgkmcnt(0)".
+        enc = self.isa_spec.encoding_map.get('ENC_SOPP')
+        if enc is None or enc.primary_dt_ptrs is None:
+            return
+        if any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in enc.insts):
+            return
+        if len(enc.primary_dt_ptrs) <= 9:
+            return
+
+        dt_ptr = enc.primary_dt_ptrs[9]
+        if dt_ptr == -1:
+            return
+
+        inst = Instruction(
+            'S_WAITCNT',
+            'ENC_SOPP',
+            9,
+            [
+                Operand(
+                    'simm16',
+                    16,
+                    'OPR_WAITCNT',
+                    True,
+                    False,
+                    False,
+                    True,
+                    1,
+                )
+            ],
+        )
+        insert_idx = next(
+            (
+                idx
+                for idx, existing in enumerate(enc.insts)
+                if existing.opcode > inst.opcode
+            ),
+            len(enc.insts),
+        )
+        enc.insts.insert(insert_idx, inst)
+
+        dte = self.isa_spec.primary_decode_table[dt_ptr]
+        decode_func = f'decode{inst.fmt_name}'
+        if dte.sub_decode_funcs is not None:
+            dte.sub_decode_funcs[inst.opcode] = decode_func
+        else:
+            dte.decode_func = decode_func
+            dte.inst_name = inst.fmt_name
 
     def _parse_compact_expr(self, expr_node: elem_tree.Element) -> str:
         """Parse the compact expression AST used by newer MR ISA XML."""

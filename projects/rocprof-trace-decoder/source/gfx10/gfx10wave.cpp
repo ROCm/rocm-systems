@@ -327,11 +327,6 @@ void wave_t::apply_immediate(int64_t token_time)
     update_state(WaveslotState::WS_EXEC, token_time + 1);
 }
 
-#ifdef SQTT_LOGGING
-static std::vector<const char*> INST_CATEGORIES = {
-    "NONE", "SMEM", "SALU", "VMEM", "FLAT", "LDS", "VALU", "JUMP", "NEXT", "IMMED", "MESSAGE", "CONTEXT", "BVH"};
-#endif
-
 void wave_t::update_barrier_gfx11(int64_t token_time)
 {
     if (!extend_barrier_gfx11) return;

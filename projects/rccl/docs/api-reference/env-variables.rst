@@ -41,6 +41,15 @@ in the following table.
       - | ``0``: Force unidirectional ring.
         | ``1``: Force bidirectional ring (default).
 
+    * - | ``NCCL_CUMEM_ENABLE``
+        | Enables cuMem virtual memory management (VMM) for RCCL allocations,
+          which is required for ``ncclCommSuspend`` and ``ncclCommResume`` to
+          release the physical GPU memory of a suspended communicator. See
+          :ref:`suspend-resume` for the full prerequisites.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+        | ``-2``: Auto-detect; enable when the platform supports VMM.
+
 Logging and debugging
 =====================
 
@@ -152,6 +161,13 @@ in the following table.
       - | Integer value (default: ``-1``)
         | See InfiniBand ``show_gids`` command for valid values
 
+    * - | ``NCCL_PXN_C2C``
+        | Allows PXN routing through a C2C link to reach a NIC attached to a
+          peer GPU. The C2C path is NVIDIA-specific and is not currently
+          applicable on AMD hardware.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
       - | Interface prefix string or list
@@ -233,6 +249,14 @@ intended for debugging and development purposes.
         | Enables multi-process mode in test applications.
       - | Any non-empty value enables multi-process mode
         | Used with test executables for distributed testing
+
+    * - | ``NCCL_DISABLE_MEM_MANAGER``
+        | Disables the internal RCCL memory manager. This is an internal
+          parameter intended for testing and debugging only. When the memory
+          manager is disabled, ``ncclCommSuspend``, ``ncclCommResume``, and
+          ``ncclCommMemStats`` return ``ncclInvalidUsage``.
+      - | ``0``: Memory manager enabled (default).
+        | ``1``: Memory manager disabled.
 
 Multi-communicator ordering
 ===========================

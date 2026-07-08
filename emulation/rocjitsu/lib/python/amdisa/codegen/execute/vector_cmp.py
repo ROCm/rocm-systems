@@ -41,6 +41,8 @@ def gen_vector_cmp_class(
     else:
         # All v_cmp variants zero inactive lanes regardless of encoding.
         L.append('  uint64_t vcc = 0;')
+    if is_vop3 and dtype == 'f16':
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
@@ -80,9 +82,14 @@ def gen_vector_cmp_class(
         # normal. The exponent/mantissa/sign decode below distinguishes all ten
         # classes on the true f16 value (bit 9 of the mantissa is the quiet-NaN
         # bit in IEEE 754 binary16).
-        L.append(
-            f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
-        )
+        if is_vop3:
+            L.append(
+                f'    uint16_t s0_raw = static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, opsel, 0));'
+            )
+        else:
+            L.append(
+                f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
+            )
         if is_vop3:
             # VOP3 abs/neg apply to the f16 value: abs clears the sign bit, neg
             # flips it (abs before neg, matching neg(abs(x))).
@@ -181,12 +188,20 @@ def _cmp_condition(
                 f'    double s1 = std::bit_cast<double>({src[1]}.read_lane64(wf, lane));'
             )
         elif dtype == 'f16':
-            L.append(
-                f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
-            )
-            L.append(
-                f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_lane(wf, lane)));'
-            )
+            if is_vop3:
+                L.append(
+                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src({src[0]}, wf, lane, opsel, 0)));'
+                )
+                L.append(
+                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src({src[1]}, wf, lane, opsel, 1)));'
+                )
+            else:
+                L.append(
+                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+                )
+                L.append(
+                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({src[1]}.read_lane(wf, lane)));'
+                )
         else:
             L.append(
                 f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
@@ -292,8 +307,8 @@ def _cmp_condition(
     return f's0 {cmp_op} s1'
 
 
-def _uses_vop3_i16_opsel(op: str | None, dtype: str | None, is_vop3: bool) -> bool:
-    return is_vop3 and dtype in ('i16', 'u16') and op not in ('f', 't')
+def _uses_vop3_true16_opsel(op: str | None, dtype: str | None, is_vop3: bool) -> bool:
+    return is_vop3 and dtype in ('f16', 'i16', 'u16') and op not in ('f', 't')
 
 
 def gen_vector_cmp(
@@ -314,7 +329,7 @@ def gen_vector_cmp(
     L.append('  uint64_t exec = wf.exec();')
     # All v_cmp variants zero inactive lanes regardless of encoding.
     L.append('  uint64_t vcc = 0;')
-    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+    if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -355,7 +370,7 @@ def gen_vector_cmpx(
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  uint64_t result = 0;')
-    if _uses_vop3_i16_opsel(op, dtype, is_vop3):
+    if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')

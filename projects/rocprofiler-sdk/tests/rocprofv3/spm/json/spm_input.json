@@ -1,0 +1,14 @@
+{
+    "jobs": [
+        {
+            "kernel_include_regex": "subtract_kernel",
+            "kernel_iteration_range": "[1]",
+            "kernel_exclude_regex": "",
+            "truncate_kernels": true,
+            "spm_beta_enabled": true,
+            "spm_sample_interval_unit": "sclk_cycles",
+            "spm_sample_interval": 4200,
+            "spm": ["SQ_WAVES"]
+        }
+    ]
+}

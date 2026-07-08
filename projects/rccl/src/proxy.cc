@@ -1295,7 +1295,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int proxyRank, 
   if (comm->gproxyConn[proxyRank].initialized == false) {
     NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, proxyRank, &comm->gproxyConn[proxyRank]), ret, error);
   }
-#if (defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)) && HIP_VERSION < 71260540
+#if (defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)) && !NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   {
     uint64_t hipHandleVal = (uint64_t)(uintptr_t)(*(hipMemGenericAllocationHandle_t*)handle);
     NCCLCHECKGOTO(ncclProxyCallBlockingUDS(comm, &comm->gproxyConn[proxyRank], ncclProxyMsgGetFd, (void*)&hipHandleVal, sizeof(hipHandleVal), NULL, 0, NULL, convertedFd), ret, error);
