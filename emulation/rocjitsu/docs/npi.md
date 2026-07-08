@@ -6,13 +6,25 @@ This guide is not complete.
 
 Mark tasks that need to be done when introducing a new product with `\NPI` comment.
 
-Can do multi-line comments with
+Single-line markers use any comment leader (e.g. `//`):
 
 ```c
-/// \NPI I am a big complicated todo \
-/// that takes multiple lines to describe.
+// \NPI a one-line todo
 ```
-(no trailing space after the `\`)
+
+Multi-line markers use a `/* */` block comment, ending each continued line with a
+trailing `\` (a `//` comment ending in `\` is a line-continuation that GCC rejects
+under `-Werror=comment`):
+
+```c
+/*
+ * \NPI I am a big complicated todo \
+ * that takes multiple lines to describe.
+ */
+```
+
+`scripts/find-npi-tasks.sh` strips the comment leaders and joins the continued
+lines into a single task.
 
 ## Find npi tasks
 
