@@ -22,6 +22,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_isa_rdna3_5
     rocjitsu_isa_rdna4
     rocjitsu_isa_gfx1250
+    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here, and \
+    # wire any new *_sim_test.cpp and kernels/ coverage into this file.
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd

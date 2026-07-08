@@ -777,6 +777,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 } // namespace
 
 rj_code_arch_t parse_arch(const std::string &arch_str) {
+  // \NPI new ISA family: add its "arch" string here and in arch_to_string().
   if (arch_str == "cdna1")
     return ROCJITSU_CODE_ARCH_CDNA1;
   if (arch_str == "cdna2")
