@@ -84,12 +84,15 @@ def prepend_path(env, name: str, path: Path) -> None:
     )
 
 
-def build_env(install_dir: Path, rocm_path: Path, rocm_bin_dir: Path) -> dict:
+def build_env(
+    install_dir: Path, tests_dir: Path, rocm_path: Path, rocm_bin_dir: Path
+) -> dict:
     env = os.environ.copy()
     prepend_path(env, "PATH", rocm_bin_dir)
     prepend_path(env, "PATH", install_dir / "bin")
     env["ROCM_PATH"] = str(rocm_path)
     env["ROCPROFSYS_INSTALL_DIR"] = str(install_dir)
+    env["ROCPROFSYS_TEST_DIR"] = str(tests_dir)
 
     examples_lib_dir = install_dir / "share" / PROJECT_NAME / "examples" / "lib"
     prepend_path(env, "LD_LIBRARY_PATH", examples_lib_dir)
@@ -105,19 +108,20 @@ def resolve_tier() -> str:
     return tier
 
 
-def run_tests(tests_dir: Path, cwd: Path, env: dict) -> None:
+def run_tests(tests_dir: Path, env: dict) -> None:
     tier = resolve_tier()
 
     ctest_base = ["ctest", "--test-dir", str(tests_dir)]
 
-    # Informational test: dump the pytest configuration.
+    # Dump the pytest configuration first; a failure here indicates a broken
+    # setup
     config_cmd = ctest_base + [
         "--verbose",
         "--tests-regex",
-        "rocprofiler-systems-pytest-config",
+        "^rocprofiler-systems-pytest-config$",
     ]
-    logging.info(f"++ Exec [{cwd}]$ {format_command(config_cmd)}")
-    subprocess.run(config_cmd, cwd=cwd, check=False, env=env)
+    logging.info(f"++ Exec [{tests_dir}]$ {format_command(config_cmd)}")
+    subprocess.run(config_cmd, cwd=tests_dir, check=True, env=env)
 
     # The tier label already encodes the always-excluded tests/labels, so we
     # only need to select it.
@@ -129,8 +133,8 @@ def run_tests(tests_dir: Path, cwd: Path, env: dict) -> None:
         "until-pass:3",
     ]
 
-    logging.info(f"++ Exec [{cwd}]$ {format_command(cmd)}")
-    subprocess.run(cmd, cwd=cwd, check=True, env=env)
+    logging.info(f"++ Exec [{tests_dir}]$ {format_command(cmd)}")
+    subprocess.run(cmd, cwd=tests_dir, check=True, env=env)
 
 
 def main() -> None:
@@ -149,8 +153,8 @@ def main() -> None:
             "ROCPROFSYS_INSTALL_TESTING=ON."
         )
 
-    env = build_env(install_dir, rocm_path, rocm_bin_dir)
-    run_tests(tests_dir, cwd=install_dir, env=env)
+    env = build_env(install_dir, tests_dir, rocm_path, rocm_bin_dir)
+    run_tests(tests_dir, env=env)
 
 
 if __name__ == "__main__":
