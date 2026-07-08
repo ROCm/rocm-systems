@@ -568,6 +568,15 @@ enable_queue_intercept()
     return false;
 }
 
+bool
+context_needs_queue_interposition_tracing(const context::context* ctx)
+{
+    return ctx != nullptr && ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+}
+
 void
 queue_controller_init(HsaApiTable* table)
 {

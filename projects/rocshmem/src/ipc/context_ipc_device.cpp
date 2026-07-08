@@ -28,36 +28,12 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_ipc.hpp"
-#include "ipc_user_buf.hpp"
 #include "log.hpp"
+#include "constmem.hpp"
 #include "context_ipc_device.hpp"
 #include "context_ipc_tmpl_device.hpp"
 
 namespace rocshmem {
-
-// Constant memory declared in ipc_user_buf.cpp
-extern __constant__ ipc_user_buf_entry_t ipc_user_buf_table[];
-extern __constant__ int                  ipc_user_buf_count;
-
-// Resolve dest address to a remote pointer for the given PE.
-// Checks user-registered buffers first (constant memory, no HBM load),
-// falls back to symmetric heap bases.
-__device__ static inline char* ipc_resolve_remote(void *dest, int pe,
-                                                   char **heap_bases, int my_pe) {
-  uintptr_t addr = reinterpret_cast<uintptr_t>(dest);
-  for (int b = 0; b < ipc_user_buf_count; b++) {
-    uintptr_t base = ipc_user_buf_table[b].local_base;
-    if (addr >= base && addr < base + ipc_user_buf_table[b].length) {
-      uint64_t offset = addr - base;
-      return reinterpret_cast<char*>(ipc_user_buf_table[b].remote_bases[pe] + offset);
-    }
-  }
-  // Symmetric heap fallback for addresses on the rocshmem symmetric heap.
-  char* my_base = heap_bases ? heap_bases[my_pe] : nullptr;
-  char* pe_base = heap_bases ? heap_bases[pe] : nullptr;
-  uint64_t offset = reinterpret_cast<char*>(dest) - my_base;
-  return pe_base + offset;
-}
 
 __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b) {
@@ -75,27 +51,26 @@ __host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
 
 __device__ void IPCContext::putmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem(void *dest, const void *source, size_t nelems,
                                   int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
-  ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(
-      dest, remote, nelems, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
                                       size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
   ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
@@ -117,12 +92,12 @@ __device__ void IPCContext::pe_quiet(size_t pe) {
 }
 
 __device__ void *IPCContext::shmem_ptr(const void *dest, int pe) {
-  return ipc_resolve_remote(const_cast<void*>(dest), pe, ipcImpl_.ipc_bases, my_pe);
+  return ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
 }
 
 __device__ void IPCContext::putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
   __builtin_amdgcn_s_barrier();
@@ -130,86 +105,87 @@ __device__ void IPCContext::putmem_wg(void *dest, const void *source,
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
-  ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(
-      dest, remote, nelems, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
   __builtin_amdgcn_s_barrier();
 }
 
 __device__ void IPCContext::putmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wg(void *dest, const void *source,
                                          size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
-  ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(
-      dest, remote, nelems, pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
+  ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::putmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems, pe);
 }
 
 __device__ void IPCContext::getmem_nbi_wave(void *dest, const void *source,
                                            size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, ipcImpl_.ipc_bases, my_pe);
+  char *remote = ipcImpl_.ipcPeerPtr(source, constmem.my_pe, pe);
   ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, remote, nelems, pe);
 }
 
 __device__ void IPCContext::internal_putmem(void *dest, const void *source,
                                             size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_lane<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems);
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_lane<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
 }
 
 __device__ void IPCContext::internal_getmem(void *dest, const void *source,
                                             size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_lane<MemcpyKind::Get>(dest, remote, nelems);
+  const char *src_typed = reinterpret_cast<const char *>(source);
+  uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_lane<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
 }
 
 __device__ void IPCContext::internal_putmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_wg<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems);
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wg<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
   __builtin_amdgcn_s_barrier();
 }
 
 __device__ void IPCContext::internal_getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_wg<MemcpyKind::Get>(dest, remote, nelems);
+  const char *src_typed = reinterpret_cast<const char *>(source);
+  uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wg<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
   __builtin_amdgcn_s_barrier();
 }
 
 __device__ void IPCContext::internal_putmem_wave(void *dest,
                         const void *source, size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(dest, pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_wave<MemcpyKind::Put>(remote, const_cast<void *>(source), nelems);
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wave<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
 }
 
 __device__ void IPCContext::internal_getmem_wave(void *dest,
                         const void *source, size_t nelems, int pe) {
-  char *remote = ipc_resolve_remote(const_cast<void*>(source), pe, wrk_sync_pool_bases_, my_pe);
-  memcpy_wave<MemcpyKind::Get>(dest, remote, nelems);
+  const char *src_typed = reinterpret_cast<const char *>(source);
+  uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wave<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
 }
 
 __device__ void IPCContext::putmem_signal(void *dest, const void *source, size_t nelems,
@@ -293,13 +269,13 @@ __device__ void IPCContext::putmem_signal_nbi_wave(void *dest, const void *sourc
 
 __device__ uint64_t IPCContext::signal_fetch(const uint64_t *sig_addr) {
   uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-  return amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+  return amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
 }
 
 __device__ uint64_t IPCContext::signal_fetch_wg(const uint64_t *sig_addr) {
   if (is_thread_zero_in_block()) {
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    wg_signal_scratch = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+    wg_signal_scratch = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
   }
   __syncthreads();
   return wg_signal_scratch;
@@ -309,7 +285,7 @@ __device__ uint64_t IPCContext::signal_fetch_wave(const uint64_t *sig_addr) {
   uint64_t value{0};
   if (is_thread_zero_in_wave()) {
     uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, my_pe);
+    value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
   }
   __threadfence_block();
   value = __shfl(value, 0);

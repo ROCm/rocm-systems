@@ -164,7 +164,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
   size_t allocSize = qSize + max_command_buffers * (cmdSize + fSize);
   VirtualGPU::Queue* queue = amd::AllocWithTrailing<VirtualGPU::Queue>(
       allocSize, gpu, palDev, residency_limit, max_command_buffers);
-  
+
   if (queue != nullptr) {
     address addrQ = nullptr;
     if (((qCreateInfo.engineType == Pal::EngineTypeCompute) ||
@@ -2117,6 +2117,59 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     for (const auto& op : copyOps) {
       op.dstMemory->signalWrite(&dev());
     }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchWriteMemoryOp>& write_ops = cmd.WriteOps();
+
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags sync_flags;
+    sync_flags.skipEntire_ = false;
+
+    for (const amd::BatchWriteMemoryOp& op : write_ops) {
+      dev().getGpuMemory(op.dst_memory)->syncCacheFromHost(*this, sync_flags);
+    }
+  }
+
+  if (!blitMgr().WriteBufferBatch(write_ops)) {
+    LogError("SubmitBatchWriteMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    if (!amd::IS_HIP) {
+      for (const amd::BatchWriteMemoryOp& op : write_ops) {
+        op.dst_memory->signalWrite(&dev());
+      }
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
+void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  std::scoped_lock lock(execution());
+
+  profilingBegin(cmd);
+
+  const std::vector<amd::BatchReadMemoryOp>& read_ops = cmd.ReadOps();
+
+  if (!amd::IS_HIP) {
+    for (const amd::BatchReadMemoryOp& op : read_ops) {
+      dev().getGpuMemory(op.src_memory)->syncCacheFromHost(*this);
+    }
+  }
+
+  if (!blitMgr().ReadBufferBatch(read_ops)) {
+    LogError("SubmitBatchReadMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
   }
 
   profilingEnd(cmd);

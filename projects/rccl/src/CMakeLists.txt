@@ -189,6 +189,7 @@ set(SRC_FILES
   include/trees.h
   include/tuner.h
   include/utils.h
+  include/kernel_config.h
   include/mlx5/mlx5dvcore.h
   include/mlx5/mlx5dvsymbols.h
   include/mlx5/mlx5dvwrap.h
@@ -324,6 +325,7 @@ set(SRC_FILES
   misc/ionicdvwrap.cc
 # misc/nvmlwrap.cc
   misc/nvmlwrap_stub.cc
+  misc/kernel_config.cc
   misc/param.cc
   misc/rocmwrap.cc
   misc/roctx.cc

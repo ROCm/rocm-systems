@@ -7,8 +7,9 @@ if(BUILD_TESTS)
 
   option(OPENMP_TESTS_ENABLED "Enable OpenMP for unit tests" OFF)
   option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
-  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" OFF)
-  option(ENABLE_HOST_API_TESTS "Build the host-API tests" OFF)
+  #Automatically enabled when MPI-based tests available
+  option(RCCL_HAS_GIN_IB_PROXY "Build the IB Proxy GIN transport-level tests" ON)
+  option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
@@ -222,6 +223,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      IommuPassthrough_test.cpp
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
@@ -233,6 +235,7 @@ if(BUILD_TESTS)
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
+      ../src/misc/kernel_config.cc
     )
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
@@ -338,6 +341,7 @@ if(BUILD_TESTS)
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
+      SymmetricKernelMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
@@ -358,7 +362,7 @@ if(BUILD_TESTS)
       if(DEFINED ASAN_RUNTIME_DIR)
         target_link_options(${test_executable} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
       endif()
-    endif()                                                                                                                                                                     
+    endif()
 
     # Add MPI-specific configuration if MPI tests are enabled
     if(ENABLE_MPI_TESTS)
