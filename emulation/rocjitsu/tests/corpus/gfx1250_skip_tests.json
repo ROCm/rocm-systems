@@ -30,6 +30,26 @@
     "iree.gfx1250.e2e.unpack.dynamic_unpack_transpose_inner_dims_large",
     "iree.gfx1250.e2e.unpack.static_unpack_extract_slice_large"
   ],
-  "cts": [],
+  "cts": [
+    "cts.gfx1250.fpsan.fpsan_atomic_test",
+    "cts.gfx1250.fpsan.fpsan_classify_test",
+    "cts.gfx1250.fpsan.fpsan_hip_device_test",
+    "cts.gfx1250.fpsan.fpsan_xlane_test",
+    "cts.gfx1250.fpsan.fpsan_wave_test",
+    "cts.gfx1250.fpsan.fpsan_amdgcn_math_test",
+    "cts.gfx1250.fpsan.fpsan_amdgcn_ldexp_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_scalef32_pk_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_scale_unpack_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_cvt_fp8_e5m3_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_16x16x32_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_16x16x64_fp8_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_16x16x128_fp8_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_16x16x128_f8f6f4_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_32x16x128_f4_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_wmma_scale_f8f6f4_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_swmmac_16x16x128_fp8_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_swmmac_16x16x64_16_gfx1250_test",
+    "cts.gfx1250.fpsan.fpsan_amdgcn_math_extra_test"
+  ],
   "kernels": []
 }
