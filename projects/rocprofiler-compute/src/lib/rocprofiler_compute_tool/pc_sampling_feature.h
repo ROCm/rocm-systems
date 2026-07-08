@@ -5,6 +5,8 @@
 #include "pc_sampling_collector.h"
 #include "source_snapshotter.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -40,6 +42,7 @@ public:
     const std::filesystem::path& source_snapshot_path() const { return m_source_snapshot_path; }
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
+    void on_kernel_symbol_register(size_t code_object_id, uint64_t kernel_id, const std::string& name);
     void finalize();
 
 private:

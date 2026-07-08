@@ -341,14 +341,21 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         // if matches store kernel id
         // Lock before modifying target_kernel_ids
         std::lock_guard<std::mutex> lock(tool->mut);
-        if (!tool->kernel_filter_include_regex.empty())
+        const bool                  pc_sampling_enabled = tool->pc_sampling.enabled();
+        const bool                  filtering_by_name = !tool->kernel_filter_include_regex.empty();
+
+        std::string kernel_name;
+        if (pc_sampling_enabled || filtering_by_name)
+        {
+            const char* raw_kernel_name = data->kernel_name == nullptr ? "" : data->kernel_name;
+            int         demangle_status = 0;
+            kernel_name = truncate_name(cxa_demangle(raw_kernel_name, &demangle_status));
+        }
+
+        if (filtering_by_name)
         {
             try
             {
-                int  demangle_status = 0;
-                auto kernel_name     = cxa_demangle(data->kernel_name, &demangle_status);
-                kernel_name          = truncate_name(kernel_name);
-
                 std::regex re(tool->kernel_filter_include_regex);
                 if (!kernel_name.empty() && std::regex_search(kernel_name, re))
                 {
@@ -366,6 +373,13 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         else
         {
             tool->target_kernel_ids.insert(data->kernel_id);
+        }
+
+        if (pc_sampling_enabled)
+        {
+            tool->pc_sampling.on_kernel_symbol_register(static_cast<size_t>(data->code_object_id),
+                                                        data->kernel_id,
+                                                        kernel_name);
         }
     }
 }
