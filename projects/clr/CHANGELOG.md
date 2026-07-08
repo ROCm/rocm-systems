@@ -79,6 +79,10 @@ for accurate size validation. Additionally, the exec flag is propagated through 
 * Enhanced debug information for illegal memory access errors. In multi-node and multi-GPU environments, it can be difficult to identify the source of a fault.
 The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fault error messages, improving issue identification and debugging.
 
+## Known issues
+
+* `cooperative_groups::reduce` will not work correctly with block dimensions whose .y or .z component is different from one, leading to incorrect results or kernel launch failures.
+
 ## HIP 7.13 for ROCm 7.13
 
 ### Added
