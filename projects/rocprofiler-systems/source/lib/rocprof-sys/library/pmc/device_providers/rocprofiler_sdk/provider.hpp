@@ -36,7 +36,7 @@ public:
         configure_agents(agent_list, enabled);
     }
 
-    // &m_profile_configs is passed as void* user_data to the SDK callback.
+    // &m_counter_configs is passed as void* user_data to the SDK callback.
     // Relocating this object after configure_agents() would move the map and
     // dangle that pointer. Delete the copy and move operations to make this
     // constraint a compile-time guarantee rather than a comment.
@@ -96,17 +96,17 @@ private:
                 continue;
             }
 
-            auto profile = typename backend_t::counter_config_id_t{};
-            auto status  = m_backend_api->create_counter_config(
-                agent_id, filtered_ids.data(), filtered_ids.size(), &profile);
+            auto counter_config = typename backend_t::counter_config_id_t{};
+            auto status         = m_backend_api->create_counter_config(
+                agent_id, filtered_ids.data(), filtered_ids.size(), &counter_config);
             if(status != backend_t::status_success)
             {
-                LOG_WARNING("Failed to create profile config for agent {} (status={})",
+                LOG_WARNING("Failed to create counter config for agent {} (status={})",
                             gpu_agent->handle, static_cast<int>(status));
                 continue;
             }
 
-            m_profile_configs[gpu_agent->handle] = profile;
+            m_counter_configs[gpu_agent->handle] = counter_config;
 
             typename backend_t::context_id_t counter_context{};
             status = m_backend_api->create_context(&counter_context);
@@ -123,13 +123,13 @@ private:
                    typename backend_t::agent_id_t                 agent_cb,
                    typename backend_t::device_counting_agent_cb_t set_config,
                    void*                                          user_data) {
-                    auto* configs = static_cast<std::unordered_map<
+                    auto* counter_configs = static_cast<std::unordered_map<
                         std::uint64_t, typename backend_t::counter_config_id_t>*>(
                         user_data);
-                    auto iter = configs->find(agent_cb.handle);
-                    if(iter != configs->end()) set_config(ctx, iter->second);
+                    auto iter = counter_configs->find(agent_cb.handle);
+                    if(iter != counter_configs->end()) set_config(ctx, iter->second);
                 },
-                &m_profile_configs);
+                &m_counter_configs);
             if(status != backend_t::status_success)
             {
                 LOG_WARNING(
@@ -139,7 +139,7 @@ private:
             }
 
             m_devices.push_back(std::make_shared<device_t>(m_backend_api, counter_context,
-                                                           gpu_agent, profile,
+                                                           gpu_agent, counter_config,
                                                            std::move(counter_meta)));
         }
     }
@@ -199,7 +199,7 @@ private:
     // configure_device_counting_service fires during start_context(), reading from this
     // map via the user_data pointer.
     std::unordered_map<std::uint64_t, typename backend_t::counter_config_id_t>
-        m_profile_configs;
+        m_counter_configs;
 };
 
 }  // namespace rocprofsys::pmc::device_providers::rocprofiler_sdk

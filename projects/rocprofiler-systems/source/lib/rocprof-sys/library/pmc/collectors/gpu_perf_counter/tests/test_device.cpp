@@ -27,13 +27,13 @@ protected:
     std::shared_ptr<MockBackend>       mock_backend;
     std::shared_ptr<rocprofsys::agent> test_agent;
     MockBackend::context_id_t          test_context{};
-    MockBackend::counter_config_id_t   test_profile_config{};
+    MockBackend::counter_config_id_t   test_counter_config{};
 
     void SetUp() override
     {
         mock_backend               = std::make_shared<MockBackend>();
         test_context.handle        = 1;
-        test_profile_config.handle = 100;
+        test_counter_config.handle = 100;
 
         test_agent                    = std::make_shared<rocprofsys::agent>();
         test_agent->type              = agent_type::GPU;
@@ -52,7 +52,7 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
         counter_metadata{ 10, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             std::move(meta));
 
     EXPECT_EQ(dev.get_index(), 0U);
@@ -63,7 +63,7 @@ TEST_F(SdkPmcDeviceTest, DeviceProperties)
 
 TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             {});
 
     EXPECT_FALSE(dev.is_supported());
@@ -77,7 +77,7 @@ TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
     agent3->product_name      = "GPU 3";
     agent3->vendor_name       = "AMD";
 
-    device<MockBackend> dev(mock_backend, test_context, agent3, test_profile_config, {});
+    device<MockBackend> dev(mock_backend, test_context, agent3, test_counter_config, {});
 
     EXPECT_EQ(dev.get_index(), 3U);
     EXPECT_EQ(dev.get_name(), "GPU 3");
@@ -91,7 +91,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithScalarCounters)
         counter_metadata{ 20, "SQ_INSTS_VALU", "", "", "", false, false, {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             std::move(meta));
 
     MockBackend::counter_record_t records[2];
@@ -172,7 +172,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithMultiDimCounters)
                           { { "WGP", 3 }, { "SA", 0 }, { "SE", 0 } } },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             std::move(meta));
 
     MockBackend::counter_record_t records[4];
@@ -229,7 +229,7 @@ TEST_F(SdkPmcDeviceTest, CounterIdDecodedFromInstanceId)
             plain_counter_handle, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             std::move(meta));
 
     MockBackend::counter_record_t record{};
@@ -270,7 +270,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
         counter_metadata{ 5, "SQ_WAVES", "", "", "", false, false, {} },
     };
 
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             std::move(meta));
 
     MockBackend::counter_record_t record{};
@@ -312,7 +312,7 @@ TEST_F(SdkPmcDeviceTest, ResultCacheReusedAcrossSamples)
 
 TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             {});
 
     EXPECT_CALL(*mock_backend, start_context(_))
@@ -329,7 +329,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
 
 TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
 {
-    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_counter_config,
                             {});
 
     EXPECT_CALL(*mock_backend, start_context(_))
