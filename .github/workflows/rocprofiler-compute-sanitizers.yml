@@ -83,7 +83,7 @@ jobs:
         --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: |
             projects/rocprofiler-compute

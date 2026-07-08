@@ -77,7 +77,7 @@ jobs:
 
     steps:
     - &sparse-checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         sparse-checkout: |
           projects/rocprofiler-systems/
@@ -476,7 +476,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}

@@ -71,7 +71,7 @@ jobs:
         apt-get update
         apt-get install -y git
 
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - name: Install requirements
       timeout-minutes: 10
