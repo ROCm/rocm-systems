@@ -566,11 +566,11 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ uint64_t atomic_cas(void *dest, uint64_t cond, uint64_t value,
-                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  __device__ uint64_t atomic_compare_swap(void *dest, uint64_t cond, uint64_t value,
+                                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
   template <typename... PostOptions>
-  __device__ uint64_t atomic_cas_single(void *dest, uint64_t cond, uint64_t value,
-                                        PostOpt<PostOptions...> = {});
+  __device__ uint64_t atomic_compare_swap_single(void *dest, uint64_t cond, uint64_t value,
+                                                 PostOpt<PostOptions...> = {});
 
 #if 0
   /**
@@ -587,11 +587,11 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ void atomic_cas_nbi(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
-                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  __device__ void atomic_compare_swap_nbi(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+                                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
   template <typename... PostOptions>
-  __device__ void atomic_cas_nbi_single(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
-                                        PostOpt<PostOptions...> = {});
+  __device__ void atomic_compare_swap_nbi_single(uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
+                                                 PostOpt<PostOptions...> = {});
 #endif
 
   /**
@@ -608,11 +608,11 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ void atomic_cas_nofetch(void *dest, uint64_t cond, uint64_t value,
-                                     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  __device__ void atomic_compare_swap_nofetch(void *dest, uint64_t cond, uint64_t value,
+                                              const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
   template <typename... PostOptions>
-  __device__ void atomic_cas_nofetch_single(void *dest, uint64_t cond, uint64_t value,
-                                            PostOpt<PostOptions...> = {});
+  __device__ void atomic_compare_swap_nofetch_single(void *dest, uint64_t cond, uint64_t value,
+                                                     PostOpt<PostOptions...> = {});
 /**@}*/
 
 
@@ -801,7 +801,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -817,7 +817,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -833,7 +833,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -847,7 +847,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nbi_single(
     uint64_t *fetch, void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -861,7 +861,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nbi_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -875,7 +875,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch_single(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -938,7 +938,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -950,7 +950,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
+__device__ uint64_t QueuePairSHMEM<Provider>::atomic_compare_swap_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -962,7 +962,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_cas_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch(
     void *dest, uint64_t cond, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
@@ -974,7 +974,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_cas_nofetch_single(
+__device__ void QueuePairSHMEM<Provider>::atomic_compare_swap_nofetch_single(
     void *dest, uint64_t cond, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_CS;
