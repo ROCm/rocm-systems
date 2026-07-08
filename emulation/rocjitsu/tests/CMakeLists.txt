@@ -1401,7 +1401,7 @@ if(RJ_ENABLE_HIP_TESTS)
     _rj_path_from_installed_test_bin(
         _rj_installed_preload_lib
         "${CMAKE_INSTALL_LIBDIR}"
-        "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_kmd${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
     )
 
     add_executable(daemon_test daemon_test.cpp)
