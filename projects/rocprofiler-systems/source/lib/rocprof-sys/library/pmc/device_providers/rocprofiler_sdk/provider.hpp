@@ -23,6 +23,8 @@ namespace rocprofsys::pmc::device_providers::rocprofiler_sdk
 {
 
 template <typename BackendFactory>
+    requires collectors::gpu_perf_counter::backend_contract<
+        typename BackendFactory::backend_t>
 class provider
 {
 public:

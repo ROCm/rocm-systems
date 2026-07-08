@@ -62,6 +62,13 @@ concept backend_contract = requires(
         backend.configure_device_counting_service(context, buffer, agent, service_cb,
                                                   data)
     } -> std::same_as<typename Backend::status_t>;
+    // Status/flag constants read by device<Backend> during sampling.
+    { Backend::flag_none } -> std::convertible_to<typename Backend::counter_flag_t>;
+    { Backend::status_success } -> std::convertible_to<typename Backend::status_t>;
+    { Backend::status_hsa_not_loaded } -> std::convertible_to<typename Backend::status_t>;
+    // Callback type the SDK hands back into the device-counting lambda (used by
+    // provider).
+    typename Backend::device_counting_agent_cb_t;
 };
 
 template <backend_contract Backend>
