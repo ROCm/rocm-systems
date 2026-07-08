@@ -124,4 +124,21 @@ struct formatter<ncclComm_t>
     }
 };
 
+template <>
+struct formatter<ncclWaitSignalDesc_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(const ncclWaitSignalDesc_t& v, Ctx& ctx) const
+    {
+        return fmt::format_to(
+            ctx.out(), "opCnt={}, peer={}, sigIdx={}, ctx={}", v.opCnt, v.peer, v.sigIdx, v.ctx);
+    }
+};
+
 }  // namespace fmt

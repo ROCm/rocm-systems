@@ -40,6 +40,15 @@ namespace rccl
 {
 namespace utils
 {
+template <typename T, typename = void>
+struct is_ostreamable : std::false_type
+{};
+
+template <typename T>
+struct is_ostreamable<T, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<const T&>())>>
+    : std::true_type
+{};
+
 template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
@@ -50,11 +59,15 @@ stringize_impl(const Tp& _v)
     {
         return fmt::format("{}", _v);
     }
-    else
+    else if constexpr(is_ostreamable<value_type>::value)
     {
         auto _ss = std::stringstream{};
         _ss << _v;
         return _ss.str();
+    }
+    else
+    {
+        return std::string{"<opaque>"};
     }
 }
 

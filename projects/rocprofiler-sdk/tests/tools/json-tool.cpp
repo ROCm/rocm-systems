@@ -2526,27 +2526,11 @@ get_filename(std::string fname, std::string extension)
 
     if(getenv("ROCPROFILER_TOOL_OUTPUT_FILE_APPEND_PID"))
     {
-        const auto  fpath = common::fs::path(ofname);
-        std::string filename_buf(512, '\0');
-
-        if(fpath.has_extension())
-        {
-            std::snprintf(filename_buf.data(),
-                          filename_buf.size() - 1,
-                          "%s-%d.%s",
-                          fpath.stem().c_str(),
-                          getpid(),
-                          fpath.extension().c_str());
-        }
-        else
-        {
-            std::snprintf(filename_buf.data(),
-                          filename_buf.size() - 1,
-                          "%s-%d.json",
-                          fpath.stem().c_str(),
-                          getpid());
-        }
-        return filename_buf;
+        auto fpath    = common::fs::path(ofname);
+        auto stem     = fpath.stem().string();
+        auto ext      = fpath.has_extension() ? fpath.extension().string() : ("." + extension);
+        auto pid_stem = stem + "-" + std::to_string(getpid());
+        return (fpath.parent_path() / (pid_stem + ext)).string();
     }
     else
     {
