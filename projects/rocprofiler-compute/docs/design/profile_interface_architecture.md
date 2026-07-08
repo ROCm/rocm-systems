@@ -114,9 +114,9 @@ together but with different dependency characteristics.
 ## Phasing and Acceptance
 
 Phase order: A (remove CSV) -> B (`profiling_data` boundary) -> C (backend
-execution) -> D (`analysis_data` boundary), plus follow-ups (e.g. A-2, removing
-the now-dead `--join-type` option). Once Phase A lands, B, C, and D have no hard
-ordering dependency on each other.
+execution), plus follow-ups (e.g. A-2, removing the now-dead `--join-type`
+option). Once Phase A lands, B and C have no hard ordering dependency on each
+other.
 
 ## Phase A: Remove the CSV Profile Backend
 
@@ -293,7 +293,7 @@ Analyze callers never branch on storage format, construct file paths, or read
 > The diagrams show only the PMC counter data path which is all this boundary
 > moves. A workload directory contains many other files (`roofline.csv`, traces,
 > `sysinfo.csv`, `profiling_config.yaml`, perfmon configs, and derived analyze
-> outputs) which are deliberately left unchanged here as they are either untouched by this abstraction or addressed in future phases.
+> outputs) which are deliberately left unchanged here as they are either untouched by this abstraction or future scope.
 
 ## Phase C: Backend Execution
 
@@ -342,86 +342,13 @@ flowchart LR
     rocpd -->|"writes"| db
 ```
 
-## Phase D: Analyze-Data Boundary
-
-The boundary above covers profile source data. Analyze mode also produces its
-own derived files such as `pmc_kernel_top.csv`, `pmc_dispatch_info.csv`, roofline HTML,
-etc, and each is currently written with a
-hardcoded name in the code that produces it, with the same names being hardcoded
-again on the read-back side. This deserves its own boundary so analyze-output
-location and format knowledge does not spread the way profile-data knowledge did.
-
-`analysis_data/` is symmetric with `profiling_data/`: `profiling_data/` owns
-where profile *source* data lives; `analysis_data/` owns where analyze-*derived*
-outputs go. It is a writer/reader for derived outputs not a storage format
-implementation.
-
-### Before
-
-```mermaid
-flowchart LR
-    subgraph analyze["Analyze Mode"]
-        cli["analysis_cli.py"]
-        webui["analysis_webui.py"]
-        tui["analysis_tui.py"]
-        parser["parser.py<br/>YAML table loader"]
-    end
-    subgraph util["writer modules (filename as string literal)"]
-        fio["file_io.py"]
-        roof["roofline_main.py"]
-        tty["tty.py"]
-        orm["analysis_orm.py"]
-    end
-    subgraph disk["On-Disk (derived)"]
-        top["pmc_kernel_top.csv"]
-        html["roofline HTML"]
-        txt["text report"]
-        exp["analysis export .db"]
-    end
-    cli -->|"calls"| fio
-    webui -->|"calls"| fio
-    tui -->|"calls"| fio
-    cli -->|"calls"| roof
-    fio -->|"writes (hardcoded name)"| top
-    roof -->|"writes (hardcoded name)"| html
-    tty -->|"writes"| txt
-    orm -->|"writes"| exp
-    parser -.->|"reads (hardcoded name again)"| top
-```
-
-### Target
-
-```mermaid
-flowchart LR
-    subgraph analyze["Analyze Mode"]
-        cli["analysis_cli.py"]
-        webui["analysis_webui.py"]
-        tui["analysis_tui.py"]
-        parser["parser.py<br/>YAML table loader"]
-    end
-    subgraph iface["analysis_data/"]
-        ad["Analyze writer + reader<br/>get_analyze_writer"]
-    end
-    subgraph disk["On-Disk (derived)"]
-        top["pmc_kernel_top.csv"]
-        html["roofline HTML"]
-        txt["text report"]
-        exp["analysis export .db"]
-    end
-    cli -->|"get_analyze_writer(fmt)"| ad
-    webui -->|"get_analyze_writer(fmt)"| ad
-    tui -->|"get_analyze_writer(fmt)"| ad
-    parser -.->|"reads through boundary"| ad
-    ad -->|"writes / owns names"| top
-    ad -->|"writes"| html
-    ad -->|"writes"| txt
-    ad -->|"writes"| exp
-```
-
-
 ## Future Scope
 
-1. PC-sampling analyze reads JSON produced by profile mode. That is another
+1. Analyze-derived outputs may need their own boundary, but that requires a
+   separate design effort. This proposal does not decide an `analysis_data`
+   interface, implementation, file layout, or migration plan. 
+   - The reason is that analyze outputs are customer-visible artifacts and test inputs in some flows, so the right boundary needs more definition.
+2. PC-sampling analyze reads JSON produced by profile mode. That is another
    format that should eventually sit behind a similar boundary (likely a JSON
    implementation); noted for future scope.
 
