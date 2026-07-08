@@ -142,6 +142,7 @@ std::optional<std::string> child_config_path() {
 }
 
 void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+  // syscall(2) is the libc wrapper: on kernel errors it returns -1 and sets errno.
   long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
   if (rc == -1)
     return MAP_FAILED;
@@ -149,7 +150,9 @@ void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, o
 }
 
 int raw_munmap_syscall(void *addr, size_t length) {
-  return static_cast<int>(syscall(SYS_munmap, addr, length));
+  long rc = syscall(SYS_munmap, addr, length);
+  assert(rc == 0 || rc == -1);
+  return static_cast<int>(rc);
 }
 
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
