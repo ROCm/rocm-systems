@@ -430,7 +430,6 @@ target_link_libraries(
     PRIVATE
         ${RJ_OBJECT_LIBS}
         rocjitsu_kmd
-        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
