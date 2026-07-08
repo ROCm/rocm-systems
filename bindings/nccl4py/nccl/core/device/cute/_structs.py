@@ -14,7 +14,7 @@ from cutlass.cutlass_dsl import ir
 # === MLIR type adapters ===
 
 class _LLVMPtrType:
-    """Wraps ``!llvm.ptr`` for use in ``cute.ffi`` signatures and as a
+    """Wraps ``!llvm.ptr`` for use in ``@cute.extern`` signatures and as a
     ``@cute.native_struct`` field annotation."""
 
     @staticmethod
@@ -24,6 +24,17 @@ class _LLVMPtrType:
     @staticmethod
     def __get_mlir_types__():
         return [_LLVMPtrType.mlir_type()]
+
+    @classmethod
+    def isinstance(cls, value):
+        """Match an ``!llvm.ptr`` ir.Value during ``@cute.extern`` dispatch.
+
+        Callers pass pointers as bare ``!llvm.ptr`` ir.Values — a wrapper's
+        ``.ptr``, or ``_to_ptr`` for an integer address — so the extern
+        overload matcher needs this hook to recognize them against a
+        ``_LLVMPtrType`` annotation.
+        """
+        return isinstance(value, ir.Value) and value.type == cls.mlir_type()
 
 
 def _array_i8(n: int):

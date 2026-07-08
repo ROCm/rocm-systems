@@ -13,7 +13,7 @@ from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op
 
 from ...resources import DevCommResource
-from . import _bindings as raw
+from . import _bindings
 from ._helpers import _alloca_struct
 from ._structs import (
     DevCommValue,
@@ -161,15 +161,15 @@ class DevComm:
 
     @property
     def team_world(self) -> Team:
-        return raw.ncclTeamWorld(self.ptr)
+        return Team(_bindings.nccl_team_world(self.ptr))
 
     @property
     def team_lsa(self) -> Team:
-        return raw.ncclTeamLsa(self.ptr)
+        return Team(_bindings.nccl_team_lsa(self.ptr))
 
     @property
     def team_rail(self) -> Team:
-        return raw.ncclTeamRail(self.ptr)
+        return Team(_bindings.nccl_team_rail(self.ptr))
 
     # === Gin factory ===
 
@@ -184,7 +184,8 @@ class DevComm:
             Initialized :class:`Gin`.
         """
         storage = _alloca_struct(ncclGin_C)
-        raw.ncclGin_C_init(storage, backend, self, context_id)
+        _bindings.nccl_gin_c_init(
+            storage, cutlass.Int32(int(backend)), self.ptr, cutlass.Int32(context_id))
         return Gin(ptr=storage)
 
 

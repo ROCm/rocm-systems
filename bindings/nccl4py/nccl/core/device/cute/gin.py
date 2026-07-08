@@ -15,7 +15,8 @@ import cutlass.cute as cute
 from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import dsl_user_op
 
-from . import _bindings as raw
+from . import _bindings
+from ._helpers import _to_ptr, _to_coop_value, _to_value
 from ._structs import _LLVMPtrType, ncclGin_C, ncclTeam, ncclCoopAny
 
 
@@ -83,12 +84,18 @@ class Gin:
         dst_offset = dst.iterator.toint() - dst_base.toint()
         src_offset = src.iterator.toint() - src_base.toint()
         size = (dst.element_type.width // 8) * cute.size(dst)
-        raw.ncclGinPut(
-            self.ptr, team, peer, dst_win, dst_offset, src_win, src_offset, size,
-            is_signal, signal_id, signal_op, signal_op_arg,
-            is_counter, counter_id, coop,
-            is_descriptor, descriptor_ptr,
-            given_release, required_release, opt_flags,
+        _bindings.nccl_gin_put(
+            self.ptr, _to_value(team), cutlass.Int32(peer),
+            dst_win.ptr, cutlass.Int64(dst_offset),
+            src_win.ptr, cutlass.Int64(src_offset),
+            cutlass.Int64(size),
+            cutlass.Boolean(is_signal), cutlass.Int32(signal_id),
+            cutlass.Int32(signal_op), cutlass.Int64(signal_op_arg),
+            cutlass.Boolean(is_counter), cutlass.Int32(counter_id),
+            _to_coop_value(coop),
+            cutlass.Boolean(is_descriptor), _to_ptr(descriptor_ptr),
+            cutlass.Int32(given_release), cutlass.Int32(required_release),
+            cutlass.Int32(opt_flags),
         )
 
     def put_value(
@@ -137,11 +144,15 @@ class Gin:
         dst_base = cute.make_ptr(cutlass.Int8, dst_win.local_pointer(0))
         dst_offset = dst.iterator.toint() - dst_base.toint()
         size = dst.element_type.width // 8
-        raw.ncclGinPutValue(
-            self.ptr, team, peer, dst_win, dst_offset, value, size,
-            is_signal, signal_id, signal_op, signal_op_arg,
-            coop, is_descriptor, descriptor_ptr,
-            given_release, required_release, opt_flags,
+        _bindings.nccl_gin_put_value(
+            self.ptr, _to_value(team), cutlass.Int32(peer),
+            dst_win.ptr, cutlass.Int64(dst_offset),
+            cutlass.Int64(value), cutlass.Int64(size),
+            cutlass.Boolean(is_signal), cutlass.Int32(signal_id),
+            cutlass.Int32(signal_op), cutlass.Int64(signal_op_arg),
+            _to_coop_value(coop), cutlass.Boolean(is_descriptor), _to_ptr(descriptor_ptr),
+            cutlass.Int32(given_release), cutlass.Int32(required_release),
+            cutlass.Int32(opt_flags),
         )
 
     def get(
@@ -184,10 +195,13 @@ class Gin:
         remote_offset = remote.iterator.toint() - remote_base.toint()
         local_offset = local.iterator.toint() - local_base.toint()
         size = (local.element_type.width // 8) * cute.size(local)
-        raw.ncclGinGet(
-            self.ptr, team, peer, remote_win, remote_offset, local_win, local_offset, size,
-            coop, is_descriptor, descriptor_ptr,
-            opt_flags,
+        _bindings.nccl_gin_get(
+            self.ptr, _to_value(team), cutlass.Int32(peer),
+            remote_win.ptr, cutlass.Int64(remote_offset),
+            local_win.ptr, cutlass.Int64(local_offset),
+            cutlass.Int64(size),
+            _to_coop_value(coop), cutlass.Boolean(is_descriptor), _to_ptr(descriptor_ptr),
+            cutlass.Int32(opt_flags),
         )
 
     def signal(
@@ -221,10 +235,13 @@ class Gin:
             given_release: release-fence flags from the caller.
             required_release: release-fence flags required by the op.
         """
-        raw.ncclGinSignal(
-            self.ptr, team, peer, is_signal, signal_id,
-            signal_op, signal_op_arg, coop, is_descriptor, descriptor_ptr,
-            given_release, required_release, opt_flags,
+        _bindings.nccl_gin_signal(
+            self.ptr, _to_value(team), cutlass.Int32(peer),
+            cutlass.Boolean(is_signal), cutlass.Int32(signal_id),
+            cutlass.Int32(signal_op), cutlass.Int64(signal_op_arg),
+            _to_coop_value(coop), cutlass.Boolean(is_descriptor), _to_ptr(descriptor_ptr),
+            cutlass.Int32(given_release), cutlass.Int32(required_release),
+            cutlass.Int32(opt_flags),
         )
 
     def read_signal(
@@ -246,7 +263,8 @@ class Gin:
         Returns:
             value of the signal slot.
         """
-        return raw.ncclGinReadSignal(self.ptr, signal, bits, ord)
+        return cutlass.Int64(_bindings.nccl_gin_read_signal(
+            self.ptr, cutlass.Int32(signal), cutlass.Int32(bits), cutlass.Int32(ord)))
 
     def wait_signal(
         self,
@@ -268,7 +286,9 @@ class Gin:
             ord: ``cuda::memory_order`` integer; default 2 = ``ACQUIRE``.
                 See :class:`~nccl.core.device.cute.types.MemoryOrder`.
         """
-        raw.ncclGinWaitSignal(self.ptr, coop, signal, least, bits, ord)
+        _bindings.nccl_gin_wait_signal(
+            self.ptr, _to_coop_value(coop), cutlass.Int32(signal),
+            cutlass.Int64(least), cutlass.Int32(bits), cutlass.Int32(ord))
 
     def flush(self, coop: ncclCoopAny, ord: int = 2) -> None:
         """Flush pending GIN operations.
@@ -278,7 +298,7 @@ class Gin:
             ord: ``cuda::memory_order`` integer; default 2 = ``ACQUIRE``.
                 See :class:`~nccl.core.device.cute.types.MemoryOrder`.
         """
-        raw.ncclGinFlush(self.ptr, coop, ord)
+        _bindings.nccl_gin_flush(self.ptr, _to_coop_value(coop), cutlass.Int32(ord))
 
     @dsl_user_op
     def value(self, *, loc=None, ip=None) -> ncclGin_C:

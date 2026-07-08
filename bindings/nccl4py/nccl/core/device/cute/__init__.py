@@ -20,7 +20,6 @@ from .comm import *     # Team, DevComm
 from .window import *   # Window
 from .gin import *      # Gin
 from .barrier import *  # session classes + factories
-from ._helpers import device_bitcode_path
 
 __all__ = [
     "types",
@@ -35,5 +34,4 @@ __all__ = [
     *window.__all__,
     *gin.__all__,
     *barrier.__all__,
-    "device_bitcode_path",
 ]

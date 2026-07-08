@@ -7,7 +7,8 @@ import cutlass.cute as cute
 from cutlass.cutlass_dsl import ir
 
 from ...resources import RegisteredWindowHandle
-from . import _bindings as raw
+from . import _bindings
+from ._helpers import _to_value
 from ._structs import _LLVMPtrType, ncclTeam as Team
 
 
@@ -74,7 +75,7 @@ class Window:
         Returns:
             ``!llvm.ptr`` MLIR value.
         """
-        return raw.ncclGetLocalPointer(self.ptr, offset)
+        return _bindings.nccl_get_local_pointer(self.ptr, cutlass.Int64(offset))
 
     def lsa_pointer(self, offset: int, peer: int) -> ir.Value:
         """Translate ``offset`` to ``peer``'s LSA virtual address.
@@ -86,7 +87,8 @@ class Window:
         Returns:
             ``!llvm.ptr`` MLIR value.
         """
-        return raw.ncclGetLsaPointer(self.ptr, offset, peer)
+        return _bindings.nccl_get_lsa_pointer(
+            self.ptr, cutlass.Int64(offset), cutlass.Int32(peer))
 
     def peer_pointer(
         self, offset: int, peer: int, team: Team | None = None
@@ -102,8 +104,10 @@ class Window:
             ``!llvm.ptr`` MLIR value.
         """
         if team is None:
-            return raw.ncclGetPeerPointer(self.ptr, offset, peer)
-        return raw.ncclGetPeerPointerTeam(self.ptr, offset, team, peer)
+            return _bindings.nccl_get_peer_pointer(
+                self.ptr, cutlass.Int64(offset), cutlass.Int32(peer))
+        return _bindings.nccl_get_peer_pointer_team(
+            self.ptr, cutlass.Int64(offset), _to_value(team), cutlass.Int32(peer))
 
     def tensor(self, dtype, layout, offset: int = 0):
         """Construct a ``cute.Tensor`` view over the registered buffer.
