@@ -236,6 +236,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
     // deterministic, pin the calling thread to its current CPU so the scheduler
     // cannot migrate it (and thus change its NUMA node) between the prefetch and
     // the verification below.
+    #include <sched.h>
     cpu_set_t originalSet;
     REQUIRE(sched_getaffinity(0, sizeof(originalSet), &originalSet) == 0);
     struct AffinityGuard {
