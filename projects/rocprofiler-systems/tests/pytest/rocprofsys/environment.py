@@ -32,6 +32,7 @@ The following environment variables are excluded from the user layer overrides:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from enum import Enum
 import os
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,17 @@ if TYPE_CHECKING:
 
 # Environment layers ordered from lowest to highest precedence
 ENV_LAYER_ORDER = ("base", "test", "user")
+
+
+class TestEnvKind(str, Enum):
+    """Base-environment preset selected for a test run."""
+
+    NONE = "none"
+    BASE = "base"
+    BINARY = "binary"
+    PYTHON = "python"
+    CAUSAL = "causal"
+
 
 # Fixed selection of fundamental shell variables surfaced in the test-session
 # header. This is intentionally small
@@ -62,30 +74,29 @@ class TestEnvironment:
     user: dict[str, str] = field(default_factory=dict)
 
     def set_base_environment(
-        self, config: "RocprofsysConfig", test_type: str = "base"
+        self,
+        config: "RocprofsysConfig",
+        test_type: TestEnvKind = TestEnvKind.BASE,
     ) -> None:
-        """Get the base environment for a given test type (default: "base")
+        """Set the base layer to the preset for ``test_type`` (default: BASE)."""
+        try:
+            kind = TestEnvKind(test_type)
+        except ValueError as exc:
+            valid = ", ".join(k.value for k in TestEnvKind)
+            raise ValueError(
+                f"Invalid test type: {test_type!r}. Expected one of: {valid}"
+            ) from exc
 
-        Accepted test types:
-         - "base" (default)
-         - "binary"
-         - "python"
-         - "causal"
-         - "none"
-        """
-
-        if test_type == "none":
+        if kind is TestEnvKind.NONE:
             self.base = {}
-        elif test_type == "base":
+        elif kind is TestEnvKind.BASE:
             self.base = base_environment()
-        elif test_type == "binary":
+        elif kind is TestEnvKind.BINARY:
             self.base = base_binary_environment()
-        elif test_type == "python":
+        elif kind is TestEnvKind.PYTHON:
             self.base = base_python_environment(config)
-        elif test_type == "causal":
+        elif kind is TestEnvKind.CAUSAL:
             self.base = base_causal_environment()
-        else:
-            raise ValueError(f"Invalid test type: {test_type}")
 
     def set_test_environment(self, test_env: dict[str, str]) -> None:
         self.test.update(test_env)
@@ -108,11 +119,11 @@ class TestEnvironment:
     def get_merged_environment(self, config: "RocprofsysConfig") -> dict[str, str]:
         """Return the effective merged environment (highest-precedence layer wins).
 
-        ROCm-derived defaults (:meth:`get_derived_defaults`) are applied at the
+        ROCm-derived defaults (:func:`derived_defaults`) are applied at the
         lowest precedence, so any base/test/user value overrides them.
         """
         merged = self.merge()[0]
-        for key, value in self.get_derived_defaults(config).items():
+        for key, value in derived_defaults(config).items():
             merged.setdefault(key, value)
         return merged
 
@@ -170,101 +181,105 @@ class TestEnvironment:
         )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
-    def get_derived_defaults(self, config: "RocprofsysConfig") -> dict[str, str]:
-        """ROCm-derived defaults, applied at the lowest precedence by
-        :meth:`get_merged_environment` (any layer overrides them). Each entry is
-        only produced when its derived target exists on disk.
-        """
-        defaults: dict[str, str] = {}
 
-        # LIBVA_DRIVERS_PATH: fall back to ROCm's bundled VA drivers.
-        if config.rocm_path:
-            sysdeps = (config.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
-            if sysdeps.is_dir():
-                defaults["LIBVA_DRIVERS_PATH"] = str(sysdeps)
+def derived_defaults(config: "RocprofsysConfig") -> dict[str, str]:
+    """ROCm-derived defaults, applied at the lowest precedence by
+    :meth:`TestEnvironment.get_merged_environment` (any layer overrides them).
+    Each entry is only produced when its derived target exists on disk.
+    """
+    defaults: dict[str, str] = {}
 
-        return defaults
+    # LIBVA_DRIVERS_PATH: fall back to ROCm's bundled VA drivers.
+    if config.rocm_path:
+        sysdeps = (config.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
+        if sysdeps.is_dir():
+            defaults["LIBVA_DRIVERS_PATH"] = str(sysdeps)
+
+    return defaults
+
+
+# Settings shared by every ``base_*`` environment preset.
+COMMON_BASE_DEFAULT_VARS = {
+    "ROCPROFSYS_CI": "ON",
+    "ROCPROFSYS_CI_TIMEOUT": "300",
+    "ROCPROFSYS_USE_PID": "OFF",
+    "ROCPROFSYS_CONFIG_FILE": "",
+}
+
+# OpenMP thread-pinning shared by presets that exercise OpenMP workloads.
+OMP_DEFAULT_VARS = {
+    "OMP_PROC_BIND": "spread",
+    "OMP_PLACES": "threads",
+    "OMP_NUM_THREADS": "2",
+}
 
 
 def base_environment() -> dict[str, str]:
     """Framework default environment for instrumented test execution."""
     return {
+        **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS": "64",
-        "ROCPROFSYS_CI": "ON",
-        "ROCPROFSYS_CI_TIMEOUT": "300",
-        "ROCPROFSYS_CONFIG_FILE": "",
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "ON",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_FILE_OUTPUT": "ON",
-        "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "info",
         "ROCPROFSYS_SAMPLING_FREQ": "300",
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
         "ROCPROFSYS_SAMPLING_GPUS": "all",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
     }
 
 
 def base_binary_environment() -> dict[str, str]:
     """Framework default environment for rocprof-sys binary test execution."""
     return {
-        "ROCPROFSYS_CI": "ON",
-        "ROCPROFSYS_CI_TIMEOUT": "300",
+        **COMMON_BASE_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "info",
-        "ROCPROFSYS_CONFIG_FILE": "",
     }
 
 
 def base_python_environment(config: "RocprofsysConfig") -> dict[str, str]:
     """Framework default environment for Python test execution."""
     return {
-        "ROCPROFSYS_CI": "ON",
-        "ROCPROFSYS_CI_TIMEOUT": "300",
+        **COMMON_BASE_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TREE_OUTPUT": "OFF",
-        "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
         "PYTHONPATH": (
             str(config.rocprofsys_site_packages)
             if config.rocprofsys_site_packages
             else ""
         ),
-        "ROCPROFSYS_CONFIG_FILE": "",
     }
 
 
 def base_causal_environment() -> dict[str, str]:
     """Framework default environment for causal profiling test execution."""
     return {
-        "ROCPROFSYS_CI": "ON",
-        "ROCPROFSYS_CI_TIMEOUT": "300",
-        "ROCPROFSYS_USE_PID": "OFF",
+        **COMMON_BASE_DEFAULT_VARS,
         "ROCPROFSYS_THREAD_POOL_SIZE": "0",
         "ROCPROFSYS_VERBOSE": "1",
         "ROCPROFSYS_LOG_LEVEL": "info",
         "ROCPROFSYS_DL_VERBOSE": "0",
         "ROCPROFSYS_DEBUG_SETTINGS": "0",
-        "ROCPROFSYS_CONFIG_FILE": "",
     }
 
 
 def flat_environment() -> dict[str, str]:
     """Environment for flat-profile tests."""
     return {
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
@@ -275,9 +290,6 @@ def flat_environment() -> dict[str, str]:
         "ROCPROFSYS_COLLAPSE_THREADS": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
     }
 
 
@@ -301,6 +313,7 @@ def lock_environment() -> dict[str, str]:
 def perfetto_environment() -> dict[str, str]:
     """Environment for perfetto-only tests."""
     return {
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "OFF",
         "ROCPROFSYS_USE_SAMPLING": "ON",
@@ -308,24 +321,19 @@ def perfetto_environment() -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
         "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
     }
 
 
 def timemory_environment() -> dict[str, str]:
     """Environment for timemory-only tests."""
     return {
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "OFF",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "ON",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
     }
 
 

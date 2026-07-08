@@ -19,6 +19,7 @@ from .config import (
 
 from .environment import (
     TestEnvironment,
+    TestEnvKind,
 )
 
 from .runners import (
@@ -61,6 +62,7 @@ __all__ = [
     "discover_install_config",
     # Environment
     "TestEnvironment",
+    "TestEnvKind",
     # Runners
     "TestResult",
     "BaselineRunner",

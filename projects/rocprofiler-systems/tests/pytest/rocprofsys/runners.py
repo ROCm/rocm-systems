@@ -22,7 +22,7 @@ import shutil
 import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
-from .environment import TestEnvironment
+from .environment import TestEnvironment, TestEnvKind
 
 
 def safe_remove(path: Path) -> None:
@@ -171,7 +171,7 @@ class BaseRunner(ABC):
     def __init__(
         self,
         config: RocprofsysConfig,
-        test_type: str,
+        test_type: TestEnvKind,
         target: str,
         output_dir: Path,
         run_args: Optional[list[str]] = None,
@@ -201,7 +201,7 @@ class BaseRunner(ABC):
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.environment = TestEnvironment()
         self.environment.set_base_environment(
-            config, "none" if no_base_env else test_type
+            config, TestEnvKind.NONE if no_base_env else test_type
         )
         # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
         # next) may override it (e.g. Julia adds extra lib dirs).
@@ -371,7 +371,9 @@ class BaselineRunner(BaseRunner):
         command: Optional[list[str]] = None,
         **kwargs,
     ):
-        test_type = "binary" if target in self.ROCPROFSYS_BINARIES else "base"
+        test_type = (
+            TestEnvKind.BINARY if target in self.ROCPROFSYS_BINARIES else TestEnvKind.BASE
+        )
         super().__init__(config, test_type, target, output_dir, **kwargs)
         self.command = command
 
@@ -401,7 +403,7 @@ class SamplingRunner(BaseRunner):
             sampling_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, "base", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.sampling_args = sampling_args or []
 
     def build_command(self) -> list[str]:
@@ -439,7 +441,7 @@ class BinaryRewriteRunner(BaseRunner):
                 fixture handle cleanup after validation completes.
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, "base", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.binary_rewrite_args = binary_rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
         self.cleanup_on_success = cleanup_on_success
@@ -595,7 +597,7 @@ class RuntimeInstrumentRunner(BaseRunner):
             runtime_instrument_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, "base", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.runtime_instrument_args = runtime_instrument_args or []
 
     def build_command(self) -> list[str]:
@@ -630,7 +632,7 @@ class SysRunRunner(BaseRunner):
             sys_run_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, "base", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.sys_run_args = sys_run_args or []
 
     def build_command(self) -> list[str]:
@@ -666,7 +668,7 @@ class CausalRunner(BaseRunner):
             causal_args: Arguments for rocprof-sys-causal
             **kwargs: Additional arguments passed to BaseRunner
         """
-        super().__init__(config, "causal", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.CAUSAL, target, output_dir, **kwargs)
         self.causal_mode = causal_mode
         self.causal_args = causal_args or []
 
@@ -696,7 +698,7 @@ class PythonRunner(BaseRunner):
         standalone: bool = False,
         **kwargs,
     ):
-        super().__init__(config, "python", target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
 
         self.python_version = python_version
         self.annotated = annotated
