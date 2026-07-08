@@ -17,7 +17,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <set>
+#include <system_error>
 #include <sstream>
 #include <stdexcept>
 #include <stdlib.h>  // POSIX ::setenv / ::getenv
@@ -456,7 +458,8 @@ discover_llvm_libdir_for_ompt()
 
     auto has_libomptarget = [](const std::string& dir) {
         const std::string so = dir + "/libomptarget.so";
-        return ::tim::filepath::exists(so);
+        std::error_code   _ec;
+        return std::filesystem::exists(so, _ec);
     };
 
     // Pick the first candidate that contains libomptarget.so
@@ -574,7 +577,8 @@ discover_torch_libpath(const std::string& python_binary)
 
     std::string torch_libdir = result + "/lib";
 
-    if(!::tim::filepath::direxists(torch_libdir))
+    std::error_code _ec;
+    if(!std::filesystem::is_directory(torch_libdir, _ec))
     {
         LOG_WARNING("torch lib directory does not exist: {}", torch_libdir);
         return {};
