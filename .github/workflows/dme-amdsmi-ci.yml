@@ -54,9 +54,11 @@ env:
   BUILD_TYPE: Release
   DME_REPO: https://github.com/ROCm/device-metrics-exporter.git
   GPU_AGENT_REPO: https://github.com/ROCm/gpu-agent.git
-  # Use pinned defaults to avoid CI breakage from upstream branch drift.
-  DME_BRANCH: ${{ inputs.dme_branch || 'v1.4.2' }}
-  GPU_AGENT_BRANCH: ${{ inputs.gpu_agent_branch || 'v1.4.2' }}
+  # Automatic runs resolve to immutable SHAs (not mutable tags) so a
+  # re-tagged upstream release cannot silently change what CI builds.
+  # Manual runs may override with any branch/tag/SHA via workflow_dispatch.
+  DME_BRANCH: ${{ inputs.dme_branch || '779265ed4f4423af9f0c52de11c5e92d51d8cd00' }} # v1.4.2
+  GPU_AGENT_BRANCH: ${{ inputs.gpu_agent_branch || '1015b1605e3be4f0573129e0a7abca0cc946f966' }} # v1.4.2
   GO_VERSION: '1.25.5'
   DME_METRICS_PORT: '5000'
   # GPU Agent's default gRPC port; override if upstream changes.
@@ -139,6 +141,10 @@ jobs:
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          # DME (with its go.sum) is cloned later, so setup-go has nothing to
+          # key on here. Go module/build caching is handled by a dedicated
+          # actions/cache step after "Prepare DME Submodules".
+          cache: false
 
       - name: Install Go Protobuf Plugins (pinned)
         run: |
@@ -185,6 +191,18 @@ jobs:
             --gpu-agent-repo "${GPU_AGENT_REPO}" \
             --gpu-agent-branch "${GPU_AGENT_BRANCH}"
 
+      # go.sum only exists after DME is cloned above, so cache Go modules and
+      # the build cache here rather than via setup-go's ineffective auto-cache.
+      - name: Cache Go Modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ env.DME_BRANCH }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
       - name: Prepare GPU Agent Build Environment
         working-directory: ${{ env.AMDSMI_TESTS_DIR }}
         run: |
@@ -196,6 +214,18 @@ jobs:
       # --------------------------------------------------------
       # Phase 3 - Build GPU Agent (C++ binary)
       # --------------------------------------------------------
+      # The third-party C++ libs (protobuf, gRPC, abseil, ...) take the bulk
+      # of the privileged runner time and only change with the gpu-agent ref,
+      # so cache the build tree keyed on the pinned GPU_AGENT_BRANCH.
+      # GPU_AGENT_WORKDIR is a symlink; cache the real dir under DME_DIR.
+      - name: Cache GPU Agent Third-party Build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ env.DME_DIR }}/gpuagent/sw/nic/build
+          key: ${{ runner.os }}-gpuagent-build-${{ env.GPU_AGENT_BRANCH }}
+          restore-keys: |
+            ${{ runner.os }}-gpuagent-build-
+
       - name: Build GPU Agent Third-party Libraries
         timeout-minutes: 60
         working-directory: ${{ env.GPU_AGENT_WORKDIR }}/sw/nic/gpuagent
@@ -203,7 +233,7 @@ jobs:
           set -euo pipefail
           echo "Building third-party C++ libraries (protobuf, gRPC, abseil, ...)"
           echo "::group::build-libs"
-          make build-libs 2>&1 | tee /tmp/build-libs.log | tail -200
+          make build-libs -j "$(nproc)" 2>&1 | tee /tmp/build-libs.log | tail -200
           echo "::endgroup::"
 
       - name: Build GPU Agent Binary
@@ -225,7 +255,7 @@ jobs:
           # fixes its LDFLAGS.
           GPP_WRAP=$(cd "${AMDSMI_TESTS_DIR}" && python3 -m dme_integration write-gpp-wrapper --output /tmp/g++-wrap)
           echo "::group::make gpuagent"
-          make gpuagent CC="${GPP_WRAP}"
+          make gpuagent -j "$(nproc)" CC="${GPP_WRAP}"
           echo "::endgroup::"
 
           BLD_BIN="${GPU_AGENT_WORKDIR}/sw/nic/build/x86_64/sim/bin"

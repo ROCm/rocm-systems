@@ -24,6 +24,9 @@ _WRAPPER_TEMPLATE = '#!/bin/sh\nexec g++ "$@" -lunwind\n'
 
 def write_wrapper(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # Refuse to follow an attacker-planted symlink on world-writable tmp.
+    if destination.is_symlink():
+        destination.unlink()
     destination.write_text(_WRAPPER_TEMPLATE)
     destination.chmod(0o755)
 

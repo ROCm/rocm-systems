@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Allow running directly as well as via unittest discovery from
 # ``projects/amdsmi/tests``.
@@ -57,6 +58,35 @@ class RewriteGitmodulesSshToHttpsTest(unittest.TestCase):
         # Second call is a no-op: nothing left to rewrite.
         self.assertFalse(submodules._rewrite_gitmodules_ssh_to_https(path))
         self.assertEqual(path.read_text(), rewritten)
+
+
+class CloneAtRefTest(unittest.TestCase):
+    _SHA = "779265ed4f4423af9f0c52de11c5e92d51d8cd00"
+
+    def test_tag_uses_clone_dash_b(self):
+        with mock.patch.object(submodules, "run") as run:
+            submodules._clone_at_ref("repo", Path("/dst"), "v1.4.2")
+        # A tag/branch clones directly with -b and never checks out a SHA.
+        (cmd,), _ = run.call_args
+        self.assertIn("-b", cmd)
+        self.assertIn("v1.4.2", cmd)
+        self.assertEqual(run.call_count, 1)
+
+    def test_sha_clones_then_checks_out(self):
+        with mock.patch.object(submodules, "run") as run:
+            submodules._clone_at_ref("repo", Path("/dst"), self._SHA)
+        cmds = [c.args[0] for c in run.call_args_list]
+        # SHA path: plain clone (no -b) then a detached checkout of the SHA.
+        self.assertNotIn("-b", cmds[0])
+        self.assertEqual(cmds[1][:3], ["git", "checkout", "--detach"])
+        self.assertIn(self._SHA, cmds[1])
+
+    def test_sha_recurse_updates_submodules(self):
+        with mock.patch.object(submodules, "run") as run:
+            submodules._clone_at_ref("repo", Path("/dst"), self._SHA, recurse=True)
+        cmds = [c.args[0] for c in run.call_args_list]
+        self.assertIn("--recurse-submodules", cmds[0])
+        self.assertTrue(any("submodule" in c and "update" in c for c in cmds))
 
 
 if __name__ == "__main__":

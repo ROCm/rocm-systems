@@ -52,6 +52,14 @@ def _process_alive(pid: int) -> bool:
         return True
 
 
+def _pid_cmdline(pid: int) -> str:
+    """Return /proc/<pid>/cmdline as a string (NUL-separated), "" on any OSError."""
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace")
+    except OSError:
+        return ""
+
+
 def _tail_log(log_file: Path, lines: int = 50) -> None:
     try:
         text = log_file.read_text(errors="replace").splitlines()[-lines:]
@@ -144,7 +152,7 @@ def check_alive(
     return False
 
 
-def stop(*, name: str, pid_file: Path) -> None:
+def stop(*, name: str, pid_file: Path, expected: str | None = None) -> None:
     if not pid_file.is_file():
         logger.info("no pid file for %s at %s -- nothing to stop", name, pid_file)
         return
@@ -153,6 +161,16 @@ def stop(*, name: str, pid_file: Path) -> None:
     except ValueError:
         logger.warning("invalid pid file: %s", pid_file)
         return
+    # Guard against a recycled PID: on a shared runner the number may now
+    # belong to an unrelated process, so only signal it if its cmdline matches.
+    if expected is not None and _process_alive(pid):
+        cmdline = _pid_cmdline(pid)
+        if expected not in cmdline:
+            logger.warning(
+                "%s pid=%s cmdline does not contain %r -- skipping kill", name, pid, expected
+            )
+            pid_file.unlink(missing_ok=True)
+            return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         if not _process_alive(pid):
             break
@@ -200,6 +218,11 @@ def main(argv: list[str] | None = None) -> int:
     p_stop = sub.add_parser("stop", help="Stop a previously-started service")
     p_stop.add_argument("--name", required=True)
     p_stop.add_argument("--pid-file", required=True, type=Path)
+    p_stop.add_argument(
+        "--expected",
+        default=None,
+        help="Only signal the pid if its cmdline contains this substring.",
+    )
 
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -226,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         if not alive:
             return 1
     elif args.action == "stop":
-        stop(name=args.name, pid_file=args.pid_file)
+        stop(name=args.name, pid_file=args.pid_file, expected=args.expected)
     return 0
 
 
