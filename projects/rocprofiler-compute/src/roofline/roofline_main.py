@@ -22,6 +22,7 @@ from utils.logger import (
 from utils.roofline_calc import (
     CACHE_LEVELS,
     SUPPORTED_DATATYPES,
+    OpsSupport,
     construct_roof,
     sanitize_mem_level,
 )
@@ -626,12 +627,12 @@ class Roofline:
         #######################
         valu_data = (
             self.__ceiling_data.get("valu")
-            if (SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 1)
+            if OpsSupport.VALU in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             else None
         )
         matrix_data = (
             self.__ceiling_data.get("matrix_ops")
-            if (SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 2)
+            if OpsSupport.MATRIX in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             else None
         )
 
@@ -1146,7 +1147,7 @@ class Roofline:
 
         # Plot VALU and Matrix Ops Peak
         if (
-            SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 1
+            OpsSupport.VALU in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             and self.__ceiling_data["valu"]
             and self.__ceiling_data["valu"][0] is not None
         ):
@@ -1181,7 +1182,7 @@ class Roofline:
             console_warning(f"No PEAK measurement available for {dtype}")
 
         if (
-            SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype] & 2
+            OpsSupport.MATRIX in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
             and self.__ceiling_data["matrix_ops"]
             and self.__ceiling_data["matrix_ops"][0] is not None
         ):

@@ -50,6 +50,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
+    OpsSupport,
 )
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
@@ -378,12 +379,12 @@ class db_analysis(OmniAnalyze_Base):
             for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
                 keys.append(f"{mem_level}Bw")
             for dtype in SUPPORTED_DATATYPES[gpu_arch].keys():
-                if SUPPORTED_DATATYPES[gpu_arch][dtype] & 1:
+                if OpsSupport.VALU in SUPPORTED_DATATYPES[gpu_arch][dtype]:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         keys.append(f"{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
-                if SUPPORTED_DATATYPES[gpu_arch][dtype] & 2:
+                if OpsSupport.MATRIX in SUPPORTED_DATATYPES[gpu_arch][dtype]:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         matrix_dtype = dtype.replace("FP", "F")
