@@ -257,8 +257,9 @@ if ! mkdir -p "${CACHE_DIR}/rocm" "${CACHE_DIR}/downloads"; then
 fi
 
 ROCM_RELEASE="${WIN_VER}"
-# Family in the path so two families resolving to the same version never collide.
-ROCM_PATH="${CACHE_DIR}/rocm/rocm-${ROCM_RELEASE}-${WIN_FAMILY}"
+# Version-only cache path (must match rocm-ref.sh for refcounting/GC). The
+# resolved family/channel are recorded in .stamp, not the path.
+ROCM_PATH="${CACHE_DIR}/rocm/rocm-${ROCM_RELEASE}"
 refs_dir="${ROCM_PATH}.refs"
 ref_token="${ROCM_REF_TOKEN:-}"
 tarball="$(basename "${WIN_URL}")"
@@ -302,7 +303,7 @@ acquire_ref() {
 if cache_hit && [[ -z "${ref_token}" ]]; then
   echo "==> Reusing cached ROCm ${ROCM_RELEASE} at ${ROCM_PATH}"
 else
-  exec {lock_fd}>"${CACHE_DIR}/downloads/.lock-${WIN_FAMILY}-${WIN_CHANNEL}-${ROCM_RELEASE}"
+  exec {lock_fd}>"${CACHE_DIR}/downloads/.lock-${ROCM_RELEASE}"
   flock "${lock_fd}"
   acquire_ref
   if cache_hit; then

@@ -9,7 +9,6 @@
 #   RCCL_DEVICE_API_CACHE   Cache root (default: /apps/rccl-ci)
 #   ROCM_RELEASE_CHANNEL    nightly|dev|prerelease|release (default: nightly)
 #   ROCM_RELEASE            Concrete version (required; empty => no-op)
-#   ROCM_AMDGPU_FAMILY      Artifact family (default: gfx950-dcgpu)
 #   ROCM_REF_TOKEN          This run's reference token (e.g. <run_id>-<attempt>)
 
 set -euo pipefail
@@ -20,7 +19,6 @@ if [[ "${op}" != "release-gc" ]]; then
   exit 2
 fi
 
-rocm_family="${ROCM_AMDGPU_FAMILY:-gfx950-dcgpu}"
 rocm_channel="${ROCM_RELEASE_CHANNEL:-nightly}"
 ref_token="${ROCM_REF_TOKEN:-}"
 CACHE_DIR="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
@@ -33,7 +31,7 @@ fi
 
 ROCM_PATH="${CACHE_DIR}/rocm/rocm-${ROCM_RELEASE}"
 refs_dir="${ROCM_PATH}.refs"
-lock_file="${CACHE_DIR}/downloads/.lock-${rocm_family}-${rocm_channel}-${ROCM_RELEASE}"
+lock_file="${CACHE_DIR}/downloads/.lock-${ROCM_RELEASE}"
 mkdir -p "${CACHE_DIR}/downloads"
 
 exec {lock_fd}>"${lock_file}"
