@@ -347,9 +347,9 @@ namespace RcclUnitTesting
 
   // Group of broadcasts each rooted at a different rank. With >=2 distinct roots
   // and NCCL_ALLGATHERV_ENABLE=1 (default) the task producer fuses them into a single
-  // ncclFuncAllGatherV ring kernel; with NCCL_ALLGATHERV_ENABLE=0 they fall back to
-  // individual broadcasts. Results must validate either way. Sizes vary per root
-  // to exercise AllGatherV's variable-length partitioning.
+  // ncclFuncAllGatherV ring kernel. Sizes vary per root to exercise AllGatherV's
+  // variable-length partitioning. To test the individual-broadcast fallback path,
+  // run with NCCL_ALLGATHERV_ENABLE=0 in the environment before launching the test.
   TEST(GroupCall, MultiRootBroadcast)
   {
     TestBed testBed;
@@ -387,6 +387,114 @@ namespace RcclUnitTesting
       testBed.ExecuteCollectives();
       testBed.ValidateResults(isCorrect);
       testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Single broadcast in a group with AllGatherV enabled. BcastPeers==1 triggers the
+  // downgrade path in ncclPrepareTasks (enqueue.cc) that converts the ncclTaskBcast
+  // back into a plain ncclFuncBroadcast ncclTaskColl and inserts it into collSorter.
+  // Validates that the downgrade produces correct data (not silently dropped).
+  TEST(GroupCall, SingleRootBroadcastDowngrade)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // Exactly one broadcast with a non-zero root => BcastPeers==1 downgrade path.
+      int const numCollPerGroup = 1;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall SingleRootBroadcastDowngrade", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      OptionalColArgs options;
+      options.root = totalRanks - 1; // non-zero root stresses minBcastPeer indexing
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                1048576, 1048576,
+                                options, /*collIdx=*/0);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Two consecutive group calls on the same communicator with AllGatherV enabled.
+  // The second call uses a different (non-zero) root to exercise reclaimPlannerState:
+  // if minBcastPeer is not reset to INT_MAX after the first call, the second call
+  // indexes into the wrong peer's bcastQueue and silently drops its task.
+  TEST(GroupCall, MultiRootBroadcastConsecutive)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      int const numCollPerGroup = totalRanks;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MultiRootBroadcastConsecutive", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      // First group call: roots 0..N-1
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = collIdx;
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  524288, 524288,
+                                  options, collIdx);
+      }
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+
+      // Second group call on the same communicator: roots in reverse order.
+      // reclaimPlannerState must have reset minBcastPeer=INT_MAX so this call
+      // correctly indexes peers[totalRanks-1] rather than peers[0].
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.root = (numCollPerGroup - 1) - collIdx; // reverse root order
+        testBed.SetCollectiveArgs(ncclCollBroadcast, dataType,
+                                  262144, 262144,
+                                  options, collIdx);
+      }
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+
       testBed.DestroyComms();
     }
     testBed.Finalize();
