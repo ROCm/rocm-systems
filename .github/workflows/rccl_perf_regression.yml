@@ -105,7 +105,14 @@ jobs:
       - name: Gate on detector verdict
         if: always()
         run: |
-          # Re-derive pass/fail from the report so the job status reflects the gate.
+          # steps.detect.outcome is the raw result before continue-on-error flips it:
+          # success = SLURM job ran and exited 0 or 1 (pass/regression)
+          # failure = submit_and_poll.sh exited 2 (polling error, timeout, no job)
+          # In the failure case the NFS report is stale from a previous run — fail hard.
+          if [[ "${{ steps.detect.outcome }}" == "failure" ]]; then
+            echo "::error::Detector failed to run (SLURM submission/polling error or timeout). Report on NFS may be stale — not gating on it."
+            exit 2
+          fi
           python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --output /dev/null
