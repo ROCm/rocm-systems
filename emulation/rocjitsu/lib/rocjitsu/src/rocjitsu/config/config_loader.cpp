@@ -462,11 +462,13 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       bool packed = (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
                      arch == ROCJITSU_CODE_ARCH_GFX1250);
       cp->set_packed_tid(packed);
-      const bool gfx11_plus_sdma =
-          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
-      cp->set_sdma_packet_dialect(gfx11_plus_sdma ? amdgpu::SdmaPacketDialect::Gfx11Plus
-                                                  : amdgpu::SdmaPacketDialect::Legacy);
+      amdgpu::SdmaPacketDialect sdma_dialect = amdgpu::SdmaPacketDialect::Legacy;
+      if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+        sdma_dialect = amdgpu::SdmaPacketDialect::Gfx1250;
+      else if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+               arch == ROCJITSU_CODE_ARCH_RDNA4)
+        sdma_dialect = amdgpu::SdmaPacketDialect::Gfx11Plus;
+      cp->set_sdma_packet_dialect(sdma_dialect);
       return cp;
     };
 
@@ -651,18 +653,28 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         if (soc)
           soc->add_xcd(xcd);
 
+        amdgpu::CommandProcessor *xcd_cp = nullptr;
+        amdgpu::L2Cache *xcd_l2 = nullptr;
         for (auto &ch : xcd->children()) {
-          if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(ch.get()))
+          if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(ch.get())) {
             xcd->set_command_processor(cp);
-          else if (auto *l2 = dynamic_cast<amdgpu::L2Cache *>(ch.get()))
+            xcd_cp = cp;
+          } else if (auto *l2 = dynamic_cast<amdgpu::L2Cache *>(ch.get())) {
             xcd->set_l2_cache(l2);
-          else if (auto *se = dynamic_cast<amdgpu::ShaderEngine *>(ch.get())) {
+            xcd_l2 = l2;
+          } else if (auto *se = dynamic_cast<amdgpu::ShaderEngine *>(ch.get())) {
             xcd->add_shader_engine(se);
             for (auto &sch : se->children())
               if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(sch.get()))
                 se->add_compute_unit(cu);
           }
         }
+        // Register the XCD's L2 with its CP so SDMA cache maintenance
+        // (flush_gpu_caches/invalidate_gpu_caches) operates on it. The Xcd full
+        // constructor wires this, but the config-driven path builds children
+        // from the topology and must wire it here.
+        if (xcd_cp && xcd_l2)
+          xcd_cp->add_l2_cache(xcd_l2);
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {
         if (soc)
           soc->add_iod(iod);
