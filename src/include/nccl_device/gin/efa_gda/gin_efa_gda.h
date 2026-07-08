@@ -605,14 +605,18 @@ NCCL_DEVICE_INLINE static void putValueImpl(ncclGinCtx ctx, Coop coop, int peer,
 /* ── flushImplMode: mode-templated Flush implementation ───────────── */
 
 template <bool HasTimeout, ncclGinResourceSharingMode mode, typename Coop>
-NCCL_DEVICE_INLINE static void flushImplMode(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag,
-                                             uint64_t timeoutCycles) {
+NCCL_DEVICE_INLINE static ncclResult_t flushImplMode(ncclGinCtx ctx, Coop coop, cuda::memory_order ord,
+                                                     uint32_t* abortFlag, uint64_t timeoutCycles) {
   (void)ord;
-  (void)timeoutCycles;
-  // TODO: Implement timeout
+  if NCCL_IF_CONSTEXPR (!HasTimeout) (void)timeoutCycles;
+
   coop.sync();
+  ncclResult_t result = ncclSuccess;
   if (coop.thread_rank() == 0) {
     nccl_ofi_gin_gdaki_dev_handle* dev = getDevHandle(ctx);
+    uint64_t startCycle = 0;
+    if NCCL_IF_CONSTEXPR (HasTimeout) startCycle = clock64();
+    else (void)startCycle; // referenced only when HasTimeout is true
 
     /* For each endpoint with outstanding work, snapshot submitted_count
      * (scoped atomic load matching the relaxed bumps from the post
@@ -620,7 +624,8 @@ NCCL_DEVICE_INLINE static void flushImplMode(ncclGinCtx ctx, Coop coop, cuda::me
      * reaches the snapshot. The HW counter is read with system-scope
      * acquire so the GPU bypasses caches and observes the latest NIC
      * update through PCIe-coherent memory. */
-    auto wait_for_endpoint = [abortFlag](nccl_ofi_gin_gdaki_dev_endpoint_handle& ep) -> bool {
+    auto wait_for_endpoint = [abortFlag, startCycle,
+                              timeoutCycles](nccl_ofi_gin_gdaki_dev_endpoint_handle& ep) -> ncclResult_t {
       uint64_t target = scopedAtomicLoad<ncclGinScope<mode>, cuda::memory_order_relaxed>(&ep.submitted_count);
 
       /* Drain-to-zero: outstanding = (submitted - completed) reduced to
@@ -629,16 +634,21 @@ NCCL_DEVICE_INLINE static void flushImplMode(ncclGinCtx ctx, Coop coop, cuda::me
        * so the masked difference is exact and cannot be fooled by a
        * counter wrap. */
       while (((((uint32_t)target) - (uint32_t)hwCounterLoad(ep.local_cntr_value)) & EFA_CNTR_MASK) != 0) {
-        if (abortFlag && *abortFlag) return false;
+        if NCCL_IF_CONSTEXPR (HasTimeout) {
+          if (clock64() - startCycle >= timeoutCycles) return ncclTimeout;
+        }
+        if (abortFlag && *abortFlag) return ncclInProgress;
       }
-      return true;
+      return ncclSuccess;
     };
 
-    if (!wait_for_endpoint(dev->data)) return;
+    result = wait_for_endpoint(dev->data);
+    if (result != ncclSuccess) goto done;
 
     /* The dedicated PutValue endpoint is a local poster too (all PutValue
      * writes ride it), so drain it as well. */
-    if (!wait_for_endpoint(dev->pvdata)) return;
+    result = wait_for_endpoint(dev->pvdata);
+    if (result != ncclSuccess) goto done;
 
     /* Drain the counter endpoints only. With the decoupled model the
      * local poster QP is always the data endpoint, the PutValue endpoint,
@@ -647,24 +657,32 @@ NCCL_DEVICE_INLINE static void flushImplMode(ncclGinCtx ctx, Coop coop, cuda::me
      * FI_WRITE counter never ticks from our writes and there is nothing to
      * drain. A signal QP needs no local completions at all. */
     for (int i = 0; i < dev->nCounters; i++) {
-      if (!wait_for_endpoint(dev->counter_handles[i]->base)) return;
+      result = wait_for_endpoint(dev->counter_handles[i]->base);
+      if (result != ncclSuccess) goto done;
     }
   }
-  coop.sync();
+done:
+  // Broadcast result from thread_rank()==0 to all participants.
+  // Use shared memory — safe for all coop types including ncclCoopAny.
+  {
+    __shared__ int sharedResult;
+    if (coop.thread_rank() == 0) sharedResult = (int)result;
+    coop.sync();
+    result = (ncclResult_t)sharedResult;
+  }
+  return (result == ncclInProgress) ? ncclSuccess : result;
 }
 
 /* ── flushImpl: runtime mode dispatcher ───────────────────────────── */
 
 template <bool HasTimeout, typename Coop>
-NCCL_DEVICE_INLINE static void flushImpl(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag,
-                                         uint64_t timeoutCycles) {
+NCCL_DEVICE_INLINE static ncclResult_t flushImpl(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag,
+                                                 uint64_t timeoutCycles) {
   switch ((ncclGinResourceSharingMode)ctx.resourceSharingMode) {
   case NCCL_GIN_RESOURCE_SHARING_CTA:
-    flushImplMode<HasTimeout, NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, coop, ord, abortFlag, timeoutCycles);
-    break;
+    return flushImplMode<HasTimeout, NCCL_GIN_RESOURCE_SHARING_CTA>(ctx, coop, ord, abortFlag, timeoutCycles);
   default:
-    flushImplMode<HasTimeout, NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, coop, ord, abortFlag, timeoutCycles);
-    break;
+    return flushImplMode<HasTimeout, NCCL_GIN_RESOURCE_SHARING_GPU>(ctx, coop, ord, abortFlag, timeoutCycles);
   }
 }
 
@@ -780,7 +798,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_EFA_GDA> {
                                       cuda::memory_order ord, uint32_t* abortFlag) {
     (void)hasDescriptor;
     (void)descriptor;
-    nccl::gin::efa_gda::flushImpl<false>(ctx, coop, ord, abortFlag, 0);
+    (void)nccl::gin::efa_gda::flushImpl<false>(ctx, coop, ord, abortFlag, 0);
   }
 
   template <typename Coop>
@@ -789,8 +807,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_EFA_GDA> {
                                               uint32_t* abortFlag, uint64_t timeoutCycles) {
     (void)hasDescriptor;
     (void)descriptor;
-    nccl::gin::efa_gda::flushImpl<true>(ctx, coop, ord, abortFlag, timeoutCycles);
-    return ncclSuccess;
+    return nccl::gin::efa_gda::flushImpl<true>(ctx, coop, ord, abortFlag, timeoutCycles);
   };
 };
 
