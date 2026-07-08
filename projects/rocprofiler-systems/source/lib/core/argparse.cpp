@@ -11,7 +11,6 @@
 #include <cstdint>
 
 #include <timemory/settings/types.hpp>
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 

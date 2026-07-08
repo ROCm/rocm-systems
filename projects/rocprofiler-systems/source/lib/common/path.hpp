@@ -92,37 +92,10 @@ realpath(const std::string& _relpath,
          std::string*       _resolved = nullptr) ROCPROFSYS_INTERNAL_API;
 
 inline bool
-is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
-
-inline bool
 is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
-
-struct ROCPROFSYS_INTERNAL_API path_type
-{
-    enum path_type_e
-    {
-        directory = 0,
-        regular,
-        link,
-        unknown
-    };
-
-    inline path_type(const std::string&);
-    ~path_type()                           = default;
-    path_type(const path_type&)            = default;
-    path_type(path_type&&)                 = default;
-    path_type& operator=(const path_type&) = default;
-    path_type& operator=(path_type&&)      = default;
-
-    bool     exists() const { return m_type < unknown; }
-    explicit operator bool() const { return exists(); }
-
-private:
-    path_type_e m_type = unknown;
-};
 
 //--------------------------------------------------------------------------------------//
 //
@@ -130,28 +103,21 @@ private:
 //
 //--------------------------------------------------------------------------------------//
 
-path_type::path_type(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(lstat(_fname.c_str(), &_buffer) == 0)
-    {
-        if(S_ISDIR(_buffer.st_mode) != 0)
-            m_type = directory;
-        else if(S_ISREG(_buffer.st_mode) != 0)
-            m_type = regular;
-        else if(S_ISLNK(_buffer.st_mode) != 0)
-            m_type = link;
-    }
-}
-
 bool
 exists(const std::string& _fname)
 {
-    struct stat _buffer;
-    if(lstat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISDIR(_buffer.st_mode) != 0 || S_ISREG(_buffer.st_mode) != 0 ||
-                S_ISLNK(_buffer.st_mode) != 0);
-    return false;
+    // Unified existence check (design §5.4): std::filesystem::exists semantics —
+    // true for a directory / regular file / valid symlink; FALSE for a broken
+    // symlink or missing path (follows symlinks, stat-based). Replaces the two
+    // former exists variants (the false-for-dirs tim::filepath::exists and this
+    // lstat-based one), fixing the directory-guard latent bugs.
+    try
+    {
+        return std::filesystem::exists(std::filesystem::path{ _fname });
+    } catch(...)
+    {
+        return false;
+    }
 }
 
 template <typename RetT>
@@ -287,37 +253,6 @@ realpath(const std::string& _relpath, std::string* _resolved)
     }
 
     return (_resolved) ? *_resolved : std::string{ _result };
-}
-
-bool
-is_text_file(const std::string& filename)
-{
-    std::ifstream _file{ filename, std::ios::in | std::ios::binary };
-    if(!_file.is_open())
-    {
-        ROCPROFSYS_PATH_LOG(0, "Error! '%s' could not be opened...\n", filename.c_str());
-        return false;
-    }
-
-    constexpr size_t buffer_size = 1024;
-    char             buffer[buffer_size];
-    while(_file.read(buffer, sizeof(buffer)))
-    {
-        for(char itr : buffer)
-        {
-            if(itr == '\0') return false;
-        }
-    }
-
-    if(_file.gcount() > 0)
-    {
-        for(std::streamsize i = 0; i < _file.gcount(); ++i)
-        {
-            if(buffer[i] == '\0') return false;
-        }
-    }
-
-    return true;
 }
 
 //--------------------------------------------------------------------------------------//

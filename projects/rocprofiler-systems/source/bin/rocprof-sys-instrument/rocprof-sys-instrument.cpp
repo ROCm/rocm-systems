@@ -24,7 +24,6 @@
 #include <timemory/settings.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>

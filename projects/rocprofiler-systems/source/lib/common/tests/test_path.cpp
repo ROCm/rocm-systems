@@ -112,8 +112,10 @@ TEST_F(PathTest, Exists_SymbolicLink)
 
 TEST_F(PathTest, Exists_BrokenSymlink)
 {
+    // Unified exists() now uses std::filesystem::exists semantics (follows symlinks),
+    // so a broken symlink no longer "exists" (design §5.4 / intended change).
     std::string link_path = create_symlink("/nonexistent/target", "broken_link");
-    EXPECT_TRUE(exists(link_path));
+    EXPECT_FALSE(exists(link_path));
 }
 
 TEST_F(PathTest, Exists_EmptyPath) { EXPECT_FALSE(exists("")); }
@@ -199,58 +201,6 @@ TEST_F(PathTest, Realpath_WithResolvedOutput)
     std::string result = realpath(file_path, &resolved_output);
     EXPECT_EQ(result, file_path);
     EXPECT_EQ(resolved_output, file_path);
-}
-
-TEST_F(PathTest, IsTextFile_TextFile)
-{
-    std::string text_content = "This is a text file\nwith multiple lines\n";
-    std::string file_path    = create_file("text_file.txt", text_content);
-    EXPECT_TRUE(is_text_file(file_path));
-}
-
-TEST_F(PathTest, IsTextFile_BinaryFile)
-{
-    std::string   file_path = m_test_dir + "/binary_file.bin";
-    std::ofstream ofs(file_path, std::ios::binary);
-    char binary_data[] = { 'H', 'e', 'l', 'l', 'o', '\0', 'W', 'o', 'r', 'l', 'd' };
-    ofs.write(binary_data, sizeof(binary_data));
-    ofs.close();
-    EXPECT_FALSE(is_text_file(file_path));
-}
-
-TEST_F(PathTest, IsTextFile_EmptyFile)
-{
-    std::string file_path = create_file("empty_file.txt", "");
-    EXPECT_TRUE(is_text_file(file_path));
-}
-
-TEST_F(PathTest, PathType_Directory)
-{
-    path_type pt(m_test_dir);
-    EXPECT_TRUE(pt.exists());
-    EXPECT_TRUE(static_cast<bool>(pt));
-}
-
-TEST_F(PathTest, PathType_RegularFile)
-{
-    std::string file_path = create_file("pathtype_file.txt");
-    path_type   pt(file_path);
-    EXPECT_TRUE(pt.exists());
-}
-
-TEST_F(PathTest, PathType_SymbolicLink)
-{
-    std::string target    = create_file("pathtype_target.txt");
-    std::string link_path = create_symlink(target, "pathtype_link");
-    path_type   pt(link_path);
-    EXPECT_TRUE(pt.exists());
-}
-
-TEST_F(PathTest, PathType_Nonexistent)
-{
-    path_type pt("/nonexistent/path");
-    EXPECT_FALSE(pt.exists());
-    EXPECT_FALSE(static_cast<bool>(pt));
 }
 
 TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmpty)

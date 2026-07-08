@@ -24,7 +24,6 @@
 #include "rocprofiler-systems/types.h"
 #include <spdlog/fmt/fmt.h>
 
-#include <timemory/utility/filepath.hpp>
 
 #include <cassert>
 #include <gnu/libc-version.h>

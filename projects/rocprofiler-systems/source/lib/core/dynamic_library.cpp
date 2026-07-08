@@ -7,7 +7,6 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include "logger/debug.hpp"

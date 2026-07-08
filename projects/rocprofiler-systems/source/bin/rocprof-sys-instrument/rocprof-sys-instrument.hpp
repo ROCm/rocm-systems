@@ -14,7 +14,6 @@
 #include "common/path.hpp"
 
 #include <spdlog/fmt/ranges.h>
-#include <timemory/utility/filepath.hpp>
 
 #include <dlfcn.h>
 #include <string>

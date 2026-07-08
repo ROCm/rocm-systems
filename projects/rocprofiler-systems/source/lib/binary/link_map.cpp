@@ -7,7 +7,6 @@
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 
-#include <timemory/utility/filepath.hpp>
 
 #include "logger/debug.hpp"
 

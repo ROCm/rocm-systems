@@ -13,7 +13,6 @@
 #include <regex>
 #include <string>
 #include <timemory/environment/types.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <unistd.h>
 
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0

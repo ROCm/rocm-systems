@@ -15,7 +15,6 @@
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
-#include <timemory/utility/filepath.hpp>
 
 #include <spdlog/fmt/ranges.h>
 

@@ -23,7 +23,6 @@
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/archives/xml.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
-#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>

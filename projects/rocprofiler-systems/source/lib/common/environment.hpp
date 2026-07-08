@@ -8,7 +8,6 @@
 #include "logger/debug.hpp"
 #include <spdlog/fmt/fmt.h>
 
-#include <timemory/utility/filepath.hpp>
 
 #include <algorithm>
 #include <array>
