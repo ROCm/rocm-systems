@@ -17,6 +17,9 @@
 #   BENCH_KILL_AFTER  SIGKILL grace          (default: 30s)
 #   CONFIG         Test-matrix JSON          (default: lib/gin-tests.json)
 #   GIN_GATE_TESTS Set to 1 to fail the job on any test failure
+#   RCCL_CI_DEBUG  Set to 1 to add the config's debug_env to every run
+#   RCCL_CI_DEBUG_DIR  Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
+#                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
 
 set -euo pipefail
 
@@ -68,18 +71,29 @@ echo "==> NP=${NP} MSG_SIZE=${MSG_SIZE} (E=NP*MSG_SIZE=${E})"
 echo "==> test matrix          = ${CONFIG}"
 
 MCA=""
+DEBUG_ENV=""
 TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=()
 CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
   echo "ERROR: failed to parse test matrix ${CONFIG}" >&2; exit 1; }
 while IFS=$'\t' read -r kind f1 f2 f3 f4 f5; do
   case "${kind}" in
-    mca)  MCA="${f1}" ;;
-    test) TEST_NAMES+=("${f1}"); TEST_KINDS+=("${f2}"); TEST_BINS+=("${f3}"); TEST_ENVS+=("${f4}"); TEST_ARGS+=("${f5}") ;;
+    mca)        MCA="${f1}" ;;
+    debug_env)  DEBUG_ENV="${f1}" ;;
+    test)       TEST_NAMES+=("${f1}"); TEST_KINDS+=("${f2}"); TEST_BINS+=("${f3}"); TEST_ENVS+=("${f4}"); TEST_ARGS+=("${f5}") ;;
   esac
 done <<< "${CONFIG_TSV}"
 
 if [[ ${#TEST_NAMES[@]} -eq 0 ]]; then
   echo "ERROR: no tests parsed from ${CONFIG}" >&2; exit 1
+fi
+
+# In debug mode, expand {LOGDIR} in debug_env to a real per-job dir so
+# NCCL_DEBUG_FILE writes per-rank logs there (keeping stdout readable).
+if [[ -n "${RCCL_CI_DEBUG:-}" && -n "${DEBUG_ENV}" ]]; then
+  RCCL_CI_DEBUG_DIR="${RCCL_CI_DEBUG_DIR:-${SLURM_SUBMIT_DIR:-$(pwd)}/nccl-debug}"
+  mkdir -p "${RCCL_CI_DEBUG_DIR}"
+  DEBUG_ENV="${DEBUG_ENV//\{LOGDIR\}/${RCCL_CI_DEBUG_DIR}}"
+  echo "==> RCCL_CI_DEBUG=1: NCCL debug logs -> ${RCCL_CI_DEBUG_DIR}/nccl-debug.<host>.<pid>.log"
 fi
 echo "==> ${#TEST_NAMES[@]} tests to run: ${TEST_NAMES[*]}"
 
@@ -101,6 +115,9 @@ run_test() {
     return
   fi
   args="${args//\{E\}/${E}}"
+  if [[ -n "${RCCL_CI_DEBUG:-}" && -n "${DEBUG_ENV}" ]]; then
+    env_flags="${env_flags} ${DEBUG_ENV}"
+  fi
   echo "=== ${name}: ${bin} ${args} ==="
   set +e
   timeout --kill-after="${BENCH_KILL_AFTER}" "${BENCH_TIMEOUT}" \

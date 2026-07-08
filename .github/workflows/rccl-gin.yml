@@ -13,12 +13,12 @@ on:
         required: false
         default: 'release'
       rocm_release:
-        description: 'ROCm version to fetch. Empty = latest for the channel.'
+        description: 'ROCm version to fetch, matched as a prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available.'
         type: string
         required: false
-        default: '7.13.0'
+        default: '7.14'
       rocm_amdgpu_family:
-        description: 'TheRock artifact group / GPU family for the ROCm tarball.'
+        description: 'Specific GPU family fallback if no multi-arch tarball is found.'
         type: string
         required: false
         default: 'gfx950-dcgpu'
@@ -27,6 +27,15 @@ on:
         type: string
         required: false
         default: 'gfx950'
+    secrets:
+      # Existing GitHub App creds; used only to mint a rockrel-scoped actions:read
+      # token for the prerelease-artifacts leg. Optional: without them (or if the
+      # App is not installed on rockrel) resolution falls back to nightly.
+      # Callers should pass `secrets: inherit` to enable the RC / multi-arch leg.
+      APP_ID:
+        required: false
+      APP_PRIVATE_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       rocm_release_channel:
@@ -40,10 +49,10 @@ on:
           - prerelease
         default: release
       rocm_release:
-        description: 'ROCm version to fetch. Empty = latest for the channel. Format depends on channel (release/prerelease 7.13.0, nightly 7.13.0aYYYYMMDD).'
+        description: 'ROCm version to fetch, matched as a prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available. Resolution cascades release -> prerelease -> prerelease-artifacts -> nightly, multiarch-first.'
         type: string
         required: false
-        default: '7.13.0'
+        default: '7.14'
       rocm_amdgpu_family:
         description: 'TheRock artifact group / GPU family for the ROCm tarball.'
         type: string
@@ -70,9 +79,13 @@ jobs:
     env:
       RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx950' }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
-      # empty ROCM_RELEASE => latest for the channel
+      # ROCM_RELEASE is a version prefix (e.g. "7.14"); empty => newest available.
       ROCM_RELEASE: ${{ inputs.rocm_release }}
       ROCM_RELEASE_CHANNEL: ${{ inputs.rocm_release_channel || 'release' }}
+      # Stability-first cascade used by fetch-rocm.sh (overrides ROCM_RELEASE_CHANNEL).
+      RCCL_ROCM_CHANNELS: 'release prerelease prerelease-artifacts nightly'
+      # Add the test matrix's debug_env (NCCL_DEBUG=INFO, ...) to every run.
+      RCCL_CI_DEBUG: '1'
       # Per-(run, attempt) checkout+build dir so parallel legs sharing the NFS
       # _work never collide.
       CI_SUBDIR: _ci/gin-${{ github.run_id }}-${{ github.run_attempt }}
@@ -82,7 +95,25 @@ jobs:
         with:
           path: ${{ env.CI_SUBDIR }}
 
-      - name: Provision ROCm (TheRock ${{ inputs.rocm_release_channel || 'release' }}) on the head node
+      # Mint a short-lived, rockrel-scoped token (actions:read only) from the
+      # existing GitHub App, so fetch-rocm.sh can find the ROCm/rockrel release
+      # run for the prerelease-artifacts leg (RC + multi-arch tarballs). Requires
+      # the App (secrets.APP_ID) to be installed on ROCm/rockrel. continue-on-error
+      # so that if it isn't, resolution just falls back to nightly.
+      - name: Generate rockrel read token
+        id: rockrel-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: rockrel
+          permission-actions: read
+
+      - name: Provision ROCm (TheRock, version ${{ inputs.rocm_release || 'latest' }}) on the head node
+        env:
+          GH_TOKEN: ${{ steps.rockrel-token.outputs.token }}
         run: |
           set -euo pipefail
           export RCCL_DEVICE_API_WORKDIR="${GITHUB_WORKSPACE}/${CI_SUBDIR}"
@@ -105,7 +136,7 @@ jobs:
           python3 "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/submit_slurm_job.py" \
             --script "${RCCL_DEVICE_API_WORKDIR}/projects/rccl/tools/ci/lib/gin.sbatch" \
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/gin-logs" \
-            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS"
+            --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_RELEASE_CHANNEL,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
 
       - name: Dump compute-node logs
         if: always()
@@ -125,6 +156,8 @@ jobs:
           dump "build"     "${logs_dir}"/build-*.out "${logs_dir}"/build-*.err
           dump "test"      "${logs_dir}"/test-*.out  "${logs_dir}"/test-*.err
           dump "scheduler" "${logs_dir}"/rccl-gin-*.out "${logs_dir}"/rccl-gin-*.err
+          # Verbose per-rank NCCL debug logs (RCCL_CI_DEBUG=1); noisy, kept last.
+          dump "nccl-debug" "${logs_dir}"/nccl-debug/nccl-debug.*.log
 
       - name: Clean up per-job workdir
         if: always()

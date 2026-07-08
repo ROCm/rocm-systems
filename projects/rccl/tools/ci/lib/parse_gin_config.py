@@ -5,6 +5,7 @@
 layout below is a stable contract:
 
   mca\t<flags>
+  debug_env\t<-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
   test\t<name>\t<kind>\t<bin>\t<-x env flags>\t<args>
 """
 
@@ -29,6 +30,7 @@ class GinConfig(NamedTuple):
     """The parsed GIN test matrix."""
 
     mca: str
+    debug_env: list[str]
     tests: list[GinTest]
 
 
@@ -54,12 +56,17 @@ def parse_config(path: Path) -> GinConfig:
             )
         )
 
-    return GinConfig(mca=data.get("mca", "") or "", tests=tests)
+    return GinConfig(
+        mca=data.get("mca", "") or "",
+        debug_env=list(data.get("debug_env", []) or []),
+        tests=tests,
+    )
 
 
 def format_rows(config: GinConfig) -> list[str]:
     """Render the parsed config as tab-separated rows for the bash runner."""
     rows = ["mca\t" + config.mca]
+    rows.append("debug_env\t" + " ".join("-x " + e for e in config.debug_env))
     for test in config.tests:
         env_flags = " ".join("-x " + e for e in test.env)
         rows.append(

@@ -22,6 +22,8 @@
 #   BENCH_KILL_AFTER       SIGKILL grace after BENCH_TIMEOUT (default: 30s)
 #   CONFIG                 Test-matrix JSON          (default: lib/device-api-tests.json)
 #   RCCL_CI_DEBUG          Set to 1 to add debug_env to every run
+#   RCCL_CI_DEBUG_DIR      Dir for NCCL_DEBUG_FILE output when RCCL_CI_DEBUG=1
+#                          (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
 
 set -euo pipefail
 
@@ -106,6 +108,15 @@ if [[ ${#SUITE_NAMES[@]} -eq 0 ]]; then
   exit 1
 fi
 echo "==> ${#SUITE_NAMES[@]} suites to run: ${SUITE_NAMES[*]}"
+
+# In debug mode, expand {LOGDIR} in debug_env to a real per-job dir so
+# NCCL_DEBUG_FILE writes per-rank logs there (keeping stdout readable).
+if [[ -n "${RCCL_CI_DEBUG:-}" && -n "${DEBUG_ENV}" ]]; then
+  RCCL_CI_DEBUG_DIR="${RCCL_CI_DEBUG_DIR:-${SLURM_SUBMIT_DIR:-$(pwd)}/nccl-debug}"
+  mkdir -p "${RCCL_CI_DEBUG_DIR}"
+  DEBUG_ENV="${DEBUG_ENV//\{LOGDIR\}/${RCCL_CI_DEBUG_DIR}}"
+  echo "==> RCCL_CI_DEBUG=1: NCCL debug logs -> ${RCCL_CI_DEBUG_DIR}/nccl-debug.<host>.<pid>.log"
+fi
 
 BENCH_ARGS="${BENCH_ARGS:-${CFG_BENCH_ARGS}}"
 

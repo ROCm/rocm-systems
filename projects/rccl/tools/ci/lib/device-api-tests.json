@@ -5,6 +5,8 @@
     "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ./build/<bin> $bench_args <args>",
     "bench_args: common bench flags | base_env: -x on every run",
     "debug_env:  -x added only when RCCL_CI_DEBUG=1",
+    "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
+    "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout.",
     "suites:     [ { name, bins:[...], args, env:[...] (optional) } ]",
     "Switched from YAML to JSON because PyYAML is not installed on the CI hosts."
   ],
@@ -13,7 +15,7 @@
 
   "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1"],
 
-  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET"],
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
 
   "suites": [
     {

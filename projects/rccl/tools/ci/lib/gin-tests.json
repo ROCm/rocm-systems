@@ -5,10 +5,15 @@
     "  mpirun -np $NP <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
     "kind: 'rocshmem' -> $ROCSHMEM_TESTS_BIN_DIR/<bin>; 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>",
     "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
-    "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility)."
+    "-D 3 is the rocSHMEM-SDMA path the script labels 'Crash' (kept for visibility).",
+    "debug_env: -x added to every test only when RCCL_CI_DEBUG=1.",
+    "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
+    "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout."
   ],
 
   "mca": "-mca pml ob1 -mca btl ^openib",
+
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET", "NCCL_DEBUG_FILE={LOGDIR}/nccl-debug.%h.%p.log"],
 
   "tests": [
     {
