@@ -63,7 +63,7 @@ endif()
 
 # RCCL project
 #==================================================================================================
-project(rccl CXX)
+project(rccl C CXX)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(NCCL_OS_WINDOWS ON)
@@ -755,6 +755,8 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
+    add_subdirectory(plugins/env/example)
+    add_subdirectory(plugins/env/json)
   endif()
   add_subdirectory(test)
 
