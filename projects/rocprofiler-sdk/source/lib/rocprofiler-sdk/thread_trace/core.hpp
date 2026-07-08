@@ -204,6 +204,13 @@ public:
         std::unique_lock<std::mutex> lk(agent_mut);
         return params.find(id) != params.end();
     }
+    bool requires_queue_intercept()
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        for(const auto& [_, pack] : params)
+            if(pack.perfcounter_ctrl != 0 && !pack.perfcounters.empty()) return true;
+        return false;
+    }
 
     const auto& get_agents() const { return agents; }
 

@@ -2552,6 +2552,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
+    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
+       !tool::att_no_intercept::is_supported())
+    {
+        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
+                        "ATT quick-scan support. Falling back to --att.";
+        tool::get_config().att_no_intercept = false;
+    }
+
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
