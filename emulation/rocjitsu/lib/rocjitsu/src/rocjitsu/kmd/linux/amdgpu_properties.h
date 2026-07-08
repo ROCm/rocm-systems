@@ -52,6 +52,10 @@ constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t r
 /// diverges from a direct decode are listed here; every other GPU -- all of
 /// gfx10/gfx11 and gfx12.0 -- decodes directly, which is exact for the
 /// thresholds the driver compares against.
+///
+/// \NPI add a case when a new GPU's gfx_target_version does not decode directly
+/// to its GC hardware IP version (see the KFD device table in
+/// drivers/gpu/drm/amd/amdkfd/kfd_device.c).
 constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_version) {
   switch (gfx_target_version) {
   case 90010: // Aldebaran / gfx90a  -> GC 9.4.2
