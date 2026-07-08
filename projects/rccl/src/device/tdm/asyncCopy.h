@@ -159,6 +159,21 @@ __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElemen
   group1.tileDim0(numElements);
 }
 
+template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
+struct AsyncDataCopier{
+  size_t size_{0};
+
+  __device__ void loadTile(const T* src, T* dst, size_t size){
+    size_ = size;
+    asyncLoadToLDS<T, cp>(src, dst);
+  }
+
+  __device__ void storeTile(T* dst){}
+
+  template<int WAIT_CNT = 0>
+  __device__ void waitTile();
+};
+
 // Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned 
 // for maximum performance.
 template<typename T, CachePolicy cp = DEFAULT_CACHE_POLICY>
