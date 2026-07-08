@@ -12,7 +12,11 @@ namespace
 std::string kernel_symbol_register_test_name(
     const ::testing::TestParamInfo<kernel_symbol_register_test_params_t>& info)
 {
-    return info.param.kernel_name == nullptr ? "NullName" : "DemangledName";
+    if (info.param.kernel_name == nullptr)
+        return "NullName";
+
+    const std::string kernel_name = info.param.kernel_name;
+    return !kernel_name.empty() && kernel_name.front() == '_' ? "DemangledName" : "PlainName";
 }
 }  // namespace
 
@@ -209,6 +213,32 @@ TEST_P(TestSdkCallbacksKernelSymbolRegister, ProvidedKernelSymbolRegister_Forwar
     EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id);
 }
 
+TEST_F(TestSdkCallbacks, ProvidedPcSamplingAndKernelFilteringEnabled_ForwardsAllKernelSymbols)
+{
+    constexpr size_t   matching_code_object_id    = 123;
+    constexpr size_t   nonmatching_code_object_id = 456;
+    constexpr uint64_t matching_kernel_id         = 10;
+    constexpr uint64_t nonmatching_kernel_id      = 20;
+
+    auto& collector                          = enable_pc_sampling();
+    m_tool_data->kernel_filter_include_regex = ".*my_kernel.*";
+
+    invoke_kernel_symbol_register(matching_code_object_id, matching_kernel_id, "_Z9my_kernelv");
+    invoke_kernel_symbol_register(nonmatching_code_object_id, nonmatching_kernel_id, "_Z12other_kernelv");
+
+    EXPECT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_TRUE(m_tool_data->target_kernel_ids.count(matching_kernel_id));
+
+    const auto& calls = collector.get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 2);
+    EXPECT_EQ(calls[0].code_object_id, matching_code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, matching_kernel_id);
+    EXPECT_EQ(calls[0].name, "my_kernel");
+    EXPECT_EQ(calls[1].code_object_id, nonmatching_code_object_id);
+    EXPECT_EQ(calls[1].kernel_id, nonmatching_kernel_id);
+    EXPECT_EQ(calls[1].name, "other_kernel");
+}
+
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
 {
     constexpr uint64_t kernel_id_0           = 10;
@@ -384,11 +414,13 @@ INSTANTIATE_TEST_SUITE_P(
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelSymbolRegister
-INSTANTIATE_TEST_SUITE_P(KernelSymbolRegister,
-                         TestSdkCallbacksKernelSymbolRegister,
-                         ::testing::Values(kernel_symbol_register_test_params_t{"_Z9my_kernelv", "my_kernel"},
-                                           kernel_symbol_register_test_params_t{nullptr, ""}),
-                         kernel_symbol_register_test_name);
+INSTANTIATE_TEST_SUITE_P(
+    KernelSymbolRegister,
+    TestSdkCallbacksKernelSymbolRegister,
+    ::testing::Values(kernel_symbol_register_test_params_t{"_Z9my_kernelv", "my_kernel"},
+                      kernel_symbol_register_test_params_t{"plain_kernel", "plain_kernel"},
+                      kernel_symbol_register_test_params_t{nullptr, ""}),
+    kernel_symbol_register_test_name);
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelFiltering
