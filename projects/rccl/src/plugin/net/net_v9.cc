@@ -69,7 +69,8 @@ static ncclResult_t ncclNet_connect(void* ctx __attribute__((unused)), int dev, 
 }
 
 static ncclResult_t ncclNet_makeVDevice(int* d, ncclNetVDeviceProps_t* props) {
-  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to NCCL_NET_MAX_DEVS_PER_NIC_V11 for v9 plugins.
+  // Safe cast: devs[] is at the end of the struct and NCCL limits ndevs to
+  // NCCL_NET_MAX_DEVS_PER_NIC_V11 for v9 plugins.
   return ncclNet_v9->makeVDevice(d, (ncclNetVDeviceProps_v9_t*)props);
 }
 

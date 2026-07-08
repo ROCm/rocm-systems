@@ -24,7 +24,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
 
-  bar.sync(cta, cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
   handler.template forEachWorkNoFusion<uint8_t>([&] __device__(size_t nElts, size_t nAllElts, ncclSymPtr<uint8_t> input,
                                                                ncclSymPtr<uint8_t> output) {
@@ -96,5 +96,5 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   if (threadIdx.x == ringThreads) {
     *localSignalPtr = localSignalValue;
   }
-  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
 }

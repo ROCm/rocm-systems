@@ -88,7 +88,8 @@ struct connectMap {
   int sameProcess;
   int shared;
   int cudaDev;
-  // First 3 bits of offsets determine the mem bank. 001 is host mem, 011 is dev mem, 101 is shared host mem and 111 is shared dev mem.
+  // First 3 bits of offsets determine the mem bank. 001 is host mem, 011 is dev mem, 101 is shared host mem and 111
+  // is shared dev mem.
   struct connectMapMem mems[NCCL_NET_MAP_MEMS];
   // Offsets. 3 MSBs indicate mem bank, 111 indicates NULL.
   struct {
@@ -1128,8 +1129,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       }
       struct ncclSharedNetComms* comms = progressState->netComms[resources->netDev] + resources->tpRemoteRank;
       // let only one localrank connect to a tpRemoteRank to avoid duplicate connections
-      if (comms->activeConnect[resources->channelId] == 0)
+      if (comms->activeConnect[resources->channelId] == 0) {
         comms->activeConnect[resources->channelId] = (resources->tpLocalRank + 1);
+      }
       if (comms->sendComm[resources->channelId] == NULL &&
           comms->activeConnect[resources->channelId] == (resources->tpLocalRank + 1)) {
         if (rcclAinicRoce) {
@@ -1336,9 +1338,10 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       }
 
       // Copy the mhandle dptr, if implemented
-      if (resources->netDeviceHandle && proxyState->ncclNet->getDeviceMr)
+      if (resources->netDeviceHandle && proxyState->ncclNet->getDeviceMr) {
         NCCLCHECK(proxyState->ncclNet->getDeviceMr(resources->netSendComm, resources->mhandles[p],
                                                    &connection->mhandles[p]));
+      }
     }
   }
 
@@ -1382,8 +1385,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       }
       struct ncclSharedNetComms* comms = progressState->netComms[resources->netDev] + resources->tpRemoteProxyRank;
       // reuse handle to for netdev/remote rank to avoid duplicate connections
-      if (comms->activeAccept[resources->channelId] == 0)
+      if (comms->activeAccept[resources->channelId] == 0) {
         comms->activeAccept[resources->channelId] = (resources->tpLocalRank + 1);
+      }
       // try connecting while comm is null
       if (comms->recvComm[resources->channelId] == NULL &&
           comms->activeAccept[resources->channelId] == (resources->tpLocalRank + 1)) {
@@ -1575,9 +1579,10 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       }
 
       // Copy the mhandle dptr
-      if (resources->netDeviceType != NCCL_NET_DEVICE_HOST && proxyState->ncclNet->getDeviceMr)
+      if (resources->netDeviceType != NCCL_NET_DEVICE_HOST && proxyState->ncclNet->getDeviceMr) {
         NCCLCHECK(proxyState->ncclNet->getDeviceMr(resources->netRecvComm, resources->mhandles[p],
                                                    &connection->mhandles[p]));
+      }
     }
   }
 
@@ -1589,7 +1594,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 
 static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 0, connection));
     return ncclSuccess;
   }
@@ -1631,8 +1637,9 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
         struct ncclSharedNetComms* comms =
           proxyState->progressState.netComms[resources->netDev] + resources->tpRemoteRank;
         comms->sendRefCount[resources->channelId]--;
-        if (comms->sendRefCount[resources->channelId] == 0)
+        if (comms->sendRefCount[resources->channelId] == 0) {
           NCCLCHECK(proxyState->ncclNet->closeSend(comms->sendComm[resources->channelId]));
+        }
       } else {
         NCCLCHECK(proxyState->ncclNet->closeSend(resources->netSendComm));
       }
@@ -1647,7 +1654,8 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
 
 static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
   struct recvNetResources* resources = (struct recvNetResources*)(connection->transportResources);
-  if (connection->state == connSharedInitialized) { // NVB Preconnect
+  if (connection->state == connSharedInitialized) {
+    // NVB Preconnect
     NCCLCHECK(sharedNetBuffersDestroy(proxyState, connection->tpLocalRank, 1, connection));
     return ncclSuccess;
   }
@@ -1685,8 +1693,9 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
         struct ncclSharedNetComms* comms =
           proxyState->progressState.netComms[resources->netDev] + resources->tpRemoteProxyRank;
         comms->recvRefCount[resources->channelId]--;
-        if (comms->recvRefCount[resources->channelId] == 0)
+        if (comms->recvRefCount[resources->channelId] == 0) {
           NCCLCHECK(proxyState->ncclNet->closeRecv(comms->recvComm[resources->channelId]));
+        }
       } else {
         NCCLCHECK(proxyState->ncclNet->closeRecv(resources->netRecvComm));
       }
@@ -1912,9 +1921,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             (struct recvNetResources*)(args->subs[next].connection->transportResources);
           if (nextRes->netRecvComm == recvComm) break;
         }
-        if (next == args->nsubs) { // Not found
+        if (next == args->nsubs) {
+          // Not found
           groupSize = 0;
-        } else if (s != next) { // We found a sub later with the same recvComm ; swap subs
+        } else if (s != next) {
+          // We found a sub later with the same recvComm ; swap subs
           struct ncclProxySubArgs temp;
           memcpy(&temp, sub, sizeof(struct ncclProxySubArgs));
           memcpy(sub, args->subs + next, sizeof(struct ncclProxySubArgs));
@@ -2088,8 +2099,11 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                 INFO(NCCL_INIT, "%s: issued GDC flush", __func__);
               }
 #else
-              WARN("NET: GDR Flush only supported on x86_64");
-              return ncclInternalError;
+              // Portable equivalent. seq_cst fence keeps the load inside
+              // ncclGdrCudaRead from being reordered ahead of the CQE poll.
+              std::atomic_thread_fence(std::memory_order_seq_cst);
+              uint64_t dummy;
+              NCCLCHECK(ncclGdrCudaRead(resources->gdrDesc, &dummy, resources->gdcFlush, sizeof(dummy)));
 #endif
             } else {
               int subCount = 0;
@@ -2185,9 +2199,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             sub->transmitted > sub->done) {
             if (subGroup->recvRequestsCache[sub->done % NCCL_STEPS]) {
               // the multirecv requests are only cached in the first sub.
-              if (proxyState->ncclNet->irecvConsumed)
+              if (proxyState->ncclNet->irecvConsumed) {
                 NCCLCHECK(proxyState->ncclNet->irecvConsumed(resources->netRecvComm, subGroup->recvRequestsSubCount,
                                                              subGroup->recvRequestsCache[sub->done % NCCL_STEPS]));
+              }
               subGroup->recvRequestsCache[sub->done % NCCL_STEPS] = NULL;
             }
             int doneStepId = sub->done;

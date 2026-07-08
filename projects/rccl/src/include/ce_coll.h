@@ -72,13 +72,27 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
 
 bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 
+bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
+                         ncclSymRegType_t winRegType);
+
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);
 
-ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, void* ceCollHandle);
+// Intra-LSA-rank barrier.
+ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream, struct ncclCeCollArgs* profilerArgs = nullptr);
+
+// Allocate / free internal arrays for a batch-ops parameter struct.
+ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int capacity);
+void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
+
+// Launch a batch of cudaMemcpyAsync ops
+ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsParams* params, cudaStream_t stream,
+                                  struct ncclCeCollArgs* profilerArgs = nullptr);
 
 ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan);
+
+ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan);
 
 ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
@@ -87,4 +101,8 @@ ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, c
 ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
 ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
+
+ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 #endif /* NCCL_CE_COLL_H_ */

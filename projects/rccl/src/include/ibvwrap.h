@@ -73,6 +73,7 @@ ncclResult_t wrap_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int
 ncclResult_t wrap_ibv_destroy_qp(struct ibv_qp* qp);
 ncclResult_t wrap_ibv_query_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* supported);
 ncclResult_t wrap_ibv_set_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* supported);
+ncclResult_t wrap_ibv_query_port_speed(struct ibv_context* context, uint8_t port_num, uint64_t* speed);
 
 static inline ncclResult_t wrap_ibv_create_ah(struct ibv_ah** ret, struct ibv_pd* pd, struct ibv_ah_attr* attr) {
   if (ret) *ret = NULL; /*don't leave a stale pointer behind if creation fails*/
@@ -104,6 +105,7 @@ static inline ncclResult_t wrap_ibv_destroy_ah(struct ibv_ah* ah) {
   }
   return ncclSuccess;
 }
+
 
 static inline ncclResult_t wrap_ibv_post_send(struct ibv_qp* qp, struct ibv_send_wr* wr, struct ibv_send_wr** bad_wr) {
   int ret = qp->context->ops.post_send(

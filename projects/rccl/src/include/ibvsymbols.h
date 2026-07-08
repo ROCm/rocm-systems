@@ -49,6 +49,7 @@ struct ncclIbvSymbols {
   const char* (*ibv_internal_event_type_str)(enum ibv_event_type event);
   int (*ibv_internal_query_ece)(struct ibv_qp* qp, struct ibv_ece* ece);
   int (*ibv_internal_set_ece)(struct ibv_qp* qp, struct ibv_ece* ece);
+  int (*ibv_internal_query_port_speed)(struct ibv_context* context, uint8_t port_num, uint64_t* speed);
 };
 
 /* Constructs IB verbs symbols per rdma-core linking or dynamic loading mode */

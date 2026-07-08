@@ -16,6 +16,9 @@
 #include "archinfo.h"
 #include <cinttypes>
 
+// PCI device class for NVSwitch (used to identify remote NVLink targets)
+#define PCI_NVSWITCH_CLASS "0x068000"
+
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
@@ -409,6 +412,14 @@ static ncclResult_t xmlAddTree(struct ncclXml* dst, struct ncclXmlNode* parent, 
 
 // Dictionary for STR -> INT conversions. No dictionary size information,
 // there needs to be a last element with str == NULL.
+
+inline void printMissingTopoDictValueHint() {
+  INFO(NCCL_GRAPH,
+       "HINT: In many cases this issue indicates missing or faulty information in the provided topology file.");
+  INFO(NCCL_GRAPH, "HINT: To confirm, set NCCL_TOPO_DUMP_FILE=topo.xml to produce the topology NCCL has detected and "
+                   "compare to the one provided.");
+}
+
 struct kvDict {
   const char* str;
   int value;
@@ -424,6 +435,7 @@ static ncclResult_t kvConvertToInt(const char* str, int* value, struct kvDict* d
     d++;
   }
   INFO(NCCL_GRAPH, "KV Convert to int : could not find value of '%s' in dictionary, falling back to %d", str, d->value);
+  printMissingTopoDictValueHint();
   *value = d->value;
   return ncclSuccess;
 }
@@ -445,6 +457,7 @@ static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* d
     d++;
   }
   WARN("KV Convert to str : could not find value %d in dictionary", value);
+  printMissingTopoDictValueHint();
   return ncclInternalError;
 }
 

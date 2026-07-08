@@ -8,7 +8,7 @@
 #include "param/param_registry.h"
 #include "debug.h"
 
-extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL void* ncclParamRegistryInstance() {
+extern "C" void* ncclParamRegistryInstance() {
   static ncclParamRegistry::registryState state;
   return &state;
 }

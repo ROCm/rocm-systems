@@ -130,21 +130,24 @@ ncclResult_t IbCastGinIbInit(void** ctx, uint64_t commId, ncclDebugLogger_t logF
   return IbCastGinIbInitType(ctx, commId, logFunction, ncclParamCastGinType(), &IbCastGinIb);
 }
 
-// GIN Entry point, which will then morph into either the GDAKI or PROXY backend
+// GIN Entry point, which will then morph into either the GDAKI or PROXY backend.
+// Must match the v14 ncclGin_t layout (17 fields): name, init, then NULLs that
+// IbCastGinIbInitType overwrites via memcpy from the selected backend vtable.
 ncclGin_t IbCastGinIb = {"GIN_IB", IbCastGinIbInit,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL,     NULL,
-                         NULL};
+                         NULL,     NULL, NULL, NULL, NULL, NULL, NULL,
+                         NULL,     NULL, NULL, NULL, NULL, NULL, NULL};
 
 ncclResult_t IbCastGinIbFinalize(void* ctx) {
   if (ctx) free(ctx);
   return IbCastFinalizeDevices();
+}
+
+// v14 GIN plugins expose GIN capability flags via getGinProperties. IB-CAST's
+// IB proxy/GDAKI backends support both strong and VA signals.
+ncclResult_t IbCastGinIbGetGinProperties(ncclGinProperties_v14_t* ginProps) {
+  ginProps->supportsStrongSignals = true;
+  ginProps->supportsVASignals = true;
+  return ncclSuccess;
 }
 
 static ncclResult_t IbCastGinIbAllGather(struct CastIbGinCollComm* cComm, void* srcBuf, void* recvBuf, size_t len) {
@@ -317,7 +320,7 @@ ncclResult_t IbCastGinIbGdakiConnect(void* ctx, void* handles[], int nranks, int
   return ncclSuccess;
 }
 
-ncclResult_t IbCastGinIbGdakiCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** ginCtx,
+ncclResult_t IbCastGinIbGdakiCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** ginCtx,
                                            ncclNetDeviceHandle_t** devHandle) {
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
 
@@ -351,6 +354,7 @@ ncclResult_t IbCastGinIbGdakiQueryLastError(void* ginCtx, bool* hasError) {
 ncclGin_t IbCastGinIbGdaki = {"GIN_IB_GDAKI",
                               IbCastGinIbGdakiInit,
                               IbCastGinIbGdakiDevices,
+                              IbCastGinIbGetGinProperties,
                               IbCastGinIbGdakiGetProperties,
                               IbCastGinIbGdakiListen,
                               IbCastGinIbGdakiConnect,
@@ -361,11 +365,6 @@ ncclGin_t IbCastGinIbGdaki = {"GIN_IB_GDAKI",
                               IbCastGinIbGdakiDestroyContext,
                               IbCastGinIbCloseColl,
                               IbCastCloseListen,
-                              NULL,
-                              NULL,
-                              NULL,
-                              NULL,
-                              NULL,
                               IbCastGinIbGdakiProgress,
                               IbCastGinIbGdakiQueryLastError,
                               IbCastGinIbFinalize};
@@ -405,7 +404,7 @@ struct IbCastGinIbProxyCtx {
   int nContexts;
 };
 
-ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v13_t* config, void** ginCtx,
+ncclResult_t IbCastGinIbProxyCreateContext(void* collComm, ncclGinConfig_v14_t* config, void** ginCtx,
                                            ncclNetDeviceHandle_v11_t** devHandle) {
   ncclResult_t ret = ncclSuccess;
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
@@ -817,9 +816,15 @@ ncclResult_t IbCastGinIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
+// v14 GIN layout. The old v13 host-proxy data ops (iput/iputSignal/iget/iflush/
+// test) are not part of the v14 vtable — the v14 core never invokes them through
+// the GIN interface; IB-CAST's proxy data path drives those functions internally
+// via the RMA proxy/host-proxy path (gin_host_proxy.cc). ginProgress/queryLastError
+// stay NULL as in the prior proxy vtable.
 ncclGin_t IbCastGinIbProxy = {"GIN_IB_PROXY",
                               IbCastGinIbProxyInit,
                               IbCastDevices,
+                              IbCastGinIbGetGinProperties,
                               IbCastGinIbProxyGetProperties,
                               IbCastListen,
                               IbCastGinIbProxyConnect,
@@ -830,11 +835,6 @@ ncclGin_t IbCastGinIbProxy = {"GIN_IB_PROXY",
                               IbCastGinIbProxyDestroyContext,
                               IbCastGinIbCloseColl,
                               IbCastCloseListen,
-                              IbCastGinIbProxyIPut,
-                              IbCastGinIbProxyIPutSignal,
-                              IbCastGinIbProxyIGet,
-                              IbCastGinIbProxyIFlush,
-                              IbCastGinIbProxyTest,
                               NULL,
                               NULL,
                               IbCastGinIbFinalize};

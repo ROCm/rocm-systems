@@ -2,7 +2,7 @@
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 # Adapted from NVIDIA NCCL ir/Makefile (v2.29.2-1).
 #
-# See LICENSE.txt for license information
+# See LICENSE.txt for more license information
 #
 # LLVM IR / bitcode generation for RCCL device APIs.
 #

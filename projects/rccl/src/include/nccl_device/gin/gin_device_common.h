@@ -21,6 +21,14 @@
 #define NCCL_GIN_PROXY_ENABLE 1
 #endif
 
+#ifndef NCCL_GIN_GPI_ENABLE
+#if CUDA_VERSION >= 12020 && __CUDA_ARCH__ >= 700
+#define NCCL_GIN_GPI_ENABLE 1
+#else
+#define NCCL_GIN_GPI_ENABLE 0
+#endif
+#endif
+
 #ifndef NCCL_GIN_GDAKI_ENABLE
 #if defined(__HIP_PLATFORM_AMD__)
 #define NCCL_GIN_GDAKI_ENABLE 0
@@ -39,7 +47,8 @@ enum ncclGinOptFlags {
 
 #define NCCL_GIN_BACKEND_MASK_ALL \
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
-   ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI)
+   ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI | \
+   ((NCCL_GIN_GPI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GPI)
 
 // Resource sharing mode for a given ncclGin/ncclGin_C *instance*.
 // This mode is selected at construction time and is carried by the ncclGin
@@ -49,6 +58,7 @@ enum ncclGinOptFlags {
 enum ncclGinResourceSharingMode : uint8_t {
   NCCL_GIN_RESOURCE_SHARING_GPU = 0,
   NCCL_GIN_RESOURCE_SHARING_CTA = 1,
+  NCCL_GIN_RESOURCE_SHARING_THREAD = 2,
 };
 
 struct ncclGinCtx {
@@ -86,6 +96,7 @@ struct ncclGinSignalDescriptor {
       ncclGinSignal_t signalId;
     } indexedSignal;
   };
+  bool isStrong;
 };
 
 #if NCCL_CHECK_CUDACC
@@ -98,7 +109,8 @@ struct ncclGinApi_Wait {
 
 template <ncclNetDeviceType backend>
 struct ncclGinApi_FlushAsync {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, uint32_t peer, ncclGinRequest_t* outRequest, uint32_t optFlags);
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, uint32_t peer, ncclGinRequest_t* outRequest, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, uint32_t optFlags);
 };
 
 template <ncclNetDeviceType backend>
@@ -130,14 +142,19 @@ struct ncclGinApi_PutValue {
                                       uint32_t optFlags = ncclGinOptFlagsDefault);
 };
 
+struct ncclGinOffsetPtr {
+  uint64_t* ptr;
+  uint64_t offset;
+};
+
 template <ncclNetDeviceType backend>
 struct ncclGinApi_GetSignalPtr {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinSignal_t signalId);
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx, int peer, ncclGinSignal_t signalId);
 };
 
 template <ncclNetDeviceType backend>
 struct ncclGinApi_GetCounterPtr {
-  NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx, int peer, ncclGinCounter_t counterId);
+  NCCL_DEVICE_INLINE static ncclGinOffsetPtr call(ncclGinCtx, int peer, ncclGinCounter_t counterId);
 };
 
 template <ncclNetDeviceType backend>
@@ -153,7 +170,8 @@ struct ncclGinApi_ResetCounter {
 template <ncclNetDeviceType backend>
 struct ncclGinApi_Flush {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, cuda::memory_order ord, uint32_t* abortFlag);
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx, Coop, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      cuda::memory_order ord, uint32_t* abortFlag);
 };
 #endif
 
@@ -171,6 +189,11 @@ NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGi
   case (int)NCCL_NET_DEVICE_GIN_GDAKI:
     if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_GDAKI))) __builtin_unreachable();
     return ApiFn<NCCL_NET_DEVICE_GIN_GDAKI>::call(ctx, static_cast<Arg&&>(arg)...);
+#endif
+#if NCCL_GIN_GPI_ENABLE
+  case (int)NCCL_NET_DEVICE_GIN_GPI:
+    if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_GPI))) __builtin_unreachable();
+    return ApiFn<NCCL_NET_DEVICE_GIN_GPI>::call(ctx, static_cast<Arg&&>(arg)...);
 #endif
   default:
     __builtin_unreachable();
