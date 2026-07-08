@@ -48,9 +48,11 @@ Adding a new storage format should mean adding one implementation behind the
 boundary and extending one selection point — not editing profiling, analysis,
 and utility code.
 
-## Architectural Decisions (AD)
+## User visible architectural Decisions (AD)
 
-Each decision below is recorded with its rationale and consequences
+The purpose of this section is to outline architectural decisions which potentially impact user experience in order to simplify receiving feedback on them.
+For this purpose this also outlines ADs motivation and possible mitigation strategies.
+
 
 ### AD-1: The CSV profile output format support is removed, rocpd becomes the default profile source. 
 
