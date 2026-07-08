@@ -683,10 +683,15 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
       }
     } else {
       // Remote copy to other ranks: send to rank dstRank's receive buffer at position comm->rank
-        size_t* peerRecvSizes = args->sizes + 4 * comm->nRanks * dstRank + 2 * comm->nRanks;
+        size_t* peerRecvSizes  = args->sizes + 4 * comm->nRanks * dstRank + 2 * comm->nRanks;
         size_t* peerRecvDispls = args->sizes + 4 * comm->nRanks * dstRank + 3 * comm->nRanks;
         peerDispls = peerRecvDispls[comm->rank];
         peerRcvSize = peerRecvSizes[comm->rank];
+        if (chunkBytes != peerRcvSize) {
+          WARN("CE AlltoAllv: size mismatch rank %d -> %d: sendBytes=%zu peerRecvBytes=%zu", comm->rank, dstRank, chunkBytes, peerRcvSize);
+          ret = ncclInvalidUsage;
+          goto fail;
+        }
 
         uint8_t* dstPtr = (uint8_t*)myRecvBuff + peerDispls;
         offset = dstPtr - (uint8_t*)args->recvBuff;
