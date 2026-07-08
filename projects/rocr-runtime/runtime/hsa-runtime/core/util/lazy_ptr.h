@@ -67,6 +67,10 @@ template <typename T> class lazy_ptr {
   }
 
   lazy_ptr& operator=(lazy_ptr&& rhs) {
+    // Guard against self move-assignment. Without this, p = std::move(p) would
+    // reduce to obj = std::move(obj) on a std::unique_ptr, which is UB per
+    // [res.on.arguments]. The guard makes the operation well-defined.
+    if (&rhs == this) return *this;
     obj = std::move(rhs.obj);
     func = std::move(rhs.func);
     return *this;

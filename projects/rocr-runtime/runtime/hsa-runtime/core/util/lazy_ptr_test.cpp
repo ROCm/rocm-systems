@@ -107,13 +107,29 @@ TEST(LazyPtrTest, ResetAfterMoveAssignIsSafe) {
   EXPECT_TRUE(dst.created());
 }
 
-// Self move-assignment must remain well-formed and return self.
+// Self move-assignment must remain well-formed and return self. operator=
+// guards against self-assignment (&rhs == this), so p = std::move(p) does not
+// reduce to a UB self-move of the underlying std::unique_ptr.
 TEST(LazyPtrTest, SelfMoveAssignReturnsSelf) {
   lazy_ptr<Widget> p([]() { return new Widget(3); });
 
+  // The self-move is deliberate here; -Wself-move would otherwise flag it.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wself-move"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-move"
+#endif
   lazy_ptr<Widget>& result = (p = std::move(p));
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
   EXPECT_EQ(&result, &p);
+  EXPECT_EQ((*p)->value, 3);  // guard preserved the object across self-move
 }
 
 }  // namespace

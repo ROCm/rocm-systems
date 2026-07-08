@@ -455,6 +455,13 @@ if( NOT ${BUILD_SHARED_LIBS} )
   install ( TARGETS ${CORE_RUNTIME_NAME} EXPORT ${CORE_RUNTIME_NAME}Targets )
 endif()
 
+## Unit tests for header-only utilities (opt-in; requires GTest).
+option(BUILD_ROCR_TESTS "Build hsa-runtime unit tests" OFF)
+if (BUILD_ROCR_TESTS)
+  enable_testing()
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/core/util)
+endif()
+
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
 if (NOT WIN32)
