@@ -60,9 +60,7 @@ namespace rocprofsys::rocprofiler_sdk
 /// Exposes SDK types as nested `using` aliases, SDK enum values as
 /// `static constexpr` constants, and SDK functions as `static` methods.
 /// No logic beyond direct forwarding lives here.
-///
-/// Serves as the `Wrapper` policy for backends::rocprofiler_sdk::backend<Wrapper>.
-struct sdk_wrapper
+struct backend
 {
     // ─── Compile-time SDK version ────────────────────────────────────────────────
     static constexpr std::uint32_t compile_time_version = ROCPROFILER_VERSION;
@@ -810,6 +808,6 @@ struct sdk_wrapper
     {
         return rocprofiler::sdk::get_buffer_tracing_names();
     }
-};  // struct sdk_wrapper
+};
 
 }  // namespace rocprofsys::rocprofiler_sdk

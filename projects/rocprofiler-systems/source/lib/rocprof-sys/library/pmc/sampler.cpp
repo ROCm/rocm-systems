@@ -107,8 +107,7 @@ using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_co
 
 #if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
-    backends::rocprofiler_sdk::backend_factory<
-        ::rocprofsys::rocprofiler_sdk::sdk_wrapper>>;
+    backends::rocprofiler_sdk::backend_factory<::rocprofsys::rocprofiler_sdk::backend>>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
