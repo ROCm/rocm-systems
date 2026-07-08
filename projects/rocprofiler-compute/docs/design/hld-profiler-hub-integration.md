@@ -10,7 +10,7 @@ Rocprof-compute produces two types of artifacts:
 Profiler Hub is targeted to abstract both of these types of data. However, only profiling data is a focus of this HLD at the first step.
 
 Profiling phase currently supports two output formats CSV and ROCPD. Currently CSV format is planned to be deprecated as part of another HLD.
-**Therefore, scope of HLD is ROCPD data collection on profiling phase only.**
+**Therefore, scope of HLD is current ROCPD data collection on profiling phase only, and how to extend it switch it Profiler Hub.**
 
 
 ### Profiling phase
@@ -19,7 +19,7 @@ During profiling phase `ROCm Compute` loads two collectors via `LD_PRELOAD`:
     - Collection result is in `rocpd` format containing kernel dispatches, agents info, kernel symbols.
     - Counters collection is disabled (when native collector is used, which is by default).
     - Separate databases are produced per each process and each run. Because many analysis types require ~10-20 passes and complex workloads could spawn multiple processes, this could produce ~100+ databases.
-    - At the end of each collection pass individual databases are merged into a resulting database.
+    - At the end of each collection pass python layer reads individual databases and merges them into a resulting database.
 - rocprofiler-compute-tool.so - `ROCm Compute`-provided library which collects profiling data inside target process.
     - Collection result is in `csv` format containing hardware counters.
     - Collected data is accumulated in memory and is written on disk at the process end.
