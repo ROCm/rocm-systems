@@ -1718,8 +1718,11 @@ TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
     setupP2PBuffers();
     ASSERT_MPI_SUCCESS(createTestCommunicator());
 
-    // Ensure default auto-detect (-1) is active; RCCL_PARAM caches the first
-    // read per process, so this must be unset before the first RCCL call.
+    // Save and clear RCCL_P2P_BATCH_ENABLE so the auto-detect path (-1) is
+    // exercised.  Restored after the test to avoid polluting subsequent tests.
+    const char*       saved_env = getenv("RCCL_P2P_BATCH_ENABLE");
+    const std::string saved_val = saved_env ? saved_env : "";
+    const bool        had_env   = (saved_env != nullptr);
     unsetenv("RCCL_P2P_BATCH_ENABLE");
 
     if(config.world_rank == 0)
@@ -1779,6 +1782,10 @@ TEST_F(P2pMPITest, P2pBatchAutoDisableOnSingleNode)
                               << ": Data validation failed at index " << error_idx
                               << ": expected " << expected_val
                               << ", got " << actual_val;
+
+    // Restore original env state
+    if(had_env)
+        setenv("RCCL_P2P_BATCH_ENABLE", saved_val.c_str(), 1);
 
     if(config.world_rank == 0)
     {
