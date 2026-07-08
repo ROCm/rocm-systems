@@ -112,26 +112,4 @@ namespace RcclUnitTesting
       }
     }
   }
-
-  TEST(AlltoAll, P2pBatchDisabledOnSingleNode)
-  {
-    TestBed testBed;
-
-    setenv("RCCL_P2P_BATCH_ENABLE", "0", 1);
-
-    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32};
-    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
-    std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1048576, 1024};
-    std::vector<bool>           const inPlaceList     = {false};
-    std::vector<bool>           const managedMemList  = {false};
-    std::vector<bool>           const useHipGraphList = {false};
-
-    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                           inPlaceList, managedMemList, useHipGraphList);
-    testBed.Finalize();
-
-    unsetenv("RCCL_P2P_BATCH_ENABLE");
-  }
 }
