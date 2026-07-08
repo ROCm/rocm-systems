@@ -538,7 +538,7 @@ public:
 #endif
 
   /**
-   * @brief Create and enqueue a non-blocking atomic add work queue entry (WQE).
+   * @brief Create and enqueue a non-fetching atomic add work queue entry (WQE).
    *
    * @param[in] dest Destination address for data transmission.
    * @param[in] value Data value for the atomic operation.
@@ -547,11 +547,11 @@ public:
    * @tparam Options Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void atomic_add_nbi(void *dest, uint64_t value,
-                                 const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
+  __device__ void atomic_add(void *dest, uint64_t value,
+                             const ActiveWFInfo& wf_info, PostOpt<PostOptions...> = {});
   template <typename... PostOptions>
-  __device__ void atomic_add_nbi_single(void *dest, uint64_t value,
-                                        PostOpt<PostOptions...> = {});
+  __device__ void atomic_add_single(void *dest, uint64_t value,
+                                    PostOpt<PostOptions...> = {});
 
   /**
    * @brief Create and enqueue a blocking atomic compare-and-swap work queue entry (WQE).
@@ -773,7 +773,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_fetch_add_nbi_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
+__device__ void QueuePairSHMEM<Provider>::atomic_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
@@ -787,7 +787,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(
+__device__ void QueuePairSHMEM<Provider>::atomic_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
@@ -914,7 +914,7 @@ __device__ uint64_t QueuePairSHMEM<Provider>::atomic_fetch_add_single(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
+__device__ void QueuePairSHMEM<Provider>::atomic_add(
     void *dest, uint64_t value,
     const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
@@ -926,7 +926,7 @@ __device__ void QueuePairSHMEM<Provider>::atomic_add_nbi(
 
 template <typename Provider>
 template <typename... PostOptions>
-__device__ void QueuePairSHMEM<Provider>::atomic_add_nbi_single(
+__device__ void QueuePairSHMEM<Provider>::atomic_add_single(
     void *dest, uint64_t value,
     PostOpt<PostOptions...> post_options) {
   static constexpr OpCode Op = OpCode::ATOMIC_FA;
