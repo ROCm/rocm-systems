@@ -52,14 +52,12 @@
 #include <sstream>
 #include <cstdlib>
 #include <algorithm>
+#include <vector>
+#include "amd_hsa_alloc_bounds.hpp"
 
 #ifdef SP3_STATIC_LIB
 #include "sp3.h"
 #endif // SP3_STATIC_LIB
-
-#ifndef _WIN32
-#define _alloca alloca
-#endif
 
 namespace rocr {
 namespace amd {
@@ -526,8 +524,13 @@ namespace code {
 
     void AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
     {
-      size_t size = sizeof(amdgpu_hsa_note_producer_t) + vendor_name.length() + architecture_name.length() + 1;
-      amdgpu_hsa_note_isa_t* desc = (amdgpu_hsa_note_isa_t*) _alloca(size);
+      size_t size = sizeof(amdgpu_hsa_note_isa_t) + vendor_name.length() + architecture_name.length() + 1;
+      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+        out << "ISA note buffer size exceeds limit: " << size << std::endl;
+        return;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_isa_t* desc = reinterpret_cast<amdgpu_hsa_note_isa_t*>(buffer.data());
       memset(desc, 0, size);
       desc->vendor_name_size = vendor_name.length()+1;
       desc->architecture_name_size = architecture_name.length()+1;
@@ -815,7 +818,12 @@ namespace code {
     void AmdHsaCode::AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_t) + producer.length();
-      amdgpu_hsa_note_producer_t* desc = (amdgpu_hsa_note_producer_t*) _alloca(size);
+      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+        out << "Producer note buffer size exceeds limit: " << size << std::endl;
+        return;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_producer_t* desc = reinterpret_cast<amdgpu_hsa_note_producer_t*>(buffer.data());
       memset(desc, 0, size);
       desc->producer_name_size = producer.length();
       desc->producer_major_version = major;
@@ -837,7 +845,13 @@ namespace code {
     void AmdHsaCode::AddNoteProducerOptions(const std::string& options)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_options_t) + options.length();
-      amdgpu_hsa_note_producer_options_t *desc = (amdgpu_hsa_note_producer_options_t*) _alloca(size);
+      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+        out << "Producer options note buffer size exceeds limit: " << size << std::endl;
+        return;
+      }
+      std::vector<char> buffer(size);
+      amdgpu_hsa_note_producer_options_t *desc =
+          reinterpret_cast<amdgpu_hsa_note_producer_options_t*>(buffer.data());
       desc->producer_options_size = options.length();
       memcpy(desc->producer_options, options.c_str(), options.length() + 1);
       AddAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, desc, size);
