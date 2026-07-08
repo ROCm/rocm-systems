@@ -53,7 +53,6 @@
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
-#include "amd_hsa_alloc_bounds.hpp"
 
 #ifdef SP3_STATIC_LIB
 #include "sp3.h"
@@ -63,6 +62,15 @@ namespace rocr {
 namespace amd {
 namespace hsa {
 namespace code {
+namespace detail {
+
+constexpr size_t kMaxAmdNoteBufferSize = 4096;
+
+inline bool IsWithinAmdNoteBufferLimit(size_t size) {
+  return size <= kMaxAmdNoteBufferSize;
+}
+
+}  // namespace detail
 
     using amd::elf::GetNoteString;
 
