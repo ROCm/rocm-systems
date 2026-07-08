@@ -179,6 +179,76 @@
         }
       ]
     },
+    "nchannels_per_net_peer_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "NChannelsPerNetPeer_ConfigField_HonoredAcrossRanks",
+          "description": "ncclConfig_t::nChannelsPerNetPeer resolves to the requested value on every rank and all ranks agree",
+          "test_filter": "NChannelsPerNetPeerMPITest.ConfigField_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "NChannelsPerNetPeer_Env_HonoredAcrossRanks",
+          "description": "NCCL_NCHANNELS_PER_NET_PEER is honored across ranks (own mpirun so the per-process NCCL_PARAM cache is fresh)",
+          "test_filter": "NChannelsPerNetPeerMPITest.Env_HonoredAcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "NChannelsPerNetPeer_Env_OverridesConfig_AcrossRanks",
+          "description": "NCCL_NCHANNELS_PER_NET_PEER overrides an explicit config field consistently on every rank (own mpirun for a fresh param cache)",
+          "test_filter": "NChannelsPerNetPeerMPITest.Env_OverridesConfig_AcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "NChannelsPerNetPeer_Default_LeavesUndef_AcrossRanks",
+          "description": "With neither config nor env set, the field stays UNDEF on every rank so paths.cc auto-tunes",
+          "test_filter": "NChannelsPerNetPeerMPITest.Default_LeavesUndef_AcrossRanks",
+          "timeout": 120
+        },
+        {
+          "name": "NChannelsPerNetPeer_ConfigField_FunctionalAllReduceEndToEnd",
+          "description": "A communicator built with nChannelsPerNetPeer set runs a correct AllReduce across all ranks",
+          "test_filter": "NChannelsPerNetPeerMPITest.ConfigField_FunctionalAllReduceEndToEnd",
+          "timeout": 180
+        },
+        {
+          "name": "NChannelsPerNetPeer_MultiNode_NetPeer_HonoredEndToEnd",
+          "description": "On >=2 nodes the knob is honored on every rank and the multi-node communicator runs a correct collective (exercises the NET path the knob governs)",
+          "test_filter": "NChannelsPerNetPeerMPITest.MultiNode_NetPeer_HonoredEndToEnd",
+          "timeout": 300
+        },
+        {
+          "name": "NChannelsPerNetPeer_NetSendRecv_AcrossNodes_EndToEnd",
+          "description": "Real ncclSend/ncclRecv across nodes with data validation on a communicator built with the knob set",
+          "test_filter": "NChannelsPerNetPeerMPITest.NetSendRecv_AcrossNodes_EndToEnd",
+          "timeout": 300
+        },
+        {
+          "name": "NChannelsPerNetPeer_NetTransport_SelectedForInterNodePeer",
+          "description": "Inter-node peer uses the NET transport (transportComm == netTransport.send) while a same-node peer does not",
+          "test_filter": "NChannelsPerNetPeerMPITest.NetTransport_SelectedForInterNodePeer",
+          "timeout": 300
+        },
+        {
+          "name": "NChannelsPerNetPeer_AutoTuneDivergence_Audit",
+          "description": "Audit configured vs auto-tuned effective per-peer channel count (comm->p2pnChannelsPerPeer) and NET-connected channel count; surfaces parity divergence",
+          "test_filter": "NChannelsPerNetPeerMPITest.AutoTuneDivergence_Audit",
+          "timeout": 300
+        }
+      ]
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
