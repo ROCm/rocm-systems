@@ -149,6 +149,31 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+#if HIP_VERSION >= 71260540
+  TEST(AllReduce, SingleProcMemReg)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclBfloat16};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {1,4314};
+    std::vector<bool>           const inPlaceList     = {true,false};
+    std::vector<bool>           const managedMemList  = {true,false};
+    std::vector<bool>           const useHipGraphList = {true,false};
+
+    setenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1", 1);
+    setenv("NCCL_CUMEM_ENABLE","1",1);
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    
+    testBed.Finalize();
+    unsetenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE");
+    unsetenv("NCCL_CUMEM_ENABLE");
+  }
+#endif
   // This tests using custom pre-mult scalars reductions
   TEST(AllReduce, PreMultScalar)
   {
