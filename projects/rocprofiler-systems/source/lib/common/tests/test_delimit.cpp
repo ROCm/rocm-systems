@@ -4,12 +4,14 @@
 #include "common/delimit.hpp"
 
 #include <gtest/gtest.h>
+#include <set>
 #include <string>
 #include <vector>
 
 using namespace rocprofsys::common;
 
 using strvec = std::vector<std::string>;
+using strset = std::set<std::string>;
 
 TEST(delimit_test, basic_split)
 {
@@ -42,3 +44,10 @@ TEST(delimit_test, no_delimiter_present)
 }
 
 TEST(delimit_test, empty_input) { EXPECT_EQ(delimit("", ","), strvec{}); }
+
+TEST(delimit_test, set_container_dedups_and_sorts)
+{
+    // Exercises the emplace()/reserve() concept branches for a non-vector container:
+    // std::set has emplace() (not emplace_back) and no reserve().
+    EXPECT_EQ((delimit<strset>("c,a,b,a", ",")), (strset{ "a", "b", "c" }));
+}
