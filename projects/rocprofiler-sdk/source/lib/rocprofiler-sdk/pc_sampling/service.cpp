@@ -234,8 +234,11 @@ is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
     // Require HSA-level init to be complete so that get_pcs_session_of() will succeed
     // and the ROCr session exists for every agent this function returns true for.
     if(!is_hsa_initialized().load()) return false;
-    return get_global_pc_sampling_sessions().rlock(
-        [agent_id](const auto& sessions) { return sessions.find(agent_id) != sessions.end(); });
+    return get_global_pc_sampling_sessions().rlock([agent_id](const auto& sessions) {
+        // If the agent_id is in the global sessions map,
+        // then the PC sampling service is configured on this agent.
+        return sessions.find(agent_id) != sessions.end();
+    });
 }
 
 PCSAgentSession*
