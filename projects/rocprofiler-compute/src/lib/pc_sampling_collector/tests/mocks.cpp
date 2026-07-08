@@ -92,6 +92,8 @@ void mock_code_object_writer_t::end_code_obj()
     ++m_ended_code_obj_count;
 }
 
+void mock_code_object_writer_t::write_kernel(uint64_t, const std::string&) {}
+
 void mock_code_object_writer_t::start_symbol(const symbol_t& symbol)
 {
     m_symbol_descriptions.push_back(symbol);

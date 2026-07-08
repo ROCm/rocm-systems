@@ -71,6 +71,7 @@ class mock_code_object_writer_t : public rocprofiler_compute_tool::code_object_w
 public:
     void        start_code_obj(size_t obj_id) override;
     void        end_code_obj() override;
+    void        write_kernel(uint64_t kernel_id, const std::string& name) override;
     void        start_symbol(const rocprofiler_compute_tool::symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const rocprofiler_compute_tool::instruction_t& inst) override;
