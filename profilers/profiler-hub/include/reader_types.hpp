@@ -133,6 +133,7 @@ using process_info_list_t = std::vector<process_info_ptr_t>;
 
 struct agent_info_t
 {
+    size_t                id{};
     std::string           agent_type;
     size_t                type_index;
     std::optional<size_t> absolute_index{};

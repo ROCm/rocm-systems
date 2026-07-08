@@ -212,6 +212,7 @@ reader_t::impl::get_all_agents()
             }
 
             auto agent_info_ptr        = std::make_shared<reader_types::agent_info_t>();
+            agent_info_ptr->id         = agent_info.id;
             agent_info_ptr->agent_type = agent_info.type.value();
             agent_info_ptr->type_index = agent_info.type_index.value();
             agent_info_ptr->absolute_index = agent_info.absolute_index;

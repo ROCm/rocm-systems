@@ -626,20 +626,26 @@ private:
                     &interval_row_result::name_ref,
                     &interval_row_result::category);
 
-        // kernel dispatch intervals: name_ref is the kernel_symbol id.
+        // kernel dispatch intervals: name_ref is the kernel_symbol id. Category is
+        // resolved in-SQL via rocpd_event/rocpd_info_category (LEFT JOIN, additive —
+        // mirrors the region and stream interval queries); the row set is unchanged.
         m_kernel_dispatch_interval_track_v4 =
             m_backend
                 ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
-                    fmt::format("SELECT k.id, ts_s.value, ts_e.value, k.kernel_id "
-                                "FROM rocpd_kernel_dispatch_{u} k "
-                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
-                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
-                                "WHERE k.track_id = ? ORDER BY ts_s.value",
-                                fmt::arg("u", u)),
+                    fmt::format(
+                        "SELECT k.id, ts_s.value, ts_e.value, k.kernel_id, IC.name "
+                        "FROM rocpd_kernel_dispatch_{u} k "
+                        "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
+                        "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
+                        "LEFT JOIN rocpd_event_{u} E ON E.id = k.event_id "
+                        "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                        "WHERE k.track_id = ? ORDER BY ts_s.value",
+                        fmt::arg("u", u)),
                     &interval_row_result::id,
                     &interval_row_result::start,
                     &interval_row_result::end,
-                    &interval_row_result::name_ref);
+                    &interval_row_result::name_ref,
+                    &interval_row_result::category);
 
         // memory copy intervals.
         m_memory_copy_interval_track_v4 =

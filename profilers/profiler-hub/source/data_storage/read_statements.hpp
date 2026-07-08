@@ -1333,19 +1333,26 @@ private:
                 &interval_row_result::name_ref,
                 &interval_row_result::category);
 
-        // gpu_queue: kernel dispatches keyed on (nid, pid, agent_id, queue_id)
+        // gpu_queue: kernel dispatches keyed on (nid, pid, agent_id, queue_id). Category
+        // is resolved in-SQL via rocpd_event/rocpd_string (LEFT JOIN, additive — mirrors
+        // the region and stream interval queries); the base SELECT list is otherwise
+        // unchanged, so the row set stays identical to get_track_stats' count.
         m_kernel_dispatch_interval_track = m_backend->create_read_statement_executor<
             interval_row_result,
             bind_types<size_t, size_t, size_t, size_t>>(
-            fmt::format("SELECT id, start, \"end\", kernel_id "
-                        "FROM rocpd_kernel_dispatch_{} "
-                        "WHERE nid = ? AND pid = ? AND agent_id = ? AND queue_id = ? "
-                        "ORDER BY start",
-                        u),
+            fmt::format(
+                "SELECT k.id, k.start, k.\"end\", k.kernel_id, CS.string "
+                "FROM rocpd_kernel_dispatch_{u} k "
+                "LEFT JOIN rocpd_event_{u} E ON E.id = k.event_id "
+                "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                "WHERE k.nid = ? AND k.pid = ? AND k.agent_id = ? AND k.queue_id = ? "
+                "ORDER BY k.start",
+                fmt::arg("u", u)),
             &interval_row_result::id,
             &interval_row_result::start,
             &interval_row_result::end,
-            &interval_row_result::name_ref);
+            &interval_row_result::name_ref,
+            &interval_row_result::category);
 
         // dma: memory copies keyed on (nid, pid, queue_id, stream_id). NULL queue_id /
         // stream_id are distinct group values, so prepare one variant per NULL pattern.
