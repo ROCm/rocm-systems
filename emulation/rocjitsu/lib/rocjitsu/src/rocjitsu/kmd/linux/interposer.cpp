@@ -88,6 +88,16 @@ static int connect_to_daemon() {
 
 namespace {
 
+#if defined(__clang__) && defined(__has_attribute) &&                                              \
+    __has_attribute(disable_sanitizer_instrumentation)
+#define RJ_NO_SANITIZE_INTERPOSER __attribute__((disable_sanitizer_instrumentation))
+#elif defined(__GNUC__)
+#define RJ_NO_SANITIZE_INTERPOSER                                                                  \
+  __attribute__((no_sanitize_address, no_sanitize_thread, no_sanitize_undefined))
+#else
+#define RJ_NO_SANITIZE_INTERPOSER
+#endif
+
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -126,7 +136,7 @@ public:
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
   pid_t (*fork)() = nullptr;
 
-  bool ready() const { return initialized_; }
+  RJ_NO_SANITIZE_INTERPOSER bool ready() const { return initialized_; }
 
   void resolve() {
     auto *handle = RTLD_NEXT;
@@ -546,7 +556,52 @@ alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
 
+static void *(*real_dlsym_fn)(void *, const char *) = nullptr;
+
+RJ_NO_SANITIZE_INTERPOSER __attribute__((constructor(101))) static void resolve_real_dlsym() {
+  real_dlsym_fn =
+      reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34"));
+  if (!real_dlsym_fn)
+    real_dlsym_fn =
+        reinterpret_cast<decltype(real_dlsym_fn)>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
+  if (!real_dlsym_fn) {
+    fprintf(stderr, "rocjitsu: failed to resolve real dlsym\n");
+    abort();
+  }
+}
+
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
+
+constexpr int DRM_NODE_PRIMARY = 0;
+constexpr int DRM_NODE_RENDER = 2;
+constexpr int DRM_BUS_PCI = 0;
+
+struct drmPciBusInfo {
+  uint16_t domain;
+  uint8_t bus;
+  uint8_t dev;
+  uint8_t func;
+};
+
+struct drmPciDeviceInfo {
+  uint16_t vendor_id;
+  uint16_t device_id;
+  uint16_t subvendor_id;
+  uint16_t subdevice_id;
+  uint8_t revision_id;
+};
+
+struct drmDevice {
+  char **nodes;
+  int available_nodes;
+  int bustype;
+  union {
+    drmPciBusInfo *pci;
+  } businfo;
+  union {
+    drmPciDeviceInfo *pci;
+  } deviceinfo;
+};
 
 } // namespace
 
@@ -1661,6 +1716,155 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
   return real_lxstat64(ver, actual, buf);
 }
 
+// -- DRM device enumeration (direct PLT linkage consumers) --
+
+static std::unordered_set<void *> our_drm_allocs;
+static std::mutex drm_alloc_mutex;
+
+static drmDevice *alloc_drm_device(const Sysfs::GpuInfo &gpu, uint32_t card_idx) {
+  uint32_t render_minor = gpu.drm_render_minor;
+  char primary_path[64], render_path[64];
+  snprintf(primary_path, sizeof(primary_path), "/dev/dri/card%u", card_idx);
+  snprintf(render_path, sizeof(render_path), "/dev/dri/renderD%u", render_minor);
+
+  size_t primary_len = strlen(primary_path) + 1;
+  size_t render_len = strlen(render_path) + 1;
+  constexpr int kMaxNodeTypes = 3;
+
+  size_t alloc_size = sizeof(drmDevice) + kMaxNodeTypes * sizeof(char *) + primary_len +
+                      render_len + sizeof(drmPciBusInfo) + sizeof(drmPciDeviceInfo);
+  auto *mem = static_cast<uint8_t *>(calloc(1, alloc_size));
+  if (!mem)
+    return nullptr;
+
+  auto *dev = reinterpret_cast<drmDevice *>(mem);
+  auto *nodes = reinterpret_cast<char **>(mem + sizeof(drmDevice));
+  auto *str_buf = reinterpret_cast<char *>(nodes + kMaxNodeTypes);
+  auto *bus = reinterpret_cast<drmPciBusInfo *>(str_buf + primary_len + render_len);
+  auto *pci_dev = reinterpret_cast<drmPciDeviceInfo *>(bus + 1);
+
+  memcpy(str_buf, primary_path, primary_len);
+  memcpy(str_buf + primary_len, render_path, render_len);
+
+  nodes[DRM_NODE_PRIMARY] = str_buf;
+  nodes[DRM_NODE_RENDER] = str_buf + primary_len;
+  nodes[1] = nullptr;
+
+  uint32_t bus_num = (gpu.location_id >> 8) & 0xFF;
+  uint32_t dev_num = (gpu.location_id >> 3) & 0x1F;
+  uint32_t func_num = gpu.location_id & 0x7;
+
+  bus->domain = static_cast<uint16_t>(gpu.domain);
+  bus->bus = static_cast<uint8_t>(bus_num);
+  bus->dev = static_cast<uint8_t>(dev_num);
+  bus->func = static_cast<uint8_t>(func_num);
+
+  pci_dev->vendor_id = static_cast<uint16_t>(gpu.vendor_id);
+  pci_dev->device_id = static_cast<uint16_t>(gpu.device_id);
+  pci_dev->subvendor_id = static_cast<uint16_t>(gpu.vendor_id);
+  pci_dev->subdevice_id = static_cast<uint16_t>(gpu.device_id);
+  pci_dev->revision_id = static_cast<uint8_t>(gpu.pci_revision_id);
+
+  dev->nodes = nodes;
+  dev->available_nodes = (1 << DRM_NODE_PRIMARY) | (1 << DRM_NODE_RENDER);
+  dev->bustype = DRM_BUS_PCI;
+  dev->businfo.pci = bus;
+  dev->deviceinfo.pci = pci_dev;
+
+  {
+    std::lock_guard lock(drm_alloc_mutex);
+    our_drm_allocs.insert(mem);
+  }
+
+  return dev;
+}
+
+RJ_INTERPOSER_EXPORT void drmFreeDevice(drmDevice **device) {
+  if (!device || !*device)
+    return;
+  bool ours;
+  {
+    std::lock_guard lock(drm_alloc_mutex);
+    ours = our_drm_allocs.erase(*device) != 0;
+  }
+  if (ours) {
+    free(*device);
+    *device = nullptr;
+    return;
+  }
+  using fn_t = void (*)(drmDevice **);
+  static fn_t real_fn = util::lookup_symbol<fn_t>(RTLD_NEXT, "drmFreeDevice");
+  if (real_fn)
+    real_fn(device);
+}
+
+RJ_INTERPOSER_EXPORT void drmFreeDevices(drmDevice **devices, int count) {
+  for (int i = 0; i < count; ++i) {
+    if (devices[i])
+      drmFreeDevice(&devices[i]);
+  }
+}
+
+RJ_INTERPOSER_EXPORT int drmGetDevice(int fd, drmDevice **device) {
+  if (!device)
+    return -EINVAL;
+  *device = nullptr;
+  if (!InterposerContext::real.ready() || !InterposerContext::ctx.is_drm(fd))
+    return -ENODEV;
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return -ENODEV;
+  *device = alloc_drm_device(*gpu, 0);
+  return *device ? 0 : -ENOMEM;
+}
+
+RJ_INTERPOSER_EXPORT int drmGetDevice2(int fd, uint32_t /*flags*/, drmDevice **device) {
+  return drmGetDevice(fd, device);
+}
+
+RJ_INTERPOSER_EXPORT int drmGetDevices(drmDevice **devices, int max_devices) {
+  if (!devices || max_devices <= 0)
+    return 0;
+  auto *gpu = interposer_gpu_info();
+  if (!gpu)
+    return 0;
+  devices[0] = alloc_drm_device(*gpu, 0);
+  return devices[0] ? 1 : 0;
+}
+
+RJ_INTERPOSER_EXPORT int drmGetDevices2(uint32_t /*flags*/, drmDevice **devices, int max_devices) {
+  return drmGetDevices(devices, max_devices);
+}
+
+// Intercept dlsym so that dlsym-based consumers (amdsmi) get our DRM
+// device query implementations instead of libdrm's.  Without this,
+// libdrm's internal drmGetDeviceFromDevId runs on our synthetic memfds
+// and produces a corrupted drmDevice that crashes in drmFreeDevice.
+// drmFreeDevice/drmFreeDevices are intentionally excluded: our own
+// drmFreeDevice fallback calls dlsym(RTLD_NEXT, "drmFreeDevice") and
+// including it here would cause infinite recursion.
+RJ_INTERPOSER_EXPORT RJ_NO_SANITIZE_INTERPOSER void *dlsym(void *handle, const char *symbol) {
+  if (!real_dlsym_fn) {
+    // Called before resolve_real_dlsym constructor runs (e.g., during
+    // dynamic linker symbol resolution at library load time). Resolve the real
+    // dlsym now before touching interposer state or sanitizer-initialized code.
+    resolve_real_dlsym();
+  }
+  auto symbol_addr = reinterpret_cast<uintptr_t>(symbol);
+  if (symbol_addr != 0 && InterposerContext::real.ready()) {
+    static const std::unordered_map<std::string_view, void *> overrides = {
+        {"drmGetDevice", reinterpret_cast<void *>(&drmGetDevice)},
+        {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
+        {"drmGetDevices", reinterpret_cast<void *>(&drmGetDevices)},
+        {"drmGetDevices2", reinterpret_cast<void *>(&drmGetDevices2)},
+    };
+    auto it = overrides.find(symbol);
+    if (it != overrides.end())
+      return it->second;
+  }
+  return real_dlsym_fn(handle, symbol);
+}
+
 RJ_INTERPOSER_EXPORT pid_t fork() {
   assert(InterposerContext::real.ready());
   pid_t pid = InterposerContext::real.fork();
@@ -1670,3 +1874,5 @@ RJ_INTERPOSER_EXPORT pid_t fork() {
 }
 
 } // extern "C"
+
+#undef RJ_NO_SANITIZE_INTERPOSER

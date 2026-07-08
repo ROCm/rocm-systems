@@ -278,6 +278,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    rocjitsu_cli_test.cpp
     simdojo_sim_test.cpp
     simulated_driver_test.cpp
     decode_smoke_test.cpp
@@ -377,6 +378,7 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+target_include_directories(rocjitsu_tests PRIVATE ${RJ_VERSION_INCLUDE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
