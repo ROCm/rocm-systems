@@ -1,0 +1,180 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+
+namespace {
+constexpr size_t kWidth = 8;
+constexpr size_t kHeight = 4;
+constexpr size_t kByteCount = kWidth * kHeight;
+
+std::array<uint8_t, kByteCount> MakePattern(uint8_t seed) {
+  std::array<uint8_t, kByteCount> pattern{};
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    pattern[i] = static_cast<uint8_t>(seed + i);
+  }
+  return pattern;
+}
+
+hipChannelFormatDesc ByteChannelDesc() { return hipCreateChannelDesc<uint8_t>(); }
+}  // namespace
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes) {
+  CHECK_IMAGE_SUPPORT;
+
+  const auto src = MakePattern(0x23);
+  std::array<uint8_t, kByteCount> dst{};
+  void* device_ptr = nullptr;
+  hipArray_t array = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), src.data(), src.size()));
+  HIP_CHECK(hipMemcpyDtoA(array, 0, reinterpret_cast<hipDeviceptr_t>(device_ptr), src.size()));
+  HIP_CHECK(hipMemcpyAtoH(dst.data(), array, 0, dst.size()));
+
+  REQUIRE(dst == src);
+
+  HIP_CHECK(hipFreeArray(array));
+  HIP_CHECK(hipFree(device_ptr));
+}
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes) {
+  CHECK_IMAGE_SUPPORT;
+
+  const auto src = MakePattern(0x45);
+  std::array<uint8_t, kByteCount> dst{};
+  hipArray_t src_array = nullptr;
+  hipArray_t dst_array = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
+
+  HIP_CHECK(hipMemcpy2DToArray(src_array, 0, 0, src.data(), kWidth, kWidth, kHeight,
+                               hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DArrayToArray(dst_array, 0, 0, src_array, 0, 0, kWidth, kHeight,
+                                    hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipMemcpy2DFromArray(dst.data(), kWidth, dst_array, 0, 0, kWidth, kHeight,
+                                 hipMemcpyDeviceToHost));
+
+  REQUIRE(dst == src);
+
+  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipFreeArray(src_array));
+}
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsync_NullSource_IsRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  hipStream_t stream = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  const hipError_t status = hipMemcpyHtoAAsync(array, 0, nullptr, kByteCount, stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(array));
+
+  REQUIRE(status != hipSuccess);
+  HIP_CHECK_ERROR(hipGetLastError(), status);
+  HIP_CHECK(hipGetLastError());
+}
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyDtoA_NullArray_IsRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  const auto src = MakePattern(0x67);
+  void* device_ptr = nullptr;
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMalloc(&device_ptr, src.size()));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), src.data(), src.size()));
+
+  const hipError_t status = hipMemcpyDtoA(nullptr, 0, reinterpret_cast<hipDeviceptr_t>(device_ptr),
+                                          src.size());
+
+  HIP_CHECK(hipFree(device_ptr));
+
+  REQUIRE(status != hipSuccess);
+  HIP_CHECK_ERROR(hipGetLastError(), status);
+  HIP_CHECK(hipGetLastError());
+}
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyAtoD_NullArray_IsRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  void* device_ptr = nullptr;
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMalloc(&device_ptr, kByteCount));
+
+  const hipError_t status =
+      hipMemcpyAtoD(reinterpret_cast<hipDeviceptr_t>(device_ptr), nullptr, 0, kByteCount);
+
+  HIP_CHECK(hipFree(device_ptr));
+
+  REQUIRE(status != hipSuccess);
+  HIP_CHECK_ERROR(hipGetLastError(), status);
+  HIP_CHECK(hipGetLastError());
+}
+
+HIP_TEST_CASE(Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t src_array = nullptr;
+  hipArray_t dst_array = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMallocArray(&src_array, &desc, kWidth, kHeight));
+  HIP_CHECK(hipMallocArray(&dst_array, &desc, kWidth, kHeight));
+
+  const hipError_t status = hipMemcpy2DArrayToArray(
+      dst_array, 0, 0, src_array, 0, 0, kWidth, kHeight, static_cast<hipMemcpyKind>(-1));
+
+  HIP_CHECK(hipFreeArray(dst_array));
+  HIP_CHECK(hipFreeArray(src_array));
+
+  REQUIRE(status != hipSuccess);
+  HIP_CHECK_ERROR(hipGetLastError(), status);
+  HIP_CHECK(hipGetLastError());
+}
+
+#if !HT_NVIDIA
+HIP_TEST_CASE(Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSync) {
+  CHECK_IMAGE_SUPPORT;
+
+  const auto src = MakePattern(0x89);
+  std::array<uint8_t, kByteCount> dst{};
+  hipArray_t array = nullptr;
+  hipStream_t stream = nullptr;
+  const auto desc = ByteChannelDesc();
+
+  HIP_CHECK(hipMallocArray(&array, &desc, kByteCount, 1));
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipMemcpyHtoAAsync(array, 0, src.data(), src.size(), stream));
+  HIP_CHECK(hipMemcpyAtoHAsync(dst.data(), array, 0, dst.size(), stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  REQUIRE(dst == src);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFreeArray(array));
+}
+#endif

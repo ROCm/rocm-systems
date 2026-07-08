@@ -8,8 +8,12 @@ The first domains are:
 
 - `memory`: allocation and free contracts
 - `transfer`: synchronous copy contracts
+- `driver_memcpy`: driver-style directed 1D synchronous and stream-ordered copy contracts
+- `driver_memcpy_2d`: driver-style struct-based 2D synchronous and stream-ordered copy contracts
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
 - `device`: portable current-device property contracts
+- `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
+- `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `stream_props`: stream creation flag, priority, identity, device, and event timing contracts
 - `stream_callbacks`: stream callback and host-function ordering contracts
@@ -17,7 +21,11 @@ The first domains are:
 - `stream_memory_ops`: stream wait/write value and batch memory operation contracts
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `memset`: byte, word, dword, and async memset contracts
+- `driver_memset_async`: driver-style directed async byte, word, and dword memset contracts
+- `driver_memset_2d`: driver-style directed 2D byte, word, and dword memset contracts
+- `driver_memset_async_2d3d`: driver-style async 2D and 3D memset contracts
 - `error_api`: error name and string API contracts without backend-specific text assumptions
+- `driver_error`: driver-style error name and string API contracts
 - `kernel`: tiny in-source kernel launch contracts
 - `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `kernel_launch`: cooperative, extended, symbol, and AMD extension kernel launch contracts
@@ -31,6 +39,7 @@ The first domains are:
 - `graph_topology`: graph node, root, edge, dependency, and dependent introspection contracts
 - `graph_clone`: graph clone lifecycle and cloned memcpy graph contracts
 - `graph_update`: graph exec whole-graph update and memcpy, memset, host, child graph, and event node parameter update contracts
+- `graph_exec_lifecycle`: executable graph instantiate-with-flags, upload, and flag query contracts
 - `graph_node_types`: graph node type introspection and dependency edit contracts
 - `graph_child`: child graph node creation, introspection, and embedded execution contracts
 - `graph_host`: host graph node callback, parameter, and node-type contracts
@@ -39,14 +48,22 @@ The first domains are:
 - `graph_user_objects`: graph user object create, retain, release, and graph lifetime contracts
 - `graph_node_enabled`: executable graph node enable/disable query and behavior contracts
 - `graph_node_attributes`: graph kernel node attribute set/get and invalid-input contracts
+- `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
+- `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
 - `array_memory`: HIP array allocation and 2D array copy contracts
+- `array_copy`: legacy and async HIP array copy contracts
+- `array_copy_ext`: remaining driver-style and async HIP array copy contracts
+- `driver_array`: driver-style HIP array creation, destruction, and descriptor contracts
 - `managed_memory`: managed allocation, visibility, free, and prefetch contracts
 - `mem_advise`: managed-memory advice and range-attribute contracts
+- `pointer_info`: pointer attribute, address-range, and memory-capacity query contracts
+- `pointer_query`: driver-style pointer attribute, pointer-attribute set, and allocation-size query contracts
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
+- `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
 - `array3d`: 3D array allocation and 3D copy-to/from-array contracts
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `context`: driver-style device and context query contracts

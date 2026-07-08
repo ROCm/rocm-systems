@@ -1,0 +1,123 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip/hip_runtime_api.h>
+#include <hip_test_common.hh>
+
+namespace {
+constexpr size_t kWidth = 8;
+constexpr size_t kHeight = 4;
+constexpr size_t kDepth = 2;
+
+HIP_ARRAY_DESCRIPTOR Array2DDesc() {
+  HIP_ARRAY_DESCRIPTOR desc{};
+  desc.Width = kWidth;
+  desc.Height = kHeight;
+  desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
+  desc.NumChannels = 1;
+  return desc;
+}
+
+HIP_ARRAY3D_DESCRIPTOR Array3DDesc() {
+  HIP_ARRAY3D_DESCRIPTOR desc{};
+  desc.Width = kWidth;
+  desc.Height = kHeight;
+  desc.Depth = kDepth;
+  desc.Format = HIP_AD_FORMAT_UNSIGNED_INT8;
+  desc.NumChannels = 1;
+  desc.Flags = 0;
+  return desc;
+}
+}  // namespace
+
+HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array2DDesc();
+
+  HIP_CHECK(hipArrayCreate(&array, &desc));
+
+  REQUIRE(array != nullptr);
+
+  HIP_CHECK(hipArrayDestroy(array));
+}
+
+HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array2DDesc();
+  HIP_ARRAY_DESCRIPTOR returned_desc{};
+
+  HIP_CHECK(hipArrayCreate(&array, &desc));
+  HIP_CHECK(hipArrayGetDescriptor(&returned_desc, array));
+
+  REQUIRE(returned_desc.Width == desc.Width);
+  REQUIRE(returned_desc.Height == desc.Height);
+  REQUIRE(returned_desc.Format == desc.Format);
+  REQUIRE(returned_desc.NumChannels == desc.NumChannels);
+
+  HIP_CHECK(hipArrayDestroy(array));
+}
+
+HIP_TEST_CASE(Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array2DDesc();
+
+  REQUIRE(hipArrayCreate(nullptr, &desc) != hipSuccess);
+  REQUIRE(hipArrayCreate(&array, nullptr) != hipSuccess);
+}
+
+HIP_TEST_CASE(Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array2DDesc();
+  HIP_ARRAY_DESCRIPTOR returned_desc{};
+
+  HIP_CHECK(hipArrayCreate(&array, &desc));
+
+  REQUIRE(hipArrayGetDescriptor(nullptr, array) != hipSuccess);
+  REQUIRE(hipArrayGetDescriptor(&returned_desc, nullptr) != hipSuccess);
+
+  HIP_CHECK(hipArrayDestroy(array));
+}
+
+HIP_TEST_CASE(Contract_DriverArray_Array3DCreate_ReturnsUsableArray) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array3DDesc();
+
+  HIP_CHECK(hipArray3DCreate(&array, &desc));
+
+  REQUIRE(array != nullptr);
+
+  HIP_CHECK(hipArrayDestroy(array));
+}
+
+HIP_TEST_CASE(Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags) {
+  CHECK_IMAGE_SUPPORT;
+
+  hipArray_t array = nullptr;
+  auto desc = Array3DDesc();
+  HIP_ARRAY3D_DESCRIPTOR returned_desc{};
+
+  HIP_CHECK(hipArray3DCreate(&array, &desc));
+  HIP_CHECK(hipArray3DGetDescriptor(&returned_desc, array));
+
+  REQUIRE(returned_desc.Width == desc.Width);
+  REQUIRE(returned_desc.Height == desc.Height);
+  REQUIRE(returned_desc.Depth == desc.Depth);
+  REQUIRE(returned_desc.Format == desc.Format);
+  REQUIRE(returned_desc.NumChannels == desc.NumChannels);
+  REQUIRE(returned_desc.Flags == desc.Flags);
+
+  HIP_CHECK(hipArrayDestroy(array));
+}

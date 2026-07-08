@@ -27,6 +27,39 @@ contract:
   Contract_Transfer_InvalidDirection_ReturnsInvalidMemcpyDirection:
     <<: *level_0
     tags: [transfer]
+  Contract_DriverMemcpy_HtoDtoH_RoundTripsBytes:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy_DtoD_SingleDevice_CopiesBytes:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy_ZeroBytes_Succeeds:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy_Async_OnStream_RoundTripsBytes:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy_NullPointers_AreRejected:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy_AsyncNullPointers_AreRejected:
+    <<: *level_0
+    tags: [driver_memcpy]
+  Contract_DriverMemcpy2D_HtoDtoH_RoundTripsRows:
+    <<: *level_0
+    tags: [driver_memcpy_2d]
+  Contract_DriverMemcpy2D_DtoD_SingleDevice_CopiesRows:
+    <<: *level_0
+    tags: [driver_memcpy_2d]
+  Contract_DriverMemcpy2D_ZeroExtent_Succeeds:
+    <<: *level_0
+    tags: [driver_memcpy_2d]
+  Contract_DriverMemcpy2D_Async_OnStream_HostToDeviceVisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memcpy_2d]
+  Contract_DriverMemcpy2D_NullPointersInStruct_AreRejected:
+    <<: *level_0
+    tags: [driver_memcpy_2d]
   Contract_Runtime_InitZeroFlags_Succeeds:
     <<: *level_0
     tags: [runtime]
@@ -78,6 +111,42 @@ contract:
   Contract_Device_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device]
+  Contract_DeviceIdentity_GetByPCIBusId_RoundTripsWithGetPCIBusId:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_GetByPCIBusId_InvalidString_IsRejected:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_GetByPCIBusId_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_ChooseDevice_ReturnsInRangeOrdinal:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_ChooseDevice_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_CanAccessPeer_SelfQueryReturnsBoolean:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_DeviceIdentity_CanAccessPeer_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [device_identity]
+  Contract_PeerQuery_GetP2PAttribute_SelfDevice_IsRejected:
+    <<: *level_0
+    tags: [peer_query]
+  Contract_PeerQuery_GetP2PAttribute_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [peer_query]
+  Contract_PeerQuery_LinkTypeAndHopCount_SameDevice_IsRejected:
+    <<: *level_0
+    tags: [peer_query]
+  Contract_PeerQuery_LinkTypeAndHopCount_InvalidDevice_IsRejected:
+    <<: *level_0
+    tags: [peer_query]
+  Contract_PeerQuery_LinkTypeAndHopCount_NullOutputs_AreRejected:
+    <<: *level_0
+    tags: [peer_query]
   Contract_Stream_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [stream]
@@ -198,6 +267,57 @@ contract:
   Contract_MemsetD32_DeviceBuffer_IsFilledWithDwordPattern:
     <<: *level_0
     tags: [memset]
+  Contract_DriverMemsetAsync_D8_FillsByte_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemsetAsync_D16_FillsWord_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemsetAsync_D32_FillsDword_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemsetAsync_NullStream_UsesDefaultStream:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemsetAsync_ZeroCount_Succeeds:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemsetAsync_NullDestination_IsRejected:
+    <<: *level_0
+    tags: [driver_memset_async]
+  Contract_DriverMemset2D_D2D8_FillsRows_VisibleAfterCopy:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemset2D_D2D16_FillsWordRows_VisibleAfterCopy:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemset2D_D2D32_FillsDwordRows_VisibleAfterCopy:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemset2D_AsyncD2D8_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemset2D_RuntimeMemset2D_FillsRegion:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemset2D_NullDestination_IsRejected:
+    <<: *level_0
+    tags: [driver_memset_2d]
+  Contract_DriverMemsetAsync2D3D_D2D16Async_FillsWordRows_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async_2d3d]
+  Contract_DriverMemsetAsync2D3D_D2D32Async_FillsDwordRows_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async_2d3d]
+  Contract_DriverMemsetAsync2D3D_Memset2DAsync_FillsRegion_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async_2d3d]
+  Contract_DriverMemsetAsync2D3D_Memset3DAsync_FillsExtent_VisibleAfterSync:
+    <<: *level_0
+    tags: [driver_memset_async_2d3d]
+  Contract_DriverMemsetAsync2D3D_NullDestination_IsRejected:
+    <<: *level_0
+    tags: [driver_memset_async_2d3d]
   Contract_ErrorApi_GetErrorNameSuccess_ReturnsNonEmptyString:
     <<: *level_0
     tags: [error_api]
@@ -216,6 +336,24 @@ contract:
   Contract_ErrorApi_GetErrorStringUnknownError_ReturnsNonNullString:
     <<: *level_0
     tags: [error_api]
+  Contract_DriverError_GetErrorName_KnownCode_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [driver_error]
+  Contract_DriverError_GetErrorString_KnownCode_ReturnsNonEmptyString:
+    <<: *level_0
+    tags: [driver_error]
+  Contract_DriverError_GetErrorName_RepeatedQueryIsStable:
+    <<: *level_0
+    tags: [driver_error]
+  Contract_DriverError_GetErrorString_RepeatedQueryIsStable:
+    <<: *level_0
+    tags: [driver_error]
+  Contract_DriverError_GetErrorName_InvalidCode_IsRejected:
+    <<: *level_0
+    tags: [driver_error]
+  Contract_DriverError_GetErrorString_InvalidCode_IsRejected:
+    <<: *level_0
+    tags: [driver_error]
   Contract_Kernel_LaunchGGL_WritesExpectedValue:
     <<: *level_0
     tags: [kernel]
@@ -408,6 +546,21 @@ contract:
   Contract_GraphUpdate_ExecEventWaitNodeSetEvent_AcceptsSwappedEvent:
     <<: *level_0
     tags: [graph_update]
+  Contract_GraphExecLifecycle_InstantiateWithFlags_ZeroFlag_LaunchSucceeds:
+    <<: *level_0
+    tags: [graph_exec_lifecycle]
+  Contract_GraphExecLifecycle_ExecGetFlags_ReflectsZero:
+    <<: *level_0
+    tags: [graph_exec_lifecycle]
+  Contract_GraphExecLifecycle_ExecGetFlags_ReflectsAutoFreeOnLaunch:
+    <<: *level_0
+    tags: [graph_exec_lifecycle]
+  Contract_GraphExecLifecycle_Upload_ThenLaunchSucceeds:
+    <<: *level_0
+    tags: [graph_exec_lifecycle]
+  Contract_GraphExecLifecycle_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [graph_exec_lifecycle]
   Contract_GraphNodeTypes_GetType_EmptyNodeReportsEmpty:
     <<: *level_0
     tags: [graph_node_types]
@@ -492,6 +645,27 @@ contract:
   Contract_GraphNodeAttributes_SetAttribute_RejectsInvalidInputs:
     <<: *level_0
     tags: [graph_node_attributes]
+  Contract_GraphNodeParams_MemsetNode_SetThenGet_RoundTripsParams:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_MemcpyNode_GetParams_ReflectsAddedNode:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_MemcpyNode_SetThenGet_RoundTripsParams:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_MemsetNodeGetParams_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_MemcpyNodeGetParams_NullArgs_AreRejected:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_EventRecordAndWaitNode_GetEvent_ReturnsBoundEvent:
+    <<: *level_0
+    tags: [graph_node_params]
+  Contract_GraphNodeParams_DestroyNode_RemovesNodeFromGraph:
+    <<: *level_0
+    tags: [graph_node_params]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]
@@ -507,6 +681,27 @@ contract:
   Contract_HostMemory_HostGetFlags_IncludesRequestedFlags:
     <<: *level_0
     tags: [host_memory]
+  Contract_HostAllocAliases_HostAlloc_ReturnsUsablePinnedPointer:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_MallocHost_ReturnsUsablePointer:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_MemAllocHost_ReturnsUsablePointer:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_FreeHost_NullSucceeds_InvalidPointerRejected:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_ExtMallocWithFlags_DefaultAllocatesAndZeroSizeIsNull:
+    <<: *level_0
+    tags: [host_alloc_aliases]
+  Contract_HostAllocAliases_ExtMallocWithFlags_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [host_alloc_aliases]
   Contract_PitchedMemory_MallocPitch_ReturnsPitchAtLeastWidth:
     <<: *level_0
     tags: [pitched_memory]
@@ -531,6 +726,63 @@ contract:
   Contract_ArrayMemory_ArrayGetInfo_ReturnsDescriptorIfAvailable:
     <<: *level_0
     tags: [array_memory]
+  Contract_ArrayCopy_MemcpyToArrayAndFromArray_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopy_MemcpyHtoAAndAtoH_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopy_MemcpyToArray_InvalidKind_IsRejected:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopy_Memcpy2DFromArrayAsync_InvalidKind_IsRejected:
+    <<: *level_0
+    tags: [array_copy]
+  Contract_ArrayCopyExt_MemcpyDtoAThenAtoH_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_Memcpy2DArrayToArray_RoundTripsBytes:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_MemcpyHtoAAsync_NullSource_IsRejected:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_MemcpyDtoA_NullArray_IsRejected:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_MemcpyAtoD_NullArray_IsRejected:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_Memcpy2DArrayToArray_InvalidKind_IsRejected:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_ArrayCopyExt_MemcpyHtoAAsyncThenAtoHAsync_VisibleAfterSync:
+    <<: *level_0
+    tags: [array_copy_ext]
+  Contract_DriverArray_ArrayCreate_2D_ReturnsUsableArray:
+    <<: *level_0
+    tags: [driver_array]
+  Contract_DriverArray_GetDescriptor_RoundTripsDimsAndFormat:
+    <<: *level_0
+    tags: [driver_array]
+  Contract_DriverArray_ArrayCreate_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [driver_array]
+  Contract_DriverArray_GetDescriptor_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [driver_array]
+  Contract_DriverArray_Array3DCreate_ReturnsUsableArray:
+    <<: *level_0
+    tags: [driver_array]
+  Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags:
+    <<: *level_0
+    tags: [driver_array]
   Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer:
     <<: *level_0
     tags: [managed_memory]
@@ -564,6 +816,45 @@ contract:
   Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected:
     <<: *level_0
     tags: [mem_advise]
+  Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceType:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_GetAttributes_HostAllocation_ReportsHostType:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_GetAttributes_ManagedAllocation_ReportsManagedOrUnified:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_GetAttribute_MemoryType_MatchesGetAttributes:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_MemGetAddressRange_ReturnsBaseAndSize:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_MemGetInfo_FreeNotGreaterThanTotal:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerInfo_GetAttributes_NullOutput_IsRejected:
+    <<: *level_0
+    tags: [pointer_info]
+  Contract_PointerQuery_DrvGetAttributes_DeviceAllocation_ReportsTypeAndOrdinal:
+    <<: *level_0
+    tags: [pointer_query]
+  Contract_PointerQuery_DrvGetAttributes_MatchesSingleAttributeQuery:
+    <<: *level_0
+    tags: [pointer_query]
+  Contract_PointerQuery_DrvGetAttributes_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [pointer_query]
+  Contract_PointerQuery_MemPtrGetInfo_ReturnsAllocationSize:
+    <<: *level_0
+    tags: [pointer_query]
+  Contract_PointerQuery_SetAttribute_SyncMemops_SucceedsWhenSupported:
+    <<: *level_0
+    tags: [pointer_query]
+  Contract_PointerQuery_SetAttribute_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [pointer_query]
   Contract_MemoryPool_DeviceGetDefaultMemPool_ReturnsPool:
     <<: *level_0
     tags: [memory_pool]
@@ -609,6 +900,24 @@ contract:
   Contract_Copy3D_Free3DAllocation_Succeeds:
     <<: *level_0
     tags: [copy3d]
+  Contract_AsyncCopy3D_Memcpy3DAsync_HostDeviceRoundTripsExtent_VisibleAfterSync:
+    <<: *level_0
+    tags: [async_copy3d]
+  Contract_AsyncCopy3D_Memset3D_FillsExtent_VisibleAfterCopyBack:
+    <<: *level_0
+    tags: [async_copy3d]
+  Contract_AsyncCopy3D_Memcpy3DAsync_NullParams_IsRejected:
+    <<: *level_0
+    tags: [async_copy3d]
+  Contract_AsyncCopy3D_MemcpyWithStream_RoundTripsBytes_VisibleAfterSync:
+    <<: *level_0
+    tags: [async_copy3d]
+  Contract_AsyncCopy3D_MemcpyWithStream_InvalidKind_IsRejected:
+    <<: *level_0
+    tags: [async_copy3d]
+  Contract_AsyncCopy3D_Memset3D_NullPitchedPtr_IsRejected:
+    <<: *level_0
+    tags: [async_copy3d]
   Contract_Array3D_Malloc3DArray_ReturnsUsableArray:
     <<: *level_0
     tags: [array3d]
