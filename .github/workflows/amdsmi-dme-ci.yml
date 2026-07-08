@@ -11,19 +11,19 @@
 #     python3 -m dme_integration <subcommand>
 # --------------------------------------------------------------
 
-name: DME AMDSMI Integration CI
+name: AMDSMI DME Integration CI
 
 on:
   pull_request:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
-      - '.github/workflows/dme-amdsmi-ci.yml'
+      - '.github/workflows/amdsmi-dme-ci.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
-      - '.github/workflows/dme-amdsmi-ci.yml'
+      - '.github/workflows/amdsmi-dme-ci.yml'
   workflow_dispatch:
     inputs:
       dme_branch:

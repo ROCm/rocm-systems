@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) Advanced Micro Devices. All rights reserved.
-"""Build the GPU Agent compiler wrapper used by ``dme-amdsmi-ci.yml``.
+"""Build the GPU Agent compiler wrapper used by ``amdsmi-dme-ci.yml``.
 
 GPU Agent's Makefile compiles generated ``.pb.cc`` files with bare
 ``g++`` (no ``-I`` flags), so it picks up older system protobuf headers

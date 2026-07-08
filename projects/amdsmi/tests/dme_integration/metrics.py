@@ -2,7 +2,7 @@
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 """Verify the Device Metrics Exporter Prometheus endpoint.
 
-Replaces the inline curl/grep loop in ``dme-amdsmi-ci.yml`` Phase 5 with
+Replaces the inline curl/grep loop in ``amdsmi-dme-ci.yml`` Phase 5 with
 a real Prometheus exposition-format check that asserts:
 
 * Endpoint returns HTTP 200 within ``--max-retries`` attempts.

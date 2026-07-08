@@ -2,7 +2,7 @@
 # Copyright (C) Advanced Micro Devices. All rights reserved.
 """Clone Device Metrics Exporter and prepare its submodules.
 
-Replaces the inline bash in ``dme-amdsmi-ci.yml`` Phase 2:
+Replaces the inline bash in ``amdsmi-dme-ci.yml`` Phase 2:
 
 * Clone DME at ``--branch`` into ``--dme-dir``.
 * Initialise ``gpuagent`` and ``libamdsmi`` submodules independently so

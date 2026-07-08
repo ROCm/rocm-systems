@@ -1,7 +1,7 @@
 # dme_integration
 
 CI helpers for the **DME <-> AMDSMI integration workflow**
-([`.github/workflows/dme-amdsmi-ci.yml`](../../../../.github/workflows/dme-amdsmi-ci.yml)).
+([`.github/workflows/amdsmi-dme-ci.yml`](../../../../.github/workflows/amdsmi-dme-ci.yml)).
 
 The workflow used to inline ~340 lines of bash across a dozen `run:`
 blocks. Those blocks moved here so they are:
@@ -248,7 +248,7 @@ self-hosted) Ubuntu container:
 - The package uses **only the standard library**, so the workflow does
   not need a `pip install` step.
 - Every step in
-  [`dme-amdsmi-ci.yml`](../../../../.github/workflows/dme-amdsmi-ci.yml)
+  [`amdsmi-dme-ci.yml`](../../../../.github/workflows/amdsmi-dme-ci.yml)
   sets `working-directory: ${{ env.AMDSMI_TESTS_DIR }}` before invoking
   `python3 -m dme_integration ...`, which puts CWD on `sys.path` so the
   package imports cleanly without `PYTHONPATH`.
