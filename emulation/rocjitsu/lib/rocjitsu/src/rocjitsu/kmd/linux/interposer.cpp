@@ -141,20 +141,6 @@ std::optional<std::string> child_config_path() {
   return std::string(cfg_buf);
 }
 
-void *raw_mmap_syscall(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  // syscall(2) is the libc wrapper: on kernel errors it returns -1 and sets errno.
-  long rc = syscall(SYS_mmap, addr, length, prot, flags, fd, offset);
-  if (rc == -1)
-    return MAP_FAILED;
-  return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
-}
-
-int raw_munmap_syscall(void *addr, size_t length) {
-  long rc = syscall(SYS_munmap, addr, length);
-  assert(rc == 0 || rc == -1);
-  return static_cast<int>(rc);
-}
-
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
   signal(SIGSEGV, SIG_DFL);
   raise(SIGSEGV);
@@ -177,7 +163,10 @@ public:
   static void init() {
     new (storage_) InterposerContext();
     real().resolve();
+    ready_.store(true, std::memory_order_release);
   }
+
+  static bool ready() { return ready_.load(std::memory_order_acquire); }
 
   /// @brief Reset interposer state in a forked child process.
   /// @details After fork(), the child inherits the parent's address space but
@@ -577,6 +566,7 @@ private:
   std::unordered_set<int> kfd_dup_fds_;
 
   alignas(16) static uint8_t storage_[];
+  static inline std::atomic<bool> ready_{false};
 };
 
 // Storage for the singleton is never destructed. Using aligned raw storage
@@ -688,9 +678,8 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
     va_end(ap);
   }
 
-  assert(InterposerContext::real().ready());
   auto *volatile p = path;
-  if (!p || InterposerContext::in_construction)
+  if (!InterposerContext::ready() || !p || InterposerContext::in_construction)
     return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
@@ -761,7 +750,7 @@ RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
   }
 
   auto *volatile p_at = path;
-  if (!p_at)
+  if (!InterposerContext::ready() || !p_at)
     return InterposerContext::real().openat(dirfd, path, flags, mode);
   if (InterposerContext::in_construction)
     return InterposerContext::real().openat(dirfd, path, flags, mode);
@@ -805,7 +794,8 @@ RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
 }
 
 RJ_INTERPOSER_EXPORT int close(int fd) {
-  assert(InterposerContext::real().ready());
+  if (!InterposerContext::ready())
+    return InterposerContext::real().close(fd);
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
     // fd and RPC connection are torn down only when the last reference is
@@ -835,11 +825,13 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
 __attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
-  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, request);
   void *arg = va_arg(ap, void *);
   va_end(ap);
+
+  if (!InterposerContext::ready())
+    return InterposerContext::real().ioctl(fd, request, arg);
 
   constexpr unsigned kDrmIoctlType = 'd';
   constexpr unsigned kDrmIoctlNrVersion = 0x00;
@@ -1011,8 +1003,9 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
 }
 
 RJ_INTERPOSER_EXPORT int dup(int oldfd) {
-  assert(InterposerContext::real().ready());
   int rc = InterposerContext::real().dup(oldfd);
+  if (!InterposerContext::ready())
+    return rc;
   if (rc >= 0) {
     if (InterposerContext::ctx.is_kfd_tracked(oldfd))
       InterposerContext::ctx.track_dup(rc);
@@ -1023,12 +1016,13 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
 }
 
 RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
-  assert(InterposerContext::real().ready());
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
   if (oldfd == newfd)
     return InterposerContext::real().dup2(oldfd, newfd);
   int rc = InterposerContext::real().dup2(oldfd, newfd);
+  if (!InterposerContext::ready())
+    return rc;
   if (rc < 0)
     return rc;
   // newfd was atomically closed and replaced; reconcile its tracking only now.
@@ -1043,10 +1037,11 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
 
 #ifdef SYS_dup3
 RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
-  assert(InterposerContext::real().ready());
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
   int rc = InterposerContext::real().dup3(oldfd, newfd, flags);
+  if (!InterposerContext::ready())
+    return rc;
   if (rc < 0)
     return rc;
   InterposerContext::ctx.untrack_sysfs(newfd);
@@ -1138,7 +1133,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     break;
   }
 
-  if (rc >= 0 && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) {
+  if (InterposerContext::ready() && rc >= 0 && (cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC)) {
     if (InterposerContext::ctx.is_kfd_tracked(fd))
       InterposerContext::ctx.track_dup(static_cast<int>(rc));
     else
@@ -1156,7 +1151,6 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
 } // namespace
 
 RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
-  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1174,7 +1168,6 @@ RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
 // interposed separately or libdrm's F_DUPFD_CLOEXEC on the render fd bypasses
 // our dup tracking and subsequent ioctls land on an untracked fd.
 RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
-  assert(InterposerContext::real().ready());
   va_list ap;
   va_start(ap, cmd);
   FcntlArgKind kind = fcntl_arg_kind(cmd);
@@ -1190,10 +1183,9 @@ RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
 
 RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
                                 off_t offset) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().mmap)
-    return raw_mmap_syscall(addr, length, prot, flags, fd, offset);
+  if (!InterposerContext::ready())
+    return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
 
-  assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
 
@@ -1236,7 +1228,8 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
-  assert(InterposerContext::real().ready());
+  if (!InterposerContext::ready())
+    return InterposerContext::real().mprotect(addr, length, prot);
   auto *drv = InterposerContext::ctx.driver();
   if (drv && drv->is_doorbell_range(addr, length)) {
     errno = EPERM;
@@ -1246,7 +1239,8 @@ RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
 }
 
 RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
-  assert(InterposerContext::real().ready());
+  if (!InterposerContext::ready())
+    return InterposerContext::real().madvise(addr, length, advice);
   if ((advice == MADV_HUGEPAGE || advice == MADV_DONTFORK) &&
       reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL)
     return 0;
@@ -1254,10 +1248,9 @@ RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
-  if (!InterposerContext::real().ready() || !InterposerContext::real().munmap)
-    return raw_munmap_syscall(addr, length);
+  if (!InterposerContext::ready())
+    return InterposerContext::real().munmap(addr, length);
 
-  assert(InterposerContext::real().ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
     if (ret != -ENOENT)
@@ -1279,12 +1272,10 @@ extern "C" {
 // -- fopen / freopen interposition (sysfs redirect) --
 
 RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<FILE *(*)(const char *, const char *)>(RTLD_NEXT, "fopen");
-    return fn ? fn(path, mode) : nullptr;
-  }
   if (!path || !mode)
     return nullptr;
+  if (!InterposerContext::ready())
+    return InterposerContext::real().fopen(path, mode);
 
   const char *actual = path;
   std::string redirected;
@@ -1323,13 +1314,13 @@ RJ_INTERPOSER_EXPORT FILE *freopen64(const char *path, const char *mode, FILE *s
 // -- stat/lstat/access interposition --
 
 static std::string redirect_sysfs_path(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::ready() || InterposerContext::in_construction)
     return {};
   return InterposerContext::ctx.redirect_sysfs_path(path);
 }
 
 static std::string redirect_sys_dev_char(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   constexpr std::string_view prefix = "/sys/dev/char/";
@@ -1385,7 +1376,7 @@ static const Sysfs::GpuInfo *interposer_gpu_info(uint32_t render_minor) {
 }
 
 static std::string redirect_dev_dri(const char *path) {
-  if (!path || !InterposerContext::real().ready() || InterposerContext::in_construction)
+  if (!path || !InterposerContext::ready() || InterposerContext::in_construction)
     return {};
   std::string_view sv(path);
   // Redirect both the /dev/dri directory and individual node files
@@ -1418,10 +1409,8 @@ static std::string redirect_dev_dri(const char *path) {
 }
 
 RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
-    return fn ? fn(path, buf) : -1;
-  }
+  if (!InterposerContext::ready())
+    return InterposerContext::real().stat(path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -1433,10 +1422,8 @@ RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
 }
 
 RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "lstat");
-    return fn ? fn(path, buf) : -1;
-  }
+  if (!InterposerContext::ready())
+    return InterposerContext::real().lstat(path, buf);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -1448,10 +1435,8 @@ RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
 }
 
 RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<int (*)(const char *, int)>(RTLD_NEXT, "access");
-    return fn ? fn(path, mode) : -1;
-  }
+  if (!InterposerContext::ready())
+    return InterposerContext::real().access(path, mode);
   auto redirected = redirect_sysfs_path(path);
   if (redirected.empty())
     redirected = redirect_sys_dev_char(path);
@@ -1465,15 +1450,13 @@ RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
 // -- opendir interposition --
 
 RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<DIR *(*)(const char *)>(RTLD_NEXT, "opendir");
-    return fn ? fn(name) : nullptr;
-  }
   auto *volatile p_od = name;
   if (!p_od) {
     errno = EINVAL;
     return nullptr;
   }
+  if (!InterposerContext::ready())
+    return InterposerContext::real().opendir(name);
   if (!InterposerContext::in_construction) {
     std::string redirected = InterposerContext::ctx.redirect_sysfs_path(name);
     if (redirected.empty())
@@ -1489,12 +1472,8 @@ RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
 // -- fstat interposition (DRM memfd → synthetic st_rdev) --
 
 RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
-    return fn ? fn(fd, buf) : -1;
-  }
   int rc = InterposerContext::real().fstat_fn(fd, buf);
-  if (rc == 0 && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1508,7 +1487,7 @@ RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
   if (!real_fstat64)
     return -1;
   int rc = real_fstat64(fd, buf);
-  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1522,7 +1501,7 @@ RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
   if (!real_fxstat)
     return -1;
   int rc = real_fxstat(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1536,7 +1515,7 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
   if (!real_fxstat64)
     return -1;
   int rc = real_fxstat64(ver, fd, buf);
-  if (rc == 0 && InterposerContext::real().ready() && InterposerContext::ctx.is_drm(fd)) {
+  if (rc == 0 && InterposerContext::ready() && InterposerContext::ctx.is_drm(fd)) {
     uint32_t render_minor = InterposerContext::ctx.drm_render_minor(fd);
     buf->st_rdev = makedev(226, render_minor);
     buf->st_mode = (buf->st_mode & ~S_IFMT) | S_IFCHR;
@@ -1547,10 +1526,8 @@ RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
 // -- readlink interposition (redirect /sys/dev/char/) --
 
 RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
-  if (!InterposerContext::real().ready()) {
-    auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
-    return fn ? fn(path, buf, bufsiz) : -1;
-  }
+  if (!InterposerContext::ready())
+    return InterposerContext::real().readlink_fn(path, buf, bufsiz);
   auto redirected = redirect_sys_dev_char(path);
   if (redirected.empty())
     redirected = redirect_sysfs_path(path);
@@ -1645,9 +1622,8 @@ RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *bu
 }
 
 RJ_INTERPOSER_EXPORT pid_t fork() {
-  assert(InterposerContext::real().ready());
   pid_t pid = InterposerContext::real().fork();
-  if (pid == 0)
+  if (pid == 0 && InterposerContext::ready())
     InterposerContext::ctx.reset_after_fork();
   return pid;
 }
