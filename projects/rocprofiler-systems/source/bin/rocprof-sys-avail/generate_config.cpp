@@ -9,6 +9,7 @@
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
+#include "common/path.hpp"
 #include "common/json_config.hpp"
 #include <spdlog/fmt/fmt.h>
 
@@ -32,7 +33,7 @@
 #include <string>
 
 namespace cereal   = ::tim::cereal;
-namespace filepath = ::tim::filepath;
+namespace path = ::rocprofsys::common::path;
 using settings     = ::tim::settings;
 using ::tim::tsettings;
 using ::tim::type_list;
@@ -272,7 +273,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             }
         }
 
-        if(filepath::open(_ofs, _fname))
+        if(path::open(_ofs, _fname))
         {
             if(settings::verbose() >= 0)
                 printf("[rocprof-sys-avail] Outputting %s configuration file '%s'...\n",
