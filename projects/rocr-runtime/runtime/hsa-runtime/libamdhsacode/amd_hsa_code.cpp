@@ -70,10 +70,6 @@ namespace detail {
 
 constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
 
-inline bool IsWithinSectionPrintLimit(size_t size) {
-  return size <= kMaxSectionPrintSize;
-}
-
 }  // namespace detail
 
     using amd::elf::GetNoteString;
@@ -1413,7 +1409,7 @@ inline bool IsWithinSectionPrintLimit(size_t size) {
     {
       out << "    Data:" << std::endl;
       const size_t section_size = section->size();
-      if (!detail::IsWithinSectionPrintLimit(section_size)) {
+      if (section_size > detail::kMaxSectionPrintSize) {
         out << "      (section data too large to display: " << section_size
             << " bytes)" << std::endl;
         return;
