@@ -215,8 +215,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
-        auto _search_paths = fmt::format("{}:{}", common::path::dirname(_omnilib),
-                                         common::path::dirname(_dllib));
+        auto _search_paths = fmt::format("{}:{}", common::path::parent_path(_omnilib),
+                                         common::path::parent_path(_dllib));
         common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
 
         m_omnihandle = open(m_omnilib);
@@ -1243,7 +1243,8 @@ rocprofsys_postinit(std::string _exe)
         case InstrumentMode::ProcessAttach:
         {
             if(_exe.empty())
-                _exe = tim::filepath::readlink(fmt::format("/proc/{}/exe", getpid()));
+                _exe =
+                    common::path::read_symlink(fmt::format("/proc/{}/exe", getpid()));
 
             rocprofsys_init_tooling();
             if(_exe.empty())
