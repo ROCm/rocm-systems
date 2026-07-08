@@ -77,12 +77,12 @@ public:
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t value, uint64_t cond,
+                                           uint64_t swap_add, uint64_t compare,
                                            const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond,
+                                                  uint64_t swap_add, uint64_t compare,
                                                   PostOpt<Options...> = {});
 
   __device__ void quiet_single();
@@ -280,7 +280,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   //using PostOptions = PostOpt<Options...>;
@@ -320,10 +320,10 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
   wqe->atomic_v2.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
   wqe->atomic_v2.remote_va_low  = endian::to_be<uint32_t>(raddr);
   wqe->atomic_v2.remote_rkey    = rkey;
-  wqe->atomic_v2.swap_add_high  = endian::to_be<uint32_t>(value >> 32);
-  wqe->atomic_v2.swap_add_low   = endian::to_be<uint32_t>(value);
-  wqe->atomic_v2.compare_high   = endian::to_be<uint32_t>(cond >> 32);
-  wqe->atomic_v2.compare_low    = endian::to_be<uint32_t>(cond);
+  wqe->atomic_v2.swap_add_high  = endian::to_be<uint32_t>(swap_add >> 32);
+  wqe->atomic_v2.swap_add_low   = endian::to_be<uint32_t>(swap_add);
+  wqe->atomic_v2.compare_high   = endian::to_be<uint32_t>(compare >> 32);
+  wqe->atomic_v2.compare_low    = endian::to_be<uint32_t>(compare);
 
   uint64_t* atomic_laddr = nonfetching_atomic;
   if constexpr (Fetch == AMOFetchType::Blocking) {
@@ -351,7 +351,7 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond, PostOpt<Options...>) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = 1;
@@ -384,10 +384,10 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
   wqe->atomic_v2.remote_va_high = endian::to_be<uint32_t>(raddr >> 32);
   wqe->atomic_v2.remote_va_low  = endian::to_be<uint32_t>(raddr);
   wqe->atomic_v2.remote_rkey    = rkey;
-  wqe->atomic_v2.swap_add_high  = endian::to_be<uint32_t>(value >> 32);
-  wqe->atomic_v2.swap_add_low   = endian::to_be<uint32_t>(value);
-  wqe->atomic_v2.compare_high   = endian::to_be<uint32_t>(cond >> 32);
-  wqe->atomic_v2.compare_low    = endian::to_be<uint32_t>(cond);
+  wqe->atomic_v2.swap_add_high  = endian::to_be<uint32_t>(swap_add >> 32);
+  wqe->atomic_v2.swap_add_low   = endian::to_be<uint32_t>(swap_add);
+  wqe->atomic_v2.compare_high   = endian::to_be<uint32_t>(compare >> 32);
+  wqe->atomic_v2.compare_low    = endian::to_be<uint32_t>(compare);
 
   uint64_t* atomic_laddr = nonfetching_atomic;
   if constexpr (Fetch == AMOFetchType::Blocking) {

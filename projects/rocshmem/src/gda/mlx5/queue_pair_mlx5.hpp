@@ -76,12 +76,12 @@ public:
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t value, uint64_t cond,
+                                           uint64_t swap_add, uint64_t compare,
                                            const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond,
+                                                  uint64_t swap_add, uint64_t compare,
                                                   PostOpt<Options...> = {});
 
   __device__ void quiet_single();
@@ -217,7 +217,7 @@ __device__ void QueuePairMLX5::post_wqe_rma_single(
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   using PostOptions = PostOpt<Options...>;
@@ -242,7 +242,7 @@ __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, value, cond, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
@@ -269,7 +269,7 @@ __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo(
 // precondition: called with all active lanes using different QPs
 template <QueuePairMLX5::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond, PostOpt<Options...>) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   using PostOptions = PostOpt<Options...>;
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
@@ -291,7 +291,7 @@ __device__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_amo_single(
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, value, cond, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;

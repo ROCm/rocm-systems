@@ -106,12 +106,12 @@ public:
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t value, uint64_t cond,
+                                           uint64_t swap_add, uint64_t compare,
                                            const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond,
+                                                  uint64_t swap_add, uint64_t compare,
                                                   PostOpt<Options...> = {});
 
   __device__ void quiet_single();
@@ -338,24 +338,24 @@ __device__ void QueuePairMux::post_wqe_rma_single(
 
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch>(
-                                 raddr, rkey, value, cond, wf_info, options);
+                                 raddr, rkey, swap_add, compare, wf_info, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     return qp.bnxt.post_wqe_amo<provider_op<Op, QueuePairBNXT>(), Fetch>(
-                                raddr, rkey, value, cond, wf_info, options);
+                                raddr, rkey, swap_add, compare, wf_info, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     return qp.mlx5.post_wqe_amo<provider_op<Op, QueuePairMLX5>(), Fetch>(
-                                raddr, rkey, value, cond, wf_info, options);
+                                raddr, rkey, swap_add, compare, wf_info, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);
@@ -365,24 +365,24 @@ __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
 
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch>(
-                                        raddr, rkey, value, cond, options);
+                                        raddr, rkey, swap_add, compare, options);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     return qp.bnxt.post_wqe_amo_single<provider_op<Op, QueuePairBNXT>(), Fetch>(
-                                       raddr, rkey, value, cond, options);
+                                       raddr, rkey, swap_add, compare, options);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     return qp.mlx5.post_wqe_amo_single<provider_op<Op, QueuePairMLX5>(), Fetch>(
-                                       raddr, rkey, value, cond, options);
+                                       raddr, rkey, swap_add, compare, options);
 #endif
   default:
     assert(false /* invalid GDAProvider */);

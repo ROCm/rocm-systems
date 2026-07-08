@@ -76,12 +76,12 @@ public:
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t value, uint64_t cond,
+                                           uint64_t swap_add, uint64_t compare,
                                            const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
   __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t value, uint64_t cond,
+                                                  uint64_t swap_add, uint64_t compare,
                                                   PostOpt<Options...> = {});
 
   __device__ void quiet_single();
@@ -99,7 +99,7 @@ private:
 
   template <OpCode Op, AMOFetchType Fetch, bool CheckSQ>
   __device__ uint64_t* write_amo_wqe(uintptr_t raddr, uint32_t rkey,
-                                     uint64_t value, uint64_t cond, bool signaled);
+                                     uint64_t swap_add, uint64_t compare, bool signaled);
 
   static __device__ void* get_hwqe(const bnxt_device_sq& sq, uint32_t idx);
   static __device__ void fill_psns_for_msntbl(bnxt_device_sq& sq, uint32_t msg_len);
@@ -186,7 +186,7 @@ __device__ void QueuePairBNXT::post_wqe_rma_single(
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond,
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   using PostOptions = PostOpt<Options...>;
@@ -206,7 +206,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
-      atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, value, cond, signaled);
+      atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
       /* Ring Doorbell */
       if constexpr (PostOptions::RingDB) {
@@ -233,7 +233,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
 __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond, PostOpt<Options...>) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   using PostOptions = PostOpt<Options...>;
   uint64_t* atomic_laddr = nullptr;
@@ -248,7 +248,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
   bool signaled = PostOptions::signal_completion_single();
 
   /* Write WQE to SQ */
-  atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, value, cond, signaled);
+  atomic_laddr = write_amo_wqe<Op, Fetch, PostOptions::CheckSQ>(raddr, rkey, swap_add, compare, signaled);
 
   /* Ring Doorbell */
   if constexpr (PostOptions::RingDB) {
@@ -336,7 +336,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(
 
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
 __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
-    uintptr_t raddr, uint32_t rkey, uint64_t value, uint64_t cond, bool signaled) {
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   static constexpr size_t size = sizeof(uint64_t);
 
@@ -371,8 +371,8 @@ __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
   hdr.lhdr.rva = raddr;
 
   /* Populate AMO Segment */
-  amo.swp_dt = value;
-  amo.cmp_dt = cond;
+  amo.swp_dt = swap_add;
+  amo.cmp_dt = compare;
 
   /* Populate SG Segment - (Return address of atomic) */
   atomic_laddr = get_atomic_addr<Fetch>();
