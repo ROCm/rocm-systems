@@ -527,8 +527,17 @@ TEST(CeInternalNeg, CeImplementedReturnsTrueOnSupportedDriver)
 
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAll,  ncclDevSum, ncclFloat32));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAlltoAllv, ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncScatter,   ncclDevSum, ncclFloat32));
     EXPECT_TRUE(ncclCeImplemented(ncclFuncGather,    ncclDevSum, ncclFloat32));
+}
+
+// NEG-03: ncclCeAlltoAllv rejects missing size metadata before launching transfers.
+TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
+{
+    ncclCeCollArgs args{};
+    args.sizes = nullptr;
+    EXPECT_EQ(ncclCeAlltoAllv(ceComm, &args, getActiveStream()), ncclInvalidUsage);
 }
 
 // ===========================================================================

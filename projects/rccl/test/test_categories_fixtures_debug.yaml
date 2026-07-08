@@ -23,6 +23,7 @@ test_categories:
       - "DdaAlltoAllThreshold.*"
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
+      - "CeAlltoAllvEligibilityTest.*"
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"

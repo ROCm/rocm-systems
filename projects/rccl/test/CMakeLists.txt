@@ -341,6 +341,7 @@ if(BUILD_TESTS)
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
+      CeAlltoAllvEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
