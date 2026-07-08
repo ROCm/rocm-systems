@@ -1790,6 +1790,11 @@ namespace elf {
         return 0;
       }
 
+      // The loop indexes shdr[i] with sizeof(Elf64_Shdr) stride.
+      if (ehdr->e_shentsize != sizeof(Elf64_Shdr)) {
+        return 0;
+      }
+
       if (bounded && ehdr->e_shoff >= buffer_size) {
         return 0;
       }
@@ -1806,6 +1811,15 @@ namespace elf {
       uint64_t total_size = max_offset + shdr_table_size;
 
       for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+        if (bounded) {
+          uint64_t shdr_entry_offset =
+              static_cast<uint64_t>(ehdr->e_shoff) +
+              static_cast<uint64_t>(i) * sizeof(Elf64_Shdr);
+          if (shdr_entry_offset + sizeof(Elf64_Shdr) > buffer_size) {
+            return 0;
+          }
+        }
+
         uint64_t cur_offset = static_cast<uint64_t>(shdr[i].sh_offset);
         if (max_offset < cur_offset) {
           max_offset = cur_offset;

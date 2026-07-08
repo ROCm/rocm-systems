@@ -2300,11 +2300,15 @@ hsa_status_t hsa_executable_load_code_object(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
   CodeObjectReaderImpl reader;
+  // buffer_size == 0 means unbounded size discovery for in-memory ELF images.
   size_t code_object_size = amd::elf::ElfSize(code_object_p, 0);
   if (code_object_size == 0) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
-  reader.SetMemory(code_object_p, code_object_size);
+  hsa_status_t status = reader.SetMemory(code_object_p, code_object_size);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
   return exec->LoadCodeObject(agent, code_object, code_object_size, options,
                               reader.GetUri());
