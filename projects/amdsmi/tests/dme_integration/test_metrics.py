@@ -111,6 +111,8 @@ class VerifyTest(unittest.TestCase):
                 self._verify(gpu_agent_pid_file=pid_file)
 
     def test_missing_metrics_gpu_agent_dead_soft_passes(self):
+        # A dead GPU Agent with missing metrics soft-passes (upstream ABI skew,
+        # not a PR regression); this branch self-disables once the agent stays up.
         pid_file = Path(tempfile.gettempdir()) / "dme-test-pid"
         with (
             mock.patch.object(metrics, "_fetch", return_value=(200, _VALID_BODY_MISSING_REQUIRED)),

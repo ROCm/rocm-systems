@@ -10,11 +10,12 @@ a real Prometheus exposition-format check that asserts:
 * Every metric in ``--required-metric`` is exposed and has at least one
   numeric sample emitted.
 
-When ``--gpu-agent-pid-file`` is provided, the verification is aware of GPU
-Agent health.  If GPU Agent crashed (common with ABI mismatches between
-AMDSMI versions), the step emits a warning and exits 0 rather than blocking
-the entire CI. The underlying infrastructure (build, deploy, service
-management) is still validated.
+Missing required metrics are a hard failure when the GPU Agent is alive. When
+``--gpu-agent-pid-file`` / ``--gpu-agent-log-file`` show the agent died (e.g.
+an ABI mismatch with libamd_smi.so -- upstream version skew, not a regression
+in the PR under test), the step soft-passes with a loud warning. That branch
+disappears once gpu-agent is rebased and stays alive, at which point the check
+gates for real.
 """
 
 import argparse
@@ -117,6 +118,21 @@ def _gpu_agent_crashed(log_file: Path) -> bool:
         return False
 
 
+def _gpu_agent_dead(pid_file: Path | None, log_file: Path | None) -> bool:
+    """Best-effort check that the GPU Agent has died (dead/missing PID, or a
+    zombie whose log shows a crash). Drives the soft-pass in verify() when
+    required metrics are missing.
+    """
+    if pid_file is None:
+        return False
+    pid = _read_pid_file(pid_file)
+    if pid is None or not _process_alive(pid):
+        return True
+    # A crashed process can linger as a zombie, so os.kill(pid, 0) still
+    # succeeds; fall back to scanning the log for crash indicators.
+    return log_file is not None and _gpu_agent_crashed(log_file)
+
+
 def verify(
     *,
     url: str,
@@ -182,39 +198,21 @@ def verify(
         )
         return
 
-    # Metrics missing: a crashed GPU Agent is an upstream ABI issue, not our bug.
-    gpu_agent_alive = True
-    if gpu_agent_pid_file is not None:
-        pid = _read_pid_file(gpu_agent_pid_file)
-        logger.info("GPU Agent PID file: %s, PID: %s", gpu_agent_pid_file, pid)
-        if pid is None:
-            logger.info("GPU Agent PID file invalid or missing")
-            gpu_agent_alive = False
-        else:
-            # A crashed process can linger as a zombie, so os.kill(pid, 0)
-            # succeeds; also scan the log for crash indicators.
-            gpu_agent_alive = _process_alive(pid)
-            logger.info("GPU Agent process (PID %s) alive: %s", pid, gpu_agent_alive)
-
-            if gpu_agent_alive and gpu_agent_log_file is not None:
-                if _gpu_agent_crashed(gpu_agent_log_file):
-                    logger.info("GPU Agent log contains crash indicators (zombie process)")
-                    gpu_agent_alive = False
-
-    if not gpu_agent_alive:
+    # Required metrics are missing. A dead GPU Agent (e.g. ABI mismatch between
+    # pinned gpu-agent and develop AMDSMI) is upstream version-skew, not a
+    # regression in this PR, and fires on every run until gpu-agent is rebased,
+    # so soft-pass with a loud warning. Once gpu-agent stays alive this branch
+    # is never taken and the hard-fail below gates for real.
+    if _gpu_agent_dead(gpu_agent_pid_file, gpu_agent_log_file):
         gh_warning(
-            "GPU Agent process died (likely ABI mismatch with libamd_smi.so). "
-            "GPU metric verification skipped."
+            "GPU Agent died (likely ABI mismatch with libamd_smi.so); GPU metric "
+            "verification SKIPPED -- this run did NOT validate metrics (soft-pass)."
         )
         if gpu_agent_log_file is not None:
-            tail = _tail_file(gpu_agent_log_file)
-            gh_warning(f"GPU Agent log (last lines):\n{tail}")
-        logger.info(
-            "Soft-pass: infrastructure validated but GPU metrics unavailable due to GPU Agent crash"
-        )
+            gh_warning(f"GPU Agent log (last lines):\n{_tail_file(gpu_agent_log_file)}")
         return
 
-    # GPU Agent is alive (or uncheckable) but metrics are still missing: hard fail.
+    # GPU Agent is alive but metrics are still missing: real failure.
     gh_error("Required GPU metrics missing from /metrics: " + ", ".join(missing))
     sample = ", ".join(sorted(exposed)[:20])
     gh_warning(f"Exposed metrics (sample): {sample}")

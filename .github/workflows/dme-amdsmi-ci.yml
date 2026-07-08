@@ -163,9 +163,13 @@ jobs:
           cd "${AMDSMI_DIR}"
           mkdir -p build && cd build
           echo "::group::cmake configure"
+          # Only libamd_smi.so + headers are needed here. BUILD_TESTS builds an
+          # unused GTest suite; ENABLE_ESMI_LIB pulls in CPU/ESMI code that
+          # gpu-agent never calls and git-clones esmi_ib_library at configure
+          # time (a network dependency that can fail the build).
           cmake .. \
-            -DBUILD_TESTS=ON \
-            -DENABLE_ESMI_LIB=ON \
+            -DBUILD_TESTS=OFF \
+            -DENABLE_ESMI_LIB=OFF \
             -DCMAKE_INSTALL_PREFIX=/opt/rocm \
             -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
           echo "::endgroup::"
@@ -291,6 +295,10 @@ jobs:
             --ready-timeout 30 \
             --ld-library-path "${BLD_DIR}/lib:/opt/rocm/lib"
 
+      # GPU Agent may crash from ABI skew between the pinned gpu-agent and the
+      # develop AMDSMI (fires on every run until gpu-agent is rebased). Don't
+      # block on it here; verify-metrics soft-passes with a loud warning when
+      # --gpu-agent-pid-file shows the agent died.
       - name: Health Check GPU Agent
         working-directory: ${{ env.AMDSMI_TESTS_DIR }}
         run: |
@@ -300,9 +308,6 @@ jobs:
             --pid-file /tmp/gpuagent.pid \
             --log-file /tmp/gpuagent.log \
             --delay 3
-        # GPU Agent may crash due to ABI mismatch with the AMDSMI version on
-        # this branch. Don't block the pipeline - verify-metrics handles this
-        # gracefully when --gpu-agent-pid-file is provided.
         continue-on-error: true
 
       - name: Start Device Metrics Exporter

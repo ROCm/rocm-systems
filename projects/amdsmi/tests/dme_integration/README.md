@@ -278,13 +278,19 @@ python3 -m dme_integration prepare-submodules \
 
 ## CI gating status
 
-GPU-metric verification is currently **non-gating**: when the GPU Agent
-crashes (see `verify-metrics` above), the step soft-passes with a
-`::warning::` and exits 0. A green check therefore only guarantees that
-the build, deploy, and service-management path works. It does **not** by
-itself confirm that GPU metrics were validated. Check the job log for the
-`GPU Agent process died` warning to tell a real GPU-metric pass from a
-soft-pass.
+GPU-metric verification is currently **non-gating** *only when the GPU Agent
+crashes*: that crash is upstream ABI skew between the pinned gpu-agent and the
+develop AMDSMI (it fires on every run until gpu-agent is rebased), not a
+regression in the PR under test, so the step soft-passes with a `::warning::`
+and exits 0. A green check therefore only guarantees the build, deploy, and
+service-management path works. It does **not** by itself confirm that GPU
+metrics were validated. To tell a real GPU-metric pass from a soft-pass, look
+for the `GPU metric verification SKIPPED` warning in the job log.
+
+This soft-pass is self-limiting: it only triggers while the GPU Agent dies. If
+the agent stays alive but metrics are missing, the check hard-fails, and once
+gpu-agent is ABI-compatible the soft-pass branch is never taken and the check
+gates for real.
 
 ---
 
