@@ -432,21 +432,12 @@ class ResultsEmitter:
                               json.dumps(self.manifest["coverage"], indent=2, default=str))
 
             # Bundle captured logs + coverage report into the run dir so the
-            # tarball is self-contained for the dashboard scrape. To minimize
-            # bloat, only failing tests' logs are bundled: drop the per-test log
-            # files of passing/skipped tests (any non-per-test file is kept).
+            # tarball is self-contained for the dashboard scrape. Every
+            # per-test log is kept -- the logs are the raw test/perf evidence
+            # and the fallback source if in-run parsing regresses.
             if log_dir and os.path.isdir(log_dir):
                 dst = os.path.join(run_dir, "logs")
-                drop = set()
-                for t in self.tests:
-                    rel = t.get("log_relpath")
-                    status = (t.get("status") or t.get("result") or "").upper()
-                    if rel and status not in ("FAILED", "TIMEOUT"):
-                        drop.add(os.path.basename(rel))
-                shutil.copytree(
-                    log_dir, dst, dirs_exist_ok=True,
-                    ignore=lambda _dir, names: [n for n in names if n in drop],
-                )
+                shutil.copytree(log_dir, dst, dirs_exist_ok=True)
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
                 shutil.copytree(report_dir, dst, dirs_exist_ok=True)
