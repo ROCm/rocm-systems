@@ -67,6 +67,67 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjects_WritesTheirIds)
     EXPECT_EQ(m_writer->get_start_code_obj_ids()[1], m_mem_info.code_object_id);
 }
 
+TEST_F(test_pc_sampling_collector_t, ProvidedKernelSymbols_WritesThemUnderCodeObjects)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    m_pc_sampling_collector->on_kernel_symbol_register(m_mem_info.code_object_id, 100, "kernel1");
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 99, "kernel0");
+
+    m_pc_sampling_collector->finalize(*m_writer);
+
+    const auto& kernels = m_writer->get_kernel_descriptions();
+    ASSERT_EQ(kernels.size(), 2);
+    EXPECT_EQ(kernels[0].code_object_id, m_file_info.code_object_id);
+    EXPECT_EQ(kernels[0].kernel_id, 99);
+    EXPECT_EQ(kernels[0].name, "kernel0");
+    EXPECT_EQ(kernels[1].code_object_id, m_mem_info.code_object_id);
+    EXPECT_EQ(kernels[1].kernel_id, 100);
+    EXPECT_EQ(kernels[1].name, "kernel1");
+}
+
+TEST_F(test_pc_sampling_collector_t, ProvidedOrphanKernelSymbol_DoesNotWriteIt)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_kernel_symbol_register(999, 100, "orphan");
+
+    m_pc_sampling_collector->finalize(*m_writer);
+
+    EXPECT_TRUE(m_writer->get_kernel_descriptions().empty());
+}
+
+TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectsWithoutKernelSymbols_WriteNoKernels)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+
+    m_pc_sampling_collector->finalize(*m_writer);
+
+    EXPECT_TRUE(m_writer->get_kernel_descriptions().empty());
+}
+
+TEST_F(test_pc_sampling_collector_t, ProvidedMultipleKernelSymbols_PreservesOrder)
+{
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 99, "kernel0");
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 100, "kernel1");
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 101, "kernel2");
+
+    m_pc_sampling_collector->finalize(*m_writer);
+
+    const auto& kernels = m_writer->get_kernel_descriptions();
+    ASSERT_EQ(kernels.size(), 3);
+    EXPECT_EQ(kernels[0].code_object_id, m_file_info.code_object_id);
+    EXPECT_EQ(kernels[0].kernel_id, 99);
+    EXPECT_EQ(kernels[0].name, "kernel0");
+    EXPECT_EQ(kernels[1].code_object_id, m_file_info.code_object_id);
+    EXPECT_EQ(kernels[1].kernel_id, 100);
+    EXPECT_EQ(kernels[1].name, "kernel1");
+    EXPECT_EQ(kernels[2].code_object_id, m_file_info.code_object_id);
+    EXPECT_EQ(kernels[2].kernel_id, 101);
+    EXPECT_EQ(kernels[2].name, "kernel2");
+}
+
 TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);

@@ -69,6 +69,13 @@ private:
 class mock_code_object_writer_t : public rocprofiler_compute_tool::code_object_writer_t
 {
 public:
+    struct kernel_description_t
+    {
+        size_t      code_object_id = 0;
+        uint64_t    kernel_id      = 0;
+        std::string name;
+    };
+
     void        start_code_obj(size_t obj_id) override;
     void        end_code_obj() override;
     void        write_kernel(uint64_t kernel_id, const std::string& name) override;
@@ -81,6 +88,7 @@ public:
 
     const std::vector<size_t>&                             get_start_code_obj_ids() const;
     uint32_t                                               get_end_code_obj_count() const;
+    const std::vector<kernel_description_t>&               get_kernel_descriptions() const;
     const std::vector<rocprofiler_compute_tool::symbol_t>& get_symbol_descriptions() const;
     const std::vector<rocprofiler_compute_tool::instruction_t>& get_instruction_descriptions() const;
     uint32_t get_end_symbol_count() const;
@@ -88,6 +96,8 @@ public:
 private:
     std::vector<size_t>                                  m_started_code_obj_ids;
     uint32_t                                             m_ended_code_obj_count = 0;
+    size_t                                               m_current_code_obj_id  = 0;
+    std::vector<kernel_description_t>                    m_kernel_descriptions;
     std::vector<rocprofiler_compute_tool::symbol_t>      m_symbol_descriptions;
     std::vector<rocprofiler_compute_tool::instruction_t> m_instructions;
     uint32_t                                             m_end_symbol_count = 0;

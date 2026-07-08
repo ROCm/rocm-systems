@@ -84,6 +84,7 @@ const std::vector<std::pair<size_t, uint64_t>>& mock_code_object_translator_t::g
 
 void mock_code_object_writer_t::start_code_obj(size_t obj_id)
 {
+    m_current_code_obj_id = obj_id;
     m_started_code_obj_ids.push_back(obj_id);
 }
 
@@ -92,7 +93,10 @@ void mock_code_object_writer_t::end_code_obj()
     ++m_ended_code_obj_count;
 }
 
-void mock_code_object_writer_t::write_kernel(uint64_t, const std::string&) {}
+void mock_code_object_writer_t::write_kernel(uint64_t kernel_id, const std::string& name)
+{
+    m_kernel_descriptions.push_back({m_current_code_obj_id, kernel_id, name});
+}
 
 void mock_code_object_writer_t::start_symbol(const symbol_t& symbol)
 {
@@ -129,6 +133,12 @@ const std::vector<size_t>& mock_code_object_writer_t::get_start_code_obj_ids() c
 uint32_t mock_code_object_writer_t::get_end_code_obj_count() const
 {
     return m_ended_code_obj_count;
+}
+
+const std::vector<mock_code_object_writer_t::kernel_description_t>&
+    mock_code_object_writer_t::get_kernel_descriptions() const
+{
+    return m_kernel_descriptions;
 }
 
 const std::vector<symbol_t>& mock_code_object_writer_t::get_symbol_descriptions() const
