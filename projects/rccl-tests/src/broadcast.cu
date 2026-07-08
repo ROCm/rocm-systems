@@ -8,15 +8,56 @@
 #include "cuda_runtime.h"
 #include "common.h"
 
+// Set RCCL_TESTS_ALLGATHERV_ENABLE=1 to run grouped-broadcast (AllGatherV fusion) mode
+static int broadcast_grouped = [] {
+  const char* s = getenv("RCCL_TESTS_ALLGATHERV_ENABLE");
+  return s != nullptr && s[0] == '1';
+}();
+
 void BroadcastGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
-  *sendcount = count;
-  *recvcount = count;
-  *sendInplaceOffset = 0;
-  *recvInplaceOffset = 0;
-  *paramcount = *sendcount;
+  if (broadcast_grouped) {
+    if (count < (size_t)nranks) {
+      *sendcount = *recvcount = *paramcount = *sendInplaceOffset = *recvInplaceOffset = 0;
+      return;
+    }
+    size_t chunkElems = (count / nranks) & -(16 / eltSize);
+    if (chunkElems == 0) {
+      *sendcount = *recvcount = *paramcount = *sendInplaceOffset = *recvInplaceOffset = 0;
+      return;
+    }
+    *sendcount  = chunkElems;
+    *recvcount  = chunkElems * nranks;
+    *paramcount = chunkElems;
+    *sendInplaceOffset = chunkElems;
+    *recvInplaceOffset = 0;
+  } else {
+    *sendcount = count;
+    *recvcount = count;
+    *sendInplaceOffset = 0;
+    *recvInplaceOffset = 0;
+    *paramcount = *sendcount;
+  }
 }
 
 testResult_t BroadcastInitData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int rep, int in_place) {
+  if (broadcast_grouped) {
+    size_t chunkElems = args->sendBytes / wordSize(type);
+    int nranks = args->nProcs * args->nThreads * args->nGpus;
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      int rank = (args->proc * args->nThreads + args->thread) * args->nGpus + i;
+      CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+      void* data = in_place ? ((char*)args->recvbuffs[i]) + rank * args->sendBytes : args->sendbuffs[i];
+      TESTCHECK(InitData(data, chunkElems, 0, type, ncclSum, rank + 1, 1, 0));
+      for (int k = 0; k < nranks; k++) {
+        char* slot = (char*)args->expected[i] + (size_t)k * chunkElems * wordSize(type);
+        TESTCHECK(InitData(slot, chunkElems, 0, type, ncclSum, k + 1, 1, 0));
+      }
+      CUDACHECK(cudaDeviceSynchronize());
+    }
+    return testSuccess;
+  }
+
   size_t sendcount = args->sendBytes / wordSize(type);
   size_t recvcount = args->expectedBytes / wordSize(type);
 
@@ -39,14 +80,36 @@ testResult_t  BroadcastGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
 }
 
 void BroadcastGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
-  double baseBw = (double)(count * typesize) / 1.0E9 / sec;
-
-  *algBw = baseBw;
-  double factor = 1;
-  *busBw = baseBw * factor;
+  if (broadcast_grouped) {
+    double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
+    *algBw = baseBw;
+    double factor = (double)(nranks - 1) / (double)nranks;
+    *busBw = baseBw * factor;
+  } else {
+    double baseBw = (double)(count * typesize) / 1.0E9 / sec;
+    *algBw = baseBw;
+    double factor = 1;
+    *busBw = baseBw * factor;
+  }
 }
 
 testResult_t BroadcastRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
+  if (broadcast_grouped) {
+    // nranks broadcasts with distinct roots inside one group — fuses into AllGatherV ring kernel
+    if (deviceImpl != 0) return testNotImplemented;
+    int nranks;
+    NCCLCHECK(ncclCommCount(comm, &nranks));
+    char* sptr = (char*)sendbuff + sendoffset;
+    char* rptr = (char*)recvbuff + recvoffset;
+    NCCLCHECK(ncclGroupStart());
+    for (int k = 0; k < nranks; k++) {
+      NCCLCHECK(ncclBroadcast(sptr, rptr + (size_t)k * count * wordSize(type),
+                              count, type, /*root=*/k, comm, stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    return testSuccess;
+  }
+
   if (deviceImpl == 0) {
     int rank;
     NCCLCHECK(ncclCommUserRank(comm, &rank));
@@ -88,7 +151,6 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
-  int begin_root, end_root;
 
   if ((int)type != -1) {
     type_count = 1;
@@ -100,6 +162,13 @@ testResult_t BroadcastRunTest(struct threadArgs* args, int root, ncclDataType_t 
     run_typenames = test_typenames;
   }
 
+  if (broadcast_grouped) {
+    for (int i = 0; i < type_count; i++)
+      TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], (ncclRedOp_t)0, "none", -1));
+    return testSuccess;
+  }
+
+  int begin_root, end_root;
   if (root != -1) {
     begin_root = end_root = root;
   } else {
