@@ -12,7 +12,8 @@
 namespace {
 
 template <size_t N> [[noreturn]] void fail(const char (&message)[N]) {
-  static_cast<void>(write(STDERR_FILENO, message, N - 1));
+  ssize_t ignored = write(STDERR_FILENO, message, N - 1);
+  static_cast<void>(ignored);
   _exit(EXIT_FAILURE);
 }
 
