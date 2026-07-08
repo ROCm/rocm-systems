@@ -66,11 +66,6 @@ namespace rocr {
 namespace amd {
 namespace hsa {
 namespace code {
-namespace detail {
-
-constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
-
-}  // namespace detail
 
     using amd::elf::GetNoteString;
 
@@ -1407,9 +1402,10 @@ constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
 
     void AmdHsaCode::PrintRawData(std::ostream& out, Section* section)
     {
+      constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
       out << "    Data:" << std::endl;
       const size_t section_size = section->size();
-      if (section_size > detail::kMaxSectionPrintSize) {
+      if (section_size > kMaxSectionPrintSize) {
         out << "      (section data too large to display: " << section_size
             << " bytes)" << std::endl;
         return;
