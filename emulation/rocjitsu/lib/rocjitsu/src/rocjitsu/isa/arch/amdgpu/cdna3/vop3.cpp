@@ -1151,14 +1151,20 @@ void VCvtF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t src_byte = (src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                                                       ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                                                      8u)) &
-                        0xFFu;
-    float value = amdgpu::vop3_fp8_decode_e5m3(*this)
-                      ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(src_byte))
-                      : util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>(src_byte));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(value));
+    vdst.write_lane(
+        wf, lane,
+        std::bit_cast<uint32_t>(
+            (amdgpu::vop3_fp8_decode_e5m3(*this))
+                ? util::fp8_e5m3_to_f32(static_cast<uint8_t>(
+                      ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                      ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                     8u)) &
+                       0xFFu)))
+                : util::fp8_e4m3_fnuz_to_f32(static_cast<uint8_t>(
+                      ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                      ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                     8u)) &
+                       0xFFu)))));
   }
 }
 
@@ -1178,13 +1184,12 @@ void VCvtF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t src_byte = (src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
-                                                       ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
-                                                      8u)) &
-                        0xFFu;
-    vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>(src_byte))));
+    vdst.write_lane(wf, lane,
+                    std::bit_cast<uint32_t>(util::bf8_e5m2_fnuz_to_f32(static_cast<uint8_t>(
+                        ((src0.read_lane(wf, lane) >> ((((amdgpu::vop3_opsel(inst_) & 0x1u) << 1) |
+                                                        ((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1)) *
+                                                       8u)) &
+                         0xFFu)))));
   }
 }
 

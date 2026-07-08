@@ -13,6 +13,16 @@ import pytest
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 
+# Cached PyTorch trace workload shared by the torch-operator analyze tests.
+TORCH_TRACE_WORKLOAD = "tests/workloads/torch_trace/MI300X_A1"
+
+# Cached Triton trace workload (triton_ffn.py): Triton kernels only.
+TRITON_TRACE_WORKLOAD = "tests/workloads/triton_trace/MI300A"
+
+# Cached ML API trace workload (torch_compile_triton.py): both PyTorch and
+# Triton operators in a single run.
+ML_API_TRACE_WORKLOAD = "tests/workloads/ml_api_trace/MI300A"
+
 # 30 workloads common to MI100, MI200, MI300A_A1, MI300X_A1.
 CDNA_WORKLOADS = [
     "device_filter",
@@ -115,10 +125,10 @@ def test_analyze_workload(
 ##################################################
 
 
-def test_analyze_torch_trace_list_operators_MI350(
+def test_analyze_torch_trace_list_operators_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -134,18 +144,18 @@ def test_analyze_torch_trace_list_operators_MI350(
     assert "PyTorch Operator Call Tree:" in output
     assert "Grouped by source location" in output
     assert "torch.nn.functional.relu" in output
-    assert "torch.nn.functional.linear" in output
-    assert "torch.ones_like" in output
+    assert "aten::linear" in output
+    assert "aten::ones_like" in output
     assert "dispatches:" in output
     assert "total:" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_torch_trace_filter_operator_MI350(
+def test_analyze_torch_trace_filter_operator_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -167,10 +177,10 @@ def test_analyze_torch_trace_filter_operator_MI350(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_torch_trace_multi_operator_MI350(
+def test_analyze_torch_trace_multi_operator_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -192,10 +202,10 @@ def test_analyze_torch_trace_multi_operator_MI350(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_torch_trace_invalid_operator_MI350(
+def test_analyze_torch_trace_invalid_operator_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -208,17 +218,17 @@ def test_analyze_torch_trace_invalid_operator_MI350(
     assert code == 0
 
     output = capsys.readouterr().out
-    assert "No operators matched" in output
+    assert "No PyTorch operators matched" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_torch_trace_hierarchy_path_MI350(
+def test_analyze_torch_trace_hierarchy_path_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
-    hierarchy = "*nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu*"
+    hierarchy = "*nn.Module.SimpleNet.forward/torch.nn.functional.relu/aten::relu*"
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -232,16 +242,16 @@ def test_analyze_torch_trace_hierarchy_path_MI350(
     output = capsys.readouterr().out
 
     assert "Matched PyTorch Operators:" in output
-    assert "torch.relu" in output
+    assert "aten::relu" in output
     assert "dispatches:" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_analyze_torch_trace_torch_prefix_MI350(
+def test_analyze_torch_trace_torch_prefix_MI300X_A1(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
+    workload_dir = common.setup_workload_dir(TORCH_TRACE_WORKLOAD)
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -249,14 +259,211 @@ def test_analyze_torch_trace_torch_prefix_MI350(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*torch.relu*",
+        "*torch.Tensor.sum*",
     ])
     assert code == 0
 
     output = capsys.readouterr().out
 
     assert "Matched PyTorch Operators:" in output
-    assert "torch.relu" in output
+    assert "torch.Tensor.sum" in output
     assert "dispatches:" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+##################################################
+##          Triton trace analysis tests         ##
+##################################################
+
+
+def test_analyze_triton_trace_list_operators_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(TRITON_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-triton-operators",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Triton Operator Call Tree:" in output
+    assert "Grouped by source location" in output
+    assert "triton.JITFunction.matmul_kernel" in output
+    assert "rmsnorm_kernel" in output
+    assert "dispatches:" in output
+    assert "total:" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_triton_trace_filter_operator_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(TRITON_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--triton-operator",
+        "*matmul*",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched Triton Operators:" in output
+    assert "matmul_kernel" in output
+    assert "dispatches:" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_triton_trace_multi_operator_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(TRITON_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--triton-operator",
+        "*matmul*",
+        "*silu*",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched Triton Operators:" in output
+    assert "matmul_kernel" in output
+    assert "silu_kernel" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_triton_trace_invalid_operator_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(TRITON_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--triton-operator",
+        "nonexistent_op",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+    assert "No Triton operators matched" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+##################################################
+##          ML API trace analysis tests         ##
+##################################################
+
+
+def test_analyze_ml_api_trace_list_triton_operators_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(ML_API_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-triton-operators",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Triton Operator Call Tree:" in output
+    assert "torch.compile.fused" in output
+    assert "triton_poi_fused_add_mul_relu_0" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_ml_api_trace_list_torch_operators_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(ML_API_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "PyTorch Operator Call Tree:" in output
+    assert "aten::randn" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_ml_api_trace_filter_triton_operator_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(ML_API_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--triton-operator",
+        "all",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched Triton Operators:" in output
+    assert "triton_poi_fused_add_mul_relu_0" in output
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_ml_api_trace_filter_torch_operator_MI300A(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    workload_dir = common.setup_workload_dir(ML_API_TRACE_WORKLOAD)
+
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*randn*",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched PyTorch Operators:" in output
+    assert "randn" in output
 
     common.clean_output_dir(config["cleanup"], workload_dir)

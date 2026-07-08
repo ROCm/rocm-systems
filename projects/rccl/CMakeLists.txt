@@ -354,6 +354,19 @@ check_cxx_source_compiles("
 ### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
 check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
 
+### Check for cuMem VMM DMA-BUF export support (driver-level dmabuf export).
+check_symbol_exists("hipMemGetHandleForAddressRange" "hip/hip_runtime_api.h" HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+
+### Check for uncached VMM allocation type (hipMemAllocationTypeUncached).
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemAllocationType t = hipMemAllocationTypeUncached;
+    (void)t;
+    return 0;
+  }
+" HIP_VMM_UNCACHED_MEMORY_AVAILABLE)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -386,6 +399,15 @@ if(HIP_MEMCPY_BATCH_ASYNC)
 else()
   set(CE_ENABLED OFF)
   message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
+endif()
+
+## Check for cuMem VMM DMA-BUF export support
+if(HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+  set(CUMEM_DMABUF_EXPORT_ENABLED ON)
+  message(STATUS "cuMem DMA-BUF export enabled - hipMemGetHandleForAddressRange found")
+else()
+  set(CUMEM_DMABUF_EXPORT_ENABLED OFF)
+  message(STATUS "cuMem DMA-BUF export disabled - hipMemGetHandleForAddressRange not found in hip/hip_runtime_api.h")
 endif()
 
 ## Check for hsa-runtime64

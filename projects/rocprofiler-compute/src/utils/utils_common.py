@@ -38,11 +38,16 @@ METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 
 
+def is_gfx115x(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx115x (RDNA 3.5 APU) architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx115"))
+
+
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
     """Map GPU architectures to the shared analysis-config directory name."""
     if gpu_arch is None:
         return None
-    if gpu_arch.startswith("gfx115"):
+    if is_gfx115x(gpu_arch):
         return "gfx115x"
     return gpu_arch
 
@@ -66,7 +71,7 @@ SUPPORTED_FIELD: list[str] = [
     "Q1",
     "Q3",
     "Expression",
-    "Pct of Peak",
+    "Percent of Peak",
     # Special keywords for L2 channel
     "Channel",
     "L2 Cache Hit Rate",

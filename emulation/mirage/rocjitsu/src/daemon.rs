@@ -7,7 +7,7 @@
 //! The mirage per-node host starts one of these on the node it serves.
 //! It:
 //!
-//! 1. Loads `librocjitsu_kmd.so` (which exports the full `rj_vm_*` API)
+//! 1. Loads `librocjitsu.so` (which exports the full `rj_vm_*` API)
 //!    and creates a VM in [`RjVmMode::Daemon`] mode from the synthesised
 //!    `SimulationConfig`. In daemon mode every GPU allocation is backed
 //!    by a `memfd` so it can be shared with the workload process.
@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
 use mirage_core::emulator::EmulatorDaemon;
-use rocjitsu_sys::{Lib, RjVm, RjVmCmd, RjVmMap, RjVmMode, RjVmUnmap};
+use rocjitsu_sys::{Lib, RjVm, RjVmCmd, RjVmGpuInfo, RjVmMap, RjVmMode, RjVmUnmap};
 
 /// RPC opcodes (must match `enum RpcOpcode` in `rpc.h`).
 const RPC_HANDSHAKE: u16 = 0;
@@ -50,10 +50,16 @@ const RPC_MUNMAP: u16 = 4;
 const RPC_IOCTL: u16 = 5;
 
 /// RPC protocol version (`kRpcProtocolVersion` in `rpc.h`).
-const RPC_PROTOCOL_VERSION: u32 = 2;
+const RPC_PROTOCOL_VERSION: u32 = 3;
 
 /// Size of the fixed RPC header in bytes.
 const RPC_HEADER_LEN: usize = 16;
+
+/// Size of the fixed `RpcHandshakeResponse` payload: four `u32` fields
+/// (version, gpu_id, topology_path_len, drm_path_len) followed by the
+/// 312-byte `RpcGpuInfo`. Must equal `sizeof(RpcHandshakeResponse)`
+/// (== 328, asserted in `rpc.h`).
+const RPC_HANDSHAKE_RESPONSE_LEN: usize = 16 + std::mem::size_of::<RjVmGpuInfo>();
 
 /// Upper bound on an ioctl payload, mirroring the C daemon's guard
 /// against a malicious or corrupt client.
@@ -323,12 +329,41 @@ fn accept_loop(
     }
 }
 
+/// Return the connecting client's OS PID via `SO_PEERCRED`, or 0 when it
+/// cannot be determined. The rocjitsu daemon needs the real client PID to
+/// access the workload's address space for cross-process GPU memory.
+fn peer_pid(fd: RawFd) -> i32 {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    if rc == 0 && cred.pid > 0 {
+        cred.pid
+    } else {
+        0
+    }
+}
+
 /// Serve a single client connection until it closes or errors. Mirrors
 /// the C daemon's `handle_client`.
 fn handle_client(fd: RawFd, shared: &Shared) {
     let lib = &shared.lib;
     let vm = shared.vm;
     let mut process_id: u32 = 0;
+    // The client's real OS PID, needed by the VM for daemon-mode
+    // cross-process memory access (see `rj_vm_device_open`).
+    let client_pid = peer_pid(fd);
 
     loop {
         let mut header = [0u8; RPC_HEADER_LEN];
@@ -339,7 +374,7 @@ fn handle_client(fd: RawFd, shared: &Shared) {
 
         let keep_going = match opcode {
             RPC_HANDSHAKE => {
-                let (status, pid) = unsafe { lib.vm_device_open(vm) };
+                let (status, pid) = unsafe { lib.vm_device_open(vm, client_pid) };
                 if status != rocjitsu_sys::ROCJITSU_STATUS_SUCCESS {
                     let resp = build_header(0, request_id, 0, -1);
                     send_exact(fd, &resp);
@@ -353,14 +388,20 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                     let drm = unsafe { lib.vm_drm_path(vm) }
                         .map(|c| c.to_bytes().to_vec())
                         .unwrap_or_default();
-                    let payload = 16 + topo.len() + drm.len();
+                    // Device metadata for the client's libdrm/DRM
+                    // emulation. A zeroed payload (present == 0) is a
+                    // valid fallback for libraries without the symbol.
+                    let gpu_info = unsafe { lib.vm_gpu_info(vm) }.unwrap_or_default();
+                    let payload = RPC_HANDSHAKE_RESPONSE_LEN + topo.len() + drm.len();
                     let mut msg = Vec::with_capacity(RPC_HEADER_LEN + payload);
                     msg.extend_from_slice(&build_header(0, request_id, payload as u32, 0));
-                    // RpcHandshakeResponse: version, gpu_id, topo_len, drm_len.
+                    // RpcHandshakeResponse: version, gpu_id, topo_len,
+                    // drm_len, gpu_info, then the topo/drm path strings.
                     msg.extend_from_slice(&RPC_PROTOCOL_VERSION.to_ne_bytes());
                     msg.extend_from_slice(&gpu_id.to_ne_bytes());
                     msg.extend_from_slice(&(topo.len() as u32).to_ne_bytes());
                     msg.extend_from_slice(&(drm.len() as u32).to_ne_bytes());
+                    msg.extend_from_slice(gpu_info.as_bytes());
                     msg.extend_from_slice(&topo);
                     msg.extend_from_slice(&drm);
                     send_exact(fd, &msg)

@@ -14,6 +14,9 @@
 #define RJ_API_EXPORT __attribute__((visibility("default")))
 #endif
 
+/// @brief Marks a libc entry point interposed by the LD_PRELOAD shim for export.
+#define RJ_INTERPOSER_EXPORT RJ_API_EXPORT
+
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
 /// Usage:

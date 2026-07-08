@@ -239,11 +239,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     kmt_alloc_flags.ui32.NonPaged = 1;
   }
 
-  if (!m_region.IsLocalMemory() &&
-      (alloc_flags & core::MemoryRegion::AllocateMemoryOnly)) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   // Allocating a memory handle for virtual memory
   kmt_alloc_flags.ui32.NoAddress =
       !!(alloc_flags & core::MemoryRegion::AllocateMemoryOnly);
@@ -459,15 +454,23 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                           core::ShareType type, uint32_t flags, void* export_handle,
-                                           uint64_t* export_offset) {
+hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent,
+                                           const core::DriverMemoryHandle& handle,
+                                           core::ShareType type, void* export_handle) {
+  return ExportMemoryHandleImpl(agent, handle, type, EXPORT_MEMORY_FLAGS_NONE, export_handle,
+                                nullptr);
+}
+
+hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
+                                               const core::DriverMemoryHandle& handle,
+                                               core::ShareType type, uint32_t flags,
+                                               void* export_handle, uint64_t* export_offset) {
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
     auto* dmabuf_fd = static_cast<int*>(export_handle);
-    if (flags & core::EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
+    if (flags & EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
       if (export_offset == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       void* mem = reinterpret_cast<void*>(handle.handle);
       if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset)) !=
@@ -482,7 +485,6 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
       return HSA_STATUS_SUCCESS;
     }
 #endif
-    (void)export_offset;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
     HsaHandleExportDesc desc = {};
@@ -501,7 +503,6 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
-    (void)export_offset;
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
@@ -629,9 +630,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   core::DriverMemoryHandle kfd_alloc = {};
   kfd_alloc.handle = reinterpret_cast<uint64_t>(mem);
   kfd_alloc.size = size;
-  if (ExportMemoryHandle(agent, kfd_alloc, core::ShareType::DMABUF_FD,
-                         core::EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd, offset) !=
-      HSA_STATUS_SUCCESS) {
+  if (ExportMemoryHandleImpl(agent, kfd_alloc, core::ShareType::DMABUF_FD,
+                             EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd,
+                             offset) != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
 
@@ -732,8 +733,15 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
       static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
 
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  // Require both thunks up front: importing without destroy would leak the
+  // handle. Missing either -> NOT_SUPPORTED, not a null call.
+  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
+  const bool loaded =
+      thunk_loader->HSAKMT_PFN(hsaKmtImportExternalSemaphore) != nullptr &&
+      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
   HSAKMT_STATUS s =
-      HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle));
+      loaded ? HSAKMT_CALL(hsaKmtImportExternalSemaphore(node_id, nt_handle, kmt_type, &kmt_handle))
+             : HSAKMT_STATUS_NOT_SUPPORTED;
 
   // libhsakmt distinguishes invalid input (null handle, unknown type)
   // from "no node for this agent" and from generic KMD failures.
@@ -743,8 +751,9 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
     case HSAKMT_STATUS_SUCCESS:
       break;
     case HSAKMT_STATUS_INVALID_PARAMETER:  // e.g. null nt_handle
-    case HSAKMT_STATUS_NOT_SUPPORTED:      // unsupported handle type (incl. Linux stub)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:      // missing thunk / unsupported type / Linux stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
     case HSAKMT_STATUS_INVALID_NODE_UNIT:  // no WDDM device for node
       return HSA_STATUS_ERROR_INVALID_AGENT;
     default:
@@ -757,10 +766,56 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
 
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // No export -> not this driver's handle. INVALID_AGENT (base-class
+  // contract) lets handle_close keep polling other drivers.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) == nullptr)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
   if (HSAKMT_CALL(hsaKmtDestroyExternalSemaphore(kmt_handle)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
+
+namespace {
+// Preserve the libhsakmt distinctions a caller can act on (bad handle vs.
+// wrong node vs. generic failure) instead of folding everything into ERROR.
+hsa_status_t MapQueueExtSemStatus(HSAKMT_STATUS s) {
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      return HSA_STATUS_SUCCESS;
+    case HSAKMT_STATUS_INVALID_HANDLE:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:  // missing thunk / platform stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    default:
+      return HSA_STATUS_ERROR;
+  }
+}
+}  // namespace
+
+hsa_status_t KfdDriver::SignalExternalSemaphore(uint64_t queue_id,
+                                                hsa_amd_external_semaphore_t sem,
+                                                uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueSignalExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
+hsa_status_t KfdDriver::WaitExternalSemaphore(uint64_t queue_id,
+                                              hsa_amd_external_semaphore_t sem,
+                                              uint64_t value) const {
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
+  // Optional thunk: missing export maps to NOT_SUPPORTED, not a null call.
+  if (core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) == nullptr)
+    return MapQueueExtSemStatus(HSAKMT_STATUS_NOT_SUPPORTED);
+  return MapQueueExtSemStatus(
+      HSAKMT_CALL(hsaKmtQueueWaitExternalSemaphore(queue_id, kmt_handle, value)));
+}
+
 bool KfdDriver::BindXnackMode() {
   // Get users' preference for Xnack mode of ROCm platform.
   HSAint32 mode = core::Runtime::runtime_singleton_->flag().xnack();

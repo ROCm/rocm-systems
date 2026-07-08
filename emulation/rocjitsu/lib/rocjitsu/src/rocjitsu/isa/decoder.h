@@ -34,6 +34,17 @@ public:
   /// @returns Decoded Instruction pointer (pool or heap allocated).
   virtual Instruction *decode(const rj_code_binary_inst_t *inst) = 0;
 
+  /// @brief Decode a binary instruction and record its source text offset.
+  ///
+  /// @details The generated ISA decoders construct instructions from raw
+  /// encoding words. This overload keeps source-location assignment in the
+  /// decoder API, which is the boundary where callers know both the encoding and
+  /// its location in a larger text stream.
+  /// @param[in] inst Pointer to the binary instruction encoding.
+  /// @param[in] src_loc Source byte offset in the decoded text stream.
+  /// @returns Decoded Instruction pointer (pool or heap allocated).
+  Instruction *decode(const rj_code_binary_inst_t *inst, uint64_t src_loc);
+
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
 
@@ -65,6 +76,8 @@ protected:
 /// @brief ISA-parameterized decoder.
 template <typename Isa> class IsaDecoder final : public Decoder {
 public:
+  using Decoder::decode;
+
   Instruction *decode(const rj_code_binary_inst_t *inst) override {
     auto result = Isa::Decoder::decode(inst);
     return result.release();

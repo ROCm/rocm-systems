@@ -87,7 +87,7 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 
   // GIN's symmetric windows are cuMem/VMM allocations registered with the NIC via ibv_reg_dmabuf_mr.
   // the cuMem/hipMemGetHandleForAddressRange that exports the DMA-BUF FD requires this HIP version.
-#if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   static size_t hostPageSize = sysconf(_SC_PAGESIZE);
   size_t alignedSize = length;
   ALIGN_SIZE(alignedSize, hostPageSize);
