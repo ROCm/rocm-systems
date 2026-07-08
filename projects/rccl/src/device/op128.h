@@ -13,7 +13,12 @@
 #include "rccl_ptr.h"
 
 inline __device__ void load128(const uint64_t* ptr, uint64_t &v0, uint64_t &v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_USE_COHERENT_B64
+  // Two narrow, non-atomic, system-coherent (sc0 sc1) loads. Stays narrow in IR
+  // (no SLP deinterleave / spill); the backend re-merges into global_load_dwordx4.
+  v0 = (uint64_t) __builtin_amdgcn_global_load_coherent_b64((i64_gptr) ptr);
+  v1 = (uint64_t) __builtin_amdgcn_global_load_coherent_b64((i64_gptr) ptr + 1);
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union { v4u v; uint64_t u64[2]; } u;
   u.v = __builtin_amdgcn_global_load_b128((v4u_gptr) ptr, RCCL_SYSTEM_SYNCSCOPE);
   v0 = u.u64[0];
@@ -25,7 +30,10 @@ inline __device__ void load128(const uint64_t* ptr, uint64_t &v0, uint64_t &v1) 
 }
 
 inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_USE_COHERENT_B64
+  __builtin_amdgcn_global_store_coherent_b64((i64_gptr) ptr,     (long int) v0);
+  __builtin_amdgcn_global_store_coherent_b64((i64_gptr) ptr + 1, (long int) v1);
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   union { v4u v; uint64_t u64[2]; } u;
   u.u64[0] = v0;
   u.u64[1] = v1;
@@ -347,7 +355,12 @@ DEFINE_ld_st__size(8, uint64_t, b64, l)
 
 
 __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value){  
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  #if RCCL_USE_COHERENT_B64
+    // Two narrow, non-atomic, system-coherent (sc0 sc1) stores; re-merged into
+    // global_store_dwordx4 by the backend without holding a wide value in IR.
+    __builtin_amdgcn_global_store_coherent_b64((i64_gptr) addr,     (long int) value.u64[0]);
+    __builtin_amdgcn_global_store_coherent_b64((i64_gptr) addr + 1, (long int) value.u64[1]);
+  #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950. 
     __builtin_amdgcn_global_store_b128((v4u_gptr) addr, value.v4u, RCCL_SYSTEM_SYNCSCOPE); 
   #elif defined(__gfx950__)
@@ -360,7 +373,12 @@ __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value
 
 __device__ __forceinline__ BytePack<16> load16global(uintptr_t addr){
   BytePack<16> ans;
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  #if RCCL_USE_COHERENT_B64
+    // Two narrow, non-atomic, system-coherent (sc0 sc1) loads; re-merged into
+    // global_load_dwordx4 by the backend without holding a wide value in IR.
+    ans.u64[0] = (uint64_t) __builtin_amdgcn_global_load_coherent_b64((i64_gptr) addr);
+    ans.u64[1] = (uint64_t) __builtin_amdgcn_global_load_coherent_b64((i64_gptr) addr + 1);
+  #elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
     ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr) addr, RCCL_SYSTEM_SYNCSCOPE);
   #else

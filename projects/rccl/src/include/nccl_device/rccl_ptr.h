@@ -50,6 +50,24 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 
+// Signed 64-bit global pointer, matching the type expected by the
+// __builtin_amdgcn_global_{load,store}_coherent_b64 builtins.
+using i64_gptr = __attribute__((address_space(1))) long int*;
+
+// Non-atomic, system-scope-coherent (sc0 sc1) narrow 64-bit accesses. When
+// available we prefer emitting two of these over one wide b128: they keep the
+// value narrow in IR (no <2 x i64> for SLP to deinterleave, so no register
+// spill), while SILoadStoreOptimizer still re-merges the pair into a single
+// coherent global_*_dwordx4. Disable with -DRCCL_NO_COHERENT_B64.
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && \
+    __has_builtin(__builtin_amdgcn_global_load_coherent_b64) && \
+    __has_builtin(__builtin_amdgcn_global_store_coherent_b64) && \
+    !defined(RCCL_NO_COHERENT_B64)
+#define RCCL_USE_COHERENT_B64 1
+#else
+#define RCCL_USE_COHERENT_B64 0
+#endif
+
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
