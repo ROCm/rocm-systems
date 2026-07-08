@@ -169,9 +169,8 @@ if(_rj_sanitizer_count GREATER 0)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
         if(_rj_sanitizer_arg STREQUAL "address")
             list(APPEND RJ_SANITIZER_COMPILE_OPTIONS /fsanitize=address)
-            add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
             # /INCREMENTAL:NO is required when using MSVC ASAN.
-            add_link_options(/INCREMENTAL:NO)
+            list(APPEND RJ_SANITIZER_LINK_OPTIONS /INCREMENTAL:NO)
         else()
             message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
@@ -181,6 +180,9 @@ if(_rj_sanitizer_count GREATER 0)
             -fsanitize=${_rj_sanitizer_arg}
         )
         list(APPEND RJ_SANITIZER_LINK_OPTIONS -fsanitize=${_rj_sanitizer_arg})
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+            list(APPEND RJ_SANITIZER_LINK_OPTIONS -shared-libsan)
+        endif()
         if(
             address IN_LIST _rj_sanitizer_kinds
             OR undefined IN_LIST _rj_sanitizer_kinds
@@ -188,13 +190,20 @@ if(_rj_sanitizer_count GREATER 0)
         )
             list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -fno-omit-frame-pointer)
         endif()
-        add_compile_options(${RJ_SANITIZER_COMPILE_OPTIONS})
-        add_link_options(${RJ_SANITIZER_LINK_OPTIONS})
         if(address IN_LIST _rj_sanitizer_kinds)
             # GCC 13+ emits false-positive -Wmaybe-uninitialized in std_function.h
             # when ASAN is enabled. Suppress to avoid -Werror failures.
             if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-                add_compile_options(-Wno-maybe-uninitialized)
+                list(
+                    APPEND RJ_SANITIZER_COMPILE_OPTIONS
+                    -Wno-maybe-uninitialized
+                )
+            elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+                # ROCm Clang's ASAN runtime reports duplicate string-literal
+                # ODR violations during startup for large static test binaries
+                # and still aborts with detect_odr_violation=0. Disable global
+                # object instrumentation while preserving stack/heap ASAN.
+                list(APPEND RJ_SANITIZER_COMPILE_OPTIONS -mllvm=-asan-globals=0)
             endif()
         endif()
     else()
@@ -203,10 +212,129 @@ if(_rj_sanitizer_count GREATER 0)
             "Sanitizers are not supported for compiler '${CMAKE_CXX_COMPILER_ID}'."
         )
     endif()
+
+    function(rj_define_sanitizer_runtime definition library_name)
+        execute_process(
+            COMMAND "${CMAKE_CXX_COMPILER}" "-print-file-name=${library_name}"
+            OUTPUT_VARIABLE _rj_sanitizer_runtime
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(
+            _rj_sanitizer_runtime
+            AND NOT _rj_sanitizer_runtime STREQUAL "${library_name}"
+            AND EXISTS "${_rj_sanitizer_runtime}"
+        )
+            add_compile_definitions(
+                "${definition}=\"${_rj_sanitizer_runtime}\""
+            )
+            get_filename_component(
+                _rj_sanitizer_runtime_dir
+                "${_rj_sanitizer_runtime}"
+                DIRECTORY
+            )
+            set(RJ_SANITIZER_RUNTIME_DIRS
+                ${RJ_SANITIZER_RUNTIME_DIRS}
+                "${_rj_sanitizer_runtime_dir}"
+                PARENT_SCOPE
+            )
+            message(
+                STATUS
+                "Sanitizer runtime for ${definition}: ${_rj_sanitizer_runtime}"
+            )
+        endif()
+        unset(_rj_sanitizer_runtime_dir)
+        unset(_rj_sanitizer_runtime)
+    endfunction()
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+        set(_rj_compiler_rt_arch "${CMAKE_SYSTEM_PROCESSOR}")
+        if(_rj_compiler_rt_arch MATCHES "^(x86_64|amd64|AMD64)$")
+            set(_rj_compiler_rt_arch "x86_64")
+        elseif(_rj_compiler_rt_arch MATCHES "^(aarch64|arm64|ARM64)$")
+            set(_rj_compiler_rt_arch "aarch64")
+        endif()
+        if(address IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(
+                RJ_ASAN_RUNTIME_LIBRARY
+                "libclang_rt.asan-${_rj_compiler_rt_arch}.so"
+            )
+        endif()
+        if(undefined IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(
+                RJ_UBSAN_RUNTIME_LIBRARY
+                "libclang_rt.ubsan_standalone-${_rj_compiler_rt_arch}.so"
+            )
+        endif()
+        if(thread IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(
+                RJ_TSAN_RUNTIME_LIBRARY
+                "libclang_rt.tsan-${_rj_compiler_rt_arch}.so"
+            )
+        endif()
+        if(memory IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(
+                RJ_MSAN_RUNTIME_LIBRARY
+                "libclang_rt.msan-${_rj_compiler_rt_arch}.so"
+            )
+        endif()
+        unset(_rj_compiler_rt_arch)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        if(address IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(RJ_ASAN_RUNTIME_LIBRARY libasan.so)
+        endif()
+        if(undefined IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(RJ_UBSAN_RUNTIME_LIBRARY libubsan.so)
+        endif()
+        if(thread IN_LIST _rj_sanitizer_kinds)
+            rj_define_sanitizer_runtime(RJ_TSAN_RUNTIME_LIBRARY libtsan.so)
+        endif()
+    endif()
+    if(RJ_SANITIZER_RUNTIME_DIRS)
+        list(REMOVE_DUPLICATES RJ_SANITIZER_RUNTIME_DIRS)
+        foreach(_rj_sanitizer_runtime_dir IN LISTS RJ_SANITIZER_RUNTIME_DIRS)
+            if(NOT MSVC)
+                list(
+                    APPEND RJ_SANITIZER_LINK_OPTIONS
+                    "-Wl,-rpath,${_rj_sanitizer_runtime_dir}"
+                )
+            endif()
+        endforeach()
+        unset(_rj_sanitizer_runtime_dir)
+    endif()
     unset(_rj_sanitizer_arg)
 endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
+
+function(rj_apply_sanitizers target)
+    if(RJ_SANITIZER_COMPILE_OPTIONS)
+        target_compile_options(
+            ${target}
+            PRIVATE ${RJ_SANITIZER_COMPILE_OPTIONS}
+        )
+    endif()
+    if(RJ_SANITIZER_LINK_OPTIONS)
+        get_target_property(_rj_target_type ${target} TYPE)
+        if(
+            NOT _rj_target_type STREQUAL "OBJECT_LIBRARY"
+            AND NOT _rj_target_type STREQUAL "STATIC_LIBRARY"
+        )
+            if(MSVC)
+                target_link_options(
+                    ${target}
+                    PRIVATE ${RJ_SANITIZER_LINK_OPTIONS}
+                )
+            else()
+                target_link_libraries(
+                    ${target}
+                    PRIVATE ${RJ_SANITIZER_LINK_OPTIONS}
+                )
+            endif()
+        endif()
+        unset(_rj_target_type)
+    endif()
+endfunction()
 
 if(RJ_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
@@ -297,6 +425,7 @@ target_include_directories(
     PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
 )
 target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+rj_apply_sanitizers(rocjitsu_shared)
 
 # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

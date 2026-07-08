@@ -19,3 +19,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
     )
 endif()
+if(COMMAND rj_apply_sanitizers)
+    rj_apply_sanitizers(simdojo)
+endif()

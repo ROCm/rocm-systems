@@ -4,3 +4,6 @@
 add_library(util STATIC src/simd.cpp)
 target_include_directories(util PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set_target_properties(util PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(COMMAND rj_apply_sanitizers)
+    rj_apply_sanitizers(util)
+endif()

@@ -22,4 +22,7 @@ function(rj_add_object_library name)
             PRIVATE -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden
         )
     endif()
+    if(COMMAND rj_apply_sanitizers)
+        rj_apply_sanitizers(${name})
+    endif()
 endfunction()

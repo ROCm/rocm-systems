@@ -31,11 +31,25 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <vector>
 
 using namespace rocjitsu;
+
+#ifndef RJ_ASAN_RUNTIME_LIBRARY
+#define RJ_ASAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_UBSAN_RUNTIME_LIBRARY
+#define RJ_UBSAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_TSAN_RUNTIME_LIBRARY
+#define RJ_TSAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_MSAN_RUNTIME_LIBRARY
+#define RJ_MSAN_RUNTIME_LIBRARY ""
+#endif
 
 static pid_t peer_pid_for_socket(int fd) {
   struct ucred cred {};
@@ -325,6 +339,39 @@ static void append_preload_entry(std::vector<std::string> &entries, std::string 
   entries.push_back(std::move(entry));
 }
 
+static std::vector<std::string> split_ld_preload(std::string_view preload) {
+  std::vector<std::string> entries;
+  while (!preload.empty()) {
+    auto start = preload.find_first_not_of(" \f\n\r\t\v:");
+    if (start == std::string_view::npos)
+      break;
+    preload.remove_prefix(start);
+
+    auto end = preload.find_first_of(" \f\n\r\t\v:");
+    entries.emplace_back(preload.substr(0, end));
+    if (end == std::string_view::npos)
+      break;
+    preload.remove_prefix(end + 1);
+  }
+  return entries;
+}
+
+static void append_preload_entries(std::vector<std::string> &entries, std::string_view preload) {
+  for (auto &entry : split_ld_preload(preload))
+    append_preload_entry(entries, std::move(entry));
+}
+
+static void append_configured_sanitizer_runtime(std::vector<std::string> &entries,
+                                                const char *runtime) {
+  if (!runtime || !*runtime)
+    return;
+  std::error_code ec;
+  auto path = std::filesystem::canonical(runtime, ec);
+  if (ec || path.empty())
+    return;
+  append_preload_entry(entries, path.string());
+}
+
 static std::vector<std::string> loaded_sanitizer_runtimes() {
   std::vector<std::string> entries;
   dl_iterate_phdr(
@@ -339,6 +386,10 @@ static std::vector<std::string> loaded_sanitizer_runtimes() {
         return 0;
       },
       &entries);
+  append_configured_sanitizer_runtime(entries, RJ_ASAN_RUNTIME_LIBRARY);
+  append_configured_sanitizer_runtime(entries, RJ_UBSAN_RUNTIME_LIBRARY);
+  append_configured_sanitizer_runtime(entries, RJ_TSAN_RUNTIME_LIBRARY);
+  append_configured_sanitizer_runtime(entries, RJ_MSAN_RUNTIME_LIBRARY);
   return entries;
 }
 
@@ -347,15 +398,7 @@ static std::string build_ld_preload(const std::string &interposer_lib) {
   append_preload_entry(entries, interposer_lib);
 
   if (const char *existing = std::getenv("LD_PRELOAD")) {
-    std::string_view preload(existing);
-    while (!preload.empty()) {
-      auto pos = preload.find(':');
-      auto entry = preload.substr(0, pos);
-      append_preload_entry(entries, std::string(entry));
-      if (pos == std::string_view::npos)
-        break;
-      preload.remove_prefix(pos + 1);
-    }
+    append_preload_entries(entries, existing);
   }
 
   std::string result;

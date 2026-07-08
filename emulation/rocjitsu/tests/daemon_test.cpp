@@ -28,6 +28,19 @@
 #include <unistd.h>
 #include <vector>
 
+#ifndef RJ_ASAN_RUNTIME_LIBRARY
+#define RJ_ASAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_UBSAN_RUNTIME_LIBRARY
+#define RJ_UBSAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_TSAN_RUNTIME_LIBRARY
+#define RJ_TSAN_RUNTIME_LIBRARY ""
+#endif
+#ifndef RJ_MSAN_RUNTIME_LIBRARY
+#define RJ_MSAN_RUNTIME_LIBRARY ""
+#endif
+
 namespace {
 
 struct ProcessResult {
@@ -121,6 +134,24 @@ const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
+void append_preload_entry(std::string &preload, const char *entry) {
+  if (!entry || !entry[0])
+    return;
+  if (!preload.empty())
+    preload += ':';
+  preload += entry;
+}
+
+std::string client_ld_preload() {
+  std::string preload;
+  append_preload_entry(preload, RJ_ASAN_RUNTIME_LIBRARY);
+  append_preload_entry(preload, RJ_UBSAN_RUNTIME_LIBRARY);
+  append_preload_entry(preload, RJ_TSAN_RUNTIME_LIBRARY);
+  append_preload_entry(preload, RJ_MSAN_RUNTIME_LIBRARY);
+  append_preload_entry(preload, preload_lib());
+  return preload;
+}
+
 class DaemonTest : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -170,7 +201,7 @@ protected:
     std::string cmd = "XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " LD_PRELOAD=";
-    cmd += preload_lib();
+    cmd += client_ld_preload();
     cmd += " HSA_ENABLE_SDMA=1 ";
     cmd += binary;
     if (gtest_filter && gtest_filter[0]) {

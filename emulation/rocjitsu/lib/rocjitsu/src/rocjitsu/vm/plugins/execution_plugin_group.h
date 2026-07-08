@@ -143,8 +143,11 @@ public:
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
-    static auto instance = std::make_shared<ExecutionPluginGroup>();
-    return instance;
+    // Interposed clients can still have the VM engine thread winding down during
+    // process teardown. Keep the empty group available until process exit.
+    static const auto *instance =
+        new std::shared_ptr<ExecutionPluginGroup>(std::make_shared<ExecutionPluginGroup>());
+    return *instance;
   }
 
 protected:

@@ -114,4 +114,8 @@ function(rj_configure_target target)
         )
         add_dependencies(${target} device_kernels)
     endif()
+
+    if(COMMAND rj_apply_sanitizers)
+        rj_apply_sanitizers(${target})
+    endif()
 endfunction()

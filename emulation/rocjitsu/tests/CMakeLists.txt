@@ -477,6 +477,7 @@ if(ROCMINFO_EXECUTABLE)
             RJ_INSTALLED_CONFIG_PATH="${_rj_installed_cdna4_kmd_config}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
+    rj_apply_sanitizers(rocminfo_test)
     add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
 
     if(RJ_INSTALL_TESTS)
@@ -534,6 +535,7 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
+    rj_apply_sanitizers(hsa_init_test)
     add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(hsa_init_test)
@@ -1083,6 +1085,7 @@ if(RJ_ENABLE_HIP_TESTS)
             RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
     )
     target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
+    rj_apply_sanitizers(daemon_test)
     add_dependencies(
         daemon_test
         rocjitsu_bin

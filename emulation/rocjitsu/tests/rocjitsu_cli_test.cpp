@@ -39,18 +39,6 @@ private:
   std::optional<std::string> prior_;
 };
 
-std::vector<std::string> split_preload(std::string_view preload) {
-  std::vector<std::string> entries;
-  while (!preload.empty()) {
-    auto pos = preload.find(':');
-    entries.emplace_back(preload.substr(0, pos));
-    if (pos == std::string_view::npos)
-      break;
-    preload.remove_prefix(pos + 1);
-  }
-  return entries;
-}
-
 size_t find_entry(const std::vector<std::string> &entries, std::string_view needle) {
   auto it = std::find(entries.begin(), entries.end(), needle);
   return it == entries.end() ? entries.size() : static_cast<size_t>(it - entries.begin());
@@ -73,9 +61,9 @@ TEST(RocjitsuCliTest, BuildsDeduplicatedPreloadWithInterposerBeforeExistingEntri
   constexpr const char *kExisting = "/tmp/existing.so";
   constexpr const char *kExtra = "/tmp/extra.so";
   ScopedEnv preload("LD_PRELOAD",
-                    "/tmp/existing.so:/tmp/librocjitsu.so::/tmp/extra.so:/tmp/existing.so");
+                    "/tmp/existing.so /tmp/librocjitsu.so::\t/tmp/extra.so:/tmp/existing.so");
 
-  auto entries = split_preload(build_ld_preload(kInterposer));
+  auto entries = split_ld_preload(build_ld_preload(kInterposer));
 
   EXPECT_EQ(std::count(entries.begin(), entries.end(), kInterposer), 1);
   EXPECT_EQ(std::count(entries.begin(), entries.end(), kExisting), 1);
@@ -89,6 +77,16 @@ TEST(RocjitsuCliTest, BuildsDeduplicatedPreloadWithInterposerBeforeExistingEntri
   ASSERT_NE(extra_pos, entries.size());
   EXPECT_LT(interposer_pos, existing_pos);
   EXPECT_LT(existing_pos, extra_pos);
+}
+
+TEST(RocjitsuCliTest, SplitsPreloadOnColonsAndWhitespace) {
+  auto entries = split_ld_preload("  /tmp/a.so:/tmp/b.so\t/tmp/c.so\n\n/tmp/d.so:: ");
+
+  ASSERT_EQ(entries.size(), 4u);
+  EXPECT_EQ(entries[0], "/tmp/a.so");
+  EXPECT_EQ(entries[1], "/tmp/b.so");
+  EXPECT_EQ(entries[2], "/tmp/c.so");
+  EXPECT_EQ(entries[3], "/tmp/d.so");
 }
 
 } // namespace

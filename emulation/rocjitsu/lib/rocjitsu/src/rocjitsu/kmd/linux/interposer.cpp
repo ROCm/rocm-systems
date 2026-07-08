@@ -88,14 +88,30 @@ static int connect_to_daemon() {
 
 namespace {
 
-#if defined(__clang__) && defined(__has_attribute) &&                                              \
-    __has_attribute(disable_sanitizer_instrumentation)
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
+#if __has_attribute(disable_sanitizer_instrumentation)
 #define RJ_NO_SANITIZE_INTERPOSER __attribute__((disable_sanitizer_instrumentation))
-#elif defined(__GNUC__)
-#define RJ_NO_SANITIZE_INTERPOSER                                                                  \
-  __attribute__((no_sanitize_address, no_sanitize_thread, no_sanitize_undefined))
 #else
-#define RJ_NO_SANITIZE_INTERPOSER
+#if __has_attribute(no_sanitize_address)
+#define RJ_NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+#else
+#define RJ_NO_SANITIZE_ADDRESS
+#endif
+#if __has_attribute(no_sanitize_thread)
+#define RJ_NO_SANITIZE_THREAD __attribute__((no_sanitize_thread))
+#else
+#define RJ_NO_SANITIZE_THREAD
+#endif
+#if __has_attribute(no_sanitize_undefined)
+#define RJ_NO_SANITIZE_UNDEFINED __attribute__((no_sanitize_undefined))
+#else
+#define RJ_NO_SANITIZE_UNDEFINED
+#endif
+#define RJ_NO_SANITIZE_INTERPOSER                                                                  \
+  RJ_NO_SANITIZE_ADDRESS RJ_NO_SANITIZE_THREAD RJ_NO_SANITIZE_UNDEFINED
 #endif
 
 void rj_sigsegv_handler(int, siginfo_t *, void *) {
@@ -189,6 +205,7 @@ public:
   /// the next open("/dev/kfd") creates a fresh connection.
   void reset_after_fork() {
     rj_vm_ = nullptr;
+    new (&engine_thread_) std::thread();
     remote_.store(nullptr, std::memory_order_relaxed);
     remote_kfd_fd_.store(-1, std::memory_order_relaxed);
     remote_open_refs_.store(0, std::memory_order_relaxed);
@@ -209,6 +226,24 @@ public:
   }
   bool initialized() const {
     return rj_vm_ != nullptr || remote_.load(std::memory_order_acquire) != nullptr;
+  }
+
+  void shutdown() {
+    rj_vm_t *vm = nullptr;
+    std::thread engine_thread;
+    {
+      std::lock_guard lock(init_mutex_);
+      vm = rj_vm_;
+      rj_vm_ = nullptr;
+      if (vm)
+        rj_vm_request_exit(vm, "interposer shutdown");
+      if (engine_thread_.joinable())
+        engine_thread = std::move(engine_thread_);
+    }
+    if (engine_thread.joinable())
+      engine_thread.join();
+    if (vm)
+      rj_vm_destroy(vm);
   }
 
   std::unique_lock<std::mutex> lock_remote() { return std::unique_lock(remote_mutex_); }
@@ -503,7 +538,7 @@ public:
         rj_vm_->soc->set_plugin_group(pg);
       }
 
-      std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+      engine_thread_ = std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); });
       in_construction = false;
     }
     return driver();
@@ -523,6 +558,7 @@ public:
 
 private:
   rj_vm_t *rj_vm_ = nullptr;
+  std::thread engine_thread_;
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
   /// @details Stored atomically so lock-free readers (`remote()`,
   /// `remote_lookup()`, `initialized()`, the AMDKFD ioctl fallback, the mmap
@@ -549,9 +585,8 @@ private:
   alignas(16) static uint8_t storage_[];
 };
 
-// Storage for the singleton is never destructed. Using aligned raw storage
-// avoids __cxa_finalize destroying the object while the detached engine
-// thread is still running.
+// Storage for the singleton is never destructed. Shutdown is performed
+// explicitly from the interposer destructor hook after libc remains usable.
 alignas(16) uint8_t InterposerContext::storage_[sizeof(InterposerContext)];
 InterposerContext &InterposerContext::ctx =
     *reinterpret_cast<InterposerContext *>(InterposerContext::storage_);
@@ -853,7 +888,9 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   return static_cast<int>(InterposerContext::real.close(fd));
 }
 
-__attribute__((destructor(101))) void rj_interposer_shutdown() {}
+__attribute__((destructor(101))) void rj_interposer_shutdown() {
+  InterposerContext::ctx.shutdown();
+}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real.ready());
@@ -1852,15 +1889,14 @@ RJ_INTERPOSER_EXPORT RJ_NO_SANITIZE_INTERPOSER void *dlsym(void *handle, const c
   }
   auto symbol_addr = reinterpret_cast<uintptr_t>(symbol);
   if (symbol_addr != 0 && InterposerContext::real.ready()) {
-    static const std::unordered_map<std::string_view, void *> overrides = {
-        {"drmGetDevice", reinterpret_cast<void *>(&drmGetDevice)},
-        {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
-        {"drmGetDevices", reinterpret_cast<void *>(&drmGetDevices)},
-        {"drmGetDevices2", reinterpret_cast<void *>(&drmGetDevices2)},
-    };
-    auto it = overrides.find(symbol);
-    if (it != overrides.end())
-      return it->second;
+    if (std::strcmp(symbol, "drmGetDevice") == 0)
+      return reinterpret_cast<void *>(&drmGetDevice);
+    if (std::strcmp(symbol, "drmGetDevice2") == 0)
+      return reinterpret_cast<void *>(&drmGetDevice2);
+    if (std::strcmp(symbol, "drmGetDevices") == 0)
+      return reinterpret_cast<void *>(&drmGetDevices);
+    if (std::strcmp(symbol, "drmGetDevices2") == 0)
+      return reinterpret_cast<void *>(&drmGetDevices2);
   }
   return real_dlsym_fn(handle, symbol);
 }
@@ -1876,3 +1912,6 @@ RJ_INTERPOSER_EXPORT pid_t fork() {
 } // extern "C"
 
 #undef RJ_NO_SANITIZE_INTERPOSER
+#undef RJ_NO_SANITIZE_UNDEFINED
+#undef RJ_NO_SANITIZE_THREAD
+#undef RJ_NO_SANITIZE_ADDRESS

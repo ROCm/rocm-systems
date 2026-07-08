@@ -40,3 +40,6 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
 endif()
+if(COMMAND rj_apply_sanitizers)
+    rj_apply_sanitizers(rocjitsu_hooks)
+endif()
