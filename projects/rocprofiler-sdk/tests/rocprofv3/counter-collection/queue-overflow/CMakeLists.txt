@@ -29,8 +29,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-queue-overflow
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_queue_overflow -o queue_overflow
-        --output-format csv json -- $<TARGET_FILE:multistream>
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_queue_overflow -o
+        queue_overflow --output-format csv json -- $<TARGET_FILE:multistream>
     DEPENDS multistream
     TIMEOUT 300
     LABELS "integration-tests;counter-collection"
