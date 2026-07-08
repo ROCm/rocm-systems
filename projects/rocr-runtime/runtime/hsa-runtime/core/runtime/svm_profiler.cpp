@@ -223,8 +223,11 @@ void SvmProfileControl::PollSmi() {
             int pid;
             int offset = 0;
             int args = sscanf(cursor, "%x %" SCNu64 " -%u%n", &event_id, &time, &pid, &offset);
-            if (args != 3) {
-              fprintf(logFile, "ROCr HMM event error: Failed to parse event header\n");
+            if (args != 3 || offset <= 0 ||
+                static_cast<size_t>(offset) >= line.size()) {
+              fprintf(logFile,
+                      "ROCr HMM event error: Failed to parse event header (got: '%.80s')\n",
+                      cursor);
               continue;
             }
 

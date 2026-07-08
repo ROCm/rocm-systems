@@ -30,6 +30,7 @@
 #include <cinttypes>
 #include <cstdint>
 #include <climits>
+#include <cerrno>
 #if defined(__linux__)
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
@@ -543,9 +544,16 @@ static inline void init_page_size(void) {
 static int safe_env_to_int(const char* envvar, int default_val) {
   if (envvar == nullptr) return default_val;
   char* endptr;
+  errno = 0;
   long val = strtol(envvar, &endptr, 10);
-  if (endptr == envvar || *endptr != '\0') return default_val;
-  if (val < INT_MIN || val > INT_MAX) return default_val;
+  if (endptr == envvar) return default_val;
+  // Allow trailing whitespace from shell/.env files; reject other trailing content.
+  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
+    ++endptr;
+  }
+  if (*endptr != '\0') return default_val;
+  // On LLP64 (Windows), long is 32-bit so rely on errno for overflow.
+  if (errno == ERANGE || val < INT_MIN || val > INT_MAX) return default_val;
   return static_cast<int>(val);
 }
 

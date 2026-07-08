@@ -142,6 +142,8 @@ protected:
 
   void const printSRD() const {
     char hexStr[200];
+    static_assert((sizeof(srd) / sizeof(srd[0])) * 11 < sizeof(hexStr),
+                  "hexStr too small for full SRD dump");
     size_t hexStrLen = 0;
     for (int i = 0; i < sizeof(srd) / sizeof(srd[0]); i++) {
       int written = snprintf(&hexStr[hexStrLen], sizeof(hexStr) - hexStrLen, "0x%08x ", srd[i]);
