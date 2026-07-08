@@ -23,15 +23,10 @@ list(
     APPEND UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:rocprofiler-sdk-backend-tests>:$<TARGET_OBJECTS:rocprofiler-sdk-backend-tests>>
 )
-if(
-    (ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
-    OR (
-        ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6
-        AND ROCPROFSYS_ROCM_VERSION_MINOR GREATER_EQUAL 4
-    )
+list(
+    APPEND UNIT_TEST_OBJECTS
+    $<$<TARGET_EXISTS:pmc-sdk-pmc-collector-tests>:$<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>>
 )
-    list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-sdk-pmc-collector-tests>)
-endif()
 
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 
