@@ -120,6 +120,11 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     barrierState->barrierHost = barrierPair.second;
   }
 
+  // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
+  // false-matches leftover flag words. Subsequent LL calls rely on monotonic epochs + the
+  // 2-bank layout rather than re-zeroing.
+  CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
+
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
   comm->ddaScratch = scratch;
@@ -128,6 +133,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
+  comm->ddaLLEpoch = 0;
   INFO(
       NCCL_INIT,
       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm), FabricGpuBarrier nBlocks=%d, peer table on device",

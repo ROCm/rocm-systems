@@ -86,6 +86,13 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
 #endif
 
+  // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
+  // false-matches leftover flag words (mirrors the fabric path). Harmless for
+  // the copy-based DDA collectives, which overwrite their staging area per op.
+  if (scratch != nullptr) {
+    HIP_CALL(hipMemset(scratch, 0, bytes));
+  }
+
   auto* handler = new (std::nothrow) ncclIpcMemHandler(
       comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
@@ -177,6 +184,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpoch = 0;
   INFO(
       NCCL_INIT,
       "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",

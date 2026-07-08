@@ -126,6 +126,11 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
 
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
+// LL-protocol DDA all-gather (fabric path).
+// threshold: LL is attempted only when the size (per-rank * nRanks)
+// is <= threshold, otherwise the copy-based DDA path handles the call.
+RCCL_PARAM(DdaAllGatherLL, "DDA_ALLGATHER_LL", 1);
+RCCL_PARAM(DdaAllGatherLLThreshold, "DDA_ALLGATHER_LL_THRESHOLD", (size_t)(131072));
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
@@ -246,6 +251,22 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   if (rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
+      // Small-message fast lane: LL protocol (no GPU barrier).
+      if (rcclParamDdaAllGatherLL() &&
+          msgSize <= (size_t)rcclParamDdaAllGatherLLThreshold() &&
+          ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        INFO(NCCL_COLL,
+             "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
+             comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
+        NCCLCHECK(ncclAllGatherDdaFabricLL(
+            sendbuff,
+            recvbuff,
+            sendcount,
+            datatype,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
       if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         INFO(NCCL_COLL,
              "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
@@ -259,15 +280,18 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
             stream));
         return ncclSuccess;
       }
-    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-      NCCLCHECK(ncclAllGatherDdaIpc(
-          sendbuff,
-          recvbuff,
-          sendcount,
-          datatype,
-          comm,
-          stream));
-      return ncclSuccess;
+    } else {
+      // IPC path (gfx942/gfx950)
+      if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        NCCLCHECK(ncclAllGatherDdaIpc(
+            sendbuff,
+            recvbuff,
+            sendcount,
+            datatype,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
     }
   }
   rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
