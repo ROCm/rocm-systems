@@ -86,14 +86,7 @@ struct ncclShmemData {
   bool profilerEnabled;
   struct ncclShmemGroup groups[NCCL_MAX_GROUPS];
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // Explicit arch: HIP has no __CUDA_ARCH__, so the default would size this buffer for
-  // arch 0 (1 KiB) and truncate the AllGatherV batch the host built for the real AMD arch
-  // (>=900 -> 16 KiB). Pass 900 so the device buffer matches the host's batch size.
-  alignas(16) char workStorage[ncclMaxDevWorkBatchBytes(900)];
-#else
   alignas(16) char workStorage[ncclMaxDevWorkBatchBytes()];
-#endif
 
   alignas(16) union {
     unpackShmem unpack;
@@ -275,12 +268,12 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     //   packInWork = tid%(workSize/16);
     //   dstWork = tid/(workSize/16);
 
-    // Coll/P2P batches always fit the thread count (nPacks <= tn) and load in a
-    // single pass. AGV bcast batches hold up to 64 works*3 = 192 packs, which
-    // overflows the gfx9 256-thread block (loader gets tn <= 192), so they stride
-    // over extra passes; otherwise tail works stay unloaded and the kernel faults.
-    // pk iterates this thread's packs; tid is left intact for the rotation below.
-    const int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // constant divisor
+    // AGV bcast fusion packs up to 64 works (offsetBitset bits) per batch; at 3 packs/work
+    // (48B/16B each) that is 192 packs, which can exceed the loader subgroup size
+    // (tn = threadPerBlock - 2*WARP_SIZE), so bcast requires a stride loop. Coll/P2P
+    // hold at most 1-2 works and always fit in one pass; the break below enforces that.
+    // tid is preserved (not pk) so the nextExtends warp-rotation below stays correct.
+    const int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // 3 packs/work
     bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
     for (int pk = tid; pk < nPacks; pk += tn) {
       if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
@@ -316,14 +309,13 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
       char* dst = ncclShmem.workStorage;
       dst += (workCursor + dstWork) * workSize + packInWork * 16;
       *(ulonglong2*)dst = tmp;
-      // Only bcast overflows tn; single-pass callers exit after one iteration.
-      if (!isBcast) break;
+      if (!isBcast) break; // coll/P2P fit in one pass; only AGV-fused bcast strides
     }
     workCursor += nWorks;
 
     if (batch.nextExtends) {
       batchIx += batch.nextJump;
-      // Rotate to the next two warps for the next batch struct. Use 2*WARP_SIZE.
+      // Rotate by 2*WARP_SIZE (not hardcoded 64) so the next batch uses two warps correctly.
       tid -= 2*WARP_SIZE;
       if (tid < 0) tid += tn;
     } else {

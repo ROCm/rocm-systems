@@ -10,21 +10,7 @@
 
 #include "scheduler.h"
 
-// Host-callable equivalent of device.h's __device__ ncclProtoGrainSize().
-// Mirrors enqueue.cc's static rcclProtoGrainSize() (which is file-local there).
-static int rcclProtoGrainSize(int proto, ncclComm* comm) {
-  switch (proto) {
-  case NCCL_PROTO_LL:
-    return 16;
-  case NCCL_PROTO_LL128:
-    return comm->WarpSize * NCCL_LL128_SHMEM_ELEMS_PER_THREAD * comm->ll128DataElems * sizeof(uint64_t) /
-           comm->ll128LineElems;
-  case NCCL_PROTO_SIMPLE:
-    return 512;
-  default:
-    return -1;
-  }
-}
+
 
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                           struct ncclKernelPlanBudget* budget) {
