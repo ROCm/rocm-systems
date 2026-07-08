@@ -3,6 +3,7 @@
 
 #include "database.hpp"
 #include "common/md5sum.hpp"
+#include "common/path.hpp"
 #include "node_info.hpp"
 #include <cstdint>
 
@@ -59,11 +60,9 @@ namespace
 void
 create_directory_for_database_file(const std::string& db_file)
 {
-    auto _db_dirname = tim::filepath::dirname(db_file);
-    if(!tim::filepath::direxists(_db_dirname))
-    {
-        tim::filepath::makedir(_db_dirname);
-    }
+    // make_dirs is idempotent, so the direxists pre-guard is dropped
+    (void) ::rocprofsys::common::path::make_dirs(
+        ::rocprofsys::common::path::parent_path(db_file));
 }
 
 std::string

@@ -25,8 +25,7 @@ namespace argparse
 {
 namespace
 {
-namespace filepath = ::tim::filepath;
-namespace path     = rocprofsys::common::path;
+namespace path = rocprofsys::common::path;
 using rocprofsys::common::remove_env;
 
 auto
@@ -132,8 +131,8 @@ add_ld_preload(parser_data& _data)
 parser_data&
 add_ld_library_path(parser_data& _data)
 {
-    auto _libdir = filepath::dirname(_data.env.dl_libpath);
-    if(filepath::exists(_libdir))
+    auto _libdir = path::parent_path(_data.env.dl_libpath);
+    if(path::exists(_libdir))
         update_env(_data, "LD_LIBRARY_PATH", _libdir, update_mode::APPEND);
     return _data;
 }

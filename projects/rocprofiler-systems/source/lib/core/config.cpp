@@ -6,6 +6,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/environment.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
@@ -1368,7 +1369,7 @@ configure_settings(bool _init)
     auto _cmd_env = rocprofsys::get_env<std::string>(env_vars::COMMAND_LINE, "");
     if(!_cmd_env.empty()) _cmd = rocprofsys::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
-    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    get_exe_realpath() = ::rocprofsys::common::path::realpath(_exe);
     auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
@@ -1396,7 +1397,8 @@ configure_settings(bool _init)
         // Prevent Timemory's read() silently dropping JSON config files without proper
         // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
         // includes '~/.rocprofiler-systems.json' that can be missing
-        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+        if(expanded_filename.ends_with(".json") &&
+           ::rocprofsys::common::path::exists(expanded_filename) &&
            !json_has_project_name_root(expanded_filename))
         {
             throw std::runtime_error(
@@ -2128,7 +2130,7 @@ get_exe_realpath()
     static std::string _v = []() {
         auto _cmd_line = tim::read_command_line(process::get_id());
         if(!_cmd_line.empty())
-            return filepath::realpath(_cmd_line.front(), nullptr, false);
+            return ::rocprofsys::common::path::realpath(_cmd_line.front());
         return std::string{};
     }();
     return _v;
@@ -3010,10 +3012,8 @@ std::string
 get_ump_absolute_path()
 {
     auto ensure_dir = [](std::string path) {
-        if(!path.empty() && !tim::filepath::direxists(path))
-        {
-            tim::filepath::makedir(path);
-        }
+        // make_dirs is idempotent, so the direxists pre-guard is dropped
+        if(!path.empty()) (void) ::rocprofsys::common::path::make_dirs(path);
         return path;
     };
 
@@ -3065,7 +3065,7 @@ get_ump_absolute_path()
         (get_use_rocpd() && !get_caching_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
-    return tim::filepath::dirname(source);
+    return ::rocprofsys::common::path::parent_path(source);
 }
 
 bool&
@@ -3294,11 +3294,11 @@ tmp_file::~tmp_file()
 void
 tmp_file::touch() const
 {
-    if(!filepath::exists(filename))
+    if(!::rocprofsys::common::path::exists(filename))
     {
         // if the filepath does not exist, open in out mode to create it
         auto _ofs = std::ofstream{};
-        filepath::open(_ofs, filename);
+        (void) ::rocprofsys::common::path::open(_ofs, filename);
     }
 }
 
@@ -3335,7 +3335,7 @@ tmp_file::fopen(const char* _mode)
     touch();
 
     m_pid = getpid();
-    file  = filepath::fopen(filename, _mode);
+    file  = ::rocprofsys::common::path::fopen(filename, _mode);
     if(file) fd = ::fileno(file);
 
     return (file != nullptr && fd > 0);
@@ -3419,7 +3419,7 @@ tmp_file::remove()
     if(m_pid != getpid()) return false;
 
     close();
-    if(filepath::exists(filename))
+    if(::rocprofsys::common::path::exists(filename))
     {
         LOG_DEBUG("Removing temporary file '{}'...", filename);
         auto _ret = ::remove(filename.c_str());
