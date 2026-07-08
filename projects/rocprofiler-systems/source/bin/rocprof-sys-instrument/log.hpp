@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <spdlog/fmt/fmt.h>
-
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
 
