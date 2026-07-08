@@ -1351,7 +1351,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       uint64_t fragOffset;
       void *ptr = NULL;
       size_t len = 0;
-      MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(dmabuf_fd); })
+      MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); })
       std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
       for (auto& conns : ipc_sock_server_conns_) {
         if (conn_handle == conns.first) {
@@ -1470,7 +1470,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HsaHandleImportResult res = {};
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status != HSAKMT_STATUS_SUCCESS) {
-      os::DmaBufClose(dmabuf_fd);
+      os::DmaBufClose(&dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
     // Reuse token already stored on the BO
@@ -1481,7 +1481,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
   }
 
-  os::DmaBufClose(dmabuf_fd);
+  os::DmaBufClose(&dmabuf_fd);
 
   std::unique_lock<std::mutex> lock(ipc_sock_server_lock_);
 
@@ -1572,8 +1572,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
 
-    intptr_t dmabuf_fd = os::IPCRecvHandle(socket_fd);
+    int dmabuf_fd = static_cast<int>(os::IPCRecvHandle(socket_fd));
     if (dmabuf_fd == -1) return -1;
+    MAKE_SCOPE_GUARD([&]() { os::DmaBufClose(&dmabuf_fd); });
 
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags{0};
@@ -1603,7 +1604,6 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-        os::DmaBufClose(static_cast<int>(dmabuf_fd));
         return -1;
       }
 
@@ -1624,7 +1624,6 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       } else {
         HSAKMT_CALL(hsaKmtMemHandleFreePreserveMetadata(res.buf_handle));
       }
-      os::DmaBufClose(static_cast<int>(dmabuf_fd));
     }
 
     // Ping socket server to close exporter
@@ -4217,11 +4216,10 @@ Runtime::MemoryHandle::~MemoryHandle() {
     dispatched through drm_owner */
     core::Agent* destroy_agent = drmAgent();
     destroy_agent->driver().DestroyMemoryHandle(&driver_handle);
-  }
-
-  if (driver_handle.dmabuf_fd >= 0) {
-    os::DmaBufClose(driver_handle.dmabuf_fd);
-    driver_handle.dmabuf_fd = -1;
+  } else {
+    /* FIXME: the Driver class should close the dmabuf_fd, but in case of imported handles,
+    * we do not have a region so we do not have an agentOwner() to call the driver.*/
+    os::DmaBufClose(&driver_handle.dmabuf_fd);
   }
 }
 
@@ -4253,8 +4251,7 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
 
   MAKE_SCOPE_GUARD([&]() {
     if (created_dmabuf_fd) {
-      os::DmaBufClose(memHandle->driver_handle.dmabuf_fd);
-      memHandle->driver_handle.dmabuf_fd = -1;
+      os::DmaBufClose(&memHandle->driver_handle.dmabuf_fd);
     }
   });
 
