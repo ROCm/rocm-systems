@@ -9,6 +9,7 @@
 #include <timemory/utility/backtrace.hpp>
 
 #include <cstdint>
+#include <ios>
 #include <iosfwd>
 #include <ostream>
 #include <sstream>
@@ -65,7 +66,8 @@ inline std::string
 join_va(Args&&... args)
 {
     std::ostringstream oss;
-    const char*        sep = "";
+    oss << std::boolalpha;
+    const char* sep = "";
     ((oss << sep << args, sep = " "), ...);
     return oss.str();
 }

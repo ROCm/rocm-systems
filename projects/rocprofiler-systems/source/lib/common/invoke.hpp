@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstring>
 #include <functional>
+#include <ios>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -44,7 +45,8 @@ std::string
 format_args(Args&&... args)
 {
     std::ostringstream oss;
-    const char*        separator = "";
+    oss << std::boolalpha;
+    const char* separator = "";
 
     auto append_arg = [&oss, &separator](const auto& arg) {
         using decayed_arg_type = std::decay_t<decltype(arg)>;
