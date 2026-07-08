@@ -42,6 +42,7 @@
 #include <cassert>
 #include <mutex>
 #include <algorithm>
+#include "../hsakmt_env.h"
 #include "util/os.h"
 #include "util/utils.h"
 
@@ -541,54 +542,38 @@ static inline void init_page_size(void) {
 #endif
 }
 
-static int safe_env_to_int(const char* envvar, int default_val) {
-  if (envvar == nullptr) return default_val;
-  char* endptr;
-  errno = 0;
-  long val = strtol(envvar, &endptr, 10);
-  if (endptr == envvar) return default_val;
-  // Allow trailing whitespace from shell/.env files; reject other trailing content.
-  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
-    ++endptr;
-  }
-  if (*endptr != '\0') return default_val;
-  // On LLP64 (Windows), long is 32-bit so rely on errno for overflow.
-  if (errno == ERANGE || val < INT_MIN || val > INT_MAX) return default_val;
-  return static_cast<int>(val);
-}
-
 static HSAKMT_STATUS init_vars_from_env(void) {
   const char* envvar;
 
   // Enable debug messages via HSAKMT_DEBUG_LEVEL environment variable.
   // Libraries normally suppress messages; this allows debugging output when needed.
   if ((envvar = getenv("HSAKMT_DEBUG_LEVEL")) != nullptr) {
-    dxg_runtime->hsakmt_debug_level = safe_env_to_int(envvar, 0);
+    dxg_runtime->hsakmt_debug_level = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Enable Zero Frame Buffer (ZFB) support if HSA_ZFB is set.
   if ((envvar = getenv("HSA_ZFB")) != nullptr) {
-    dxg_runtime->zfb_support = safe_env_to_int(envvar, 0);
+    dxg_runtime->zfb_support = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Enable vendor-specific AQL packet processing if WSLKMT_VENDOR_PACKET is set.
   if ((envvar = getenv("WSLKMT_VENDOR_PACKET")) != nullptr) {
-    dxg_runtime->vendor_packet_process = safe_env_to_int(envvar, 0);
+    dxg_runtime->vendor_packet_process = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Enable thunk sub-allocator via WSL_ENABLE_THUNK_SUB_ALLOCATOR.
   if ((envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR")) != nullptr) {
-    dxg_runtime->enable_thunk_sub_allocator = safe_env_to_int(envvar, 0);
+    dxg_runtime->enable_thunk_sub_allocator = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Enable PM4 packet usage if ROCR_USE_PM4 is set.
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
-    dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
+    dxg_runtime->use_pm4_ = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
   if ((envvar = getenv("ROCR_DISABLE_WAIT_TIMEOUT")) != nullptr) {
-    dxg_runtime->disable_wait_timeout_ = safe_env_to_int(envvar, 0);
+    dxg_runtime->disable_wait_timeout_ = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   // Check available system memory before allocation if WSL_CHECK_AVAIL_SYSRAM is "1".
@@ -613,7 +598,7 @@ static HSAKMT_STATUS init_vars_from_env(void) {
       !(envvar && envvar[0] == '0' && envvar[1] == '\0') && false;
 
   if ((envvar = getenv("HSAKMT_DEBUG_SYSMEM")) != nullptr) {
-    dxg_runtime->hsakmt_debug_sysmem = safe_env_to_int(envvar, 0);
+    dxg_runtime->hsakmt_debug_sysmem = hsakmt_safe_env_to_int(envvar, 0);
   }
 
   return HSAKMT_STATUS_SUCCESS;

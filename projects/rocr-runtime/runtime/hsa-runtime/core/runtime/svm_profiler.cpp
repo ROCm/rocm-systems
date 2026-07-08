@@ -171,8 +171,8 @@ void SvmProfileControl::PollSmi() {
   char buffer[HSA_SMI_EVENT_MSG_SIZE + 1];
 
   auto format_agent = [this](uint32_t gpuid) {
-    std::string ret;
     core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_gpuid(gpuid);
+    if (!agent) return std::string("GPU?(") + std::to_string(gpuid) + ")";
     if (agent->device_type() == core::Agent::kAmdCpuDevice)
       return std::string("CPU");
     else
