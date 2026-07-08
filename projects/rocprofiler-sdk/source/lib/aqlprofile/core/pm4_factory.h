@@ -167,6 +167,7 @@ public:
     virtual bool IsGFX10() const { return false; }
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
+    virtual bool IsGFX1250() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID

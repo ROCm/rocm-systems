@@ -44,6 +44,7 @@ public:
         Init(agent_info);
     }
     bool IsGFX12() const override { return true; }
+    bool IsGFX1250() const override { return true; }
 
     virtual int GetAccumLowID() const override { return 1; };
     virtual int GetAccumHiID() const override { return 1; };
