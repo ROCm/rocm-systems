@@ -42,6 +42,7 @@
 #    include <rocprofiler-sdk/rccl/details/rccl.h>
 #endif
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
@@ -106,11 +107,18 @@ get_ids();
 
 template <size_t TableIdx>
 void
-iterate_args(uint32_t                                            id,
-             const rocprofiler_callback_tracing_rccl_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t    callback,
-             int32_t                                             max_deref,
-             void*                                               user_data);
+iterate_args(uint32_t                                         id,
+             const rocprofiler_rccl_api_args_t&               data,
+             rocprofiler_callback_tracing_operation_args_cb_t callback,
+             int32_t                                          max_deref,
+             void*                                            user_data);
+
+template <size_t TableIdx>
+void
+iterate_args(uint32_t                                       id,
+             const rocprofiler_rccl_api_args_t&             data,
+             rocprofiler_buffer_tracing_operation_args_cb_t callback,
+             void*                                          user_data);
 
 template <typename TableT>
 void

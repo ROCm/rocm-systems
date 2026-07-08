@@ -89,6 +89,7 @@ add_subdirectory(rocjpeg)
 add_subdirectory(hip-host-tracing)
 add_subdirectory(code-object-multi-threaded)
 add_subdirectory(spm)
+add_subdirectory(rccl)
 
 # environment variable tests
 add_subdirectory(environment)

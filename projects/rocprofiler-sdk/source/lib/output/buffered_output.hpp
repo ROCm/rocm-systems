@@ -183,7 +183,7 @@ using hsa_buffered_output_t =
 using marker_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_marker_api_record_t, domain_type::MARKER>;
 using rccl_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_rccl_api_record_t, domain_type::RCCL>;
+    buffered_output<rocprofiler_buffer_tracing_rccl_api_ext_record_t, domain_type::RCCL>;
 using ompt_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_ompt_record_t, domain_type::OMPT>;
 using counter_collection_buffered_output_t =

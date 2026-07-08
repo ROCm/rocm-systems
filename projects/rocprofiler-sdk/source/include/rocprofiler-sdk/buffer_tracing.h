@@ -27,6 +27,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/api_args.h>
 #include <rocprofiler-sdk/kfd/kfd_id.h>
+#include <rocprofiler-sdk/rccl/api_args.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
 #include <rocprofiler-sdk/rocdecode/api_args.h>
 #include <rocprofiler-sdk/rocdecode/api_id.h>
 
@@ -207,6 +209,25 @@ typedef struct rocprofiler_buffer_tracing_rccl_api_record_t
     /// @var operation
     /// @brief Specification of the API function, e.g., ::rocprofiler_rccl_api_id_t
 } rocprofiler_buffer_tracing_rccl_api_record_t;
+
+typedef struct rocprofiler_buffer_tracing_rccl_api_ext_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_rccl_api_id_t         operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    rocprofiler_rccl_api_args_t       args;             ///< arguments of function call
+    rocprofiler_rccl_api_retval_t     retval;           ///< return value of function call
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_rccl_api_id_t)
+} rocprofiler_buffer_tracing_rccl_api_ext_record_t;
 
 /**
  * @brief ROCProfiler Buffer rocDecode API Record.
