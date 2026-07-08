@@ -44,6 +44,8 @@ struct DebugTopology {
 /// is not the same number as gfx_target_version for CDNA parts (see
 /// kmd::gc_ip_version_for_gfx_target_version), so we translate first and then
 /// apply the driver's exact IP_VERSION thresholds.
+///
+/// \NPI sync this with the KFD driver code in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
 DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   using kmd::make_gc_ip_version;
   const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(gfx_target_version);
