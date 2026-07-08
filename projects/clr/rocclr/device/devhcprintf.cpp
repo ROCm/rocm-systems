@@ -259,8 +259,9 @@ bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfIn
       return false;
     }
 
-    auto InsertResult = strMap.emplace(HashVal, info.fmtString_.substr(Delim + 1));
-    if (!InsertResult.second) {
+    auto FmtStr = info.fmtString_.substr(Delim + 1);
+    auto InsertResult = strMap.emplace(HashVal, FmtStr);
+    if (!InsertResult.second && InsertResult.first->second != FmtStr) {
       LogError("Hash value collision detected, printf buffer ill formed");
       return false;
     }
