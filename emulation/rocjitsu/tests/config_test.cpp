@@ -32,6 +32,7 @@ namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
+// \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {

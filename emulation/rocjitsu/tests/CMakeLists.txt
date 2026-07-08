@@ -22,6 +22,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_isa_rdna3_5
     rocjitsu_isa_rdna4
     rocjitsu_isa_gfx1250
+    # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here, and \
+    # wire any new *_sim_test.cpp and kernels/ coverage into this file.
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd
@@ -347,6 +349,7 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
