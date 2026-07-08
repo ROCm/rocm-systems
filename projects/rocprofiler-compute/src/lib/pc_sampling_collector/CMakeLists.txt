@@ -12,6 +12,7 @@ add_library(
     filesystem_wrapper.cpp
     code_object_translator.h
     code_object_translator.cpp
+    code_object_types.h
     code_object_writer.h
     code_object_writer.cpp
     source_snapshotter.h

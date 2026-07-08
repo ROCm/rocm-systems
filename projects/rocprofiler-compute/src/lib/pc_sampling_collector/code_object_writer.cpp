@@ -25,7 +25,20 @@ void code_object_writer_json_t::end_code_obj()
 
     m_code_objects.push_back(nlohmann::json::object({
         {"id", m_current_obj_id},
+        {"kernels", std::move(m_kernels)},
         {"symbols", std::move(m_symbols)},
+    }));
+    m_kernels = nlohmann::json::array();
+    m_symbols = nlohmann::json::array();
+}
+
+void code_object_writer_json_t::write_kernel(uint64_t kernel_id, const std::string& name)
+{
+    Expects(m_code_object_closure_count != 0);
+
+    m_kernels.push_back(nlohmann::json::object({
+        {"kernel_id", kernel_id},
+        {"name", name},
     }));
 }
 
@@ -50,6 +63,7 @@ void code_object_writer_json_t::end_symbol()
         {"size", m_current_symbol.size},
         {"instructions", std::move(m_instructions)},
     }));
+    m_instructions = nlohmann::json::array();
 }
 
 void code_object_writer_json_t::write_instruction(const instruction_t& inst)

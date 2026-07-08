@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
+#include "code_object_types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,23 +17,6 @@ class CodeobjAddressTranslate;
 
 namespace rocprofiler_compute_tool
 {
-struct symbol_t
-{
-    std::string name{};
-    uint64_t    code_object_offset = 0;
-    uint64_t    virtual_address    = 0;
-    uint64_t    size               = 0;
-};
-
-struct instruction_t
-{
-    std::string name{};
-    std::string comment{};
-    uint64_t    virtual_address = 0;
-    uint64_t    code_obj_offset = 0;
-    size_t      size{0};
-};
-
 class code_object_translator_t
 {
 public:
