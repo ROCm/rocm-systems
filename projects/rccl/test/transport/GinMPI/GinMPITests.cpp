@@ -338,7 +338,7 @@ TEST_P(GinMPITest, MultipleInflightIPuts)
 
     const size_t kBlock   = MessageSize();
     const size_t kBufSize = kInflightN * kBlock;
-    const int    nCtx     = NumContexts();
+    const int    nCtx     = GetNumContexts();
 
     void* sendBuf = AllocBuf(kBufSize);
     void* recvBuf = AllocBuf(kBufSize);
@@ -398,7 +398,7 @@ TEST_P(GinMPITest, MultipleInflightIGets)
 
     const size_t kBlock   = MessageSize();
     const size_t kBufSize = kInflightN * kBlock;
-    const int    nCtx     = NumContexts();
+    const int    nCtx     = GetNumContexts();
 
     void* buf = AllocBuf(kBufSize);
     ASSERT_NE(buf, nullptr);
@@ -449,7 +449,7 @@ TEST_P(GinMPITest, MixedIPutIGetIPutSignal)
     }
 
     const size_t kSize = MessageSize();
-    const int    nCtx  = NumContexts();
+    const int    nCtx  = GetNumContexts();
 
     void* putSendBuf = AllocBuf(kSize);
     void* putRecvBuf = AllocBuf(kSize);
@@ -521,7 +521,7 @@ TEST_P(GinMPITest, MixedIPutIGetIPutSignal)
     }
 }
 
-TEST_P(GinMPIFixedSizeTest, IPutSignalZeroSize)
+TEST_F(GinMPIFixedSizeTest, IPutSignalZeroSize)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -569,7 +569,7 @@ TEST_P(GinMPIFixedSizeTest, IPutSignalZeroSize)
     }
 }
 
-TEST_P(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
+TEST_F(GinMPIFixedSizeTest, IPutSignalInvalidSignalOp)
 {
     if(!SetUpFixture(2, 2))
     {
@@ -720,57 +720,33 @@ TEST_F(GinMPIStressTest, IPutSignalStress10k)
 namespace
 {
 
-// Pretty per-instance suffix: e.g. "Ctx2_64KiB_DmaBuf"
-inline std::string CtxSizeName(const ::testing::TestParamInfo<std::tuple<int, size_t, bool>>& info)
+// Pretty per-instance suffix: e.g. "64KiB".
+// The number of contexts (RCCL_GIN_TEST_NCONTEXTS) and the memory-registration
+// path (RCCL_GIN_TEST_DMABUF) are selected at runtime via environment
+// variables, so they are no longer encoded into the parameterized test name.
+inline std::string SizeName(const ::testing::TestParamInfo<size_t>& info)
 {
-    const int    nCtx    = std::get<0>(info.param);
-    const size_t sz      = std::get<1>(info.param);
-    const bool   dmaBuf  = std::get<2>(info.param);
-    std::string  sizeStr;
+    const size_t sz = info.param;
     if(sz % (1024 * 1024) == 0)
     {
-        sizeStr = std::to_string(sz / (1024 * 1024)) + "MiB";
+        return std::to_string(sz / (1024 * 1024)) + "MiB";
     }
-    else if(sz % 1024 == 0)
+    if(sz % 1024 == 0)
     {
-        sizeStr = std::to_string(sz / 1024) + "KiB";
+        return std::to_string(sz / 1024) + "KiB";
     }
-    else
-    {
-        sizeStr = std::to_string(sz) + "B";
-    }
-    return "Ctx" + std::to_string(nCtx) + "_" + sizeStr
-           + (dmaBuf ? "_DmaBuf" : "_RegMr");
-}
-
-inline std::string CtxOnlyName(const ::testing::TestParamInfo<std::tuple<int, bool>>& info)
-{
-    const int  nCtx   = std::get<0>(info.param);
-    const bool dmaBuf = std::get<1>(info.param);
-    return "Ctx" + std::to_string(nCtx)
-           + (dmaBuf ? "_DmaBuf" : "_RegMr");
+    return std::to_string(sz) + "B";
 }
 
 } // namespace
 
 INSTANTIATE_TEST_SUITE_P(
-    CtxAndSize,
+    Size,
     GinMPITest,
-    ::testing::Combine(
-        ::testing::Values(1, 2),
-        ::testing::Values(static_cast<size_t>(4 * 1024),
-                          static_cast<size_t>(64 * 1024),
-                          static_cast<size_t>(1 * 1024 * 1024)),
-        ::testing::Bool()),
-    CtxSizeName);
-
-INSTANTIATE_TEST_SUITE_P(
-    CtxOnly,
-    GinMPIFixedSizeTest,
-    ::testing::Combine(
-        ::testing::Values(1, 2),
-        ::testing::Bool()),
-    CtxOnlyName);
+    ::testing::Values(static_cast<size_t>(4 * 1024),
+                      static_cast<size_t>(64 * 1024),
+                      static_cast<size_t>(1 * 1024 * 1024)),
+    SizeName);
 
 } // namespace RCCLGinTests
 

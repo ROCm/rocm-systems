@@ -35,6 +35,7 @@
 
 #include "nccl_net.h"
 #include "nccl_gin.h"
+#include "alloc.h"
 
 extern ncclGin_t IbCastGinIbProxy;
 extern ncclGin_t ncclGinIbProxy;
@@ -56,6 +57,30 @@ inline ncclGin_t* GetGinPlugin()
     if (strcasecmp(envNet, "IB") == 0) return &ncclGinIbProxy;
 
     return nullptr;
+}
+
+// Memory registration path is selected via the RCCL_GIN_TEST_DMABUF
+// environment variable rather than being encoded into the test name.
+//   unset / "0" / "false" / "no"  -> RegMr (default)
+//   "1" / "true" / "yes"          -> DmaBuf
+inline bool GetUseDmaBufFromEnv()
+{
+    const char* env = std::getenv("RCCL_GIN_TEST_DMABUF");
+    if (env == nullptr) return false;
+    return strcasecmp(env, "1")    == 0
+        || strcasecmp(env, "true") == 0
+        || strcasecmp(env, "yes")  == 0;
+}
+
+// Number of GIN contexts is selected via the RCCL_GIN_TEST_NCONTEXTS
+// environment variable rather than being encoded into the test name.
+// Defaults to 1 when unset or when the value is not a positive integer.
+inline int GetNumContextsFromEnv()
+{
+    const char* env = std::getenv("RCCL_GIN_TEST_NCONTEXTS");
+    if (env == nullptr) return 1;
+    int n = std::atoi(env);
+    return n > 0 ? n : 1;
 }
 
 class GinMPITestBase : public MPITestBase
@@ -90,8 +115,8 @@ protected:
     // Device buffers allocated through AllocBuf released via hipFree in TearDown
     std::vector<void*> allocatedDeviceBuffers_;
 
-    virtual int  GetNumContexts() const { return 1; }
-    virtual bool UseDmaBuf()     const { return false; }
+    virtual int  GetNumContexts() const { return GetNumContextsFromEnv(); }
+    virtual bool UseDmaBuf()     const { return GetUseDmaBufFromEnv(); }
 
     void SetUp() override
     {
@@ -134,7 +159,7 @@ protected:
 
         for(void* p : allocatedDeviceBuffers_)
         {
-            RCCLTestGuards::hipFreeWrapper(p);   // null-safe + warns on hipFree errors
+            (void)ncclCudaFree(p, /*manager=*/nullptr);
         }
         allocatedDeviceBuffers_.clear();
 
@@ -300,20 +325,39 @@ protected:
         size_t    offset  = reinterpret_cast<uintptr_t>(data) - aligned;
         size_t    alignedSize = (size + offset + pageSize - 1) & ~(pageSize - 1);
 
-        int       fd = -1;
-        uint64_t  exportOffset = 0;
-        hsa_status_t hrc = hsa_amd_portable_export_dmabuf(
-            reinterpret_cast<const void*>(aligned), alignedSize,
-            &fd, &exportOffset);
-        if(hrc != HSA_STATUS_SUCCESS || fd < 0)
+        int      fd        = -1;
+        uint64_t dmaBufOff = 0;
+
+        if(ncclCuMemEnable())
         {
-            ADD_FAILURE() << "hsa_amd_portable_export_dmabuf failed: hsa_status=" << hrc;
-            return ncclSystemError;
+            hipError_t herr = hipMemGetHandleForAddressRange(
+                &fd, reinterpret_cast<void*>(aligned), alignedSize,
+                hipMemRangeHandleTypeDmaBufFd, /*flags=*/0);
+            if(herr != hipSuccess || fd < 0)
+            {
+                ADD_FAILURE() << "hipMemGetHandleForAddressRange failed for "
+                                 "cuMem buffer: " << hipGetErrorString(herr);
+                return ncclSystemError;
+            }
+            dmaBufOff = offset;
+        }
+        else
+        {
+            uint64_t     exportOffset = 0;
+            hsa_status_t hrc = hsa_amd_portable_export_dmabuf(
+                reinterpret_cast<const void*>(aligned), alignedSize,
+                &fd, &exportOffset);
+            if(hrc != HSA_STATUS_SUCCESS || fd < 0)
+            {
+                ADD_FAILURE() << "hsa_amd_portable_export_dmabuf failed: hsa_status=" << hrc;
+                return ncclSystemError;
+            }
+            dmaBufOff = exportOffset + offset;
         }
 
         ncclResult_t r = gin_->regMrSymDmaBuf(collComm_, data, size,
                                                NCCL_PTR_CUDA,
-                                               exportOffset + offset, fd,
+                                               dmaBufOff, fd,
                                                /*mrFlags=*/0,
                                                mhandle, ginHandle);
         (void)close(fd);
@@ -362,24 +406,21 @@ protected:
 
     void* AllocBuf(size_t size)
     {
-        void* p = nullptr;
-        if(hipMalloc(&p, size) != hipSuccess) return nullptr;
-
-        hipError_t err = hipMemset(p, 0, size);
-        if(err != hipSuccess)
+        uint8_t* p = nullptr;
+        ncclResult_t res = ncclCudaCalloc(&p, size, /*manager=*/nullptr);
+        if(res != ncclSuccess || p == nullptr)
         {
-            ADD_FAILURE() << "hipMemset failed in AllocBuf: "
-                          << hipGetErrorString(err);
-            (void)hipFree(p);
+            ADD_FAILURE() << "ncclCudaCalloc failed in AllocBuf (res=" << res
+                          << ", cuMemEnable=" << ncclCuMemEnable() << ")";
             return nullptr;
         }
 
-        err = hipDeviceSynchronize();
+        hipError_t err = hipDeviceSynchronize();
         if(err != hipSuccess)
         {
             ADD_FAILURE() << "hipDeviceSynchronize failed in AllocBuf: "
                           << hipGetErrorString(err);
-            (void)hipFree(p);
+            (void)ncclCudaFree(p, /*manager=*/nullptr);
             return nullptr;
         }
 
@@ -446,50 +487,38 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// Parameterized fixture — sweep nContexts × messageSize.
+// Parameterized fixture — sweep messageSize.
 //
-// Used by the 8 tests where both axes are meaningful. The 2 tests
-// where the size is fixed by the test point itself (zero-size) or
-// irrelevant (invalid-op) use GinMPIFixedSizeTest instead so they
-// don't produce redundant size variants.
+// The number of contexts is selected at runtime via the
+// RCCL_GIN_TEST_NCONTEXTS environment variable (see GetNumContextsFromEnv),
+// so it is no longer part of the test parameter. Used by the 8 tests where
+// message size is meaningful. The 2 tests where the size is fixed by the test
+// point itself (zero-size) or irrelevant (invalid-op) use GinMPIFixedSizeTest.
 // ---------------------------------------------------------------------------
 class GinMPITest : public GinMPITestBase,
-                   public ::testing::WithParamInterface<std::tuple<int, size_t, bool>>
+                   public ::testing::WithParamInterface<size_t>
 {
 protected:
-    int    NumContexts() const { return std::get<0>(GetParam()); }
-    size_t MessageSize() const { return std::get<1>(GetParam()); }
-    bool   IsDmaBuf()    const { return std::get<2>(GetParam()); }
-    int    GetNumContexts() const override { return NumContexts(); }
-    bool   UseDmaBuf()      const override { return IsDmaBuf(); }
+    size_t MessageSize() const { return GetParam(); }
 };
 
 // ---------------------------------------------------------------------------
-// Parameterized fixture — sweep nContexts only.
-//
-// Used by IPutSignalZeroSize (size IS the test point) and
-// IPutSignalInvalidSignalOp (size is irrelevant to the assertion).
+// Non-parameterized fixture — used by IPutSignalZeroSize (size IS the test
+// point) and IPutSignalInvalidSignalOp (size is irrelevant to the assertion).
+// The number of contexts is env-driven (RCCL_GIN_TEST_NCONTEXTS).
 // ---------------------------------------------------------------------------
-class GinMPIFixedSizeTest : public GinMPITestBase,
-                            public ::testing::WithParamInterface<std::tuple<int, bool>>
+class GinMPIFixedSizeTest : public GinMPITestBase
 {
-protected:
-    int  NumContexts() const { return std::get<0>(GetParam()); }
-    bool IsDmaBuf()    const { return std::get<1>(GetParam()); }
-    int  GetNumContexts() const override { return NumContexts(); }
-    bool UseDmaBuf()      const override { return IsDmaBuf(); }
 };
 
 // ---------------------------------------------------------------------------
 // Non-parameterized fixture — used by long-running stress tests that have
 // their own internal "iterations" dimension and need predictable runtime.
-// Single context, fixed config; the iteration count IS the stress axis.
-// Filterable as a group via `--gtest_filter='*Stress*'`.
+// The iteration count IS the stress axis; the number of contexts is env-driven
+// (RCCL_GIN_TEST_NCONTEXTS). Filterable as a group via `--gtest_filter='*Stress*'`.
 // ---------------------------------------------------------------------------
 class GinMPIStressTest : public GinMPITestBase
 {
-protected:
-    int GetNumContexts() const override { return 1; }
 };
 
 } // namespace RCCLGinTests
