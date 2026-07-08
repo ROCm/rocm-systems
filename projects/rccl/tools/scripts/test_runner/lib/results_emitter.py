@@ -437,7 +437,15 @@ class ResultsEmitter:
             # and the fallback source if in-run parsing regresses.
             if log_dir and os.path.isdir(log_dir):
                 dst = os.path.join(run_dir, "logs")
-                shutil.copytree(log_dir, dst, dirs_exist_ok=True)
+                # A single odd/unreadable file (dangling symlink, FIFO, core
+                # dump) must not abort the whole tarball write, so failures
+                # here degrade to a partial log bundle rather than no results.
+                try:
+                    shutil.copytree(log_dir, dst, dirs_exist_ok=True,
+                                    ignore_dangling_symlinks=True)
+                except (shutil.Error, OSError) as e:
+                    log.warning("results_emitter: some per-test logs could "
+                                "not be bundled: %s", e)
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
                 shutil.copytree(report_dir, dst, dirs_exist_ok=True)
