@@ -13,6 +13,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/version.h"
 
@@ -388,6 +389,7 @@ struct KfdGpuOrdinal {
   uint32_t ordinal = 0;
   uint32_t node_id = 0;
   uint32_t gpu_id = 0;
+  uint32_t gfx_target_version = 0;
 };
 
 std::optional<uint32_t> parse_u32(std::string_view text) {
@@ -416,12 +418,29 @@ std::optional<uint32_t> read_u32_file(const std::filesystem::path &path) {
   return value;
 }
 
+std::optional<uint32_t> read_u32_property(const std::filesystem::path &path, std::string_view key) {
+  std::ifstream in(path);
+  std::string name;
+  uint64_t value = 0;
+  while (in >> name >> value) {
+    if (name == key)
+      return static_cast<uint32_t>(value);
+  }
+  return std::nullopt;
+}
+
 std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
   if (!std::filesystem::exists(nodes_dir))
     nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
 
-  std::vector<std::pair<uint32_t, uint32_t>> nodes;
+  struct KfdNodeInfo {
+    uint32_t node_id = 0;
+    uint32_t gpu_id = 0;
+    uint32_t gfx_target_version = 0;
+  };
+
+  std::vector<KfdNodeInfo> nodes;
   std::error_code ec;
   for (const auto &entry : std::filesystem::directory_iterator(nodes_dir, ec)) {
     if (!entry.is_directory(ec))
@@ -433,17 +452,21 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
       continue;
 
     auto gpu_id = read_u32_file(entry.path() / "gpu_id");
-    if (gpu_id && *gpu_id != 0)
-      nodes.emplace_back(*node_id, *gpu_id);
+    if (gpu_id && *gpu_id != 0) {
+      uint32_t gfx_target_version =
+          read_u32_property(entry.path() / "properties", "gfx_target_version").value_or(0);
+      nodes.push_back({*node_id, *gpu_id, gfx_target_version});
+    }
   }
 
   std::sort(nodes.begin(), nodes.end(),
-            [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+            [](const auto &lhs, const auto &rhs) { return lhs.node_id < rhs.node_id; });
 
   std::vector<KfdGpuOrdinal> gpus;
   gpus.reserve(nodes.size());
   for (uint32_t ordinal = 0; ordinal < nodes.size(); ++ordinal)
-    gpus.push_back({ordinal, nodes[ordinal].first, nodes[ordinal].second});
+    gpus.push_back({ordinal, nodes[ordinal].node_id, nodes[ordinal].gpu_id,
+                    nodes[ordinal].gfx_target_version});
   return gpus;
 }
 
@@ -479,6 +502,18 @@ void maybe_expand_rocr_visible_devices(const rocjitsu::config::DbtGuestConfig &d
   if (dbt_guest.host_gpu_id != 0) {
     auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
       return gpu.gpu_id == dbt_guest.host_gpu_id;
+    });
+    if (match == gpus.end())
+      return;
+    host_ordinal = match->ordinal;
+  } else {
+    std::optional<uint32_t> target_version =
+        rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+    if (!target_version)
+      return;
+
+    auto match = std::find_if(gpus.begin(), gpus.end(), [&](const KfdGpuOrdinal &gpu) {
+      return gpu.gfx_target_version == *target_version;
     });
     if (match == gpus.end())
       return;

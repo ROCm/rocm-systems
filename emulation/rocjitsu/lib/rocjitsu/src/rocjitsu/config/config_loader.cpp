@@ -694,6 +694,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   if (fb_config->vm() && fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
     result.device = kfd_device_from_fb(fb_config->vm()->gpu()->device());
   }
+
   result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
 
   if (fb_config->vm() && fb_config->vm()->gpu())

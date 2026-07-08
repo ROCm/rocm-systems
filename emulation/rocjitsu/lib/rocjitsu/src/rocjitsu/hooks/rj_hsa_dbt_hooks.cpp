@@ -30,6 +30,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -1292,64 +1293,86 @@ private:
   void ensure_discovered() {
     uint64_t generation = 0;
     {
-      std::lock_guard lock(mutex_);
+      std::unique_lock lock(mutex_);
+      while (discovering_)
+        discovery_cv_.wait(lock);
       if (discovered_)
         return;
-      discovered_ = true;
+      discovering_ = true;
       generation = generation_;
     }
 
     auto config = layer().config();
-    if (!config || !config->guest_target)
-      return;
+    hsa_agent_t discovered_guest{};
+    hsa_agent_t discovered_host{};
+    bool has_mapping = false;
+    bool attempted_agent_search = false;
 
-    auto *iterate_agents = layer().iterate_agents();
-    if (!iterate_agents)
-      return;
+    if (config && config->guest_target) {
+      auto *iterate_agents = layer().iterate_agents();
+      if (iterate_agents) {
+        std::optional<uint32_t> host_node_id;
+        bool can_search = true;
+        if (config->host_gpu_id != 0) {
+          host_node_id = node_id_for_kfd_gpu_id(config->host_gpu_id);
+          if (!host_node_id) {
+            std::fprintf(stderr,
+                         "[rocjitsu-hooks] failed to find topology node for host KFD gpu_id=%u\n",
+                         config->host_gpu_id);
+            can_search = false;
+          }
+        }
 
-    std::optional<uint32_t> host_node_id;
-    if (config->host_gpu_id != 0) {
-      host_node_id = node_id_for_kfd_gpu_id(config->host_gpu_id);
-      if (!host_node_id) {
-        std::fprintf(stderr,
-                     "[rocjitsu-hooks] failed to find topology node for host KFD gpu_id=%u\n",
-                     config->host_gpu_id);
-        return;
+        if (can_search) {
+          AgentSearchData search{this, *config->guest_target, config->target, host_node_id};
+          hsa_status_t status = iterate_agents(agent_callback, &search);
+          attempted_agent_search = true;
+          has_mapping = (status == HSA_STATUS_SUCCESS || status == HSA_STATUS_INFO_BREAK) &&
+                        search.guest_agent.handle != 0 && search.host_agent.handle != 0 &&
+                        search.guest_agent.handle != search.host_agent.handle;
+          discovered_guest = search.guest_agent;
+          discovered_host = search.host_agent;
+        }
       }
     }
 
-    AgentSearchData search{this, *config->guest_target, config->target, host_node_id};
-    hsa_status_t status = iterate_agents(agent_callback, &search);
-    const bool has_mapping = (status == HSA_STATUS_SUCCESS || status == HSA_STATUS_INFO_BREAK) &&
-                             search.guest_agent.handle != 0 && search.host_agent.handle != 0 &&
-                             search.guest_agent.handle != search.host_agent.handle;
+    bool published = false;
     {
       std::lock_guard lock(mutex_);
-      if (generation != generation_)
-        return;
-      guest_ = search.guest_agent;
-      host_ = search.host_agent;
-      has_mapping_ = has_mapping;
+      if (generation == generation_) {
+        guest_ = discovered_guest;
+        host_ = discovered_host;
+        has_mapping_ = has_mapping;
+        discovered_ = true;
+        published = true;
+      }
+      discovering_ = false;
     }
+    discovery_cv_.notify_all();
+    if (!published)
+      return;
+
     if (has_mapping) {
       log_message(kLogInfo, "mapped guest agent=%llu to host agent=%llu",
-                  static_cast<unsigned long long>(search.guest_agent.handle),
-                  static_cast<unsigned long long>(search.host_agent.handle));
+                  static_cast<unsigned long long>(discovered_guest.handle),
+                  static_cast<unsigned long long>(discovered_host.handle));
       if (config->log_level > kLogDisabled) {
-        std::optional<uint32_t> selected_node_id = agent_driver_node_id(search.host_agent);
+        std::optional<uint32_t> selected_node_id = agent_driver_node_id(discovered_host);
         std::fprintf(stderr,
                      "[rocjitsu-hooks] selected host agent=%llu for guest agent=%llu "
                      "host_gpu_id=%u host_node_id=%u\n",
-                     static_cast<unsigned long long>(search.host_agent.handle),
-                     static_cast<unsigned long long>(search.guest_agent.handle),
-                     config->host_gpu_id, selected_node_id.value_or(0));
+                     static_cast<unsigned long long>(discovered_host.handle),
+                     static_cast<unsigned long long>(discovered_guest.handle), config->host_gpu_id,
+                     selected_node_id.value_or(0));
       }
-    } else {
+    } else if (attempted_agent_search) {
       std::fprintf(stderr, "[rocjitsu-hooks] failed to find guest/host HSA agents for DBT\n");
     }
   }
 
   std::mutex mutex_;
+  std::condition_variable discovery_cv_;
+  bool discovering_ = false;
   bool discovered_ = false;
   bool has_mapping_ = false;
   uint64_t generation_ = 0;
@@ -1447,9 +1470,11 @@ private:
 
     hsa_agent_t guest = AgentMapper::instance().guest_agent();
     hsa_agent_t host = AgentMapper::instance().host_for_guest();
+    if (guest.handle == 0 || host.handle == 0)
+      return;
 
     std::unordered_map<uint64_t, uint64_t> discovered;
-    if (iterate_pools != nullptr && get_info != nullptr && guest.handle != 0 && host.handle != 0) {
+    if (iterate_pools != nullptr && get_info != nullptr) {
       PoolList guest_pools;
       PoolList host_pools;
       guest_pools.get_info = get_info;
@@ -1597,6 +1622,33 @@ MappedAccessAgents map_access_agent_array(const hsa_agent_t *agents, uint32_t co
   }
 
   return mapped;
+}
+
+/// @brief Remap pointer-info accessible agents to guest handles and remove duplicates.
+///
+/// @details ROCR owns the returned array and exposes only a mutable pointer plus
+/// count. Shrinking the array in place preserves that ownership while avoiding
+/// the common host+guest pair collapsing into two copies of the visible guest.
+void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_agent_t **accessible) {
+  if (num_agents_accessible == nullptr || accessible == nullptr || *accessible == nullptr)
+    return;
+
+  hsa_agent_t *agents = *accessible;
+  uint32_t out_count = 0;
+  for (uint32_t i = 0; i < *num_agents_accessible; ++i) {
+    hsa_agent_t mapped = AgentMapper::instance().guest_for_host(agents[i]);
+    bool duplicate = false;
+    for (uint32_t out_idx = 0; out_idx < out_count; ++out_idx) {
+      if (agents[out_idx].handle == mapped.handle) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate)
+      continue;
+    agents[out_count++] = mapped;
+  }
+  *num_agents_accessible = out_count;
 }
 
 hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agent, void *data),
@@ -2070,10 +2122,7 @@ hsa_status_t HSA_API rj_amd_pointer_info(const void *ptr, hsa_amd_pointer_info_t
     if (info != nullptr &&
         info->size >= offsetof(hsa_amd_pointer_info_t, agentOwner) + sizeof(info->agentOwner))
       info->agentOwner = AgentMapper::instance().guest_for_host(info->agentOwner);
-    if (num_agents_accessible != nullptr && accessible != nullptr && *accessible != nullptr) {
-      for (uint32_t i = 0; i < *num_agents_accessible; ++i)
-        (*accessible)[i] = AgentMapper::instance().guest_for_host((*accessible)[i]);
-    }
+    map_pointer_info_accessible_agents(num_agents_accessible, accessible);
   }
   log_message(kLogVerbose, "amd_pointer_info status=%d owner=%llu accessible=%u",
               static_cast<int>(status),
@@ -2236,13 +2285,6 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
               static_cast<unsigned long long>(executable.handle),
               static_cast<unsigned long long>(agent.handle), guest_load ? 1 : 0,
               static_cast<unsigned long long>(code_object_reader.handle));
-  if (config->guest_target && !guest_load) {
-    hsa_status_t status =
-        original_load(executable, agent, code_object_reader, options, loaded_code_object);
-    log_message(kLogVerbose, "load_agent_code_object host/pass-through status=%d",
-                static_cast<int>(status));
-    return status;
-  }
 
   hsa_agent_t load_agent = guest_load ? AgentMapper::instance().host_for_guest() : agent;
   if (guest_load && load_agent.handle == 0)

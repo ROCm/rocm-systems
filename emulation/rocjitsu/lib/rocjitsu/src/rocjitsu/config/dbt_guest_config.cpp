@@ -18,7 +18,6 @@
 
 namespace rocjitsu {
 namespace config {
-namespace {
 
 DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   DbtGuestConfig config;
@@ -36,8 +35,6 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   config.guest_device = kfd_device_from_fb(guest->guest_device());
   return config;
 }
-
-} // namespace
 
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
   flatbuffers::Parser parser;

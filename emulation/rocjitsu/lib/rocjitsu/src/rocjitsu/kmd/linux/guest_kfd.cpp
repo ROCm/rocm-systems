@@ -23,7 +23,6 @@
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -35,53 +34,47 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr const char *kRealTopologyPath = "/sys/devices/virtual/kfd/kfd/topology";
-struct LinuxDirent64 {
-  uint64_t d_ino;
-  int64_t d_off;
-  unsigned short d_reclen;
-  unsigned char d_type;
-  char d_name[1];
-};
 
 std::string read_text_file(const fs::path &path) {
-  const std::string raw_path = path.string();
-  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, raw_path.c_str(), O_RDONLY | O_CLOEXEC));
+  const std::string path_str = path.string();
+  auto &real = libc_passthrough();
+  int fd = real.openat(AT_FDCWD, path_str.c_str(), O_RDONLY | O_CLOEXEC);
   if (fd < 0)
     return {};
 
   std::string out;
   std::array<char, 4096> buffer{};
   for (;;) {
-    ssize_t n = static_cast<ssize_t>(syscall(SYS_read, fd, buffer.data(), buffer.size()));
+    ssize_t n = real.read(fd, buffer.data(), buffer.size());
     if (n == 0)
       break;
     if (n < 0) {
-      syscall(SYS_close, fd);
+      real.close(fd);
       return {};
     }
     out.append(buffer.data(), static_cast<size_t>(n));
   }
-  syscall(SYS_close, fd);
+  real.close(fd);
   return out;
 }
 
 void write_text_file(const fs::path &path, const std::string &text) {
-  const std::string raw_path = path.string();
-  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, raw_path.c_str(),
-                                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+  const std::string path_str = path.string();
+  auto &real = libc_passthrough();
+  int fd = real.openat(AT_FDCWD, path_str.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   if (fd < 0)
     return;
 
   const char *cursor = text.data();
   size_t remaining = text.size();
   while (remaining > 0) {
-    ssize_t written = static_cast<ssize_t>(syscall(SYS_write, fd, cursor, remaining));
+    ssize_t written = real.write(fd, cursor, remaining);
     if (written <= 0)
       break;
     cursor += written;
     remaining -= static_cast<size_t>(written);
   }
-  syscall(SYS_close, fd);
+  real.close(fd);
 }
 
 uint32_t read_u32_property(const fs::path &path, std::string_view key, uint32_t fallback) {
@@ -241,47 +234,46 @@ uint32_t choose_render_minor(uint32_t requested) {
                                                                          : kRenderMinorEnd - 1;
 }
 
-bool raw_lstat(const std::string &path, struct stat *st) {
-  return syscall(SYS_newfstatat, AT_FDCWD, path.c_str(), st, AT_SYMLINK_NOFOLLOW) == 0;
+bool passthrough_lstat(const std::string &path, struct stat *st) {
+  return libc_passthrough().lstat(path.c_str(), st) == 0;
 }
 
-bool raw_copy_file(const std::string &src, const std::string &dst) {
-  int in = static_cast<int>(syscall(SYS_openat, AT_FDCWD, src.c_str(), O_RDONLY | O_CLOEXEC));
+bool passthrough_copy_file(const std::string &src, const std::string &dst) {
+  auto &real = libc_passthrough();
+  int in = real.openat(AT_FDCWD, src.c_str(), O_RDONLY | O_CLOEXEC);
   if (in < 0)
     return false;
 
   std::error_code ec;
   fs::create_directories(fs::path(dst).parent_path(), ec);
   if (ec) {
-    syscall(SYS_close, in);
+    real.close(in);
     return false;
   }
 
-  int out = static_cast<int>(
-      syscall(SYS_openat, AT_FDCWD, dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+  int out = real.openat(AT_FDCWD, dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   if (out < 0) {
-    syscall(SYS_close, in);
+    real.close(in);
     return false;
   }
 
   std::array<char, 4096> buffer{};
   for (;;) {
-    ssize_t n = static_cast<ssize_t>(syscall(SYS_read, in, buffer.data(), buffer.size()));
+    ssize_t n = real.read(in, buffer.data(), buffer.size());
     if (n == 0)
       break;
     if (n < 0) {
-      syscall(SYS_close, out);
-      syscall(SYS_close, in);
+      real.close(out);
+      real.close(in);
       return false;
     }
     char *p = buffer.data();
     ssize_t remaining = n;
     while (remaining > 0) {
-      ssize_t written =
-          static_cast<ssize_t>(syscall(SYS_write, out, p, static_cast<size_t>(remaining)));
+      ssize_t written = real.write(out, p, static_cast<size_t>(remaining));
       if (written <= 0) {
-        syscall(SYS_close, out);
-        syscall(SYS_close, in);
+        real.close(out);
+        real.close(in);
         return false;
       }
       p += written;
@@ -289,77 +281,130 @@ bool raw_copy_file(const std::string &src, const std::string &dst) {
     }
   }
 
-  syscall(SYS_close, out);
-  syscall(SYS_close, in);
+  real.close(out);
+  real.close(in);
   return true;
 }
 
 } // namespace
 
-TopologyOverlay::~TopologyOverlay() { cleanup(); }
+/// @brief Generated topology overlay containing host KFD nodes plus one guest node.
+///
+/// @details The overlay is private to GuestKfd because it is an implementation
+/// detail of guest discovery. It copies the real host topology from sysfs, then
+/// appends a guest GPU node generated from the configured KFD identity. Only KFD
+/// topology paths and the guest DRM render node are redirected to this overlay;
+/// host DRM paths remain real so ROCR can still create a host agent and execute
+/// on it.
+class GuestKfd::TopologyOverlay {
+public:
+  /// @brief Construct an empty overlay.
+  TopologyOverlay() = default;
 
-bool TopologyOverlay::copy_tree(const std::string &src, const std::string &dst) {
+  /// @brief Remove any generated overlay directories owned by this instance.
+  ~TopologyOverlay();
+
+  /// @brief Overlays own temporary filesystem state and cannot be copied.
+  TopologyOverlay(const TopologyOverlay &) = delete;
+
+  /// @brief Overlays own temporary filesystem state and cannot be copied.
+  TopologyOverlay &operator=(const TopologyOverlay &) = delete;
+
+  /// @brief Build the overlay from the current host sysfs topology.
+  /// @param guest Synthetic guest GPU properties to append.
+  /// @returns true when topology and guest DRM paths are ready.
+  bool generate(const Sysfs::GpuInfo &guest);
+
+  /// @brief Remove generated overlay directories.
+  void cleanup();
+
+  /// @brief Drop inherited overlay ownership without removing parent-owned paths.
+  void release_after_fork();
+
+  /// @brief Generated KFD topology root.
+  [[nodiscard]] const std::string &topology_path() const { return topology_dir_; }
+
+  /// @brief Generated DRM root containing the guest render node.
+  [[nodiscard]] const std::string &guest_drm_path() const { return guest_drm_dir_; }
+
+  /// @brief Synthetic topology node ID assigned to the guest GPU.
+  [[nodiscard]] uint32_t guest_node_id() const { return guest_node_id_; }
+
+private:
+  /// @brief Copy a host sysfs subtree into the generated overlay.
+  bool copy_tree(const std::string &src, const std::string &dst);
+
+  /// @brief Generate the appended guest KFD node and guest DRM metadata.
+  bool copy_guest_node(const Sysfs::GpuInfo &guest);
+
+  /// @brief Patch aggregate topology files after appending the guest node.
+  bool patch_topology_files();
+
+  std::string topology_dir_;
+  std::string guest_drm_dir_;
+  Sysfs guest_sysfs_;
+  uint32_t guest_node_id_ = 0;
+};
+
+GuestKfd::TopologyOverlay::~TopologyOverlay() { cleanup(); }
+
+bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::string &dst) {
   std::error_code ec;
   fs::create_directories(dst, ec);
   if (ec)
     return false;
 
-  int dir = static_cast<int>(
-      syscall(SYS_openat, AT_FDCWD, src.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-  if (dir < 0)
+  auto &real = libc_passthrough();
+  DIR *dir = real.opendir(src.c_str());
+  if (!dir)
     return false;
 
-  std::array<char, 32768> entries{};
+  bool ok = true;
   for (;;) {
-    int nread = static_cast<int>(syscall(SYS_getdents64, dir, entries.data(), entries.size()));
-    if (nread == 0)
+    errno = 0;
+    struct dirent *entry = real.readdir(dir);
+    if (!entry) {
+      ok = errno == 0;
       break;
-    if (nread < 0) {
-      syscall(SYS_close, dir);
-      return false;
     }
 
-    for (int pos = 0; pos < nread;) {
-      auto *entry = reinterpret_cast<LinuxDirent64 *>(entries.data() + pos);
-      std::string name = entry->d_name;
-      pos += entry->d_reclen;
-      if (name == "." || name == "..")
-        continue;
+    std::string name = entry->d_name;
+    if (name == "." || name == "..")
+      continue;
 
-      std::string child_src = src + "/" + name;
-      std::string child_dst = dst + "/" + name;
-      struct stat st {};
-      if (!raw_lstat(child_src, &st))
-        continue;
+    std::string child_src = src + "/" + name;
+    std::string child_dst = dst + "/" + name;
+    struct stat st {};
+    if (!passthrough_lstat(child_src, &st))
+      continue;
 
-      if (S_ISDIR(st.st_mode)) {
-        if (!copy_tree(child_src, child_dst)) {
-          syscall(SYS_close, dir);
-          return false;
-        }
-        continue;
+    if (S_ISDIR(st.st_mode)) {
+      if (!copy_tree(child_src, child_dst)) {
+        ok = false;
+        break;
       }
-      if (S_ISLNK(st.st_mode)) {
-        std::array<char, 4096> link_target{};
-        ssize_t n = static_cast<ssize_t>(syscall(SYS_readlinkat, AT_FDCWD, child_src.c_str(),
-                                                 link_target.data(), link_target.size() - 1));
-        if (n > 0) {
-          link_target[static_cast<size_t>(n)] = '\0';
-          fs::create_directories(fs::path(child_dst).parent_path(), ec);
-          fs::create_symlink(link_target.data(), child_dst, ec);
-          ec.clear();
-        }
-        continue;
-      }
-
-      (void)raw_copy_file(child_src, child_dst);
+      continue;
     }
+    if (S_ISLNK(st.st_mode)) {
+      std::array<char, 4096> link_target{};
+      ssize_t n = real.readlink_fn(child_src.c_str(), link_target.data(), link_target.size() - 1);
+      if (n > 0) {
+        link_target[static_cast<size_t>(n)] = '\0';
+        fs::create_directories(fs::path(child_dst).parent_path(), ec);
+        fs::create_symlink(link_target.data(), child_dst, ec);
+        ec.clear();
+      }
+      continue;
+    }
+
+    (void)passthrough_copy_file(child_src, child_dst);
   }
-  syscall(SYS_close, dir);
-  return true;
+  if (real.closedir(dir) != 0)
+    ok = false;
+  return ok;
 }
 
-bool TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
+bool GuestKfd::TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
   if (guest_sysfs_.generate(guest).empty())
     return false;
   guest_drm_dir_ = guest_sysfs_.drm_path();
@@ -370,7 +415,7 @@ bool TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
                    nodes_dir / std::to_string(guest_node_id_));
 }
 
-bool TopologyOverlay::patch_topology_files() {
+bool GuestKfd::TopologyOverlay::patch_topology_files() {
   fs::path root = topology_dir_;
   fs::path nodes_dir = root / "nodes";
   fs::path cpu_props = nodes_dir / "0" / "properties";
@@ -395,7 +440,7 @@ bool TopologyOverlay::patch_topology_files() {
   return true;
 }
 
-bool TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
+bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
   cleanup();
   if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
     return false;
@@ -410,7 +455,7 @@ bool TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
   return true;
 }
 
-void TopologyOverlay::cleanup() {
+void GuestKfd::TopologyOverlay::cleanup() {
   if (!topology_dir_.empty()) {
     std::error_code ec;
     fs::remove_all(topology_dir_, ec);
@@ -421,14 +466,15 @@ void TopologyOverlay::cleanup() {
   guest_sysfs_.cleanup();
 }
 
-void TopologyOverlay::release_after_fork() {
+void GuestKfd::TopologyOverlay::release_after_fork() {
   topology_dir_.clear();
   guest_drm_dir_.clear();
   guest_node_id_ = 0;
   guest_sysfs_.release_after_fork();
 }
 
-GuestKfd::GuestKfd(config::DbtGuestConfig config) : config_(std::move(config)) {
+GuestKfd::GuestKfd(config::DbtGuestConfig config)
+    : config_(std::move(config)), overlay_(std::make_unique<TopologyOverlay>()) {
   libc_passthrough().resolve();
   guest_ = gpu_info_from_config(config_.guest_device,
                                 std::max(1u, config_.guest_device.num_shader_engines));
@@ -447,7 +493,9 @@ void GuestKfd::reset_after_fork() {
   int kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
   if (kfd_fd >= 0)
     libc_passthrough().close(kfd_fd);
-  overlay_.release_after_fork();
+  std::lock_guard lock(mutex_);
+  open_refs_ = 0;
+  overlay_->release_after_fork();
   synthetic_handles_.clear();
   next_synthetic_handle_ = kSyntheticHandleBase;
 }
@@ -483,7 +531,7 @@ bool GuestKfd::ensure_ready() {
     }
     host_gpu_id_ = *host_gpu_id;
   }
-  if (!overlay_.generate(guest_)) {
+  if (!overlay_->generate(guest_)) {
     errno = ENODEV;
     return false;
   }
@@ -491,13 +539,51 @@ bool GuestKfd::ensure_ready() {
   return true;
 }
 
+bool GuestKfd::prepare_for_discovery() { return ensure_ready(); }
+
 int GuestKfd::open() {
-  if (!ensure_ready())
-    return -1;
-  return fd();
+  for (;;) {
+    if (!ensure_ready())
+      return -1;
+    std::lock_guard lock(mutex_);
+    int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
+    if (ready_.load(std::memory_order_acquire) && kfd_fd >= 0) {
+      ++open_refs_;
+      return kfd_fd;
+    }
+  }
 }
 
-int GuestKfd::close() { return 0; }
+void GuestKfd::retain_local_open() {
+  std::lock_guard lock(mutex_);
+  if (ready_.load(std::memory_order_acquire) && real_kfd_fd_.load(std::memory_order_acquire) >= 0)
+    ++open_refs_;
+}
+
+int GuestKfd::close() {
+  int kfd_fd = -1;
+  {
+    std::lock_guard lock(mutex_);
+    if (open_refs_ == 0)
+      return 0;
+    --open_refs_;
+    if (open_refs_ != 0)
+      return 0;
+
+    // The app sees a real KFD fd, but the interposer owns close ordering so
+    // dup'd descriptors can keep the process KFD connection alive. Only the
+    // final open reference closes the primary real fd and tears down discovery
+    // state; the close hook separately closes any dup fd that triggered this.
+    kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
+    ready_.store(false, std::memory_order_release);
+    synthetic_handles_.clear();
+    next_synthetic_handle_ = kSyntheticHandleBase;
+    overlay_->cleanup();
+  }
+  if (kfd_fd >= 0)
+    libc_passthrough().close(kfd_fd);
+  return 0;
+}
 
 int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
   int kfd_fd = fd();
@@ -773,7 +859,9 @@ void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offse
 
 int GuestKfd::munmap(void *, size_t) { return -ENOENT; }
 
-bool GuestKfd::owns_fd(int) const { return false; }
+bool GuestKfd::owns_fd(int fd) const {
+  return fd >= 0 && fd == real_kfd_fd_.load(std::memory_order_acquire);
+}
 
 int GuestKfd::fd() const { return real_kfd_fd_.load(std::memory_order_acquire); }
 
@@ -784,19 +872,19 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
   if (!ready_.load(std::memory_order_acquire))
     return {};
 
-  auto redirected = redirect_sysfs_root_path(path, overlay_.topology_path(), {});
+  auto redirected = redirect_sysfs_root_path(path, overlay_->topology_path(), {});
   if (!redirected.empty())
     return redirected;
-  if (overlay_.guest_drm_path().empty())
+  if (overlay_->guest_drm_path().empty())
     return {};
 
   std::string_view sv(path);
   uint32_t minor = 0;
   std::string_view suffix;
   if (parse_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
-    return overlay_.guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+    return overlay_->guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
   if (parse_sys_dev_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
-    return overlay_.guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+    return overlay_->guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
 
   constexpr std::string_view kDevDriRenderPrefix = "/dev/dri/renderD";
   if (sv.starts_with(kDevDriRenderPrefix)) {
@@ -808,7 +896,7 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
     if (err == std::errc{} && ptr == number.data() + number.size() &&
         parsed == guest_.drm_render_minor) {
       auto dev_suffix = slash == std::string_view::npos ? std::string_view{} : rest.substr(slash);
-      return overlay_.guest_drm_path() + "/dev_dri/renderD" + std::to_string(parsed) +
+      return overlay_->guest_drm_path() + "/dev_dri/renderD" + std::to_string(parsed) +
              std::string(dev_suffix);
     }
   }
@@ -827,7 +915,7 @@ const Sysfs::GpuInfo *GuestKfd::gpu_info_for_render_minor(uint32_t minor) const 
 }
 
 std::string GuestKfd::topology_path() const {
-  return ready_.load(std::memory_order_acquire) ? overlay_.topology_path() : std::string{};
+  return ready_.load(std::memory_order_acquire) ? overlay_->topology_path() : std::string{};
 }
 
 int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const {
@@ -889,7 +977,7 @@ kfd_process_device_apertures GuestKfd::guest_apertures() const {
   uint32_t guest_node_id = 0;
   {
     std::lock_guard lock(mutex_);
-    guest_node_id = overlay_.guest_node_id();
+    guest_node_id = overlay_->guest_node_id();
   }
   const uint64_t ordinal = std::max<uint32_t>(1, guest_node_id);
   const uint64_t aperture_stride = 0x10000000000ULL;

@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -38,9 +39,15 @@ std::condition_variable g_pool_cv;
 bool g_block_guest_pool_iteration = false;
 bool g_guest_pool_iteration_entered = false;
 bool g_release_guest_pool_iteration = false;
+std::mutex g_agent_mutex;
+std::condition_variable g_agent_cv;
+bool g_block_agent_iteration = false;
+bool g_agent_iteration_entered = false;
+bool g_release_agent_iteration = false;
 int g_fake_shutdown_calls = 0;
 hsa_amd_memory_pool_t g_last_allocate_pool{};
 int g_fake_allocation_storage = 0;
+hsa_agent_t g_pointer_info_accessible[2] = {};
 std::vector<uint64_t> g_last_batch_src_agents;
 std::vector<uint64_t> g_last_batch_dst_agents;
 
@@ -56,6 +63,15 @@ hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, v
                                          void *data) {
   if (callback == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  {
+    std::unique_lock lock(g_agent_mutex);
+    if (g_block_agent_iteration) {
+      g_agent_iteration_entered = true;
+      g_agent_cv.notify_all();
+      g_agent_cv.wait(lock, [] { return g_release_agent_iteration; });
+    }
+  }
 
   hsa_status_t status = callback(kGuestAgent, data);
   if (status != HSA_STATUS_SUCCESS)
@@ -189,6 +205,22 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_amd_pointer_info(const void *, hsa_amd_pointer_info_t *info,
+                                           void *(*)(size_t), uint32_t *num_agents_accessible,
+                                           hsa_agent_t **accessible) {
+  if (info != nullptr) {
+    info->size = sizeof(hsa_amd_pointer_info_t);
+    info->agentOwner = kHostAgent;
+  }
+  if (num_agents_accessible != nullptr && accessible != nullptr) {
+    g_pointer_info_accessible[0] = kHostAgent;
+    g_pointer_info_accessible[1] = kGuestAgent;
+    *num_agents_accessible = 2;
+    *accessible = g_pointer_info_accessible;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data) {
   if (callback == nullptr)
@@ -259,6 +291,7 @@ struct FakeApiTable {
     amd.hsa_amd_memory_pool_get_info_fn = fake_amd_memory_pool_get_info;
     amd.hsa_amd_memory_pool_allocate_fn = fake_amd_memory_pool_allocate;
     amd.hsa_amd_memory_async_batch_copy_fn = fake_amd_memory_async_batch_copy;
+    amd.hsa_amd_pointer_info_fn = fake_amd_pointer_info;
   }
 };
 
@@ -303,8 +336,24 @@ void release_pool_blocker() {
   g_pool_cv.notify_all();
 }
 
+void reset_agent_blocker(bool enabled) {
+  std::lock_guard lock(g_agent_mutex);
+  g_block_agent_iteration = enabled;
+  g_agent_iteration_entered = false;
+  g_release_agent_iteration = false;
+}
+
+void release_agent_blocker() {
+  {
+    std::lock_guard lock(g_agent_mutex);
+    g_release_agent_iteration = true;
+  }
+  g_agent_cv.notify_all();
+}
+
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
   reset_pool_blocker(false);
+  reset_agent_blocker(false);
   FakeApiTable api;
   InstalledHook hook(api);
   ASSERT_TRUE(hook.installed());
@@ -324,6 +373,7 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
 
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
   reset_pool_blocker(false);
+  reset_agent_blocker(false);
   FakeApiTable api;
   api.core.hsa_iterate_agents_fn = fake_iterate_agents_host_first;
   InstalledHook hook(api);
@@ -344,6 +394,7 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
 
 TEST(HsaHooksUnitTest, BatchCopyMapsSourceAndDestinationAgentLists) {
   reset_pool_blocker(false);
+  reset_agent_blocker(false);
   g_last_batch_src_agents.clear();
   g_last_batch_dst_agents.clear();
   FakeApiTable api;
@@ -363,8 +414,86 @@ TEST(HsaHooksUnitTest, BatchCopyMapsSourceAndDestinationAgentLists) {
   EXPECT_EQ(g_last_batch_dst_agents, (std::vector<uint64_t>{kHostAgent.handle, kHostAgent.handle}));
 }
 
+TEST(HsaHooksUnitTest, PointerInfoReportsGuestIdentityOnce) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_pointer_info_fn, fake_amd_pointer_info);
+
+  hsa_amd_pointer_info_t info{};
+  uint32_t accessible_count = 0;
+  hsa_agent_t *accessible = nullptr;
+  hsa_status_t status = api.amd.hsa_amd_pointer_info_fn(&g_fake_allocation_storage, &info, nullptr,
+                                                        &accessible_count, &accessible);
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(info.agentOwner.handle, kGuestAgent.handle);
+  ASSERT_NE(accessible, nullptr);
+  ASSERT_EQ(accessible_count, 1u);
+  EXPECT_EQ(accessible[0].handle, kGuestAgent.handle);
+}
+
+TEST(HsaHooksUnitTest, PoolAllocateWaitsForAgentDiscoveryPublication) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(true);
+  g_last_allocate_pool = {};
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+  ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
+
+  std::vector<uint64_t> seen;
+  hsa_status_t iterate_status = HSA_STATUS_ERROR;
+  std::thread iterate_thread([&] {
+    iterate_status = api.core.hsa_iterate_agents_fn(
+        [](hsa_agent_t agent, void *data) -> hsa_status_t {
+          static_cast<std::vector<uint64_t> *>(data)->push_back(agent.handle);
+          return HSA_STATUS_SUCCESS;
+        },
+        &seen);
+  });
+
+  bool mapper_entered_agent_iteration = false;
+  {
+    std::unique_lock lock(g_agent_mutex);
+    mapper_entered_agent_iteration = g_agent_cv.wait_for(lock, std::chrono::seconds(1),
+                                                         [] { return g_agent_iteration_entered; });
+  }
+  if (!mapper_entered_agent_iteration) {
+    release_agent_blocker();
+    iterate_thread.join();
+    ADD_FAILURE() << "agent mapper did not enter discovery iteration";
+    return;
+  }
+
+  std::atomic_bool allocate_done = false;
+  hsa_status_t allocate_status = HSA_STATUS_ERROR;
+  std::thread allocate_thread([&] {
+    void *ptr = nullptr;
+    allocate_status = api.amd.hsa_amd_memory_pool_allocate_fn(kGuestPool, 4096, 0, &ptr);
+    allocate_done.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_FALSE(allocate_done.load());
+
+  release_agent_blocker();
+  iterate_thread.join();
+  allocate_thread.join();
+
+  EXPECT_EQ(iterate_status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+  EXPECT_EQ(allocate_status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_last_allocate_pool.handle, kHostPool.handle);
+  reset_agent_blocker(false);
+}
+
 TEST(HsaHooksUnitTest, UninstallDoesNotWaitForPoolMapperDiscoveryLock) {
   reset_pool_blocker(true);
+  reset_agent_blocker(false);
   g_last_allocate_pool = {};
   FakeApiTable api;
   InstalledHook hook(api);
@@ -417,6 +546,7 @@ TEST(HsaHooksUnitTest, UninstallDoesNotWaitForPoolMapperDiscoveryLock) {
 
 TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
   reset_pool_blocker(false);
+  reset_agent_blocker(false);
   g_fake_shutdown_calls = 0;
   FakeApiTable api;
   InstalledHook hook(api);

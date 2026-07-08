@@ -26,11 +26,14 @@ class LibcPassthrough {
 public:
   int (*openat)(int, const char *, int, ...) = nullptr;
   int (*close)(int) = nullptr;
+  ssize_t (*read)(int, void *, size_t) = nullptr;
+  ssize_t (*write)(int, const void *, size_t) = nullptr;
   int (*ioctl)(int, unsigned long, ...) = nullptr;
   void *(*mmap)(void *, size_t, int, int, int, off_t) = nullptr;
   int (*munmap)(void *, size_t) = nullptr;
   int (*mprotect)(void *, size_t, int) = nullptr;
   int (*madvise)(void *, size_t, int) = nullptr;
+  int (*memfd_create)(const char *, unsigned int) = nullptr;
   int (*dup)(int) = nullptr;
   int (*dup2)(int, int) = nullptr;
   int (*dup3)(int, int, int) = nullptr;
@@ -38,6 +41,8 @@ public:
   FILE *(*fopen)(const char *, const char *) = nullptr;
   FILE *(*freopen)(const char *, const char *, FILE *) = nullptr;
   DIR *(*opendir)(const char *) = nullptr;
+  struct dirent *(*readdir)(DIR *) = nullptr;
+  int (*closedir)(DIR *) = nullptr;
   int (*stat)(const char *, struct stat *) = nullptr;
   int (*lstat)(const char *, struct stat *) = nullptr;
   int (*access)(const char *, int) = nullptr;

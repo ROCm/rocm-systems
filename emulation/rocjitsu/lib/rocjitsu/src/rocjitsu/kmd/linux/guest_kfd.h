@@ -19,67 +19,12 @@ RJ_DIAGNOSTIC_POP
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_set>
 
 namespace rocjitsu {
-
-/// @brief Generated topology overlay containing host KFD nodes plus one guest node.
-///
-/// @details The overlay copies the real host topology from sysfs, then appends a
-/// guest GPU node generated from the configured KFD identity. Only KFD topology
-/// paths and the guest DRM render node are redirected to this overlay; host DRM
-/// paths remain real so ROCR can still create a host agent and execute on it.
-class TopologyOverlay {
-public:
-  /// @brief Construct an empty overlay.
-  TopologyOverlay() = default;
-
-  /// @brief Remove any generated overlay directories owned by this instance.
-  ~TopologyOverlay();
-
-  /// @brief Overlays own temporary filesystem state and cannot be copied.
-  TopologyOverlay(const TopologyOverlay &) = delete;
-
-  /// @brief Overlays own temporary filesystem state and cannot be copied.
-  TopologyOverlay &operator=(const TopologyOverlay &) = delete;
-
-  /// @brief Build the overlay from the current host sysfs topology.
-  /// @param guest Synthetic guest GPU properties to append.
-  /// @returns true when topology and guest DRM paths are ready.
-  bool generate(const Sysfs::GpuInfo &guest);
-
-  /// @brief Remove generated overlay directories.
-  void cleanup();
-
-  /// @brief Drop inherited overlay ownership without removing parent-owned paths.
-  void release_after_fork();
-
-  /// @brief Generated KFD topology root.
-  [[nodiscard]] const std::string &topology_path() const { return topology_dir_; }
-
-  /// @brief Generated DRM root containing the guest render node.
-  [[nodiscard]] const std::string &guest_drm_path() const { return guest_drm_dir_; }
-
-  /// @brief Synthetic topology node ID assigned to the guest GPU.
-  [[nodiscard]] uint32_t guest_node_id() const { return guest_node_id_; }
-
-private:
-  /// @brief Copy a host sysfs subtree into the generated overlay.
-  bool copy_tree(const std::string &src, const std::string &dst);
-
-  /// @brief Generate the appended guest KFD node and guest DRM metadata.
-  bool copy_guest_node(const Sysfs::GpuInfo &guest);
-
-  /// @brief Patch aggregate topology files after appending the guest node.
-  bool patch_topology_files();
-
-  std::string topology_dir_;
-  std::string guest_drm_dir_;
-  Sysfs guest_sysfs_;
-  uint32_t guest_node_id_ = 0;
-};
 
 /// @brief KFD driver that exposes a guest GPU for DBT while forwarding host GPU work.
 ///
@@ -138,7 +83,15 @@ public:
   /// @brief Detach inherited child-process state before destroying this copy.
   void reset_after_fork() override;
 
+  /// @brief Prepare guest discovery without retaining an application open fd.
+  bool prepare_for_discovery();
+
+  /// @brief Add one open reference for a duplicated KFD fd.
+  void retain_local_open() override;
+
 private:
+  class TopologyOverlay;
+
   /// @brief Open real KFD, generate topology, and select the host GPU.
   bool ensure_ready();
 
@@ -189,9 +142,10 @@ private:
 
   config::DbtGuestConfig config_;
   Sysfs::GpuInfo guest_{};
-  TopologyOverlay overlay_;
+  std::unique_ptr<TopologyOverlay> overlay_;
   mutable std::mutex mutex_;
   std::atomic<int> real_kfd_fd_{-1};
+  uint32_t open_refs_ = 0;
   uint32_t host_gpu_id_ = 0;
   static constexpr uint64_t kSyntheticHandleBase = 1ULL << 63;
   uint64_t next_synthetic_handle_ = kSyntheticHandleBase;

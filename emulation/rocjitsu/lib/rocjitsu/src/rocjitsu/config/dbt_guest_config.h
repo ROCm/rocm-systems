@@ -13,6 +13,10 @@
 #include <optional>
 #include <string>
 
+namespace rocjitsu::fb {
+struct DbtGuestConfig;
+} // namespace rocjitsu::fb
+
 namespace rocjitsu::config {
 
 /// @brief DBT guest-GPU discovery configuration.
@@ -30,6 +34,12 @@ struct DbtGuestConfig {
   bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
   KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
 };
+
+/// @brief Convert a generated FlatBuffers DBT guest table into runtime config.
+///
+/// @details Shared by the DBT-only loader and the full simulation config
+/// loader so both paths interpret `dbt_guest` identically.
+DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest);
 
 /// @brief Load only dbt_guest from a rocjitsu JSON config.
 ///

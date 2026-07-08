@@ -97,7 +97,7 @@ static int connect_to_daemon() {
   addr.sun_family = AF_UNIX;
   path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
   if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-    syscall(SYS_close, sock);
+    rocjitsu::libc_passthrough().close(sock);
     return -1;
   }
   return sock;
@@ -126,12 +126,13 @@ int kfd_ioctl_ret(int r) {
 std::optional<std::string> child_config_path() {
   auto cfg_file = rocjitsu::rpc_default_config_file_path();
   char cfg_buf[4096]{};
-  int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
+  auto &real = rocjitsu::libc_passthrough();
+  int cfg_fd = real.openat(AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0);
   if (cfg_fd < 0)
     return std::nullopt;
 
-  auto n = syscall(SYS_read, cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
-  syscall(SYS_close, cfg_fd);
+  auto n = real.read(cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
+  real.close(cfg_fd);
   if (n <= 0)
     return std::nullopt;
 
@@ -463,7 +464,7 @@ public:
         auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
         if (dbt_guest.enabled) {
           auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest));
-          if (guest_driver->open() < 0) {
+          if (!guest_driver->prepare_for_discovery()) {
             in_construction = false;
             return nullptr;
           }
@@ -661,7 +662,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   if (!local_handles_render && !remote_handles_render)
     return {};
 
-  auto raw_drm_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_drm", MFD_CLOEXEC));
+  auto raw_drm_fd = InterposerContext::real().memfd_create("rocjitsu_drm", MFD_CLOEXEC);
   if (raw_drm_fd < 0)
     return {true, -1};
 
@@ -689,7 +690,7 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   assert(InterposerContext::real().ready());
   auto *volatile p = path;
   if (!p || InterposerContext::in_construction)
-    return static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, flags, mode));
+    return InterposerContext::real().openat(AT_FDCWD, path, flags, mode);
 
   if (auto drm_fd = open_synthetic_drm_fd(path); drm_fd.handled)
     return drm_fd.fd;
@@ -703,9 +704,12 @@ RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
       errno = ENODEV;
       return -1;
     }
-    drv->open();
-    InterposerContext::ctx.clear_dups();
-    return InterposerContext::ctx.driver_fd();
+    int kfd_fd = drv->open();
+    if (kfd_fd < 0)
+      return kfd_fd;
+    if (!drv->owns_fd(drv->fd()))
+      InterposerContext::ctx.clear_dups();
+    return kfd_fd;
   }
 
   std::string redirected = InterposerContext::ctx.redirect_sysfs_path(path);
@@ -1189,6 +1193,13 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
 
   if (auto *drv = InterposerContext::ctx.lookup(fd))
     return drv->mmap(addr, length, prot, flags, offset);
+
+  if (InterposerContext::ctx.is_kfd_dup(fd)) {
+    if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+      return remote->mmap(addr, length, prot, flags, offset);
+    if (auto *drv = InterposerContext::ctx.driver())
+      return drv->mmap(addr, length, prot, flags, offset);
+  }
 
   if (InterposerContext::ctx.is_drm(fd)) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
