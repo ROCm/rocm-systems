@@ -1,0 +1,148 @@
+/*
+ * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ */
+
+#include "shared/include/dxcore_loader.h"
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <ntstatus.h>
+
+namespace wsl {
+namespace thunk {
+namespace dxcore {
+
+DxcoreLoader::DxcoreLoader()
+    : pfn_D3DKMTCreateAllocation2(nullptr)
+    , pfn_D3DKMTDestroyAllocation2(nullptr)
+    , pfn_D3DKMTMapGpuVirtualAddress(nullptr)
+    , pfn_D3DKMTReserveGpuVirtualAddress(nullptr)
+    , pfn_D3DKMTFreeGpuVirtualAddress(nullptr)
+    , pfn_D3DKMTCreateDevice(nullptr)
+    , pfn_D3DKMTDestroyDevice(nullptr)
+    , pfn_D3DKMTEnumAdapters2(nullptr)
+    , pfn_D3DKMTQueryAdapterInfo(nullptr)
+    , pfn_D3DKMTCreateContextVirtual(nullptr)
+    , pfn_D3DKMTDestroyContext(nullptr)
+    , pfn_D3DKMTSubmitCommand(nullptr)
+    , pfn_D3DKMTCreateSynchronizationObject2(nullptr)
+    , pfn_D3DKMTDestroySynchronizationObject(nullptr)
+    , pfn_D3DKMTQueryStatistics(nullptr)
+    , pfn_D3DKMTEscape(nullptr)
+    , pfn_D3DKMTLock2(nullptr)
+    , pfn_D3DKMTUnlock2(nullptr)
+    , pfn_D3DKMTCreatePagingQueue(nullptr)
+    , pfn_D3DKMTDestroyPagingQueue(nullptr)
+    , pfn_D3DKMTWaitForSynchronizationObjectFromGpu(nullptr)
+    , pfn_D3DKMTSignalSynchronizationObjectFromGpu(nullptr)
+    , pfn_D3DKMTWaitForSynchronizationObjectFromCpu(nullptr)
+    , pfn_D3DKMTQueryClockCalibration(nullptr)
+    , pfn_D3DKMTMakeResident(nullptr)
+    , pfn_D3DKMTEvict(nullptr)
+    , pfn_D3DKMTShareObjects(nullptr)
+    , pfn_D3DKMTQueryResourceInfoFromNtHandle(nullptr)
+    , pfn_D3DKMTOpenResourceFromNtHandle(nullptr)
+    , pfn_D3DKMTCreateHwQueue(nullptr)
+    , pfn_D3DKMTDestroyHwQueue(nullptr)
+    , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
+    , pfn_D3DKMTEnumProcesses(nullptr)
+    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr)
+    , dxcore_handle_(nullptr)
+    , init_flag_() {
+}
+
+DxcoreLoader::~DxcoreLoader() {
+    Shutdown();
+}
+
+bool DxcoreLoader::Initialize() {
+    dlerror(); // Clear error
+    dxcore_handle_ = dlopen("libdxcore.so", RTLD_LAZY);
+
+    if (!dxcore_handle_) {
+        std::cerr << "[DxcoreLoader] Cannot load libdxcore.so: " << dlerror() << std::endl;
+        return false;
+    }
+
+    if (!LoadDxcoreApis()) {
+        // If API loading failed, close the handle to indicate failure
+        dlclose(dxcore_handle_);
+        dxcore_handle_ = nullptr;
+        return false;
+    }
+
+    return IsLoaded();
+}
+
+void DxcoreLoader::Shutdown() {
+    if (dxcore_handle_) {
+        if (dlclose(dxcore_handle_) != 0) {
+            std::cerr << "[DxcoreLoader] Cannot unload libdxcore.so: " << dlerror() << std::endl;
+        }
+        dxcore_handle_ = nullptr;
+    }
+}
+
+bool DxcoreLoader::LoadDxcoreApis() {
+    if (!dxcore_handle_) {
+        std::cerr << "[DxcoreLoader] Error: dxcore_handle_ is null" << std::endl;
+        return false;
+    }
+
+    dlerror(); // Clear error
+
+    // Load all D3DKMT functions
+    #define LOAD_DXCORE_API(func_name) \
+        DXCORE_PFN(func_name) = (DXCORE_DEF(func_name)*)dlsym(dxcore_handle_, #func_name); \
+        if (!DXCORE_PFN(func_name)) { \
+            std::cerr << "[DxcoreLoader] Failed to load " #func_name ": " << dlerror() << std::endl; \
+            goto ERROR; \
+        }
+
+    LOAD_DXCORE_API(D3DKMTCreateAllocation2);
+    LOAD_DXCORE_API(D3DKMTDestroyAllocation2);
+    LOAD_DXCORE_API(D3DKMTMapGpuVirtualAddress);
+    LOAD_DXCORE_API(D3DKMTReserveGpuVirtualAddress);
+    LOAD_DXCORE_API(D3DKMTFreeGpuVirtualAddress);
+    LOAD_DXCORE_API(D3DKMTCreateDevice);
+    LOAD_DXCORE_API(D3DKMTDestroyDevice);
+    LOAD_DXCORE_API(D3DKMTEnumAdapters2);
+    LOAD_DXCORE_API(D3DKMTQueryAdapterInfo);
+    LOAD_DXCORE_API(D3DKMTCreateContextVirtual);
+    LOAD_DXCORE_API(D3DKMTDestroyContext);
+    LOAD_DXCORE_API(D3DKMTSubmitCommand);
+    LOAD_DXCORE_API(D3DKMTCreateSynchronizationObject2);
+    LOAD_DXCORE_API(D3DKMTDestroySynchronizationObject);
+    LOAD_DXCORE_API(D3DKMTQueryStatistics);
+    LOAD_DXCORE_API(D3DKMTEscape);
+    LOAD_DXCORE_API(D3DKMTLock2);
+    LOAD_DXCORE_API(D3DKMTUnlock2);
+    LOAD_DXCORE_API(D3DKMTCreatePagingQueue);
+    LOAD_DXCORE_API(D3DKMTDestroyPagingQueue);
+    LOAD_DXCORE_API(D3DKMTWaitForSynchronizationObjectFromGpu);
+    LOAD_DXCORE_API(D3DKMTSignalSynchronizationObjectFromGpu);
+    LOAD_DXCORE_API(D3DKMTWaitForSynchronizationObjectFromCpu);
+    LOAD_DXCORE_API(D3DKMTQueryClockCalibration);
+    LOAD_DXCORE_API(D3DKMTMakeResident);
+    LOAD_DXCORE_API(D3DKMTEvict);
+    LOAD_DXCORE_API(D3DKMTShareObjects);
+    LOAD_DXCORE_API(D3DKMTQueryResourceInfoFromNtHandle);
+    LOAD_DXCORE_API(D3DKMTOpenResourceFromNtHandle);
+    LOAD_DXCORE_API(D3DKMTCreateHwQueue);
+    LOAD_DXCORE_API(D3DKMTDestroyHwQueue);
+    LOAD_DXCORE_API(D3DKMTSubmitCommandToHwQueue);
+    // WSL2 dxgkrnl-specific APIs — may not be present on Windows; dlsym failure is non-fatal
+    DXCORE_PFN(D3DKMTEnumProcesses) = (DXCORE_DEF(D3DKMTEnumProcesses)*)dlsym(dxcore_handle_, "D3DKMTEnumProcesses");
+    DXCORE_PFN(D3DKMTQueryVideoMemoryInfo) = (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)*)dlsym(dxcore_handle_, "D3DKMTQueryVideoMemoryInfo");
+
+    #undef LOAD_DXCORE_API
+
+    return true;
+ERROR:
+    std::cerr << "[DxcoreLoader] Failed to load DXCore APIs" << std::endl;
+    return false;
+}
+
+} // namespace dxcore
+} // namespace thunk
+} // namespace wsl

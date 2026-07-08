@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include( CMakeFindDependencyMacro )
+
+# Locate dependent packages here.  Finding them propagates usage requirements,
+# if any, to our clients and ensures that their target names are in scope for
+# the build.  rocdxg has no cmake project dependencies so there is nothing to
+# find.  If we switch to use find_package with external (to ROCm) library
+# dependencies (ie libnuma) then those packages should be located here using
+# find_dependencies as shown below.
+#find_dependency(Bar, 2.0)
+
+include( "${CMAKE_CURRENT_LIST_DIR}/@ROCDXG_TARGET@Targets.cmake" )
+
