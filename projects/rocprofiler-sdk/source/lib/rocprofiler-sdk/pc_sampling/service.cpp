@@ -231,12 +231,11 @@ configure_pc_sampling_service(context::context*                ctx,
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
 {
-    return get_global_pc_sampling_sessions().rlock([agent_id](const auto& sessions) {
-        // Require hsa_agent to be set so that get_pcs_session_of() (which matches by
-        // hsa_agent handle) will succeed whenever this function returns true.
-        auto it = sessions.find(agent_id);
-        return it != sessions.end() && it->second->hsa_agent.has_value();
-    });
+    // Require HSA-level init to be complete so that get_pcs_session_of() will succeed
+    // and the ROCr session exists for every agent this function returns true for.
+    if(!is_hsa_initialized().load()) return false;
+    return get_global_pc_sampling_sessions().rlock(
+        [agent_id](const auto& sessions) { return sessions.find(agent_id) != sessions.end(); });
 }
 
 PCSAgentSession*
