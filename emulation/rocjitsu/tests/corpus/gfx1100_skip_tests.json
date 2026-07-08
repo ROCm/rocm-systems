@@ -1,0 +1,12 @@
+{
+  "iree": [],
+  "cts": [
+    "fpsan_wmma_gfx11_w64_test",
+    "fpsan_xlane_w64_test",
+    "fpsan_classify_w64_test",
+    "fpsan_wave_gfx11_w64_test",
+    "fpsan_xlane_test",
+    "fpsan_wave_test"
+  ],
+  "kernels": []
+}

@@ -10,6 +10,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -24,6 +25,7 @@ on:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
       - '.github/actions/rocprofiler-sdk-util/action.yml'
+      - '.github/actions/rocprofiler-sdk-util/resolve-ci-config/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -87,11 +89,32 @@ env:
 
 
 jobs:
+  ci_config:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   # -----------------------------------------------------------------------------
   # Ubuntu / DEB job(s)
   # -----------------------------------------------------------------------------
   core-deb:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -100,8 +123,8 @@ jobs:
           # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
           # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
           # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
-    runs-on: ${{ matrix.system.runner }}
+          - { gpu: 'mi325', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -201,7 +224,7 @@ jobs:
           enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
           enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
           ccache-variant: ccache
 
       - name: Enable PC Sampling
@@ -222,7 +245,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --build-jobs 16 \
             --mode ${CI_MODE} \
-            --site ${{ matrix.system.runner }} \
+            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             ${{ matrix.system.ci-flags }} -- \
@@ -320,15 +343,16 @@ jobs:
   # -----------------------------------------------------------------------------
   core-rpm:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    needs: ci_config
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-    runs-on: ${{ matrix.system.runner }}
+          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -413,7 +437,7 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
+          ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
       - name: Enable PC Sampling
@@ -434,7 +458,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
             --build-jobs 16 \
-            --site ${{ matrix.system.runner }} \
+            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             ${{ matrix.system.ci-flags }} \
@@ -453,17 +477,18 @@ jobs:
 
   sanitizers:
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    needs: ci_config
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
       matrix:
         system:
-          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
-          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', runner: 'linux-mi325-gpu-rocm-cpu-sandbox', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'AddressSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'ThreadSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'LeakSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
+          - { sanitizer: 'UndefinedBehaviorSanitizer', os: 'ubuntu-22.04', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo' }
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -559,7 +584,7 @@ jobs:
         enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocprof-trace-decoder-build: 'true'
-        ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
+        ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_sandbox_runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         ccache-variant: ccache
 
     - name: Configure, Build, and Test
@@ -574,7 +599,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }} \
           --build-jobs 16 \
           --mode ${CI_MODE} \
-          --site ${{ matrix.system.runner }} \
+          --site ${{ needs.ci_config.outputs.gfx94x_sandbox_runner }} \
           --gpu-targets ${{ env.GPU_TARGETS }} \
           --memcheck ${{ matrix.system.sanitizer }} \
           --run-attempt ${{ github.run_attempt }} \

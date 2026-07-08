@@ -455,8 +455,10 @@ extern "C"
 #ifdef pncclResetDebugInit
 #undef pncclResetDebugInit
 #endif
-#if defined(NCCL_OS_LINUX)
-__attribute__((visibility("default"))) __attribute__((alias("ncclResetDebugInit")))
+#if defined(NCCL_OS_LINUX) && !defined(__HIP_DEVICE_COMPILE__)
+// Doesn't work on device
+__attribute__ ((visibility("default")))
+__attribute__ ((alias("ncclResetDebugInit")))
 #endif
 void pncclResetDebugInit();
 extern "C"

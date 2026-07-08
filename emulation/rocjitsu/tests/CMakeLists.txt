@@ -296,6 +296,7 @@ add_executable(
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
+    cdna3_predicate_mask_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
@@ -346,6 +347,7 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp

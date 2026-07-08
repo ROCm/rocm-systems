@@ -31,6 +31,7 @@
 
 #include "simdojo/sim/component.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -74,6 +75,7 @@ struct HwQueue {
 enum class SdmaPacketDialect {
   Legacy,
   Gfx11Plus,
+  Gfx1250,
 };
 
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
@@ -93,7 +95,13 @@ public:
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
-  void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
+  void add_l2_cache(L2Cache *l2) {
+    // Idempotent: the config-driven builder and the Xcd full constructor may
+    // both attempt to register the same L2. Avoid duplicate entries so cache
+    // maintenance does not flush the same L2 twice.
+    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+      l2_caches_.push_back(l2);
+  }
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
   uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
@@ -180,6 +188,29 @@ private:
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
   void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
 
+  /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
+  /// @details Emulated SDMA and CP writes land directly in the backing store,
+  /// bypassing the cache hierarchy. Real SDMA does not snoop GL2, so stale
+  /// cached copies are knocked out the way HW cache-maintenance does it: coarse
+  /// and indiscriminate, not per-range. This is the simulator's stand-in for a
+  /// GL2 invalidate; the consuming kernel's acquire fence at dispatch flushes
+  /// the remaining per-CU caches (including the scalar K$).
+  ///
+  /// @warning Drops dirty L2 lines without writeback. Only use after a direct
+  /// backing write whose destination is the only stale region; otherwise use
+  /// flush_gpu_caches() so K$-writeback dirty lines are published, not lost.
+  void invalidate_gpu_caches();
+
+  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @details Like invalidate_gpu_caches(), but publishes dirty data instead of
+  /// dropping it. Ordering is load-bearing: dirty scalar L1 (K$) lines are
+  /// written back into L2 first, then L2 is flushed to backing, so a dirty K$ or
+  /// L2 line overlapping an SDMA destination reaches backing before the direct
+  /// SDMA write (which runs after this returns) rather than being written out
+  /// over it by a later K$/L2 flush. Each line is written back under its own
+  /// owning vmid. Vector L1 (V$) is write-through, so it only needs invalidation.
+  void flush_gpu_caches();
+
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, HwQueueState &qs,
@@ -228,7 +259,13 @@ private:
   }
 
   bool uses_gfx11_plus_sdma_packets() const {
-    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus;
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
+           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  // gfx1250 widens the GCR packet to 6 dwords; gfx11/12 keep the 5-dword layout.
+  bool uses_gfx1250_gcr_packet() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   GpuMemory *memory_ = nullptr;
