@@ -275,9 +275,15 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
     //   packInWork = tid%(workSize/16);
     //   dstWork = tid/(workSize/16);
 
-    // We can only assume we have 64 threads, which means we can read at most 1024 bytes
-    // here which is the per batch maximum.
-    if (tid < nPacks) {
+    // Coll/P2P batches always fit the thread count (nPacks <= tn) and load in a
+    // single pass. AGV bcast batches hold up to 64 works*3 = 192 packs, which
+    // overflows the gfx9 256-thread block (loader gets tn <= 192), so they stride
+    // over extra passes; otherwise tail works stay unloaded and the kernel faults.
+    // pk iterates this thread's packs; tid is left intact for the rotation below.
+    const int bcastPacks = sizeof(struct ncclDevWorkBcast)/16; // constant divisor
+    bool isBcast = batch.workType == (int)ncclDevWorkTypeBcast;
+    for (int pk = tid; pk < nPacks; pk += tn) {
+      if (isBcast) { dstWork = pk/bcastPacks; packInWork = pk - dstWork*bcastPacks; }
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
       ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
@@ -310,6 +316,8 @@ __device__ __forceinline__ void loadWorkBatchToShmem(int tid, int tn, struct ncc
       char* dst = ncclShmem.workStorage;
       dst += (workCursor + dstWork) * workSize + packInWork * 16;
       *(ulonglong2*)dst = tmp;
+      // Only bcast overflows tn; single-pass callers exit after one iteration.
+      if (!isBcast) break;
     }
     workCursor += nWorks;
 
