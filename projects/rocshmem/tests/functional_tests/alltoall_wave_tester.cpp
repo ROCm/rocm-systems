@@ -43,6 +43,7 @@ ALLTOALLWAVEGEN(short, short)
 ALLTOALLWAVEGEN(int, int)
 ALLTOALLWAVEGEN(long, long)
 ALLTOALLWAVEGEN(long long, longlong)
+ALLTOALLWAVEGEN(char, char)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -52,31 +53,34 @@ __global__ void TeamAlltoallWaveTest(int loop, int skip, long long int *start_ti
                                  long long int *end_time, T1 *source_buf,
                                  T1 *dest_buf, int num_elems,
                                  ShmemContextType ctx_type,
-                                 rocshmem_team_t *teams) {
+                                 rocshmem_team_t *teams, int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
-  
-  rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
+  int t_id = get_flat_block_id();
+  int wf_id = t_id / wf_size;
+  int wf_per_wg = (get_flat_block_size() - 1) / wf_size + 1;
+  int flat_wf_id = wf_id + wg_id * wf_per_wg;
+
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   int n_pes = rocshmem_ctx_n_pes(ctx);
 
-  source_buf += wg_id * n_pes * num_elems;
-  dest_buf += wg_id * n_pes * num_elems;
+  source_buf += flat_wf_id * n_pes * num_elems;
+  dest_buf += flat_wf_id * n_pes * num_elems;
 
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip && hipThreadIdx_x == 0) {
-      start_time[wg_id] = wall_clock64();
+    if (i == skip && t_id % wf_size == 0) {
+      start_time[flat_wf_id] = wall_clock64();
     }
-    if (threadIdx.x < warpSize)
-      alltoall_wave<T1>(ctx, teams[wg_id], dest_buf, source_buf, num_elems);
+    alltoall_wave<T1>(ctx, teams[flat_wf_id], dest_buf, source_buf, num_elems);
   }
 
   __syncthreads();
 
-  if (hipThreadIdx_x == 0) {
-    end_time[wg_id] = wall_clock64();
+  if (t_id % wf_size == 0) {
+    end_time[flat_wf_id] = wall_clock64();
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -97,7 +101,7 @@ AlltoallWaveTester<T1>::AlltoallWaveTester(TesterArguments args)
   // Number of elements per work group
   size_t num_elems_wg = size_factor * (max_msg_size / sizeof(T1));
   // Total number of elements in the GPU kernel
-  size_t total_elems = num_elems_wg * args.num_wgs;
+  size_t total_elems = num_elems_wg * args.num_wgs * num_warps;
   size_t buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
@@ -106,6 +110,11 @@ AlltoallWaveTester<T1>::AlltoallWaveTester(TesterArguments args)
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
+  }
+
+  if (num_teams < num_warps * args.num_wgs){
+    printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
+    abort();
   }
 
   CHECK_HIP(hipMalloc(&alltoall_wave_world_dup,
@@ -142,10 +151,10 @@ void AlltoallWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(TeamAlltoallWaveTest<T1>, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
                      source_buf, dest_buf, num_elems, _shmem_context,
-                     alltoall_wave_world_dup);
+                     alltoall_wave_world_dup, wf_size);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop * gridSize.x;
+  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_timed_msgs = loop * gridSize.x * num_warps;
 }
 
 template <typename T1>
@@ -161,21 +170,22 @@ void AlltoallWaveTester<T1>::resetBuffers(size_t size) {
   int num_elems = size / sizeof(T1);
   int buff_size = num_elems * sizeof(T1) * args.num_wgs * n_pes;
   int idx = 0;
+  int total_wfs = args.num_wgs * num_warps;
 
-  for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for(unsigned int wf_id = 0; wf_id < total_wfs; wf_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
       for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
-        idx = (wg_id * n_pes + pe) * num_elems + i;
+        idx = (wf_id * n_pes + pe) * num_elems + i;
         if constexpr (std::is_same<T1, char>::value ||
                       std::is_same<T1, signed char>::value ||
                       std::is_same<T1, unsigned char>::value) {
-          source_buf[idx] = static_cast<T1>('a' + my_pe + pe + wg_id);
+          source_buf[idx] = static_cast<T1>('a' + my_pe + pe + wf_id);
         }
         else if constexpr (std::is_floating_point<T1>::value) {
-          source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe + wg_id);
+          source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe + wf_id);
         }
         else if constexpr (std::is_integral<T1>::value) {
-          source_buf[idx] = static_cast<T1>(my_pe + pe + wg_id);
+          source_buf[idx] = static_cast<T1>(my_pe + pe + wf_id);
         }
       }
     }
@@ -188,11 +198,12 @@ template <typename T1>
 void AlltoallWaveTester<T1>::verifyResults(size_t size) {
   int num_elems = size / sizeof(T1);
   int idx = 0;
+  int total_wfs = args.num_wgs * num_warps;
 
-  for(unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
+  for(int wf_id = 0; wf_id < total_wfs; wf_id++) {
     for(int pe = 0; pe < n_pes; pe++) {
-      for(unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
-        idx = (wg_id * n_pes + pe) * num_elems + static_cast<int>(i);
+      for(int i = 0; i < num_elems; i++) {
+        idx = (wf_id * n_pes + pe) * num_elems + i;
         if (dest_buf[idx] != source_buf[idx]) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
           std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
