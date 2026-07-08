@@ -42,7 +42,7 @@ endif()
 project(videodecodepicfiles)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake ${ROCM_PATH}/share/rocmcmakebuildtools/cmake)
 
 # rocdecode sample build type
 set(DEFAULT_BUILD_TYPE "Release")
