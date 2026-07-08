@@ -470,6 +470,8 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
 
     const uint32_t vb = wf->vgpr_alloc().base;
     const uint32_t sb = wf->sgpr_alloc().base;
+    auto &src0 = cu->vgpr_reg<64>(vb + 0);
+    auto &src1 = cu->vgpr_reg<64>(vb + 1);
 
     uint64_t active_mask = 0;
     uint64_t expected_mask = 0;
@@ -477,8 +479,8 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
       active_mask |= (1ULL << test.lane);
       if (test.expected)
         expected_mask |= (1ULL << test.lane);
-      cu->write_vgpr(vb + 0, test.lane, pack16(test.value, 0xCAFEu));
-      cu->write_vgpr(vb + 1, test.lane, pack16(test.mask, 0x1234u));
+      src0[test.lane] = pack16(test.value, 0xCAFEu);
+      src1[test.lane] = pack16(test.mask, 0x1234u);
     }
     wf->set_exec(active_mask);
     cu->write_sgpr(sb + 0, 0xFFFFFFFFu);
@@ -636,29 +638,6 @@ void write_packed_half(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane,
   const uint32_t shift = 16u * half;
   const uint32_t old = cu.read_vgpr(reg, lane);
   cu.write_vgpr(reg, lane, (old & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(value) << shift));
-}
-
-struct ForceScalarGuard {
-  explicit ForceScalarGuard(bool force_scalar) : old_force_scalar(util::force_scalar()) {
-    util::set_force_scalar_for_testing(force_scalar);
-  }
-  ~ForceScalarGuard() { util::set_force_scalar_for_testing(old_force_scalar); }
-
-  bool old_force_scalar;
-};
-
-void fill_vgprs(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t regs, uint32_t lanes,
-                uint32_t value) {
-  for (uint32_t reg = 0; reg < regs; ++reg)
-    for (uint32_t lane = 0; lane < lanes; ++lane)
-      cu.write_vgpr(base + reg, lane, value);
-}
-
-void write_wmma_f8_input(amdgpu::ComputeUnitCore &cu, uint32_t base, amdgpu::InputLoc loc,
-                         uint8_t value) {
-  ASSERT_EQ(loc.data_bits, 8u);
-  ASSERT_LT(loc.bit_offset, 32u);
-  write_packed_byte(cu, base + loc.vgpr_offset, loc.lane, loc.sub_element, value);
 }
 
 float wmma_test_a(uint32_t row, uint32_t k) {
@@ -1505,6 +1484,7 @@ TEST(Gfx1250True16VopcTest, CmpLtI16ReadsPackedHighVsrc1) {
 
 TEST(Rdna4True16Vop3Test, CmpGeF16UsesSelectedHighSourceHalf) {
   for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarGuard guard(force_scalar);
     amdgpu::GpuMemory gpu_mem(force_scalar ? "rdna4_true16_cmp_scalar_mem"
                                            : "rdna4_true16_cmp_simd_mem");
@@ -1590,6 +1570,52 @@ TEST(Rdna4True16Vop3Test, CmpClassF16UsesSelectedMaskHalf) {
     cu->execute_instruction(inst.get(), *wf);
 
     EXPECT_EQ(cu->read_sgpr(sb + 0), 0x1u);
+    EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
+
+    cu->reset_all_wf();
+  }
+}
+
+TEST(Rdna4True16Vop3Test, CmpClassF16InlineConstantUsesF16Broadcast) {
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "rdna4_true16_class_inline_scalar_mem"
+                                           : "rdna4_true16_class_inline_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "rdna4_true16_class_inline_scalar_l2"
+                                    : "rdna4_true16_class_inline_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec(0x3);
+
+    const uint32_t sb = wf->sgpr_alloc().base;
+    cu->write_sgpr(sb + 0, 0xFFFFFFFFu);
+    cu->write_sgpr(sb + 1, 0xDEADBEEFu);
+    cu->write_sgpr(sb + 4, 0x0100u);
+
+    constexpr auto words = encode_vop3(/*op=*/125, /*vdst=*/0, /*src0=*/242, /*src1=*/4,
+                                       /*src2=*/0, /*abs=*/0, /*opsel=*/0);
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cmp_class_f16");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->read_sgpr(sb + 0), 0x3u);
     EXPECT_EQ(cu->read_sgpr(sb + 1), 0xDEADBEEFu);
 
     cu->reset_all_wf();
@@ -1816,6 +1842,166 @@ TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
     cu->execute_instruction(inst.get(), *wf);
 
     EXPECT_EQ(cu->read_vgpr(vb + 4, 0), 0x40800000u);
+
+    cu->reset_all_wf();
+  }
+}
+
+TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "rdna4_true16_add_f16_scalar_mem"
+                                           : "rdna4_true16_add_f16_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "rdna4_true16_add_f16_scalar_l2"
+                                    : "rdna4_true16_add_f16_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec(0x3);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->write_vgpr(vb + 0, 0, pack16(util::f32_to_f16(100.0f), util::f32_to_f16(2.0f)));
+    cu->write_vgpr(vb + 1, 0, pack16(util::f32_to_f16(10.0f), util::f32_to_f16(3.0f)));
+    cu->write_vgpr(vb + 0, 1, pack16(util::f32_to_f16(8.0f), util::f32_to_f16(-1.0f)));
+    cu->write_vgpr(vb + 1, 1, pack16(util::f32_to_f16(4.0f), util::f32_to_f16(0.5f)));
+    cu->write_vgpr(vb + 2, 0, pack16(0xBEEFu, 0xCAFEu));
+    cu->write_vgpr(vb + 2, 1, pack16(0x1234u, 0x5678u));
+
+    constexpr auto words = encode_vop3(/*op=*/0x132, /*vdst=*/2, /*src0=*/256,
+                                       /*src1=*/257, /*src2=*/0, /*abs=*/0,
+                                       /*opsel=*/0xB);
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_add_f16");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0xBEEFu, util::f32_to_f16(5.0f)));
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 1), pack16(0x1234u, util::f32_to_f16(-0.5f)));
+
+    cu->reset_all_wf();
+  }
+}
+
+TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinationHalf) {
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "rdna4_true16_fmac_scalar_mem"
+                                           : "rdna4_true16_fmac_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "rdna4_true16_fmac_scalar_l2" : "rdna4_true16_fmac_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec(0x3);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->write_vgpr(vb + 0, 0, pack16(util::f32_to_f16(100.0f), util::f32_to_f16(2.0f)));
+    cu->write_vgpr(vb + 1, 0, pack16(util::f32_to_f16(10.0f), util::f32_to_f16(3.0f)));
+    cu->write_vgpr(vb + 0, 1, pack16(util::f32_to_f16(8.0f), util::f32_to_f16(-2.0f)));
+    cu->write_vgpr(vb + 1, 1, pack16(util::f32_to_f16(4.0f), util::f32_to_f16(0.5f)));
+    cu->write_vgpr(vb + 3, 0, pack16(0xBEEFu, util::f32_to_f16(4.0f)));
+    cu->write_vgpr(vb + 3, 1, pack16(0x1234u, util::f32_to_f16(1.5f)));
+
+    constexpr auto words = encode_vop3(/*op=*/0x136, /*vdst=*/3, /*src0=*/256,
+                                       /*src1=*/257, /*src2=*/0, /*abs=*/0,
+                                       /*opsel=*/0xB);
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), "v_fmac_f16");
+    cu->execute_instruction(inst.get(), *wf);
+
+    EXPECT_EQ(cu->read_vgpr(vb + 3, 0), pack16(0xBEEFu, util::f32_to_f16(10.0f)));
+    EXPECT_EQ(cu->read_vgpr(vb + 3, 1), pack16(0x1234u, util::f32_to_f16(0.5f)));
+
+    cu->reset_all_wf();
+  }
+}
+
+TEST(Rdna4True16Vop3Test, TernaryI16U16UsesSelectedHalvesAndPreservesDestinationHalf) {
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory gpu_mem(force_scalar ? "rdna4_true16_ternary_scalar_mem"
+                                           : "rdna4_true16_ternary_simd_mem");
+    amdgpu::L2Cache l2(force_scalar ? "rdna4_true16_ternary_scalar_l2"
+                                    : "rdna4_true16_ternary_simd_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 106;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_NE(decoder, nullptr);
+
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 32u);
+    wf->set_exec(0x1);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    cu->write_vgpr(vb + 0, 0, pack16(100u, 0xFFF9u)); // high=-7
+    cu->write_vgpr(vb + 1, 0, pack16(50u, 3u));
+    cu->write_vgpr(vb + 2, 0, pack16(75u, 0xFFFEu)); // high=-2
+    cu->write_vgpr(vb + 4, 0, pack16(1u, 7u));
+    cu->write_vgpr(vb + 5, 0, pack16(2u, 3u));
+    cu->write_vgpr(vb + 6, 0, pack16(3u, 5u));
+
+    auto execute = [&](uint32_t op, uint32_t dst, uint32_t src0, uint32_t src1, uint32_t src2,
+                       std::string_view mnemonic, uint16_t expected_high) {
+      cu->write_vgpr(vb + dst, 0, pack16(static_cast<uint16_t>(0xA000u | dst), 0xCAFEu));
+      const auto words = encode_vop3(op, dst, src0, src1, src2, /*abs=*/0, /*opsel=*/0xF);
+      std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
+      cu->execute_instruction(inst.get(), *wf);
+      EXPECT_EQ(cu->read_vgpr(vb + dst, 0),
+                pack16(static_cast<uint16_t>(0xA000u | dst), expected_high))
+          << mnemonic;
+    };
+
+    execute(/*op=*/0x24A, /*dst=*/10, /*src0=*/256, /*src1=*/257, /*src2=*/258, "v_min3_i16",
+            0xFFF9u);
+    execute(/*op=*/0x24D, /*dst=*/11, /*src0=*/256, /*src1=*/257, /*src2=*/258, "v_max3_i16", 3u);
+    execute(/*op=*/0x250, /*dst=*/12, /*src0=*/256, /*src1=*/257, /*src2=*/258, "v_med3_i16",
+            0xFFFEu);
+    execute(/*op=*/0x24B, /*dst=*/13, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_min3_u16", 3u);
+    execute(/*op=*/0x24E, /*dst=*/14, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_max3_u16", 7u);
+    execute(/*op=*/0x251, /*dst=*/15, /*src0=*/260, /*src1=*/261, /*src2=*/262, "v_med3_u16", 5u);
 
     cu->reset_all_wf();
   }

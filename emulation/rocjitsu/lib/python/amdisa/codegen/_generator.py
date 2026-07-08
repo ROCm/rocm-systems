@@ -2669,7 +2669,7 @@ class CodeGenerator:
                 uses_true16_e32 = bool(
                     getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
                 )
-                uses_true16_vop3_opsel = bool(
+                uses_true16_vop3 = bool(
                     getattr(profile, 'uses_true16_vop3_opsel', False)
                 )
                 is_true16_mov = (
@@ -2781,13 +2781,17 @@ class CodeGenerator:
                     for opnd in dst_operands
                 )
                 is_true16_vop3 = (
-                    uses_true16_vop3_opsel
+                    uses_true16_vop3
                     and is_vop3
                     and dst_operands
                     and (has_true16_vop3_src or has_true16_vop3_dst)
                 )
                 if is_true16_vop3:
-                    vop3_opsel = 'amdgpu::vop3_opsel(inst_)'
+                    lctx.vector_preamble.append(
+                        '  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);'
+                    )
+                    vop3_opsel = 'opsel'
+                    lctx.true16_vop3_opsel = vop3_opsel
                     for src_idx, opnd in enumerate(src_operands):
                         if opnd.is_input and (opnd.size == 16 or force_true16_vop3_src):
                             lctx.true16_src_selects[src_idx] = (
@@ -2857,6 +2861,57 @@ class CodeGenerator:
                         '    if (inst_.neg & (1u << 0))\n'
                         '      src = -src;\n'
                         f'    {dst_ops[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(src));\n'
+                        '  }\n'
+                    )
+                true16_special_vop3_ops = {
+                    'V_ASHRREV_I16': (
+                        2,
+                        ('auto v = static_cast<int16_t>(s1);',),
+                        'static_cast<uint32_t>(static_cast<uint16_t>('
+                        'v >> (static_cast<int16_t>(s0) & 15u)))',
+                    ),
+                    'V_LSHLREV_B16': (
+                        2,
+                        (),
+                        '(s1 << (s0 & 15u)) & 0xffffu',
+                    ),
+                    'V_LSHRREV_B16': (
+                        2,
+                        (),
+                        's1 >> (s0 & 15u)',
+                    ),
+                    'V_MAD_I16': (
+                        3,
+                        (
+                            'int32_t a = static_cast<int16_t>(s0);',
+                            'int32_t b = static_cast<int16_t>(s1);',
+                            'int32_t c = static_cast<int16_t>(s2);',
+                        ),
+                        'static_cast<uint32_t>(static_cast<uint16_t>(a * b + c))',
+                    ),
+                    'V_MAD_U16': (
+                        3,
+                        (),
+                        '(s0 * s1 + s2) & 0xffffu',
+                    ),
+                }
+                if is_true16_vop3 and inst.name in true16_special_vop3_ops:
+                    src_count, setup, result_expr = true16_special_vop3_ops[inst.name]
+                    src_lines = ''.join(
+                        f'    uint32_t s{i} = ::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[i]}, wf, lane, opsel, {i});\n'
+                        for i in range(src_count)
+                    )
+                    setup_lines = ''.join(f'    {line}\n' for line in setup)
+                    return (
+                        '  uint64_t exec = wf.exec();\n'
+                        '  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);\n'
+                        '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
+                        '    if (!(exec & (1ULL << lane)))\n'
+                        '      continue;\n'
+                        f'{src_lines}'
+                        f'{setup_lines}'
+                        f'    uint32_t result = {result_expr};\n'
+                        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result);\n'
                         '  }\n'
                     )
                 if cls == 'vector_add_co':
@@ -5196,7 +5251,6 @@ class CodeGenerator:
         uses_true16_e32 = bool(
             getattr(profile, 'uses_packed_16bit_e32_source_selectors', False)
         )
-        uses_true16_vop3_opsel = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
         enc_upper = (enc_name or inst.enc_name).upper()
         if (
             uses_true16_e32
@@ -5211,15 +5265,35 @@ class CodeGenerator:
             and any(op.is_output and op.size == 16 for op in inst.operands)
         ):
             return True
-        if (
-            uses_true16_vop3_opsel
-            and enc_upper == 'ENC_VOP3'
-            and any(
-                (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
-            )
-        ):
+        if self._uses_true16_vop3_execute(inst, enc_name):
             return True
         return False
+
+    def _uses_true16_vop3_execute(
+        self, inst: Instruction | None, enc_name: str | None = None
+    ) -> bool:
+        if inst is None:
+            return False
+        profile = getattr(self.isa_spec, 'profile', None)
+        if not bool(getattr(profile, 'uses_true16_vop3_opsel', False)):
+            return False
+        enc_upper = (enc_name or inst.enc_name).upper()
+        if enc_upper != 'ENC_VOP3':
+            return False
+        return any(
+            (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
+        )
+
+    def _true16_vop3_local_simd_probe(
+        self, inst: Instruction | None, enc_name: str | None = None
+    ) -> str | None:
+        if not self._uses_true16_vop3_execute(inst, enc_name):
+            return None
+
+        from amdisa.codegen.execute.simd_codegen import simd_probe_line
+
+        enc_key = (enc_name or inst.enc_name).lower().replace('enc_', '')
+        return simd_probe_line(f'{inst.mnemonic}_{enc_key}', true16_vop3=True)
 
     def _e32_true16_dst_reg_expr(
         self, inst: Instruction | None, enc_name: str | None = None
@@ -6214,6 +6288,14 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        _local_true16_probe = self._true16_vop3_local_simd_probe(
+                            inst, enc.enc_name
+                        )
+                        _local_true16_probe_body = (
+                            f'  auto &inst = *this;\n{_local_true16_probe}\n'
+                            if _local_true16_probe
+                            else ''
+                        )
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
@@ -6267,6 +6349,7 @@ class CodeGenerator:
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
                                 f'{_dpp_preamble}'
+                                f'{_local_true16_probe_body}'
                                 f'{body}\n'
                                 f'{_dpp_cleanup}'
                                 f'{_sdwa_postamble}}}'
@@ -6508,6 +6591,17 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
+                            False,
+                        )
+                    )
+                has_local_true16_simd_probe = any(
+                    self._true16_vop3_local_simd_probe(i, enc.enc_name)
+                    for i in all_insts
+                )
+                if has_local_true16_simd_probe:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/simd_glue.h',
                             False,
                         )
                     )
@@ -7029,7 +7123,10 @@ class CodeGenerator:
                     '(src0 * src1 + src2) & 0xffffu',
                 ),
             }
-            if mnemonic in true16_special_ops:
+            if (
+                mnemonic in true16_special_ops
+                and 'read_vop3_true16_src' in prefixed_body
+            ):
                 src_count, setup, result_expr = true16_special_ops[mnemonic]
                 src_lines = ''.join(
                     f'    uint32_t src{i} = read_vop3_true16_src(inst.src{i}, wf, lane, opsel, {i});\n'
@@ -7090,7 +7187,11 @@ class CodeGenerator:
                 f'inline void execute_{mnemonic}('
                 f'[[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {{'
             )
-            probe = simd_probe_line(mnemonic)
+            true16_vop3_body = (
+                'read_vop3_true16_src' in prefixed_body
+                or 'write_vop3_true16_dst' in prefixed_body
+            )
+            probe = simd_probe_line(mnemonic, true16_vop3=true16_vop3_body)
             if probe is not None:
                 lines.append(probe)
             lines.append(prefixed_body)

@@ -75,6 +75,56 @@ def test_arch_local_execute_bodies_are_not_shared():
     assert 'vector_movrel' in CodeGenerator._NON_SHAREABLE_CLASSES
 
 
+def test_vop3_f16_simd_probes_split_true16_from_generic():
+    assert simd_probe_line('v_add_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16'
+    )
+    assert simd_probe_line('v_add_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16'
+    )
+    assert simd_probe_line('v_rcp_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
+    )
+    assert simd_probe_line('v_rcp_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
+    )
+    assert simd_probe_line('v_fma_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
+    )
+    assert simd_probe_line('v_fma_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16'
+    )
+    assert simd_probe_line('v_div_fixup_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16'
+    )
+    assert simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16'
+    )
+    assert simd_probe_line('v_fmac_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_FMAC_VOP3_FP16'
+    )
+    assert simd_probe_line('v_fmac_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_FMAC_VOP3_TRUE16_FP16'
+    )
+    assert simd_probe_line('v_cmp_class_f16_vop3').startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32'
+    )
+    assert simd_probe_line('v_cmp_class_f16_vop3', true16_vop3=True).startswith(
+        '  ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32'
+    )
+    assert simd_probe_line('v_cvt_f32_f16_vop3') == (
+        '  ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3();'
+    )
+    assert simd_probe_line('v_cvt_f32_f16_vop3', true16_vop3=True) == (
+        '  ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3_TRUE16();'
+    )
+
+
+def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
+    assert simd_probe_line('v_not_b16_vop3', true16_vop3=True) is None
+    assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=True) is None
+
+
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

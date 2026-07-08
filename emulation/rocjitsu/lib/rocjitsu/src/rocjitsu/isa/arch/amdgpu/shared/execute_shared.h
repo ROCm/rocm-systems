@@ -3271,13 +3271,12 @@ inline void execute_v_ashrrev_i16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t opsel = vop3_opsel(inst.inst_);
-    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
-    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
-    auto v = static_cast<int16_t>(src1);
-    uint32_t result =
-        static_cast<uint32_t>(static_cast<uint16_t>(v >> (static_cast<int16_t>(src0) & 15u)));
-    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
+    inst.vdst.write_lane(
+        wf, lane, static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>([&]() {
+          auto v = static_cast<int16_t>(static_cast<int16_t>(inst.src1.read_lane(wf, lane)));
+          return static_cast<uint32_t>(static_cast<uint16_t>(
+              v >> (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) & 15u)));
+        }()))));
   }
 }
 
@@ -3693,7 +3692,7 @@ inline void execute_v_clz_i32_u32_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cmp_class_f16_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32(0x8000u, [](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32(0x8000u, [](auto a, auto b) {
     using U = util::native<uint32_t>;
     U h = a & 0xFFFFu;
     U exp = (h >> 10) & 0x1Fu;
@@ -8539,8 +8538,7 @@ inline void execute_v_cvt_f32_f16_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_cvt_f32_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, float32_t,
-                               [](auto a) { return util::f16_to_f32_simd(a); });
+  ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3();
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -9748,7 +9746,7 @@ inline void execute_v_cvt_u32_u16_vop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
       [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
@@ -9936,7 +9934,7 @@ inline void execute_v_div_fixup_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_div_fixup_legacy_f16_vop3([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16(
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
       [](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_f32_simd(p, b, c); });
   uint64_t exec = wf.exec();
   uint32_t opsel = amdgpu::vop3_opsel(inst.inst_);
@@ -12543,11 +12541,10 @@ inline void execute_v_lshlrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t opsel = vop3_opsel(inst.inst_);
-    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
-    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
-    uint32_t result = (src1 << (src0 & 15u)) & 0xffffu;
-    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane))
+                              << (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -12632,11 +12629,10 @@ inline void execute_v_lshrrev_b16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t opsel = vop3_opsel(inst.inst_);
-    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
-    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
-    uint32_t result = src1 >> (src0 & 15u);
-    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             (static_cast<uint16_t>(inst.src1.read_lane(wf, lane)) >>
+                              (static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) & 15u)))));
   }
 }
 
@@ -12957,15 +12953,11 @@ inline void execute_v_mad_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t opsel = vop3_opsel(inst.inst_);
-    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
-    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
-    uint32_t src2 = read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
-    int32_t a = static_cast<int16_t>(src0);
-    int32_t b = static_cast<int16_t>(src1);
-    int32_t c = static_cast<int16_t>(src2);
-    uint32_t result = static_cast<uint32_t>(static_cast<uint16_t>(a * b + c));
-    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
+                             ((static_cast<int16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<int16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<int16_t>(inst.src2.read_lane(wf, lane)))))));
   }
 }
 
@@ -13311,12 +13303,11 @@ inline void execute_v_mad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t opsel = vop3_opsel(inst.inst_);
-    uint32_t src0 = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
-    uint32_t src1 = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
-    uint32_t src2 = read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
-    uint32_t result = (src0 * src1 + src2) & 0xffffu;
-    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);
+    inst.vdst.write_lane(wf, lane,
+                         static_cast<uint32_t>(static_cast<uint16_t>(
+                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
+                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
+                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
   }
 }
 

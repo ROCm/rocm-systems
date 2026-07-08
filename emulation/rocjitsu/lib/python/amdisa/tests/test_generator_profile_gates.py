@@ -83,6 +83,18 @@ def rdna4_generated_root(amdgpu_generated_root: Path) -> Path:
     return amdgpu_generated_root / 'rdna4'
 
 
+def _shared_execute_body(execute_shared: str, name: str, next_name: str) -> str:
+    start = execute_shared.index(f'inline void execute_{name}')
+    end = execute_shared.index(f'inline void execute_{next_name}', start)
+    return execute_shared[start:end]
+
+
+def _generated_method_body(cpp: str, class_name: str, next_class_name: str) -> str:
+    start = cpp.index(f'void {class_name}::execute_impl')
+    end = cpp.index(f'{next_class_name}::{next_class_name}', start)
+    return cpp[start:end]
+
+
 def _parse_cdna_specs(*names: str):
     specs = []
     for name in names:
@@ -900,20 +912,17 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
 
 
 def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
-    execute_shared_path: Path,
+    gfx1250_generated_root: Path,
 ):
-    execute_shared = execute_shared_path.read_text()
-
-    start = execute_shared.index('inline void execute_v_mad_u16_vop3')
-    end = execute_shared.index('inline void execute_v_mad_u32_u16_vop3', start)
-    body = execute_shared[start:end]
+    vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+    body = _generated_method_body(vop3_ternary, 'VMadU16Vop3', 'VXadU32Vop3')
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT' not in body
-    assert 'uint32_t opsel = vop3_opsel(inst.inst_);' in body
-    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in body
-    assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result)' in body
+    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
+    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
+    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result)' in body
 
 
 def test_generated_special_vop3_true16_paths_use_selected_halves(
@@ -921,19 +930,18 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
 ):
     execute_shared = execute_shared_path.read_text()
 
-    def shared_body(name: str, next_name: str) -> str:
-        start = execute_shared.index(f'inline void execute_{name}')
-        end = execute_shared.index(f'inline void execute_{next_name}', start)
-        return execute_shared[start:end]
-
-    mad_u32 = shared_body('v_mad_u32_u16_vop3', 'v_mad_u32_u24_vop3')
+    mad_u32 = _shared_execute_body(
+        execute_shared, 'v_mad_u32_u16_vop3', 'v_mad_u32_u24_vop3'
+    )
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_u32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
     assert 'read_vop3_true16_src(inst.src2' not in mad_u32
     assert 'uint32_t s2 = inst.src2.read_lane(wf, lane);' in mad_u32
 
-    mad_i32 = shared_body('v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3')
+    mad_i32 = _shared_execute_body(
+        execute_shared, 'v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3'
+    )
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_i32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_i32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
@@ -942,17 +950,87 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         'int32_t s2 = static_cast<int32_t>(inst.src2.read_lane(wf, lane));' in mad_i32
     )
 
-    div_fixup = shared_body('v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
+    div_fixup = _shared_execute_body(
+        execute_shared, 'v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3'
+    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
     assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits)' in div_fixup
 
-    pack = shared_body('v_pack_b32_f16_vop3', 'v_perm_b32_vop3')
+    pack = _shared_execute_body(
+        execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
+    )
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in pack
     assert 'read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0)' in pack
     assert 'read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1)' in pack
+
+
+def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
+    execute_shared_path: Path,
+    gfx1250_generated_root: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    gfx1250_vop3_alu = (gfx1250_generated_root / 'vop3_alu.cpp').read_text()
+    gfx1250_vop3_ternary = (gfx1250_generated_root / 'vop3_ternary.cpp').read_text()
+
+    unary = _shared_execute_body(execute_shared, 'v_ceil_f16_vop3', 'v_ceil_f32_vop1')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in unary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
+    assert 'read_vop3_true16_src' not in unary
+    assert 'write_vop3_true16_dst' not in unary
+    assert 'inst.vdst.write_lane' in unary
+
+    binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
+    assert 'read_vop3_true16_src' not in binary
+    assert 'write_vop3_true16_dst' not in binary
+    assert 'inst.vdst.write_lane' in binary
+
+    ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in ternary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' not in ternary
+    assert 'read_vop3_true16_src' not in ternary
+    assert 'write_vop3_true16_dst' not in ternary
+    assert 'inst.vdst.write_lane' in ternary
+
+    true16_unary = _generated_method_body(
+        gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
+    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in true16_unary
+    assert (
+        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_unary
+    )
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_unary
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_unary
+    assert 'inst.vdst.write_lane' not in true16_unary
+
+    true16_binary = _generated_method_body(
+        gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
+    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in true16_binary
+    assert (
+        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
+    )
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_binary
+    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_binary
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_binary
+    assert 'inst.vdst.write_lane' not in true16_binary
+
+    true16_ternary = _generated_method_body(
+        gfx1250_vop3_ternary, 'VFmaF16Vop3', 'VMin3I16Vop3'
+    )
+    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in true16_ternary
+    assert (
+        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_ternary
+    )
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_ternary
+    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in true16_ternary
+    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in true16_ternary
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_ternary
+    assert 'inst.vdst.write_lane' not in true16_ternary
 
 
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
@@ -977,18 +1055,15 @@ def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
 
 
 def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
-    execute_shared_path: Path,
+    gfx1250_generated_root: Path,
 ):
-    execute_shared = execute_shared_path.read_text()
+    vop3_alu_2 = (gfx1250_generated_root / 'vop3_alu_2.cpp').read_text()
+    body = _generated_method_body(vop3_alu_2, 'VLshrrevB16Vop3', 'VAshrrevI16Vop3')
 
-    start = execute_shared.index('inline void execute_v_lshrrev_b16_vop3')
-    end = execute_shared.index('inline void execute_v_lshrrev_b32_vop2', start)
-    body = execute_shared[start:end]
-
-    assert 'uint32_t opsel = vop3_opsel(inst.inst_);' in body
-    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in body
-    assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result)' in body
+    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
+    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result)' in body
     assert 'inst.vdst.write_lane' not in body
 
 
@@ -1407,7 +1482,9 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     body = gfx1250_vop3_cvt[start:end]
     body_words = ' '.join(body.split())
 
-    assert '>> (((amdgpu::vop3_opsel(inst_) & 0x2u) >> 1) * 8u)' in body_words
+    assert '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
+    assert '>> (((opsel & 0x2u) >> 1) * 8u)' in body_words
     assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
 
 
