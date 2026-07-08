@@ -37,11 +37,14 @@ public:
     }
 
     // &m_profile_configs is passed as void* user_data to the SDK callback.
-    // Moving this object after configure_agents() would relocate the map and
-    // dangle that pointer. Delete move operations to make this constraint
-    // a compile-time guarantee rather than a comment.
-    provider(provider&&)            = delete;
-    provider& operator=(provider&&) = delete;
+    // Relocating this object after configure_agents() would move the map and
+    // dangle that pointer. Delete the copy and move operations to make this
+    // constraint a compile-time guarantee rather than a comment.
+    provider(const provider&)            = delete;
+    provider& operator=(const provider&) = delete;
+    provider(provider&&)                 = delete;
+    provider& operator=(provider&&)      = delete;
+    ~provider()                          = default;
 
     void start()
     {
