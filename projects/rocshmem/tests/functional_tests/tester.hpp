@@ -195,8 +195,9 @@
   X(BroadcastWave,             150)  \
   X(AllToAllWave,              151)  \
   X(FcollectWave,              152)  \
-  X(ReduceWave,                153)
-
+  X(ReduceWave,                153)  \
+  X(TeamReduceScatterWave,     154)
+  
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
