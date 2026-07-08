@@ -382,6 +382,7 @@ void IPCBackend::initIPC() {
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       backend_comm);
   ipcImpl.heap_size = heap.get_size();
+  ipcImpl.bypass_lane_stores = envvar::bypass_lane_stores;
 }
 
 void IPCBackend::initIPC(TcpBootstrap *bootstr) {
@@ -390,6 +391,7 @@ void IPCBackend::initIPC(TcpBootstrap *bootstr) {
   ipcImpl.ipcHostInit(my_pe, heap_bases,
                       bootstr);
   ipcImpl.heap_size = heap.get_size();
+  ipcImpl.bypass_lane_stores = envvar::bypass_lane_stores;
 }
 
 void IPCBackend::global_exit(int status) {

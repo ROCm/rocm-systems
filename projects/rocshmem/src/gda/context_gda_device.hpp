@@ -51,9 +51,24 @@ class GDAContext : public Context {
   __device__ void getmem_nbi(void *dest, const void *source, size_t size,
                              int pe);
 
+  __device__ void putmem_av(void *dest, const void *source, size_t nelems,
+                            int pe);
+
+  __device__ void putmem_nbi_av(void *dest, const void *source, size_t nelems,
+                                int pe);
+
   __device__ void fence();
 
   __device__ void fence(int pe);
+
+  /**
+   * @brief Targeted-ordering fence: uses fence_targeted() (s_waitcnt vmcnt(0))
+   * in place of the expensive per-QP quiet + system-scope L2 writeback.
+   * Correct when prior puts used cache-bypassing stores (sc0 sc1).
+   */
+  __device__ void fence_av();
+
+  __device__ void fence_av(int pe);
 
   __device__ void quiet();
 
@@ -109,6 +124,9 @@ class GDAContext : public Context {
 
   template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
+
+  template <typename T>
+  __device__ void amo_set_av(void *dst, T value, int pe);
 
   template <typename T>
   __device__ T amo_swap(void *dst, T value, int pe);
@@ -196,6 +214,9 @@ class GDAContext : public Context {
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
 
+  __device__ void putmem_wg_av(void *dest, const void *source, size_t nelems,
+                               int pe);
+
   __device__ void getmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
 
@@ -213,6 +234,13 @@ class GDAContext : public Context {
 
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
+
+  /** _av variant: uses mlx5_post_wqe_rma_av (cache-bypassing WQE + fence_targeted doorbell). */
+  __device__ void putmem_nbi_wave_av(void *dest, const void *source,
+                                     size_t nelems, int pe);
+
+  template <typename T>
+  __device__ void put_nbi_wave_av(T *dest, const T *source, size_t nelems, int pe);
 
   __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
                                   int pe);

@@ -167,6 +167,24 @@ __device__ void QueuePair::post_wqe_rma(
   }
 }
 
+__device__ void QueuePair::post_wqe_rma_av(
+    int32_t length, uintptr_t raddr, uint32_t rkey,
+    uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    mlx5_post_wqe_rma_av(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    return;
+#endif
+  default:
+    // _av optimisation not implemented for this provider; fall back to
+    // standard semantics which are always correct.
+    post_wqe_rma(length, raddr, rkey, laddr, lkey, opcode, wf_info, ring_db);
+    return;
+  }
+}
+
 __device__ void QueuePair::post_wqe_rma_single(int32_t length,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, bool ring_db) {
@@ -309,6 +327,17 @@ __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,
 }
 
 // Used in all to all
+__device__ void QueuePair::put_nbi_av(void *dest, const void *source,
+    size_t length, ActiveWFInfo &wf_info) {
+  uint32_t dst_rkey = rkey;
+  uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
+      ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
+  uintptr_t l = reinterpret_cast<uintptr_t>(source);
+  uintptr_t r = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma_av(static_cast<int32_t>(length), r, dst_rkey, l, src_lkey,
+                  gda_op_rdma_write, wf_info, /*ring_db=*/true);
+}
+
 __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
     size_t length, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);

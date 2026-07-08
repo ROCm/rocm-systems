@@ -619,6 +619,29 @@ __host__ size_t rocshmem_uint64_wait_until_some_vector(
 
 
 /**
+ * @name SHMEM_WAIT_UNTIL_AV
+ * @brief Targeted variant of wait_until: spins until the condition is true,
+ * then completes with fence_targeted() (s_waitcnt vmcnt(0)) rather than a
+ * full system-scope acquire fence.  Use when only the signalling PE needs to
+ * observe prior writes.
+ */
+__device__ void rocshmem_float_wait_until_av(float *ivars, int cmp, float val);
+__device__ void rocshmem_double_wait_until_av(double *ivars, int cmp, double val);
+__device__ void rocshmem_char_wait_until_av(char *ivars, int cmp, char val);
+__device__ void rocshmem_schar_wait_until_av(signed char *ivars, int cmp, signed char val);
+__device__ void rocshmem_short_wait_until_av(short *ivars, int cmp, short val);
+__device__ void rocshmem_int_wait_until_av(int *ivars, int cmp, int val);
+__device__ void rocshmem_long_wait_until_av(long *ivars, int cmp, long val);
+__device__ void rocshmem_longlong_wait_until_av(long long *ivars, int cmp, long long val);
+__device__ void rocshmem_uchar_wait_until_av(unsigned char *ivars, int cmp, unsigned char val);
+__device__ void rocshmem_ushort_wait_until_av(unsigned short *ivars, int cmp, unsigned short val);
+__device__ void rocshmem_uint_wait_until_av(unsigned int *ivars, int cmp, unsigned int val);
+__device__ void rocshmem_ulong_wait_until_av(unsigned long *ivars, int cmp, unsigned long val);
+__device__ void rocshmem_ulonglong_wait_until_av(unsigned long long *ivars, int cmp, unsigned long long val);
+__device__ void rocshmem_uint64_wait_until_av(uint64_t *ivars, int cmp, uint64_t val);
+
+
+/**
  * @name SHMEM_TEST
  * @brief test if the condition (* \p ptr \p cmps \p val) is
  * true.

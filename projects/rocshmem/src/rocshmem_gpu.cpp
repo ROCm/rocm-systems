@@ -506,6 +506,21 @@ __device__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
   get_internal_ctx(ctx)->putmem(dest, source, nelems, pe_in_world);
 }
 
+__device__ void rocshmem_ctx_putmem_av(rocshmem_ctx_t ctx, void *dest,
+                                        const void *source, size_t nelems,
+                                        int pe) {
+  int pe_in_world = translate_pe(ctx, pe);
+  LOGD_API("device::ctx_putmem_av (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
+    ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
+
+  get_internal_ctx(ctx)->putmem_av(dest, source, nelems, pe_in_world);
+}
+
+__device__ void rocshmem_putmem_av(void *dest, const void *source,
+                                    size_t nelems, int pe) {
+  rocshmem_ctx_putmem_av(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+}
+
 template <typename T>
 __device__ void rocshmem_put(rocshmem_ctx_t ctx, T *dest, const T *source,
                               size_t nelems, int pe) {
@@ -564,6 +579,21 @@ __device__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
   get_internal_ctx(ctx)->putmem_nbi(dest, source, nelems, pe_in_world);
 }
 
+__device__ void rocshmem_ctx_putmem_nbi_av(rocshmem_ctx_t ctx, void *dest,
+                                            const void *source, size_t nelems,
+                                            int pe) {
+  int pe_in_world = translate_pe(ctx, pe);
+  LOGD_API("device::ctx_putmem_nbi_av (ctx=%zd, dest=%p, source=%p, nelems=%zd, pe=%d w%d)",
+    ctx.ctx_opaque, dest, source, nelems, pe, pe_in_world);
+
+  get_internal_ctx(ctx)->putmem_nbi_av(dest, source, nelems, pe_in_world);
+}
+
+__device__ void rocshmem_putmem_nbi_av(void *dest, const void *source,
+                                        size_t nelems, int pe) {
+  rocshmem_ctx_putmem_nbi_av(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+}
+
 template <typename T>
 __device__ void rocshmem_put_nbi(rocshmem_ctx_t ctx, T *dest, const T *source,
                                   size_t nelems, int pe) {
@@ -607,6 +637,28 @@ __device__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx, int pe) {
     ctx.ctx_opaque, pe, pe_in_world);
 
   get_internal_ctx(ctx)->fence(pe_in_world);
+}
+
+__device__ void rocshmem_ctx_fence_av(rocshmem_ctx_t ctx) {
+  LOGD_API("device::ctx_fence_av (ctx=%zd)", ctx.ctx_opaque);
+
+  get_internal_ctx(ctx)->fence_av();
+}
+
+__device__ void rocshmem_fence_av() {
+  rocshmem_ctx_fence_av(ROCSHMEM_CTX_DEFAULT);
+}
+
+__device__ void rocshmem_ctx_fence_av(rocshmem_ctx_t ctx, int pe) {
+  int pe_in_world = translate_pe(ctx, pe);
+  LOGD_API("device::ctx_fence_av (ctx=%zd, pe=%d w%d))",
+    ctx.ctx_opaque, pe, pe_in_world);
+
+  get_internal_ctx(ctx)->fence_av(pe_in_world);
+}
+
+__device__ void rocshmem_fence_av(int pe) {
+  rocshmem_ctx_fence_av(ROCSHMEM_CTX_DEFAULT, pe);
 }
 
 __device__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx) {
@@ -1217,6 +1269,32 @@ __device__ void rocshmem_ctx_putmem_nbi_wave(rocshmem_ctx_t ctx, void *dest,
     ctx.ctx_opaque, dest, source, nelems, pe, translate_pe(ctx, pe));
 
   get_internal_ctx(ctx)->putmem_nbi_wave(dest, source, nelems, pe);
+}
+
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_av(rocshmem_ctx_t ctx, T *dest,
+                                          const T *source, size_t nelems, int pe) {
+  int pe_in_world = translate_pe(ctx, pe);
+  get_internal_ctx(ctx)->put_nbi_wave_av(dest, source, nelems, pe_in_world);
+}
+
+template <typename T>
+__device__ void rocshmem_put_nbi_wave_av(T *dest, const T *source,
+                                          size_t nelems, int pe) {
+  rocshmem_put_nbi_wave_av(ROCSHMEM_CTX_DEFAULT, dest, source, nelems, pe);
+}
+
+__device__ void rocshmem_ctx_schar_put_nbi_wave_av(rocshmem_ctx_t ctx,
+                                                    signed char *dest,
+                                                    const signed char *source,
+                                                    size_t nelems, int pe) {
+  rocshmem_put_nbi_wave_av<signed char>(ctx, dest, source, nelems, pe);
+}
+
+__device__ void rocshmem_schar_put_nbi_wave_av(signed char *dest,
+                                               const signed char *source,
+                                               size_t nelems, int pe) {
+  rocshmem_put_nbi_wave_av<signed char>(dest, source, nelems, pe);
 }
 
 __device__ void rocshmem_ctx_putmem_nbi_wg(rocshmem_ctx_t ctx, void *dest,
@@ -1972,6 +2050,37 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
   __device__ int rocshmem_##TNAME##_test(T *ivars, int cmp, T val) {          \
     return rocshmem_test<T>(ivars, cmp, val);                                 \
   }
+
+template <typename T>
+__device__ void rocshmem_wait_until_av(T *ivars, int cmp, T val) {
+  LOGD_API("device::wait_until_av (ivars=%p, cmp=%d, val=%g)",
+    ivars, cmp, (double)val);
+
+  Context *ctx_internal = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  ctx_internal->ctxStats.incStat(NUM_WAIT_UNTIL);
+  ctx_internal->wait_until_av(ivars, cmp, val);
+}
+
+#define WAIT_AV_DEF_GEN(T, TNAME)                                             \
+  __device__ void rocshmem_##TNAME##_wait_until_av(T *ivars, int cmp,        \
+                                                    T val) {                  \
+    rocshmem_wait_until_av<T>(ivars, cmp, val);                               \
+  }
+
+WAIT_AV_DEF_GEN(float, float)
+WAIT_AV_DEF_GEN(double, double)
+WAIT_AV_DEF_GEN(char, char)
+WAIT_AV_DEF_GEN(signed char, schar)
+WAIT_AV_DEF_GEN(short, short)
+WAIT_AV_DEF_GEN(int, int)
+WAIT_AV_DEF_GEN(long, long)
+WAIT_AV_DEF_GEN(long long, longlong)
+WAIT_AV_DEF_GEN(unsigned char, uchar)
+WAIT_AV_DEF_GEN(unsigned short, ushort)
+WAIT_AV_DEF_GEN(unsigned int, uint)
+WAIT_AV_DEF_GEN(unsigned long, ulong)
+WAIT_AV_DEF_GEN(unsigned long long, ulonglong)
+WAIT_AV_DEF_GEN(uint64_t, uint64)
 
 #define RMA_SIGNAL_SUFFIX_DEC(SUFFIX)                                                    \
   template <typename T>                                                                  \

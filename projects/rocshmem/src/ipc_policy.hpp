@@ -257,9 +257,16 @@ class IpcOnImpl {
 
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
+  /**
+   * @brief When true, the large multi-thread memcpy_lane put path uses
+   * cache-bypassing (SystemScope) stores instead of cached writes + fence.
+   * Propagated from ROCSHMEM_BYPASS_LANE_STORES at backend init time.
+   */
+  bool bypass_lane_stores{false};
+
   template <MemcpyKind Kind = MemcpyKind::Put>
   __device__ void ipcCopy(void *dst, void *src, size_t size, [[maybe_unused]] int local_pe) {
-    memcpy_lane<Kind>(dst, src, size);
+    memcpy_lane<Kind>(dst, src, size, bypass_lane_stores);
   }
 
   template <MemcpyKind Kind = MemcpyKind::Put>
@@ -324,6 +331,19 @@ class IpcOnImpl {
   template <typename T>
   __device__ void ipcAMOSet(T *val, T value) {
     __hip_atomic_store(val, value, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  }
+
+  /**
+   * @brief Targeted-ordering variant of ipcAMOSet.
+   *
+   * Uses __ATOMIC_RELAXED instead of __ATOMIC_SEQ_CST, omitting the
+   * implicit buffer_wbl2 + buffer_inv that SEQ_CST implies on gfx942.
+   * Safe to use after a preceding fence_av() / fence_targeted() that
+   * has already ensured all prior writes are visible to system scope.
+   */
+  template <typename T>
+  __device__ void ipcAMOSet_av(T *val, T value) {
+    __hip_atomic_store(val, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 
   template <typename T>
@@ -568,6 +588,9 @@ class IpcOffImpl {
 
   template <typename T>
   __device__ void ipcAMOSet(T *val, T value) {}
+
+  template <typename T>
+  __device__ void ipcAMOSet_av(T *val, T value) {}
 
   template <typename T>
   __device__ void ipcAMOCas(T *val, T cond, T value) {}

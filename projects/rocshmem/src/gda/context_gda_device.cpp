@@ -122,6 +122,37 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
 }
 
+__device__ void GDAContext::putmem_av(void *dest, const void *source,
+                                     size_t nelems, int pe) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    // IPC path: cache-bypassing stores already used by ipcCopy (SystemScope);
+    // no change needed for the _av variant on the IPC fast path.
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
+  qps[qp_index].put_nbi_av(base_heap[pe] + L_offset, source, nelems, wf_info);
+  qps[qp_index].quiet(wf_info);
+}
+
+__device__ void GDAContext::putmem_nbi_av(void *dest, const void *source,
+                                          size_t nelems, int pe) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
+  qps[qp_index].put_nbi_av(base_heap[pe] + L_offset, source, nelems, wf_info);
+}
+
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
@@ -139,59 +170,43 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
 
 __device__ void GDAContext::fence() {
   /**
-   * Operations issued by this context may use two backends: RDMA QPs
-   * for remote PEs and the IPC fast path, when enabled, for shm-local
-   * peers. The fence must order writes across both paths.
+   * Matches the sc26 targeted_order reference implementation.
    *
-   * RDMA: A single QP already orders its own traffic through in-order
-   * delivery; only the multi-QP case requires an explicit per-QP quiet.
+   * rocSHMEM uses one QP per PE per context by default
+   * (ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX=1).  With a single QP all
+   * puts to a given PE travel in order through the same NIC queue, so
+   * NIC in-order delivery guarantees payload visibility before the count
+   * signal without any explicit CQ drain.  A GPU-side system release
+   * fence (buffer_wbl2) is sufficient to order WQE postings and IPC
+   * writes for all paths.
+   *
+   * For the targeted-ordering path see fence_av() which uses
+   * fence_targeted() (s_waitcnt vmcnt(0)) instead.
    */
-  if (num_qps_per_pe > 1) {
-    ActiveWFInfo wf_info(ctx_id_);
-    for (uint32_t i = 0; i < num_qps; i++) {
-      qps[i].quiet(wf_info);
-    }
-  }
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+}
 
+__device__ void GDAContext::fence_av() {
   /**
-   * IPC: Skip when there are no shm-local peers. Otherwise, issue a
-   * system-scope release fence to ensure prior IPC writes are visible
-   * to peer ranks.
+   * Targeted-ordering fence for the GDA context.
+   *
+   * Replaces the standard fence's expensive per-QP quiet + system-scope
+   * ipcFence() with fence_targeted() (s_waitcnt vmcnt(0)):
+   *  - RDMA path: a single QP delivers writes in order; no CQ drain needed
+   *    to establish ordering, only a GPU-side VMEM completion wait.
+   *  - IPC path: fence_targeted() replaces ipcImpl_.ipcFence() (which emits
+   *    buffer_wbl2) when prior stores already used sc0 sc1 cache bypass.
    */
-  if (constmem.ipc_shm_size != 0) {
-    ipcImpl_.ipcFence();
-  }
+  fence_targeted();
+}
+
+__device__ void GDAContext::fence_av(int pe) {
+  fence_targeted();
 }
 
 __device__ void GDAContext::fence(int pe) {
-  /**
-   * Operations targeting `pe` may use two backends: RDMA QPs for remote
-   * PEs and the IPC fast path, when enabled, for shm-local peers. The
-   * fence must order writes to `pe` across both paths.
-   *
-   * RDMA: A single QP per PE already orders its own traffic through
-   * in-order delivery; only the multi-QP-per-PE case requires an explicit
-   * quiet on each QP associated with `pe`.
-   */
-  if (num_qps_per_pe > 1) {
-    ActiveWFInfo wf_info(ctx_id_);
-    for(uint32_t i = 0; i < num_qps_per_pe; i++) {
-      int qp_index = i * constmem.num_pes + pe;
-      qps[qp_index].quiet(wf_info);
-    }
-  }
-
-  /**
-   * IPC: Skip when `pe` is not shm-local. Otherwise, issue a
-   * system-scope release fence so prior IPC writes to `pe` are visible
-   * to that peer rank. Passing `local_pe` lets the SDMA-enabled policy
-   * quiet only the channels associated with `pe` instead of falling
-   * back to sdmaQuietAll().
-   */
-  int local_pe;
-  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    ipcImpl_.ipcFence(local_pe);
-  }
+  // With a single QP per PE, NIC in-order delivery handles per-PE ordering.
+  fence();
 }
 
 __device__ void GDAContext::quiet() {
@@ -241,6 +256,14 @@ __device__ void GDAContext::putmem_wg(void *dest, const void *source,
     qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
     qps[qp_index].quiet(wf_info);
   }
+}
+
+__device__ void GDAContext::putmem_wg_av(void *dest, const void *source,
+                                        size_t nelems, int pe) {
+  // IPC path: handled by IPCContext::putmem_wg_av via dispatch.
+  // GDA RDMA path: the QP maintains in-order delivery; fall back to the
+  // standard blocking WG put which already uses sc0 sc1 stores.
+  putmem_wg(dest, source, nelems, pe);
 }
 
 __device__ void GDAContext::getmem_wg(void *dest, const void *source,
@@ -342,6 +365,24 @@ __device__ void GDAContext::putmem_nbi_wave(void *dest, const void *source,
     int qp_index = get_qp_index(pe, wf_info);
     uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
     qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, wf_info);
+  }
+}
+
+__device__ void GDAContext::putmem_nbi_wave_av(void *dest, const void *source,
+                                              size_t nelems, int pe) {
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    // IPC path: ipcCopy_wave already uses cache-bypassing (sc0 sc1) stores;
+    // no additional change needed for _av on the intranode path.
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  if (is_thread_zero_in_wave()) {
+    ActiveWFInfo wf_info(pe, ThreadScope::wave);
+    int qp_index = get_qp_index(pe, wf_info);
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
+    qps[qp_index].put_nbi_av(base_heap[pe] + L_offset, source, nelems, wf_info);
   }
 }
 

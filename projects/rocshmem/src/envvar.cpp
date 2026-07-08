@@ -143,6 +143,9 @@ namespace envvar {
     const var<bool> disable_ipc("DISABLE_IPC",
       "DEPRECATED: Synonym for ROCSHMEM_DISABLE_MIXED_IPC. Force using network conduit even when IPC is available",
       false);
+    const var<bool> bypass_lane_stores("BYPASS_LANE_STORES",
+      "Use cache-bypassing (sc0 sc1 / glc slc) stores in the large multi-thread memcpy_lane put path instead of cached writes followed by a system-scope release fence. Enabling this avoids the fence at the cost of bypassing the L1/L2 caches on every store. Default: 0 (disabled, use cached writes + fence).",
+      false);
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
       1024);

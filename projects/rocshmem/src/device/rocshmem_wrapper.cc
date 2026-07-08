@@ -211,6 +211,17 @@ ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi(void *dest, const void *source,
   rocshmem::rocshmem_putmem_nbi(dest, source, nelems, pe);
 }
 
+ROCSHMEM_DEVICE_API void rocshmem_putmem_av(void *dest, const void *source,
+                                            size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_av(dest, source, nelems, pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_av(void *dest,
+                                                 const void *source,
+                                                 size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi_av(dest, source, nelems, pe);
+}
+
 ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_wave(void *dest,
                                                   const void *source,
                                                   size_t nelems, int pe) {
@@ -341,6 +352,14 @@ ROCSHMEM_DEVICE_API void rocshmem_fence() {
 
 ROCSHMEM_DEVICE_API void rocshmem_fence_pe(int pe) {
   rocshmem::rocshmem_fence(pe);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_fence_av() {
+  rocshmem::rocshmem_fence_av();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_fence_av_pe(int pe) {
+  rocshmem::rocshmem_fence_av(pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_quiet() {
@@ -642,6 +661,28 @@ WRAP_WAIT(unsigned int, uint)
 WRAP_WAIT(unsigned long, ulong)
 WRAP_WAIT(unsigned long long, ulonglong)
 WRAP_WAIT(uint64_t, uint64)
+
+#define WRAP_WAIT_AV(T, TNAME)                                                 \
+  ROCSHMEM_DEVICE_API void rocshmem_##TNAME##_wait_until_av(                  \
+      T *ivars, int cmp, T val) {                                              \
+    rocshmem::rocshmem_##TNAME##_wait_until_av(ivars, cmp, val);              \
+  }
+
+WRAP_WAIT_AV(float, float)
+WRAP_WAIT_AV(double, double)
+WRAP_WAIT_AV(char, char)
+WRAP_WAIT_AV(signed char, schar)
+WRAP_WAIT_AV(short, short)
+WRAP_WAIT_AV(int, int)
+WRAP_WAIT_AV(long, long)
+WRAP_WAIT_AV(long long, longlong)
+WRAP_WAIT_AV(unsigned char, uchar)
+WRAP_WAIT_AV(unsigned short, ushort)
+WRAP_WAIT_AV(unsigned int, uint)
+WRAP_WAIT_AV(unsigned long, ulong)
+WRAP_WAIT_AV(unsigned long long, ulonglong)
+WRAP_WAIT_AV(uint64_t, uint64)
+
 // Only support reduce on team = 0 (ROCSHMEM_TEAM_WORLD)
 #define WRAP_REDUCE_OP(T, TNAME, OP)                                           \
   ROCSHMEM_DEVICE_API int rocshmem_##TNAME##_##OP##_reduce_wg(                 \

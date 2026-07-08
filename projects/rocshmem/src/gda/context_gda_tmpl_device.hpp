@@ -116,6 +116,14 @@ __device__ void GDAContext::amo_set(void *dst, T value, int pe) {
 }
 
 template <typename T>
+__device__ void GDAContext::amo_set_av(void *dst, T value, int pe) {
+  // GDA AMO set goes through the NIC; the relaxation is an IPC-specific
+  // optimisation. Fall back to the standard path for RDMA targets; IPC
+  // targets are handled by the IPC fast-path check inside amo_set.
+  amo_set(dst, value, pe);
+}
+
+template <typename T>
 __device__ T GDAContext::amo_swap(void *dst, T value, int pe) {
   if constexpr (sizeof(T) != 8) { LOGD_ERROR_ABORT("gda::amo_set not implemented for non-64bit types"); }//TODO:support for non-uint64t
   uint64_t L_offset = reinterpret_cast<char *>(dst) - base_heap[constmem.my_pe];
@@ -1032,6 +1040,11 @@ __device__ void GDAContext::put_wave(T *dest, const T *source, size_t nelems, in
 template <typename T>
 __device__ void GDAContext::put_nbi_wave(T *dest, const T *source, size_t nelems, int pe) {
   putmem_nbi_wave(dest, source, nelems * sizeof(T), pe);
+}
+
+template <typename T>
+__device__ void GDAContext::put_nbi_wave_av(T *dest, const T *source, size_t nelems, int pe) {
+  putmem_nbi_wave_av(dest, source, nelems * sizeof(T), pe);
 }
 
 template <typename T>

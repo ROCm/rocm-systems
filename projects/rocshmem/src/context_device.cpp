@@ -92,6 +92,28 @@ __device__ void Context::putmem_nbi(void* dest, const void* source,
   DISPATCH(putmem_nbi(dest, source, nelems, pe));
 }
 
+__device__ void Context::putmem_av(void* dest, const void* source,
+                                   size_t nelems, int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxStats.incStat(NUM_PUT);
+
+  DISPATCH(putmem_av(dest, source, nelems, pe));
+}
+
+__device__ void Context::putmem_nbi_av(void* dest, const void* source,
+                                       size_t nelems, int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxStats.incStat(NUM_PUT_NBI);
+
+  DISPATCH(putmem_nbi_av(dest, source, nelems, pe));
+}
+
 __device__ void Context::getmem_nbi(void* dest, const void* source, size_t size,
                                     int pe) {
   if (size == 0) {
@@ -113,6 +135,18 @@ __device__ void Context::fence(int pe) {
   ctxStats.incStat(NUM_FENCE);
 
   DISPATCH(fence(pe));
+}
+
+__device__ void Context::fence_av() {
+  ctxStats.incStat(NUM_FENCE);
+
+  DISPATCH(fence_av());
+}
+
+__device__ void Context::fence_av(int pe) {
+  ctxStats.incStat(NUM_FENCE);
+
+  DISPATCH(fence_av(pe));
 }
 
 __device__ void Context::quiet() {
@@ -203,6 +237,17 @@ __device__ void Context::sync_wg(rocshmem_team_t team) {
   ctxStats.incStat(NUM_SYNC_WG);
 
   DISPATCH(sync_wg(team));
+}
+
+__device__ void Context::putmem_wg_av(void* dest, const void* source,
+                                      size_t nelems, int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxStats.incStat(NUM_PUT_WG);
+
+  DISPATCH(putmem_wg_av(dest, source, nelems, pe));
 }
 
 __device__ void Context::putmem_wg(void* dest, const void* source,

@@ -533,6 +533,12 @@ namespace envvar {
      * be honored by other backends as they gain symmetric-registration support.
      */
     extern const var<size_t> max_symm_regions;
+
+    /**
+     * @brief Use cache-bypassing stores in the large multi-thread memcpy_lane
+     * put path (ROCSHMEM_BYPASS_LANE_STORES).
+     */
+    extern const var<bool> bypass_lane_stores;
   }  // inline namespace _base
 
   namespace bootstrap {

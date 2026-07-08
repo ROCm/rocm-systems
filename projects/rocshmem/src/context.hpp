@@ -79,6 +79,9 @@ class Context {
   __device__ void wait_until(T *ivars, int cmp, T val);
 
   template <typename T>
+  __device__ void wait_until_av(T *ivars, int cmp, T val);
+
+  template <typename T>
   __device__ void wait_until_all(T *ivars, size_t nelems,
                                  const int *status,
                                  int cmp, T val);
@@ -122,12 +125,22 @@ class Context {
   __device__ void putmem_nbi(void* dest, const void* source, size_t nelems,
                              int pe);
 
+  __device__ void putmem_av(void* dest, const void* source, size_t nelems,
+                            int pe);
+
+  __device__ void putmem_nbi_av(void* dest, const void* source, size_t nelems,
+                                int pe);
+
   __device__ void getmem_nbi(void* dest, const void* source, size_t size,
                              int pe);
 
   __device__ void fence();
 
   __device__ void fence(int pe);
+
+  __device__ void fence_av();
+
+  __device__ void fence_av(int pe);
 
   __device__ void quiet();
 
@@ -167,6 +180,9 @@ class Context {
 
   template <typename T>
   __device__ void amo_set(void* dst, T value, int pe);
+
+  template <typename T>
+  __device__ void amo_set_av(void* dst, T value, int pe);
 
   template <typename T>
   __device__ T amo_swap(void* dst, T value, int pe);
@@ -264,6 +280,9 @@ class Context {
   __device__ void putmem_wg(void* dest, const void* source, size_t nelems,
                             int pe);
 
+  __device__ void putmem_wg_av(void* dest, const void* source, size_t nelems,
+                               int pe);
+
   __device__ void getmem_wg(void* dest, const void* source, size_t nelems,
                             int pe);
 
@@ -302,6 +321,9 @@ class Context {
 
   template <typename T>
   __device__ void put_nbi_wave(T* dest, const T* source, size_t nelems, int pe);
+
+  template <typename T>
+  __device__ void put_nbi_wave_av(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
   __device__ void get_wave(T* dest, const T* source, size_t nelems, int pe);

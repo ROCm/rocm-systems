@@ -51,6 +51,16 @@ class IPCContext : public Context {
 
   __device__ void fence(int pe);
 
+  __device__ void fence_av();
+
+  __device__ void fence_av(int pe);
+
+  __device__ void putmem_nbi_wave_av(void *dest, const void *source,
+                                     size_t nelems, int pe);
+
+  template <typename T>
+  __device__ void put_nbi_wave_av(T *dest, const T *source, size_t nelems, int pe);
+
   __device__ void quiet();
 
   __device__ void pe_quiet(size_t pe);
@@ -105,6 +115,9 @@ class IPCContext : public Context {
 
   template <typename T>
   __device__ void amo_set(void *dst, T value, int pe);
+
+  template <typename T>
+  __device__ void amo_set_av(void *dst, T value, int pe);
 
   template <typename T>
   __device__ T amo_swap(void *dst, T value, int pe);
@@ -177,6 +190,9 @@ class IPCContext : public Context {
   // Block/wave functions
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);
+
+  __device__ void putmem_wg_av(void *dest, const void *source, size_t nelems,
+                               int pe);
 
   __device__ void getmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);

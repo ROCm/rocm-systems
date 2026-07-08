@@ -85,6 +85,12 @@ __device__ void IPCContext::amo_set(void *dest, T value, int pe) {
 }
 
 template <typename T>
+__device__ void IPCContext::amo_set_av(void *dest, T value, int pe) {
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcAMOSet_av(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+}
+
+template <typename T>
 __device__ T IPCContext::amo_swap(void *dest, T value, int pe) {
   return ipcImpl_.ipcAMOSwap(
       reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
@@ -696,6 +702,11 @@ __device__ void IPCContext::put_wave(T *dest, const T *source, size_t nelems, in
 template <typename T>
 __device__ void IPCContext::put_nbi_wave(T *dest, const T *source, size_t nelems, int pe) {
   putmem_nbi_wave(dest, source, nelems * sizeof(T), pe);
+}
+
+template <typename T>
+__device__ void IPCContext::put_nbi_wave_av(T *dest, const T *source, size_t nelems, int pe) {
+  putmem_nbi_wave_av(dest, source, nelems * sizeof(T), pe);
 }
 
 template <typename T>

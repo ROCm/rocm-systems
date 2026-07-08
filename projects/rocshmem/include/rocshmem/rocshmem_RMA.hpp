@@ -220,6 +220,24 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem(rocshmem_ctx_t ctx,
 __device__ ATTR_NO_INLINE void rocshmem_putmem(void *dest, const void *source,
                                                 size_t nelems, int pe);
 
+/**
+ * @brief Targeted-ordering variant of rocshmem_ctx_putmem / rocshmem_putmem.
+ *
+ * Uses cache-bypassing (sc0 sc1) stores for NIC-visible WQE data and
+ * fence_targeted() (s_waitcnt vmcnt(0)) instead of system-scope release
+ * semantics for the doorbell, avoiding the L2 writeback (buffer_wbl2)
+ * that the standard put incurs.  Correct only when used with
+ * rocshmem_fence_av() or rocshmem_quiet() before the remote PE reads.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_av(rocshmem_ctx_t ctx,
+                                                       void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_av(void *dest,
+                                                   const void *source,
+                                                   size_t nelems, int pe);
+
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -959,6 +977,33 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx,
 __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
                                                     const void *source,
                                                     size_t nelems, int pe);
+
+/**
+ * @brief Targeted-ordering non-blocking variant of rocshmem_putmem_nbi.
+ * See rocshmem_putmem_av for semantics.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_av(rocshmem_ctx_t ctx,
+                                                           void *dest,
+                                                           const void *source,
+                                                           size_t nelems,
+                                                           int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_av(void *dest,
+                                                       const void *source,
+                                                       size_t nelems, int pe);
+
+/**
+ * @brief Targeted-ordering wave-level non-blocking put for signed char.
+ * Uses cache-bypassing WQE stores + fence_targeted doorbell on GDA/MLX5.
+ * Combine with cache-bypassing source buffer stores (sc0 sc1) for full
+ * correctness without a preceding system-scope L2 writeback.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put_nbi_wave_av(
+    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
+    size_t nelems, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi_wave_av(
+    signed char *dest, const signed char *source, size_t nelems, int pe);
 
 
 /**

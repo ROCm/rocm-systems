@@ -882,6 +882,20 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_fence(rocshmem_ctx_t ctx, int pe);
 __device__ ATTR_NO_INLINE void rocshmem_fence(int pe);
 
 /**
+ * @brief Targeted fence variant: orders outstanding memory operations to the
+ * remote PE using fence_targeted() (s_waitcnt vmcnt(0)) without a full
+ * system-scope cache flush.  Use in place of rocshmem_fence() when the caller
+ * can guarantee that only the target PE needs to observe the write ordering.
+ */
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fence_av(rocshmem_ctx_t ctx);
+
+__device__ ATTR_NO_INLINE void rocshmem_fence_av();
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_fence_av(rocshmem_ctx_t ctx, int pe);
+
+__device__ ATTR_NO_INLINE void rocshmem_fence_av(int pe);
+
+/**
  * @brief Completes all previous operations posted to this context.
  *
  * This function can be called from divergent control paths at per-thread

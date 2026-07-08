@@ -498,7 +498,8 @@ __device__ __forceinline__ void copy_remainder(uint8_t* dst,
 // Blocking variants additionally drain all in-flight VMEM ops before returning.
 template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
-                                                             size_t size) {
+                                                             size_t size,
+                                                             bool bypass_stores = false) {
   if (size == 0) return;
 
   constexpr int ChunkSize = 16;
@@ -511,24 +512,48 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   int remainder = static_cast<int>(size % ChunkSize);
 
   if (size >= 16 && get_flat_block_size() > 4) {
-    // Many threads, large transfer: use cached Standard policy.
-    // Fences are direction-specific to maintain system-scope coherence.
+    // Many threads, large transfer.
+    // For gets: issue an acquire fence before loading to ensure prior remote
+    // writes are visible (unchanged regardless of bypass_stores).
     if constexpr (!is_put(Kind)) {
       detail::atomic::threadfence<detail::atomic::memory_scope_system,
                                   detail::atomic::memory_order_acquire>();
     }
 
-    if (n_chunks > 0) {
-      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 8>(
-          dst, src, n_chunks, 0, 1);
-    }
-    copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
-        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
-        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
-
     if constexpr (is_put(Kind)) {
-      detail::atomic::threadfence<detail::atomic::memory_scope_system,
-                                  detail::atomic::memory_order_release>();
+      if (bypass_stores) {
+        // ROCSHMEM_BYPASS_LANE_STORES=1: use cache-bypassing SystemScope stores
+        // (sc0 sc1 / glc slc). Data is directly visible at system scope without
+        // a subsequent fence.
+        if (n_chunks > 0) {
+          copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::SystemScope, 8>(
+              dst, src, n_chunks, 0, 1);
+        }
+        copy_remainder<CachePolicy::Standard, CachePolicy::SystemScope>(
+            static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+            static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
+      } else {
+        // Default: cached Standard stores followed by a system-scope release
+        // fence to flush dirty lines to HBM/fabric.
+        if (n_chunks > 0) {
+          copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 8>(
+              dst, src, n_chunks, 0, 1);
+        }
+        copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
+            static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+            static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
+        detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                    detail::atomic::memory_order_release>();
+      }
+    } else {
+      // Get direction: load policy unchanged, store to local dst is Standard.
+      if (n_chunks > 0) {
+        copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 8>(
+            dst, src, n_chunks, 0, 1);
+      }
+      copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
+          static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+          static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
     }
   } else {
     // Small transfer or single-lane: cache-bypass policy provides direct

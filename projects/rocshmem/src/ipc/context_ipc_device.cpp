@@ -75,12 +75,26 @@ __device__ void IPCContext::getmem_nbi(void *dest, const void *source,
 }
 
 __device__ void IPCContext::fence() {
-  ipcImpl_.ipcFence();
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
 }
 
 __device__ void IPCContext::fence(int pe) {
-  ipcImpl_.ipcFence<detail::atomic::memory_scope_system,
-                    detail::atomic::memory_order_release>(pe);
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
+}
+
+__device__ void IPCContext::putmem_nbi_wave_av(void *dest, const void *source,
+                                              size_t nelems, int pe) {
+  // IPC wave puts already use cache-bypassing stores in ipcCopy_wave;
+  // no additional _av semantics required on the intranode path.
+  putmem_nbi_wave(dest, source, nelems, pe);
+}
+
+__device__ void IPCContext::fence_av() {
+  fence_targeted();
+}
+
+__device__ void IPCContext::fence_av(int pe) {
+  fence_targeted();
 }
 
 __device__ void IPCContext::quiet() {
@@ -101,6 +115,24 @@ __device__ void IPCContext::putmem_wg(void *dest, const void *source,
   ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(
       remote, const_cast<void *>(source), nelems, pe);
   __builtin_amdgcn_s_barrier();
+}
+
+__device__ void IPCContext::putmem_wg_av(void *dest, const void *source,
+                                        size_t nelems, int pe) {
+  /**
+   * Targeted-ordering blocking WG put.
+   *
+   * Uses ipcCopy_wg<Put> (non-blocking, sc0 sc1 stores) + s_barrier +
+   * fence_targeted() in place of ipcCopy_wg<PutBlocking> which internally
+   * issues a full system-scope release fence.  fence_targeted() =
+   * s_waitcnt vmcnt(0) is sufficient because the sc0 sc1 stores write
+   * directly to HBM without populating the L2 cache.
+   */
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
+  ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(
+      ipcImpl_.ipc_bases[pe] + L_offset, const_cast<void *>(source), nelems, pe);
+  __builtin_amdgcn_s_barrier();
+  fence_targeted();
 }
 
 __device__ void IPCContext::getmem_wg(void *dest, const void *source,

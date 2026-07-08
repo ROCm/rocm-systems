@@ -171,6 +171,10 @@ class QueuePair {
   __device__ void put_nbi(void *dest, const void *source, size_t length,
       ActiveWFInfo &wf_info);
 
+  /** Targeted-ordering variant: cache-bypassing WQE stores + fence_targeted doorbell. */
+  __device__ void put_nbi_av(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
+
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
@@ -349,6 +353,12 @@ class QueuePair {
       uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
+  /** Targeted-ordering variant: dispatches to mlx5_post_wqe_rma_av on MLX5. */
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_av(int32_t length, uintptr_t raddr, uint32_t rkey,
+      uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+
   __device__ __attribute__((noinline)) void
   post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
       uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
@@ -361,6 +371,9 @@ class QueuePair {
       uint32_t lkey, uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, bool ring_db);
   __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
+      uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+      uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
+  __device__ void mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void mlx5_quiet();
@@ -407,6 +420,7 @@ class QueuePair {
    */
 #if defined(GDA_MLX5)
   __device__ void mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe);
+  __device__ void mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx5_wqe& wqe);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);

@@ -98,6 +98,35 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint64_t sq_post, const gda_mlx5_w
              &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 }
 
+/**
+ * @brief Targeted-ordering variant of mlx5_ring_doorbell.
+ *
+ * Replaces system-scope release stores with fence_targeted() +
+ * relaxed system-scope stores:
+ *   - fence_targeted() (s_waitcnt vmcnt(0)) before dbrec: ensures all
+ *     preceding cache-bypassing WQE stores have reached HBM before the
+ *     NIC reads the doorbell record.
+ *   - Relaxed system-scope store for dbrec (sc0 sc1, no preceding buffer_wbl2).
+ *   - fence_targeted() between dbrec and doorbell register: ensures dbrec
+ *     is visible before the NIC is notified via the BlueFlame write.
+ *   - Relaxed system-scope store for the doorbell register (MMIO, uncacheable).
+ */
+__device__ void QueuePair::mlx5_ring_doorbell_av(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
+  uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
+  gda_mlx5_db_register db_val{wqe};
+  __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
+
+  gda_mlx5_bf_buffer* bf = mlx5_sq.bf_buffer();
+
+  // Drain all outstanding VMEM ops (including WQE cache-bypassing stores)
+  // before making the doorbell record visible to the NIC.
+  fence_targeted();
+  __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  // Order dbrec store before the doorbell register write.
+  fence_targeted();
+  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
 [[maybe_unused]] __attribute__((noinline))
 __device__ void QueuePair::mlx5_print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode) {
   const mlx5_err_cqe* err_cqe = reinterpret_cast<const mlx5_err_cqe*>(cqe);
@@ -291,6 +320,64 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
       mlx5_ring_doorbell(mlx5_sq.post, wqe);
     }
     // release SQ lock
+    release_lock(&mlx5_sq.lock);
+  }
+}
+
+/**
+ * @brief Targeted-ordering variant of mlx5_post_wqe_rma.
+ *
+ * Uses cache-bypassing stores (sc0 sc1) for the WQE copy so data is
+ * written directly to HBM without populating the GPU's L1/L2 cache.
+ * This is required so that fence_targeted() (s_waitcnt vmcnt(0)) is
+ * sufficient to guarantee NIC visibility before the doorbell is rung.
+ *
+ * Variables used only for GPU thread synchronisation (lock, sq.post,
+ * sq.depth_mask) retain their existing store semantics — they are not
+ * read by the NIC and do not require cache bypassing.
+ */
+__device__ void QueuePair::mlx5_post_wqe_rma_av(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey,
+    uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
+  if (wf_info.is_pe_group_last) {
+    acquire_lock(&mlx5_sq.lock);
+    mlx5_poll_cq_until(wf_info.num_pe_group_lanes);
+  }
+
+  uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, wf_info.pe_group_logical_lane_id);
+  uint16_t sq_idx = mlx5_sq_idx(mlx5_sq, wqe_idx);
+
+  bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
+
+  // construct WQE on the stack (unchanged)
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
+                   raddr, byteswap<uint32_t>(rkey), laddr, byteswap<uint32_t>(lkey),
+                   static_cast<uint32_t>(length), send_inline};
+
+  // Copy WQE to SQ using cache-bypassing (SystemScope) stores so HBM
+  // receives the data directly.  The NIC will DMA-read from HBM, and
+  // fence_targeted() in mlx5_ring_doorbell_av() ensures these stores are
+  // complete before the doorbell is visible to the NIC.
+  //
+  // The WQE is a stack-local value; load each 16-byte chunk with standard
+  // (cached) policy, then store to the SQ buffer with SystemScope (sc0 sc1)
+  // to bypass L1/L2 and write directly to HBM.
+  static_assert(sizeof(gda_mlx5_wqe) == 64, "WQE must be 64 bytes");
+  using Chunk = typename AsmAccess<16>::type;
+  auto* dst = reinterpret_cast<uint8_t*>(&mlx5_sq.buf[sq_idx]);
+  auto* src = reinterpret_cast<const uint8_t*>(&wqe);
+  for (int i = 0; i < 4; ++i) {
+    Chunk val = *reinterpret_cast<const Chunk*>(src + i * 16);
+    AsmAccess<16, CachePolicy::Standard,
+              CachePolicy::SystemScope>::store(dst + i * 16, val);
+  }
+
+  if (wf_info.is_pe_group_last) {
+    // sq.post is GPU-side bookkeeping only — plain store is fine.
+    mlx5_sq.post += wf_info.num_pe_group_lanes;
+    if (ring_db) {
+      mlx5_ring_doorbell_av(mlx5_sq.post, wqe);
+    }
     release_lock(&mlx5_sq.lock);
   }
 }

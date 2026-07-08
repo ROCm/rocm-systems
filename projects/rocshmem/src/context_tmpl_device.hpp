@@ -237,6 +237,15 @@ __device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
                                                     T val) {
   while (!test(ivars, cmp, val)) {
   }
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "");
+}
+
+template <typename T>
+__device__ __forceinline__ void Context::wait_until_av(T *ivars, int cmp,
+                                                       T val) {
+  while (!test(ivars, cmp, val)) {
+  }
+  fence_targeted();
 }
 
 __device__ __forceinline__ size_t status_entry(size_t nelems,
@@ -550,6 +559,18 @@ __device__ void Context::put_nbi_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
+__device__ void Context::put_nbi_wave_av(T *dest, const T *source, size_t nelems,
+                                         int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxStats.incStat(NUM_PUT_NBI_WAVE);
+
+  DISPATCH(put_nbi_wave_av(dest, source, nelems, pe));
+}
+
+template <typename T>
 __device__ void Context::get_wave(T *dest, const T *source, size_t nelems,
                                   int pe) {
   if (nelems == 0) {
@@ -592,6 +613,13 @@ __device__ void Context::amo_set(void *dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_SET);
 
   DISPATCH(amo_set(dst, value, pe));
+}
+
+template <typename T>
+__device__ void Context::amo_set_av(void *dst, T value, int pe) {
+  ctxStats.incStat(NUM_ATOMIC_SET);
+
+  DISPATCH(amo_set_av(dst, value, pe));
 }
 
 template <typename T>
