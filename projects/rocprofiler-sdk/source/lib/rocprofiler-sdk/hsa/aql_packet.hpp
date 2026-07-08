@@ -35,6 +35,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace rocprofiler
@@ -190,6 +191,10 @@ struct TraceMemoryPool
     decltype(hsa_memory_copy)*              api_copy_fn;
 
     aqlprofile_handle_t handle;
+
+    // Ring-slot counter so shared buffers are handed out one per output buffer.
+    mutable uint32_t output_buffer_index = 0;
+
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
     static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);

@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 
 #include <gtest/gtest.h>
 #include "lib/common/logging.hpp"
@@ -143,6 +144,65 @@ TEST(thread_trace, resource_creation)
 
         tracer.resource_deinit();
     }
+}
+
+// Shared buffers are reused across contexts (same slot -> same pointer) and
+// distinct per ring slot.
+TEST(thread_trace, shared_buffer_reuse)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+
+    // Isolate from any prior test that may have populated the manager.
+    thread_trace::free_shared_buffers();
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    const auto& agent = begin(agents)->second;
+
+    // Build a TraceMemoryPool the same way ThreadTraceAQLPacketFactory does.
+    auto make_pool = [&agent]() {
+        hsa::TraceMemoryPool pool{};
+        pool.allocate_fn     = get_ext_table().hsa_amd_memory_pool_allocate_fn;
+        pool.allow_access_fn = get_ext_table().hsa_amd_agents_allow_access_fn;
+        pool.free_fn         = get_ext_table().hsa_amd_memory_pool_free_fn;
+        pool.gpu_agent       = agent.get_hsa_agent();
+        pool.gpu_pool_       = agent.gpu_pool();
+        return pool;
+    };
+
+    // Two contexts with different sizes; shared buffer is sized to the max.
+    thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x1000000);
+    thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x2000000);
+    ASSERT_TRUE(thread_trace::has_shared_buffer(agent.get_hsa_agent()));
+
+    auto pool_a = make_pool();
+    auto pool_b = make_pool();
+
+    // First context requests two ring slots (e.g. triple buffering).
+    void* a0 = thread_trace::acquire_shared_buffer(pool_a, 0);
+    void* a1 = thread_trace::acquire_shared_buffer(pool_a, 1);
+    ASSERT_NE(a0, nullptr);
+    ASSERT_NE(a1, nullptr);
+    EXPECT_NE(a0, a1) << "distinct ring slots must be distinct buffers";
+
+    // Second context reuses the same physical buffers per slot.
+    void* b0 = thread_trace::acquire_shared_buffer(pool_b, 0);
+    void* b1 = thread_trace::acquire_shared_buffer(pool_b, 1);
+    EXPECT_EQ(a0, b0) << "same ring slot must be shared across contexts";
+    EXPECT_EQ(a1, b1) << "same ring slot must be shared across contexts";
+
+    EXPECT_TRUE(thread_trace::is_shared_buffer(a0));
+    EXPECT_TRUE(thread_trace::is_shared_buffer(a1));
+    EXPECT_FALSE(thread_trace::is_shared_buffer(nullptr));
+
+    thread_trace::free_shared_buffers();
+    EXPECT_FALSE(thread_trace::is_shared_buffer(a0));
+    EXPECT_FALSE(thread_trace::has_shared_buffer(agent.get_hsa_agent()));
 }
 
 TEST(thread_trace, configure_test)

@@ -157,6 +157,9 @@ public:
     void resource_init();
     void resource_deinit();
 
+    /// Report this context's per-agent buffer sizes to the shared buffer manager.
+    void register_shared_buffer_sizes();
+
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {
         auto lk       = std::unique_lock{agents_map_mut};
@@ -193,6 +196,9 @@ public:
     void stop_context();
     void resource_init();
     void resource_deinit();
+
+    /// Report this context's per-agent buffer sizes to the shared buffer manager.
+    void register_shared_buffer_sizes();
 
     void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
     {
