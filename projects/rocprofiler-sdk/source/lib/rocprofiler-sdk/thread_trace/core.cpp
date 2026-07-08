@@ -23,6 +23,7 @@
 // Implements the core coordination logic for thread trace start/stop, buffer
 // iteration, and integration with the public API surface.
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/threading.hpp"
 
 #include "lib/common/container/stable_vector.hpp"
@@ -416,6 +417,17 @@ DispatchThreadTracer::resource_deinit()
     agents.clear();
 }
 
+void
+DispatchThreadTracer::register_shared_buffer_sizes()
+{
+    auto lk = std::unique_lock{agents_map_mut};
+    for(const auto& [agent_id, pack] : params)
+    {
+        auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
+        if(hsa_agent.has_value()) register_shared_buffer_size(*hsa_agent, pack.buffer_size);
+    }
+}
+
 /**
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop/read packets for injection.
@@ -580,6 +592,17 @@ DeviceThreadTracer::resource_deinit()
 }
 
 void
+DeviceThreadTracer::register_shared_buffer_sizes()
+{
+    std::unique_lock<std::mutex> lk(agent_mut);
+    for(const auto& [agent_id, pack] : params)
+    {
+        auto hsa_agent = rocprofiler::agent::get_hsa_agent(agent_id);
+        if(hsa_agent.has_value()) register_shared_buffer_size(*hsa_agent, pack.buffer_size);
+    }
+}
+
+void
 DeviceThreadTracer::start_context()
 {
     // Per-agent resources don't exist until HSA is registered; the request is
@@ -645,6 +668,14 @@ initialize(HsaApiTable* table)
 {
     ROCP_FATAL_IF(!table->core_ || !table->amd_ext_);
 
+    // Register every context's buffer sizes before resource_init builds buffers,
+    // so the shared per-agent buffers are sized to the max requested size.
+    for(auto& ctx : context::get_registered_contexts())
+    {
+        if(ctx->device_thread_trace) ctx->device_thread_trace->register_shared_buffer_sizes();
+        if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->register_shared_buffer_sizes();
+    }
+
     for(auto& ctx : context::get_registered_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
@@ -692,6 +723,9 @@ finalize()
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_deinit();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
     }
+
+    // ThreadTracerAgents and their packets are gone; release the shared buffers.
+    free_shared_buffers();
 
     code_object::finalize();
 }

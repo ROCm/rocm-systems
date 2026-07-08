@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/interface.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_buffer.hpp"
 
 #include <fmt/format.h>
 #include <cstddef>
@@ -166,6 +167,20 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     }
     else
     {
+        // Device (SQTT output) buffer: reuse the per-agent shared buffer across
+        // contexts (one per ring slot via output_buffer_index), falling back to
+        // a private allocation if unavailable.
+        if(thread_trace::has_shared_buffer(pool.gpu_agent))
+        {
+            const size_t index  = pool.output_buffer_index++;
+            void*        shared = thread_trace::acquire_shared_buffer(pool, index);
+            if(shared != nullptr)
+            {
+                *ptr = shared;
+                return HSA_STATUS_SUCCESS;
+            }
+        }
+
         // Return page aligned data to avoid cache flush overlap
         status = pool.allocate_fn(
             pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
@@ -177,6 +192,10 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
+    // Shared buffers are owned by the manager and freed once at finalize(); skip
+    // them here to avoid a double-free across the contexts that reuse them.
+    if(thread_trace::is_shared_buffer(ptr)) return;
+
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
