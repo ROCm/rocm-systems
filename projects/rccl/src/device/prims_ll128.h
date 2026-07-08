@@ -156,11 +156,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
- * Flag threads load half as much data which gets shuffled to the even
- * registers during Finish. The point of splitting into two phases is to
- * defer that shuffle, which incurs a dependency stall, until after other
- * memops are launched by the caller.
- */
+       * Flag threads load half as much data which gets shuffled to the even
+       * registers during Finish. The point of splitting into two phases is to
+       * defer that shuffle, which incurs a dependency stall, until after other
+       * memops are launched by the caller.
+       */
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++) {
         if (!flagThread || g % 2 == 0) {
