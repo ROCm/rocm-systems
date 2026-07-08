@@ -133,11 +133,10 @@ jobs:
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
-        if: false
         shell: bash
         run: |
           apt-get update
-          apt install -y libdw-dev pkg-config
+          apt install -y pkg-config
           echo "✅ ROCm Dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
