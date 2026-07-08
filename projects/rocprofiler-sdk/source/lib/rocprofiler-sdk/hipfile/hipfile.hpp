@@ -24,14 +24,6 @@
 
 #include <rocprofiler-sdk/hipfile/details/hipfile_headers.h>
 
-#if ROCPROFILER_SDK_USE_SYSTEM_HIPFILE > 0
-#    include <hipfile-api-trace.h>
-#    include <hipfile.h>
-#else
-#    include <rocprofiler-sdk/hipfile/details/hipfile.h>
-#    include <rocprofiler-sdk/hipfile/details/hipfile_api_trace.h>
-#endif
-
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 

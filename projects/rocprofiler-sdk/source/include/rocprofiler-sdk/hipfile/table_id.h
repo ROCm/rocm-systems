@@ -28,8 +28,6 @@
 typedef enum rocprofiler_hipfile_table_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HIPFILE_TABLE_ID_NONE = -1,
-
     ROCPROFILER_HIPFILE_TABLE_ID_CORE = 0,
-
     ROCPROFILER_HIPFILE_TABLE_ID_LAST,
 } rocprofiler_hipfile_table_id_t;

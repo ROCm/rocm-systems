@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/stringize_arg.hpp"
+#include "lib/rocprofiler-sdk/hipfile/details/format.hpp"
 
 #include "fmt/core.h"
 #include "fmt/ranges.h"

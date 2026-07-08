@@ -404,18 +404,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_path(
-    hipfile_INCLUDE_DIR
-    NAMES hipfile-api-trace.h hipfile.h
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH} ${ROCPROFILER_DEFAULT_ROCM_PATH}
-    PATH_SUFFIXES include)
+find_package(hipfile QUIET CONFIG HINTS ${ROCM_PATH} PATHS ${ROCM_PATH}
+             ${ROCPROFILER_DEFAULT_ROCM_PATH})
 
-if(hipfile_INCLUDE_DIR
-   AND EXISTS "${hipfile_INCLUDE_DIR}/hipfile-api-trace.h"
-   AND EXISTS "${hipfile_INCLUDE_DIR}/hipfile.h")
-    target_include_directories(rocprofiler-sdk-hipfile-nolink
-                               INTERFACE ${hipfile_INCLUDE_DIR})
+if(TARGET hip::hipfile)
+    rocprofiler_config_nolink_target(rocprofiler-sdk-hipfile-nolink hip::hipfile)
     target_compile_definitions(rocprofiler-sdk-hipfile-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=1)
 else()

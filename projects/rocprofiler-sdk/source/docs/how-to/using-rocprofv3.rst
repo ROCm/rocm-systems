@@ -396,7 +396,7 @@ allocations, and scratch).
 
     rocprofv3 –-runtime-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, ``hipfile_api_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
@@ -407,7 +407,7 @@ This is an all-inclusive option to collect HIP, HSA, RCCL, rocDecode, rocJPEG, h
 
     rocprofv3 –-sys-trace --output-format csv -- <application_path>
 
-Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, ``hipfile_api_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
+Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, ``rocdecode_api_trace.csv``, ``rocjpeg_api_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
 Scratch memory trace
 ++++++++++++++++++++++
@@ -512,22 +512,12 @@ hipFILE trace
 
 .. code-block:: shell
 
-    rocprofv3 --hipfile-trace --output-format csv -- <application_path>
+    rocprofv3 --hipfile-trace --output-format json rocpd -- <application_path>
 
-The above command generates a ``hipfile_api_trace`` file prefixed with the process ID.
+The above command stores hipFILE API records in the JSON results file and the rocpd database file.
 
-.. code-block:: shell
-
-    $ cat 42176_hipfile_api_trace.csv
-
-Here are the contents of ``hipfile_api_trace.csv`` file:
-
-.. csv-table:: hipFILE trace
-   :file: /data/hipfile_api_trace.csv
-   :widths: 10,10,10,10,10,20,20
-   :header-rows: 1
-
-Perfetto will also show hipFILE API arguments. Pointers will not be dereferenced and only the address will be displayed.
+The hipFILE records include API arguments. Pointers are not dereferenced unless argument
+iteration is configured to do so.
 
 OMPT trace
 ++++++++++

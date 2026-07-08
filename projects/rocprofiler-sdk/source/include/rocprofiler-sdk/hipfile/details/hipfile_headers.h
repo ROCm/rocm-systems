@@ -20,7 +20,7 @@ SOFTWARE.
 
 #if !defined(ROCPROFILER_SDK_USE_SYSTEM_HIPFILE)
 #    if defined __has_include
-#        if __has_include(<hipfile-api-trace.h>)
+#        if __has_include(<hipfile-api-trace.h>) && __has_include(<hipfile.h>)
 #            define ROCPROFILER_SDK_USE_SYSTEM_HIPFILE 1
 #        else
 #            define ROCPROFILER_SDK_USE_SYSTEM_HIPFILE 0
@@ -28,4 +28,12 @@ SOFTWARE.
 #    else
 #        define ROCPROFILER_SDK_USE_SYSTEM_HIPFILE 0
 #    endif
+#endif
+
+#if ROCPROFILER_SDK_USE_SYSTEM_HIPFILE > 0
+#    include <hipfile-api-trace.h>
+#    include <hipfile.h>
+#else
+#    include <rocprofiler-sdk/hipfile/details/hipfile.h>
+#    include <rocprofiler-sdk/hipfile/details/hipfile_api_trace.h>
 #endif
