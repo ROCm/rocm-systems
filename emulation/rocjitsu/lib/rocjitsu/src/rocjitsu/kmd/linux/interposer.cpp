@@ -600,7 +600,7 @@ static SyntheticDrmOpenResult open_synthetic_drm_fd(const char *path) {
   return {true, high_fd};
 }
 
-int open(const char *path, int flags, ...) {
+RJ_INTERPOSER_EXPORT int open(const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
     va_list ap;
@@ -669,7 +669,7 @@ int open(const char *path, int flags, ...) {
   return InterposerContext::real.openat(AT_FDCWD, path, flags, mode);
 }
 
-int open64(const char *path, int flags, ...) {
+RJ_INTERPOSER_EXPORT int open64(const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
     va_list ap;
@@ -680,15 +680,19 @@ int open64(const char *path, int flags, ...) {
   return open(path, flags, mode);
 }
 
-int __open_2(const char *path, int oflag) { return open(path, oflag, 0); }
+RJ_INTERPOSER_EXPORT int __open_2(const char *path, int oflag) { return open(path, oflag, 0); }
 
-int __open64_2(const char *path, int oflag) { return open(path, oflag, 0); }
+RJ_INTERPOSER_EXPORT int __open64_2(const char *path, int oflag) { return open(path, oflag, 0); }
 
-int __openat_2(int dirfd, const char *path, int oflag) { return openat(dirfd, path, oflag, 0); }
+RJ_INTERPOSER_EXPORT int __openat_2(int dirfd, const char *path, int oflag) {
+  return openat(dirfd, path, oflag, 0);
+}
 
-int __openat64_2(int dirfd, const char *path, int oflag) { return openat(dirfd, path, oflag, 0); }
+RJ_INTERPOSER_EXPORT int __openat64_2(int dirfd, const char *path, int oflag) {
+  return openat(dirfd, path, oflag, 0);
+}
 
-int openat(int dirfd, const char *path, int flags, ...) {
+RJ_INTERPOSER_EXPORT int openat(int dirfd, const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
     va_list ap;
@@ -755,7 +759,7 @@ int openat(int dirfd, const char *path, int flags, ...) {
   return InterposerContext::real.openat(dirfd, path, flags, mode);
 }
 
-int openat64(int dirfd, const char *path, int flags, ...) {
+RJ_INTERPOSER_EXPORT int openat64(int dirfd, const char *path, int flags, ...) {
   mode_t mode = 0;
   if (flags & O_CREAT) {
     va_list ap;
@@ -766,7 +770,7 @@ int openat64(int dirfd, const char *path, int flags, ...) {
   return openat(dirfd, path, flags, mode);
 }
 
-int close(int fd) {
+RJ_INTERPOSER_EXPORT int close(int fd) {
   assert(InterposerContext::real.ready());
   if (InterposerContext::ctx.remote_lookup(fd)) {
     // Closing the primary remote KFD fd drops one open reference; the synthetic
@@ -796,7 +800,7 @@ int close(int fd) {
 
 __attribute__((destructor(101))) void rj_interposer_shutdown() {}
 
-int ioctl(int fd, unsigned long request, ...) {
+RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real.ready());
   va_list ap;
   va_start(ap, request);
@@ -972,7 +976,7 @@ int ioctl(int fd, unsigned long request, ...) {
   return InterposerContext::real.ioctl(fd, request, arg);
 }
 
-int dup(int oldfd) {
+RJ_INTERPOSER_EXPORT int dup(int oldfd) {
   assert(InterposerContext::real.ready());
   int rc = InterposerContext::real.dup(oldfd);
   if (rc >= 0) {
@@ -984,7 +988,7 @@ int dup(int oldfd) {
   return rc;
 }
 
-int dup2(int oldfd, int newfd) {
+RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
   assert(InterposerContext::real.ready());
   // dup2(fd, fd) is a POSIX no-op that leaves the descriptor live; mutating
   // tracking would drop a still-open ref. Forward without touching tracking.
@@ -1004,7 +1008,7 @@ int dup2(int oldfd, int newfd) {
 }
 
 #ifdef SYS_dup3
-int dup3(int oldfd, int newfd, int flags) {
+RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
   assert(InterposerContext::real.ready());
   // dup3(fd, fd, ...) is required to fail with EINVAL without altering the
   // descriptor; do not mutate tracking before the syscall confirms that.
@@ -1117,7 +1121,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
 }
 } // namespace
 
-int fcntl(int fd, int cmd, ...) {
+RJ_INTERPOSER_EXPORT int fcntl(int fd, int cmd, ...) {
   assert(InterposerContext::real.ready());
   va_list ap;
   va_start(ap, cmd);
@@ -1135,7 +1139,7 @@ int fcntl(int fd, int cmd, ...) {
 // libdrm_amdgpu imports fcntl64@GLIBC_2.28 (not fcntl), so it must be
 // interposed separately or libdrm's F_DUPFD_CLOEXEC on the render fd bypasses
 // our dup tracking and subsequent ioctls land on an untracked fd.
-int fcntl64(int fd, int cmd, ...) {
+RJ_INTERPOSER_EXPORT int fcntl64(int fd, int cmd, ...) {
   assert(InterposerContext::real.ready());
   va_list ap;
   va_start(ap, cmd);
@@ -1150,7 +1154,8 @@ int fcntl64(int fd, int cmd, ...) {
   return fcntl_impl(fd, cmd, ptr_arg, int_arg);
 }
 
-void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, int fd,
+                                off_t offset) {
   assert(InterposerContext::real.ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
     return remote->mmap(addr, length, prot, flags, offset);
@@ -1186,7 +1191,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
   return InterposerContext::real.mmap(addr, length, prot, flags, fd, offset);
 }
 
-int mprotect(void *addr, size_t length, int prot) {
+RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
   assert(InterposerContext::real.ready());
   auto *drv = InterposerContext::ctx.driver();
   if (drv && drv->is_doorbell_range(addr, length)) {
@@ -1196,7 +1201,7 @@ int mprotect(void *addr, size_t length, int prot) {
   return InterposerContext::real.mprotect(addr, length, prot);
 }
 
-int madvise(void *addr, size_t length, int advice) {
+RJ_INTERPOSER_EXPORT int madvise(void *addr, size_t length, int advice) {
   assert(InterposerContext::real.ready());
   if ((advice == MADV_HUGEPAGE || advice == MADV_DONTFORK) &&
       reinterpret_cast<uintptr_t>(addr) >= 0x1000000000ULL)
@@ -1204,7 +1209,7 @@ int madvise(void *addr, size_t length, int advice) {
   return InterposerContext::real.madvise(addr, length, advice);
 }
 
-int munmap(void *addr, size_t length) {
+RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
   assert(InterposerContext::real.ready());
   if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
     int ret = remote->munmap(addr, length);
@@ -1226,7 +1231,7 @@ extern "C" {
 
 // -- fopen / freopen interposition (sysfs redirect) --
 
-FILE *fopen(const char *path, const char *mode) {
+RJ_INTERPOSER_EXPORT FILE *fopen(const char *path, const char *mode) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<FILE *(*)(const char *, const char *)>(RTLD_NEXT, "fopen");
     return fn ? fn(path, mode) : nullptr;
@@ -1275,9 +1280,9 @@ FILE *fopen(const char *path, const char *mode) {
   return fdopen(fd, mode);
 }
 
-FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
+RJ_INTERPOSER_EXPORT FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 
-FILE *freopen(const char *path, const char *mode, FILE *stream) {
+RJ_INTERPOSER_EXPORT FILE *freopen(const char *path, const char *mode, FILE *stream) {
   if (!path || !mode)
     return nullptr;
   RJ_DIAGNOSTIC_PUSH
@@ -1288,7 +1293,7 @@ FILE *freopen(const char *path, const char *mode, FILE *stream) {
   return fopen(path, mode);
 }
 
-FILE *freopen64(const char *path, const char *mode, FILE *stream) {
+RJ_INTERPOSER_EXPORT FILE *freopen64(const char *path, const char *mode, FILE *stream) {
   return freopen(path, mode, stream);
 }
 
@@ -1404,7 +1409,7 @@ static std::string redirect_dev_dri(const char *path) {
   return drm_base + "/dev_dri/" + std::string(sv.substr(kDevDri.size()));
 }
 
-int stat(const char *path, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int stat(const char *path, struct stat *buf) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "stat");
     return fn ? fn(path, buf) : -1;
@@ -1419,7 +1424,7 @@ int stat(const char *path, struct stat *buf) {
   return InterposerContext::real.stat(path, buf);
 }
 
-int lstat(const char *path, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int lstat(const char *path, struct stat *buf) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, struct stat *)>(RTLD_NEXT, "lstat");
     return fn ? fn(path, buf) : -1;
@@ -1434,7 +1439,7 @@ int lstat(const char *path, struct stat *buf) {
   return InterposerContext::real.lstat(path, buf);
 }
 
-int access(const char *path, int mode) {
+RJ_INTERPOSER_EXPORT int access(const char *path, int mode) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<int (*)(const char *, int)>(RTLD_NEXT, "access");
     return fn ? fn(path, mode) : -1;
@@ -1451,7 +1456,7 @@ int access(const char *path, int mode) {
 
 // -- opendir interposition --
 
-DIR *opendir(const char *name) {
+RJ_INTERPOSER_EXPORT DIR *opendir(const char *name) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<DIR *(*)(const char *)>(RTLD_NEXT, "opendir");
     return fn ? fn(name) : nullptr;
@@ -1500,7 +1505,7 @@ DIR *opendir(const char *name) {
 
 // -- fstat interposition (DRM memfd → synthetic st_rdev) --
 
-int fstat(int fd, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int fstat(int fd, struct stat *buf) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<int (*)(int, struct stat *)>(RTLD_NEXT, "fstat");
     return fn ? fn(fd, buf) : -1;
@@ -1514,7 +1519,7 @@ int fstat(int fd, struct stat *buf) {
   return rc;
 }
 
-int fstat64(int fd, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int fstat64(int fd, struct stat64 *buf) {
   using fstat64_fn_t = int (*)(int, struct stat64 *);
   static fstat64_fn_t real_fstat64 = util::lookup_symbol<fstat64_fn_t>(RTLD_NEXT, "fstat64");
   if (!real_fstat64)
@@ -1528,7 +1533,7 @@ int fstat64(int fd, struct stat64 *buf) {
   return rc;
 }
 
-int __fxstat(int ver, int fd, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int __fxstat(int ver, int fd, struct stat *buf) {
   using fxstat_fn_t = int (*)(int, int, struct stat *);
   static fxstat_fn_t real_fxstat = util::lookup_symbol<fxstat_fn_t>(RTLD_NEXT, "__fxstat");
   if (!real_fxstat)
@@ -1542,7 +1547,7 @@ int __fxstat(int ver, int fd, struct stat *buf) {
   return rc;
 }
 
-int __fxstat64(int ver, int fd, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int __fxstat64(int ver, int fd, struct stat64 *buf) {
   using fxstat64_fn_t = int (*)(int, int, struct stat64 *);
   static fxstat64_fn_t real_fxstat64 = util::lookup_symbol<fxstat64_fn_t>(RTLD_NEXT, "__fxstat64");
   if (!real_fxstat64)
@@ -1558,7 +1563,7 @@ int __fxstat64(int ver, int fd, struct stat64 *buf) {
 
 // -- readlink interposition (redirect /sys/dev/char/) --
 
-ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+RJ_INTERPOSER_EXPORT ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
   if (!InterposerContext::real.ready()) {
     auto fn = util::lookup_symbol<ssize_t (*)(const char *, char *, size_t)>(RTLD_NEXT, "readlink");
     return fn ? fn(path, buf, bufsiz) : -1;
@@ -1572,7 +1577,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
 
 // -- stat64/lstat64 interposition (distinct from stat on glibc 2.33+) --
 
-int stat64(const char *path, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int stat64(const char *path, struct stat64 *buf) {
   using stat64_fn_t = int (*)(const char *, struct stat64 *);
   static stat64_fn_t real_stat64 = util::lookup_symbol<stat64_fn_t>(RTLD_NEXT, "stat64");
   if (!real_stat64)
@@ -1586,7 +1591,7 @@ int stat64(const char *path, struct stat64 *buf) {
   return real_stat64(actual, buf);
 }
 
-int lstat64(const char *path, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int lstat64(const char *path, struct stat64 *buf) {
   using lstat64_fn_t = int (*)(const char *, struct stat64 *);
   static lstat64_fn_t real_lstat64 = util::lookup_symbol<lstat64_fn_t>(RTLD_NEXT, "lstat64");
   if (!real_lstat64)
@@ -1600,7 +1605,7 @@ int lstat64(const char *path, struct stat64 *buf) {
   return real_lstat64(actual, buf);
 }
 
-int __xstat(int ver, const char *path, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int __xstat(int ver, const char *path, struct stat *buf) {
   using xstat_fn_t = int (*)(int, const char *, struct stat *);
   static xstat_fn_t real_xstat = util::lookup_symbol<xstat_fn_t>(RTLD_NEXT, "__xstat");
   if (!real_xstat)
@@ -1614,7 +1619,7 @@ int __xstat(int ver, const char *path, struct stat *buf) {
   return real_xstat(ver, actual, buf);
 }
 
-int __xstat64(int ver, const char *path, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int __xstat64(int ver, const char *path, struct stat64 *buf) {
   using xstat64_fn_t = int (*)(int, const char *, struct stat64 *);
   static xstat64_fn_t real_xstat64 = util::lookup_symbol<xstat64_fn_t>(RTLD_NEXT, "__xstat64");
   if (!real_xstat64)
@@ -1628,7 +1633,7 @@ int __xstat64(int ver, const char *path, struct stat64 *buf) {
   return real_xstat64(ver, actual, buf);
 }
 
-int __lxstat(int ver, const char *path, struct stat *buf) {
+RJ_INTERPOSER_EXPORT int __lxstat(int ver, const char *path, struct stat *buf) {
   using lxstat_fn_t = int (*)(int, const char *, struct stat *);
   static lxstat_fn_t real_lxstat = util::lookup_symbol<lxstat_fn_t>(RTLD_NEXT, "__lxstat");
   if (!real_lxstat)
@@ -1642,7 +1647,7 @@ int __lxstat(int ver, const char *path, struct stat *buf) {
   return real_lxstat(ver, actual, buf);
 }
 
-int __lxstat64(int ver, const char *path, struct stat64 *buf) {
+RJ_INTERPOSER_EXPORT int __lxstat64(int ver, const char *path, struct stat64 *buf) {
   using lxstat64_fn_t = int (*)(int, const char *, struct stat64 *);
   static lxstat64_fn_t real_lxstat64 = util::lookup_symbol<lxstat64_fn_t>(RTLD_NEXT, "__lxstat64");
   if (!real_lxstat64)
@@ -1656,7 +1661,7 @@ int __lxstat64(int ver, const char *path, struct stat64 *buf) {
   return real_lxstat64(ver, actual, buf);
 }
 
-pid_t fork() {
+RJ_INTERPOSER_EXPORT pid_t fork() {
   assert(InterposerContext::real.ready());
   pid_t pid = InterposerContext::real.fork();
   if (pid == 0)
