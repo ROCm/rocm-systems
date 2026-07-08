@@ -53,7 +53,6 @@
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
-#include "amd_hsa_alloc_bounds.hpp"
 
 #ifdef SP3_STATIC_LIB
 #include "sp3.h"
@@ -67,6 +66,15 @@ namespace rocr {
 namespace amd {
 namespace hsa {
 namespace code {
+namespace detail {
+
+constexpr size_t kMaxSectionPrintSize = 1024 * 1024;
+
+inline bool IsWithinSectionPrintLimit(size_t size) {
+  return size <= kMaxSectionPrintSize;
+}
+
+}  // namespace detail
 
     using amd::elf::GetNoteString;
 
