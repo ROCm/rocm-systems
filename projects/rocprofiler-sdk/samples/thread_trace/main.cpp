@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,54 +25,41 @@
 #    undef NDEBUG
 #endif
 
-#include <array>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <future>
 #include <iostream>
+#include <vector>
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
 #include "hip/hip_runtime.h"
 
-#define DATA_SIZE (304 * 64 * 4 * 3)
-#define LDS_SIZE  1024
-
+// Two waves per SIMD on MI300
+#define DATA_SIZE (304 * 64 * 4 * 2)
 #define HIP_API_CALL(CALL)                                                                         \
     if((CALL) != hipSuccess)                                                                       \
     {                                                                                              \
         abort();                                                                                   \
     }
 
+#define LDS_SIZE 1024
+
 __global__ void
-divide_kernel(float* a, const float* b, const float* c, int loopcnt)
+divide_kernel(float* a, const float* b, const float* c, int /* unused */)
 {
     int index = blockDim.x * blockIdx.x + threadIdx.x;
+
     if(index >= DATA_SIZE) return;
 
-    float bdx = b[index];
-    float cdx = c[index];
-
-    for(int i = 0; i < 11; i++)
-    {
-        for(int j = 0; j < loopcnt; j++)
-        {
-            float cdx2 = cdx + 1;
-            float bdx2 = bdx * 1.5f;
-            bdx        = bdx2 / (cdx2 + 1);
-            cdx        = cdx2 / (bdx2 + 1);
-        }
-    }
-
-    a[index] = bdx + cdx;
+    a[index] = (b[index] - c[index]) / abs(c[index] + b[index]) + 1;
 }
 
 __global__ void
 looping_lds_kernel(float* a, const float* b, const float* c, int loopcount)
 {
     __shared__ float interm[LDS_SIZE];
-    size_t           index = blockDim.x * blockIdx.x + threadIdx.x;
+
+    size_t index = blockDim.x * blockIdx.x + threadIdx.x;
 
     for(size_t i = index; i < DATA_SIZE; i += blockDim.x * gridDim.x)
         interm[threadIdx.x % LDS_SIZE] = b[index] + threadIdx.x;
@@ -87,6 +74,39 @@ looping_lds_kernel(float* a, const float* b, const float* c, int loopcount)
 
     a[index] = interm[threadIdx.x % LDS_SIZE] + c[index];
 }
+
+__global__ void
+fifo_kernel(float* /* a */, const float* /* b */, const float* /* c */, int loops)
+{
+    using _float4 = __attribute__((__vector_size__(4 * sizeof(float)))) float;
+
+    __shared__ _float4 lds[LDS_SIZE];
+    lds[threadIdx.x]       = _float4{float(threadIdx.x)};
+    lds[threadIdx.x + 512] = _float4{float(threadIdx.x)};
+
+    __syncthreads();
+
+    _float4 dst[16];
+
+    float res1 = 0, res2 = 0;
+
+    for(int l = 0; l < loops; l++)
+    {
+#pragma unroll 16
+        for(int i = 0; i < 16; i++)
+            dst[i] = lds[threadIdx.x + i * 8];
+
+        __syncthreads();
+
+#pragma unroll 16
+        for(int i = 0; i < 16; i++)
+        {
+            res1 += dst[i][0] + dst[i][1];
+            res2 += dst[i][2] + dst[i][3];
+        }
+        asm volatile("v_add_f32 %0, %1, %2" : "=v"(res1) : "v"(res1), "v"(res2));
+    }
+};
 
 class hipMemory
 {
@@ -121,82 +141,38 @@ public:
     hipMemory dst{};
 };
 
-int
-run(int device, double run_seconds, std::atomic<int>* count)
-{
-    HIP_API_CALL(hipSetDevice(device));
-
-    std::array<HipStream, 3> streams{};
-    const auto               fixed_iterations = streams.size() * 2;
-
-    uint64_t iter = 0;
-
-    auto launch = [&]() {
-        auto& s      = streams.at(iter % streams.size());
-        auto& kernel = (iter % 2 == 0) ? divide_kernel : looping_lds_kernel;
-        hipLaunchKernelGGL(
-            kernel, DATA_SIZE / 512, 512, 0, s.stream, s.dst.ptr, s.src1.ptr, s.src2.ptr, 10);
-        HIP_API_CALL(hipGetLastError());
-        iter++;
-    };
-
-    // Warmup so the trace covers steady-state work, not first-launch noise.
-    for(uint64_t i = 0; i < fixed_iterations; i++)
-        launch();
-    HIP_API_CALL(hipDeviceSynchronize());
-
-    roctxProfilerResume(0);
-
-    count->fetch_sub(1);
-    while(count->load() != 0)
-        sched_yield();
-
-    auto       start    = std::chrono::steady_clock::now();
-    const auto deadline = start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                      std::chrono::duration<double>(run_seconds));
-
-    while((run_seconds > 0.0 && std::chrono::steady_clock::now() < deadline) ||
-          (run_seconds == 0.0 && iter < fixed_iterations))
-    {
-        launch();
-    }
-
-    roctxProfilerPause(0);
-
-    return iter;
-}
+#define Launch(kernel, stream, arglast)                                                            \
+    hipLaunchKernelGGL(                                                                            \
+        kernel, DATA_SIZE / 512, 512, 0, 0, stream.dst.ptr, stream.src1.ptr, stream.src2.ptr, 6);
 
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    int dev_count = 1;
+    std::array<HipStream, 3>              streams{};
+    std::vector<decltype(divide_kernel)*> kernels{};
 
-    // RUN_SECONDS unset or 0 -> one short alternating pass. Positive value
-    // -> the same alternating pass repeated until the time budget expires.
-    double run_seconds = 0.0;
-    if(const char* env = std::getenv("RUN_SECONDS"))
+    kernels.push_back(divide_kernel);
+    kernels.push_back(looping_lds_kernel);
+    kernels.push_back(fifo_kernel);
+
+    for(size_t i = 0; i < streams.size() * kernels.size(); i++)
     {
-        char*  end = nullptr;
-        double v   = std::strtod(env, &end);
-        if(end != env && v > 0.0)
+        // Warmup then start
+        if(i == streams.size())
         {
-            run_seconds = v;
-            HIP_API_CALL(hipGetDeviceCount(&dev_count));
+            HIP_API_CALL(hipDeviceSynchronize());
+            roctxProfilerResume(0);
         }
+
+        auto& stream = streams.at(i % streams.size());
+        auto& kernel = kernels.at(i % kernels.size());
+
+        Launch(kernel, stream, 3);
+        HIP_API_CALL(hipGetLastError());
     }
 
-    auto             start = std::chrono::steady_clock::now();
-    std::atomic<int> thread_count{dev_count};
-    auto             threads = std::vector<std::future<int>>{};
-    for(int i = 0; i < dev_count; i++)
-        threads.push_back(std::async(std::launch::async, run, i, run_seconds, &thread_count));
+    HIP_API_CALL(hipDeviceSynchronize());
+    roctxProfilerPause(0);
 
-    int iter = 0;
-    for(auto& thread : threads)
-        iter += thread.get();
-
-    std::cout << "[main] launched " << iter << " kernels over "
-              << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
-              << "s" << std::endl;
     return 0;
 }
