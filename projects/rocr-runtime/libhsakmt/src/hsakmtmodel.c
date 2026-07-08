@@ -24,6 +24,7 @@
  */
 
 #include "hsakmt/hsakmtmodel.h"
+#include "hsakmt/hsakmtmodel_path.h"
 #include "hsakmt/hsakmt_drm.h"
 #include "libhsakmt.h"
 #include "hsakmt/hsakmttypes.h"
@@ -59,44 +60,6 @@ static char *hsakmt_secure_getenv(const char *name)
 #endif
 }
 
-static bool path_contains_dotdot(const char *path)
-{
-	const char *p = path;
-
-	while (*p) {
-		if (p[0] == '.' && p[1] == '.' &&
-		    (p[2] == '\0' || p[2] == '/'))
-			return true;
-		p = strchr(p, '/');
-		if (!p)
-			break;
-		p++;
-	}
-	return false;
-}
-
-static bool model_lib_path_allowed(const char *libname, char *resolved,
-				   size_t resolved_size)
-{
-	const char *prefix = HSAKMT_INSTALL_LIBDIR;
-	size_t prefix_len = strlen(prefix);
-
-	if (!libname || !*libname || path_contains_dotdot(libname))
-		return false;
-
-	if (libname[0] == '/') {
-		if (strncmp(libname, prefix, prefix_len) != 0)
-			return false;
-		if (libname[prefix_len] != '\0' && libname[prefix_len] != '/')
-			return false;
-		return snprintf(resolved, resolved_size, "%s", libname) <
-		       (int)resolved_size;
-	}
-
-	return snprintf(resolved, resolved_size, "%s/%s", prefix, libname) <
-	       (int)resolved_size;
-}
-
 static pthread_mutex_t model_call_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void *model_library;
 static const struct hsakmt_model_functions *model_functions;
@@ -128,7 +91,8 @@ void model_init_env_vars(void)
 			fprintf(stderr, "model: HSA_MODEL_LIB environment variable must be set to FFM .so\n");
 			abort();
 		}
-		if (!model_lib_path_allowed(libname, resolved_lib, sizeof(resolved_lib)))
+		if (!hsakmt_model_lib_path_allowed(libname, HSAKMT_INSTALL_LIBDIR,
+						   resolved_lib, sizeof(resolved_lib)))
 		{
 			fprintf(stderr, "model: HSA_MODEL_LIB must be under %s (got %s)\n",
 				HSAKMT_INSTALL_LIBDIR, libname);

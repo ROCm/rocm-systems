@@ -55,6 +55,12 @@ else()
   include ( utils )
   include ( GNUInstallDirs )
 
+  ## Define default paths and packages.
+  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
+  endif()
+  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
+
   ## Setup the package version.
   get_version ( "1.0.0" )
 
@@ -322,12 +328,6 @@ else()
       set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
     endif()
   endif()
-
-  ## Define default paths and packages.
-  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
-  endif()
-  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
   if (NOT WIN32)
