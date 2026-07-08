@@ -894,7 +894,8 @@ set_tests_properties(hotswap_rewrite PROPERTIES
 
 # GPU-free InterceptQueue retry/overflow slot-accounting logic unit tests. These exercise
 # the pure header logic in hsa-runtime's core/inc/intercept_queue_logic.h + GoogleTest, so
-# they need no GPU or hsa-runtime library. GoogleTest's gtest_main provides the entry point.
+# they need no GPU or hsa-runtime library. ${GOOGLE_TEST_FRWK_NAME} (google-test-frwk64) is a
+# single static lib that compiles src/gtest_main.cpp (see rocrtst/gtest/CMakeLists.txt).
 set(INTERCEPT_QUEUE_TEST_ROOT "${ROCRTST_ROOT}/suites/functional/intercept_queue")
 add_executable(intercept_queue_logic_test
   ${INTERCEPT_QUEUE_TEST_ROOT}/intercept_queue_logic_test.cc)
