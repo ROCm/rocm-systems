@@ -52,7 +52,7 @@ bool
 is_supported();
 
 void
-configure(shader_data_forwarder_t shader_data_forwarder,
+configure(shader_data_forwarder_t    shader_data_forwarder,
           std::unordered_set<size_t> kernel_filter_range);
 
 agent_trace_config_t

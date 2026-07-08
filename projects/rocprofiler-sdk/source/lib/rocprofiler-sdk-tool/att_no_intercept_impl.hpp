@@ -27,7 +27,7 @@
 #if !defined(ROCPROFILER_ATT_QUICK_SCAN_ENABLED) || ROCPROFILER_ATT_QUICK_SCAN_ENABLED == 0
 typedef uint64_t rocprof_trace_decoder_handle_t;
 #else
-#include <rocprof_trace_decoder/rocprof_trace_decoder.h>
+#    include <rocprof_trace_decoder/rocprof_trace_decoder.h>
 #endif
 
 #include <atomic>
@@ -82,22 +82,22 @@ struct kernel_symbol_range_t
 
 struct trace_range_t
 {
-    bool                    active               = false;
-    uint8_t                 me_id                = 0;
-    uint8_t                 pipe_id              = 0;
-    uint64_t                offset_begin         = 0;
-    uint64_t                offset_end           = 0;
-    uint64_t                remaining_dispatches = 0;
-    uint64_t                flush_count          = 0;
+    bool     active               = false;
+    uint8_t  me_id                = 0;
+    uint8_t  pipe_id              = 0;
+    uint64_t offset_begin         = 0;
+    uint64_t offset_end           = 0;
+    uint64_t remaining_dispatches = 0;
+    uint64_t flush_count          = 0;
 };
 
 struct agent_state_t
 {
-    rocprofiler_agent_id_t                            id                  = {};
-    rocprofiler_context_id_t                          context             = {};
-    rocprofiler_user_data_t                           userdata            = {};
-    rocprof_trace_decoder_handle_t                    decoder             = {};
-    uint64_t                                          consecutive_kernels = 0;
+    rocprofiler_agent_id_t         id                  = {};
+    rocprofiler_context_id_t       context             = {};
+    rocprofiler_user_data_t        userdata            = {};
+    rocprof_trace_decoder_handle_t decoder             = {};
+    uint64_t                       consecutive_kernels = 0;
 
     std::shared_mutex mutex     = {};
     bool              started   = false;
@@ -106,17 +106,17 @@ struct agent_state_t
     std::unordered_map<entry_key_t, std::shared_ptr<std::atomic<size_t>>, entry_key_hash_t>
         kernel_iterations_by_entry = {};
     std::unordered_map<uint64_t, std::vector<kernel_symbol_range_t>> kernel_ranges_by_code_object{};
-    std::unordered_map<uint64_t, code_object_record_t> code_objects{};
+    std::unordered_map<uint64_t, code_object_record_t>               code_objects{};
 
     std::atomic<bool>     chunk_failed{false};
     std::atomic<uint64_t> chunk_completed{0};
     std::atomic<uint64_t> pending_requests{0};
 
-    std::mutex request_mutex{};
-    std::unordered_set<uint64_t> chunk_requested{};
-    std::mutex data_mutex{};
+    std::mutex                                         request_mutex{};
+    std::unordered_set<uint64_t>                       chunk_requested{};
+    std::mutex                                         data_mutex{};
     std::unordered_map<uint64_t, std::vector<uint8_t>> chunk_data{0};
-    std::condition_variable data_cv{};
+    std::condition_variable                            data_cv{};
 };
 
 bool
@@ -129,11 +129,11 @@ void
 backend_destroy(agent_state_t& state);
 
 void
-backend_code_object_load(agent_state_t&                                                state,
+backend_code_object_load(agent_state_t&                                              state,
                          const rocprofiler_callback_tracing_code_object_load_data_t& data);
 
 void
-backend_shader_data(agent_state_t&                           state,
+backend_shader_data(agent_state_t&                         state,
                     rocprofiler_thread_trace_shader_data_t shader_data,
                     shader_data_forwarder_t                shader_data_forwarder,
                     const std::unordered_set<size_t>&      kernel_filter_range);
