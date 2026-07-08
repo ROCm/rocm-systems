@@ -38,7 +38,7 @@ if(amdclang_EXECUTABLE)
         set(LLVM_HOST_TRIPLE "")
         rocprofiler_systems_message(
             FATAL_ERROR
-            "'${amdclang_EXECUTABLE} --print-target-triple' failed (exit code ${_llvm_host_triple_rc})"
+            "'${amdclang_EXECUTABLE} --print-target-triple' failed (exit code ${_llvm_host_triple_result})"
             "This toolchain may be broken."
         )
     endif()
