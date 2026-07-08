@@ -158,7 +158,7 @@ class CodeobjDecoderComponent
 
     void loadDebugLineInfo()
     {
-        if(!disassembly) throw std::exception();
+        if(!disassembly) throw std::runtime_error("No disassembly available!");
 
         ProtectedFd prot("");
         auto&       codeobj_data = disassembly->buffer;
@@ -382,7 +382,19 @@ public:
         inst->faddr = faddr;
         inst->vaddr = vaddr;
 
-        std::call_once(m_debug_line_info_once, [this]() { loadDebugLineInfo(); });
+        std::call_once(m_debug_line_info_once, [this]() {
+            try
+            {
+                loadDebugLineInfo();
+            } catch(std::exception& e)
+            {
+                std::cerr << "rocprofiler-sdk: failed to parse DWARF line info: " << e.what()
+                          << '\n';
+            } catch(...)
+            {
+                std::cerr << "rocprofiler-sdk: failed to parse DWARF line info\n";
+            }
+        });
 
         auto it = m_line_number_map.find({vaddr, 0, 0});
         if(it != m_line_number_map.end()) inst->comment = it->second;
