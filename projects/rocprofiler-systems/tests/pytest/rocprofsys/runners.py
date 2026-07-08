@@ -214,8 +214,7 @@ class BaseRunner(ABC):
             self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
             self.environment.set_test_environment(env)
-        # ROCPROFSYS_OUTPUT_PATH is framework-controlled (user can change it via
-        # shell), so applied last.
+        # ROCPROFSYS_OUTPUT_PATH is framework-controlled
         self.environment.set_test_environment(
             {"ROCPROFSYS_OUTPUT_PATH": str(self.output_dir)}
         )

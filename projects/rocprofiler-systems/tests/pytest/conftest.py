@@ -111,12 +111,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Show the test configuration and exit without running any tests",
     )
     group.addoption(
-        "--output-dir",
-        action="store",
-        default=None,
-        help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
-    )
-    group.addoption(
         "--ctest-mode",
         action="store",
         default="off",
@@ -1567,10 +1561,8 @@ def get_rocprof_config() -> RocprofsysConfig:
         pytest_config = getattr(pytest, "_config_ref", None)
         python_versions = None
         python_root_dirs = None
-        custom_output_dir = None
         rocm_optional = False
         if pytest_config:
-            custom_output_dir = pytest_config.getoption("--output-dir", default=None)
             ver_str = pytest_config.getoption("--python-versions", default=None)
             dir_str = pytest_config.getoption("--python-root-dirs", default=None)
             # When generating the CTestTestfile.cmake in TheRock, ROCm is not present
@@ -1585,7 +1577,6 @@ def get_rocprof_config() -> RocprofsysConfig:
                 ]
 
         return discover_build_config(
-            output_dir=Path(custom_output_dir) if custom_output_dir else None,
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
             rocm_optional=rocm_optional,

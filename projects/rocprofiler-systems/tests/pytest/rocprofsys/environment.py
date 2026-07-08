@@ -21,11 +21,13 @@ Separately, a handful of variables are read directly by config discovery
 but they are tightly coupled with config discovery (they locate the install,
 build, ROCm, and Python trees).
 
-``LD_LIBRARY_PATH`` and ``LD_PRELOAD`` are excluded from the user layer
-entirely; the test layer owns them so an inherited value cannot override the
-framework-computed ordering. The shell's values are still folded in -
-``LD_LIBRARY_PATH`` via ``config.get_library_path()`` and ``LD_PRELOAD`` via
-the runner for sanitizer builds.
+The following environment variables are excluded from the user layer overrides:
+ - ``LD_LIBRARY_PATH``: Shell's value is folded in via ``config.get_library_path()``
+ - ``LD_PRELOAD``: Shell's value is folded in via the runner for sanitizer builds
+ - ``ROCPROFSYS_OUTPUT_PATH``: Testing and validation depends on this path being
+     set by the framework.
+ - ``ROCPROFSYS_CONFIG_FILE``: Testing and validation depends on this config file being
+     set by the framework.
 """
 
 from __future__ import annotations
@@ -157,10 +159,15 @@ class TestEnvironment:
     def set_user_environment(self) -> None:
         """Capture the invoking shell environment as the user layer.
 
-        LD_LIBRARY_PATH and LD_PRELOAD are excluded (see
+        Certain environment variables are excluded (see
         the module docstring).
         """
-        owned = ("LD_LIBRARY_PATH", "LD_PRELOAD")
+        owned = (
+            "LD_LIBRARY_PATH",
+            "LD_PRELOAD",
+            "ROCPROFSYS_OUTPUT_PATH",
+            "ROCPROFSYS_CONFIG_FILE",
+        )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
     def get_derived_defaults(self, config: "RocprofsysConfig") -> dict[str, str]:
