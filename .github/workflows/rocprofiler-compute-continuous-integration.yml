@@ -122,11 +122,6 @@ jobs:
             MODE=Continuous
             ADD_COVERAGE=""
           fi
-          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
-            EXCLUDED_TESTS=""
-          else
-            EXCLUDED_TESTS="test_profile_live_attach_detach"
-          fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "add_coverage=${ADD_COVERAGE}" >> $GITHUB_OUTPUT
 
