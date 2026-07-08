@@ -8,9 +8,7 @@
 
 #include "amd_hip_ocp_host.hpp"
 
-static_assert(sizeof(unsigned int) == sizeof(__amd_fp8_storage_t[4]));
 static_assert(sizeof(uint32_t) == sizeof(__amd_fp8_storage_t[4]));
-static_assert(sizeof(int) == sizeof(__amd_fp8x2_storage_t[2]));
 static_assert(sizeof(uint32_t) == sizeof(__amd_fp8x2_storage_t[2]));
 static_assert(sizeof(__amd_shortx2_storage_t) == sizeof(__amd_fp8x2_storage_t[2]));
 
@@ -126,12 +124,12 @@ struct __hipext_ocp_fp8_e4m3 {
 
   __OCP_FP_HOST_DEVICE__ __amd_fp16_storage_t get_scaled_fp16(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
-    __amd_fp16x2_storage_t ret;
+    __amd_fp16x2_storage_t ret{};
     ret = __builtin_amdgcn_cvt_scalef32_f16_fp8(ret, __x, __amd_scale_to_float(scale), 0, false);
     return ret[0];
 #else
     using namespace fcbx;
-    return to_float<__amd_fp16_storage_t, Encoding::E4M3, true>(__x, scale);
+    return to_float<__amd_fp16_storage_t, Encoding::E4M3Mx, true>(__x, scale);
 #endif
   }
 
@@ -148,7 +146,7 @@ struct __hipext_ocp_fp8_e4m3 {
     return ret[0];
 #else
     using namespace fcbx;
-    return to_float<__amd_bf16_storage_t, Encoding::E4M3, true>(__x, scale);
+    return to_float<__amd_bf16_storage_t, Encoding::E4M3Mx, true>(__x, scale);
 #endif
   }
 
@@ -157,7 +155,7 @@ struct __hipext_ocp_fp8_e4m3 {
     return __builtin_amdgcn_cvt_scalef32_f32_fp8(__x, __amd_scale_to_float(scale), 0);
 #else
     using namespace fcbx;
-    return to_float<float, Encoding::E4M3, true>(__x, scale);
+    return to_float<float, Encoding::E4M3Mx, true>(__x, scale);
 #endif
   }
 
@@ -282,12 +280,12 @@ struct __hipext_ocp_fp8_e5m2 {
 
   __OCP_FP_HOST_DEVICE__ __amd_fp16_storage_t get_scaled_fp16(const __amd_scale_t scale) const {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
-    __amd_fp16x2_storage_t ret;
+    __amd_fp16x2_storage_t ret{};
     ret = __builtin_amdgcn_cvt_scalef32_f16_bf8(ret, __x, __amd_scale_to_float(scale), 0, false);
     return ret[0];
 #else
     using namespace fcbx;
-    return to_float<__amd_fp16_storage_t, Encoding::E5M2, true>(__x, scale);
+    return to_float<__amd_fp16_storage_t, Encoding::E5M2Mx, true>(__x, scale);
 #endif
   }
 
@@ -304,7 +302,7 @@ struct __hipext_ocp_fp8_e5m2 {
     return ret[0];
 #else
     using namespace fcbx;
-    return to_float<__amd_bf16_storage_t, Encoding::E5M2, true>(__x, scale);
+    return to_float<__amd_bf16_storage_t, Encoding::E5M2Mx, true>(__x, scale);
 #endif
   }
 
@@ -313,7 +311,7 @@ struct __hipext_ocp_fp8_e5m2 {
     return __builtin_amdgcn_cvt_scalef32_f32_bf8(__x, __amd_scale_to_float(scale), 0);
 #else
     using namespace fcbx;
-    return to_float<float, Encoding::E5M2, true>(__x, scale);
+    return to_float<float, Encoding::E5M2Mx, true>(__x, scale);
 #endif
   }
 

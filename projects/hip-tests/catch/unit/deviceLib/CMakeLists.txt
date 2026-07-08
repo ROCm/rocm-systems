@@ -72,6 +72,9 @@ set(AMD_TEST_SRC
     fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
+    ext_ocp_fp8.cc
+    ext_ocp_fp4.cc
+    ext_ocp_fp6.cc
     memcpy_async.cc
     bfloat16_atomic_test.cc
     fp16_atomic_test.cc
