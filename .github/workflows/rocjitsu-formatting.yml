@@ -43,10 +43,11 @@ jobs:
           MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
 
           # List files that were added, copied, modified, or renamed in
-          # the PR, then keep only those present on disk. The sparse
-          # checkout determines which files are on disk, so this is how
-          # we scope the check to the projects listed above.
-          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD \
+          # the PR, then keep only those present on disk. HEAD is the
+          # pull-request merge commit in GitHub Actions, so diff against
+          # the PR head SHA directly to avoid checking files that changed
+          # only on the target branch.
+          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" ${{ github.event.pull_request.head.sha }} \
             | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
 
           if [ -z "$FILES" ]; then

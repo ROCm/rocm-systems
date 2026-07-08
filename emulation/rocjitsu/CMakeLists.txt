@@ -39,6 +39,12 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Hide symbols by default so the shared library (librocjitsu.so) exports only its
+# intended ABI.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 find_package(Threads REQUIRED)
 
 # GCC 14+ emits false-positive -Wuninitialized on reinterpret_cast<uint32_t*>
@@ -315,6 +321,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
     target_link_libraries(rocjitsu_shared PRIVATE rocjitsu_core simdojo dl)
+    # Do not re-export symbols pulled in from any static/archive dependency
+    # (e.g. libutil.a): the interposer's dynamic symbol table should carry
+    # only its own libc overrides and the rj_vm_* API it forwards, never the
+    # simulator ABI. Pairs with -fvisibility=hidden on the object libraries.
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
     target_include_directories(
         rocjitsu_shared
         PRIVATE

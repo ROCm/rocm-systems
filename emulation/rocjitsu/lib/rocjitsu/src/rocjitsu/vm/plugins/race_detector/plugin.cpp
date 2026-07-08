@@ -377,7 +377,7 @@ void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> 
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);
-    s->race_state->flushWaveCompleteMemoryEvents();
+    s->race_state->flushBarrierPendingEvents();
   }
 }
 
