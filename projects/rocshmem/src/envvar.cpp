@@ -146,6 +146,10 @@ namespace envvar {
     const var<size_t> max_wavefront_buffers("MAX_WF_BUFFERS",
       "Maximum number of wavefront buffer arrays in default context (determines size of status, return, and atomic return buffers)",
       1024);
+    const var<size_t> max_symm_regions("MAX_SYMM_REGIONS",
+      "Maximum number of symmetric user buffers an application can register "
+      "with rocshmem_buffer_register_symmetric. The default value is 4",
+      4);
   }  // inline namespace _base
 
   namespace bootstrap {
