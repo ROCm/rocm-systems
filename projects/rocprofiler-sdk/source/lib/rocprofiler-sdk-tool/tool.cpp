@@ -1086,12 +1086,11 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 std::string_view include_regex(kernel_filter_include);
                 std::string_view exclude_regex(kernel_filter_exclude);
-                const auto is_targeted =
-                    rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                             include_regex) &&
-                    (kernel_filter_exclude.empty() ||
-                     !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
-                                                               exclude_regex));
+                const auto       is_targeted = rocprofiler::common::regex::regex_search(
+                                             kernel_info->formatted_kernel_name, include_regex) &&
+                                         (kernel_filter_exclude.empty() ||
+                                          !rocprofiler::common::regex::regex_search(
+                                              kernel_info->formatted_kernel_name, exclude_regex));
                 if(is_targeted) add_kernel_target(sym_data->kernel_id, kernel_filter_range);
 
                 if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept)

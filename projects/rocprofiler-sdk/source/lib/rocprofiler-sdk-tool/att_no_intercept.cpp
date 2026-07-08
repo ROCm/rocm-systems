@@ -84,11 +84,11 @@ check_status(rocprofiler_status_t status, std::string_view msg)
 }
 
 void
-add_range_locked(agent_state_t&            state,
-                 uint64_t                code_object_id,
-                 uint64_t                begin,
-                 uint64_t                size,
-                 bool                    targeted)
+add_range_locked(agent_state_t& state,
+                 uint64_t       code_object_id,
+                 uint64_t       begin,
+                 uint64_t       size,
+                 bool           targeted)
 {
     if(begin == 0) return;
     auto end = uint64_t{0};
@@ -103,10 +103,7 @@ add_range_locked(agent_state_t&            state,
 }
 
 void
-add_exact_locked(agent_state_t&            state,
-                 uint64_t                code_object_id,
-                 uint64_t                address,
-                 bool                    targeted)
+add_exact_locked(agent_state_t& state, uint64_t code_object_id, uint64_t address, bool targeted)
 {
     if(address == 0) return;
     state.kernel_iterations_by_entry[entry_key_t{code_object_id, address}] =
@@ -148,7 +145,7 @@ start_agent_context(agent_state_t& state)
 {
     auto lock = std::unique_lock{state.mutex};
     if(state.started || state.finalized) return;
-    
+
     state.started = true;
     ROCP_INFO << fmt::format("starting ATT no-intercept context for agent {}", state.id.handle);
     check_status(rocprofiler_start_context(state.context), "ATT no-intercept context start");
@@ -254,11 +251,10 @@ code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& dat
 void
 kernel_symbol_load(const kernel_symbol_t& data, bool is_targeted)
 {
-    std::shared_ptr<agent_state_t> state  = nullptr;
+    std::shared_ptr<agent_state_t> state = nullptr;
     {
         auto lock = std::unique_lock{manager_mutex};
-        if(auto itr = code_objects.find(data.code_object_id);
-           itr != code_objects.end())
+        if(auto itr = code_objects.find(data.code_object_id); itr != code_objects.end())
         {
             state = itr->second;
         }
@@ -305,7 +301,8 @@ backend_destroy(agent_state_t&)
 {}
 
 void
-backend_code_object_load(agent_state_t&, const rocprofiler_callback_tracing_code_object_load_data_t&)
+backend_code_object_load(agent_state_t&,
+                         const rocprofiler_callback_tracing_code_object_load_data_t&)
 {}
 
 void

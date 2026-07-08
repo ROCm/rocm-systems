@@ -244,8 +244,8 @@ producer_loop(
         buffer.cv.notify_one();
     };
 
-    auto submit_wait_timeout = [&] () {
-        if (signal_wait(submit_signal.sig, 1 << 28)) return true;
+    auto submit_wait_timeout = [&]() {
+        if(signal_wait(submit_signal.sig, 1 << 28)) return true;
 
         worker_flag.store(WORKER_FLAG_ERROR);
         ROCP_ERROR << "Submit timeout!";
@@ -254,8 +254,9 @@ producer_loop(
 
     auto stop_trace = [&]() {
         ROCP_INFO << "Stopping the trace";
-        if (!submit_wait_timeout()) return false;
-        att_queue_submit(queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal.sig);
+        if(!submit_wait_timeout()) return false;
+        att_queue_submit(
+            queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal.sig);
         return submit_wait_timeout();
     };
 
