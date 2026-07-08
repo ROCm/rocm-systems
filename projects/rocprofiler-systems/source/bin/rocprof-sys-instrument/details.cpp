@@ -9,6 +9,7 @@
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 
+#include "common/path.hpp"
 #include "core/demangler.hpp"
 
 #include <spdlog/fmt/ranges.h>
@@ -586,41 +587,6 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
 //
 //  Get the realpath to this exe
 //
-bool
-is_text_file(const std::string& filename)
-{
-    std::ifstream _file{ filename, std::ios::in | std::ios::binary };
-    if(!_file.is_open())
-    {
-        errprintf(-1, "Error! '%s' could not be opened...\n", filename.c_str());
-        return false;
-    }
-
-    constexpr size_t buffer_size = 1024;
-    char             buffer[buffer_size];
-    while(_file.read(buffer, sizeof(buffer)))
-    {
-        for(char itr : buffer)
-        {
-            if(itr == '\0') return false;
-        }
-    }
-
-    if(_file.gcount() > 0)
-    {
-        for(std::streamsize i = 0; i < _file.gcount(); ++i)
-        {
-            if(buffer[i] == '\0') return false;
-        }
-    }
-
-    return true;
-}
-
-//======================================================================================//
-//
-//  Get the realpath to this exe
-//
 std::string&
 rocprofsys_get_exe_realpath()
 {
@@ -631,7 +597,6 @@ rocprofsys_get_exe_realpath()
             ROCPROFSYS_ADD_LOG_ENTRY(
                 fmt::format("cmdline:: [ {} ]", fmt::join(_cmd_line, " ")));
             return _cmd_line.front();
-            // return tim::filepath::realpath(_cmd_line.front(), nullptr, false);
         }
         return std::string{};
     }();
@@ -732,7 +697,7 @@ rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            return tim::filepath::realpath(_link_map->l_name, nullptr, false);
+            return ::rocprofsys::common::path::realpath(_link_map->l_name);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -765,7 +730,7 @@ rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
         dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
         if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
         {
-            return tim::filepath::realpath(_buffer, nullptr, false);
+            return ::rocprofsys::common::path::realpath(_buffer);
         }
         if(_noload == false) dlclose(_handle);
     }
@@ -878,8 +843,8 @@ filter_modules(std::vector<module_t*>* app_modules)
         if(!mod) continue;
 
         auto _module_name = std::string{ get_name(mod) };
-        auto _module_base = std::string{ tim::filepath::basename(_module_name) };
-        auto _module_real = tim::filepath::realpath(_module_name, nullptr, false);
+        auto _module_base = ::rocprofsys::common::path::filename(_module_name);
+        auto _module_real = ::rocprofsys::common::path::realpath(_module_name);
 
         bool _is_excluded = false;
 
@@ -894,7 +859,7 @@ filter_modules(std::vector<module_t*>* app_modules)
         {
             for(const auto& [lib_path, sub_map] : _internal_libs)
             {
-                auto _lib_base = std::string{ tim::filepath::basename(lib_path) };
+                auto _lib_base = ::rocprofsys::common::path::filename(lib_path);
                 if(_module_base == _lib_base || _module_real == lib_path ||
                    sub_map.find(_module_base) != sub_map.end() ||
                    sub_map.find(_module_real) != sub_map.end() ||
@@ -1085,10 +1050,10 @@ process_modules(const std::vector<module_t*>& _app_modules)
 
     for(auto* itr : symtab_data.modules)
     {
-        const auto* _base_name = tim::filepath::basename(itr->fullName());
-        auto        _real_name = tim::filepath::realpath(itr->fullName(), nullptr, false);
+        auto _base_name = ::rocprofsys::common::path::filename(itr->fullName());
+        auto _real_name = ::rocprofsys::common::path::realpath(itr->fullName());
 
-        if(!_base_name) continue;
+        if(_base_name.empty()) continue;
 
         if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
         {

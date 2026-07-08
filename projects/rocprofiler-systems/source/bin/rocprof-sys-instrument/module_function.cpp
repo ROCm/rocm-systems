@@ -3,6 +3,7 @@
 
 #include "module_function.hpp"
 #include "InstructionCategories.h"
+#include "common/path.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
@@ -414,10 +415,10 @@ bool
 module_function::is_internal_constrained() const
 {
     auto _basename = [](std::string_view _v) {
-        return std::string{ tim::filepath::basename(_v) };
+        return ::rocprofsys::common::path::filename(_v);
     };
     auto _realpath = [](const std::string& _v) {
-        return tim::filepath::realpath(_v, nullptr, false);
+        return ::rocprofsys::common::path::realpath(_v);
     };
 
     auto _report = [&](const string_t& _action, const std::string& _type,

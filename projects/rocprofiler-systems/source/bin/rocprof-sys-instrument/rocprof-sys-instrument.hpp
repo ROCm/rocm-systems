@@ -11,6 +11,8 @@
 #include "log.hpp"
 #include "module_function.hpp"
 
+#include "common/path.hpp"
+
 #include <spdlog/fmt/ranges.h>
 #include <timemory/utility/filepath.hpp>
 
@@ -22,9 +24,6 @@
 #include <utility>
 
 //======================================================================================//
-
-bool
-is_text_file(const std::string& filename);
 
 //======================================================================================//
 
@@ -136,7 +135,7 @@ rocprofsys_get_is_executable(std::string_view _cmd, bool _default_v)
 
     if(_cmd.empty())
     {
-        if(!tim::filepath::exists(std::string{ _cmd }))
+        if(!::rocprofsys::common::path::exists(std::string{ _cmd }))
         {
             verbprintf(
                 0,
@@ -166,10 +165,10 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
 
     if(_rewrite)
     {
-        if(is_text_file(_name))
+        if(!::rocprofsys::common::path::is_elf(_name))
         {
             errprintf(-127,
-                      "'%s' is a text file. rocprof-sys only supports instrumenting "
+                      "'%s' is not an ELF binary. rocprof-sys only supports instrumenting "
                       "binary files",
                       _name.c_str());
         }
@@ -234,11 +233,11 @@ rocprofsys_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         {
             if(_cmdc < 1) errprintf(-127, "No command provided");
 
-            if(is_text_file(_cmdv[0]))
+            if(!::rocprofsys::common::path::is_elf(_cmdv[0]))
             {
                 errprintf(-1,
-                          "'%s' is a text file. rocprof-sys only supports instrumenting "
-                          "binary files",
+                          "'%s' is not an ELF binary. rocprof-sys only supports "
+                          "instrumenting binary files",
                           _cmdv[0]);
             }
 

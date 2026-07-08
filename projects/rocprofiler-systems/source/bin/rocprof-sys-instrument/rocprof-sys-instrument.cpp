@@ -144,7 +144,6 @@ namespace
 {
 namespace process  = tim::process;  // NOLINT
 namespace signals  = tim::signals;
-namespace filepath = tim::filepath;
 namespace path     = rocprofsys::common::path;
 
 using signal_settings = tim::signals::signal_settings;
@@ -311,9 +310,9 @@ main(int argc, char** argv)
     if(!exists(_omni_exe_path))
         _omni_exe_path =
             path::realpath(get_absolute_exe_filepath(rocprofsys_get_exe_realpath()));
-    bin_search_paths.emplace_back(filepath::dirname(_omni_exe_path));
+    bin_search_paths.emplace_back(path::parent_path(_omni_exe_path));
 
-    auto _omni_lib_path = filepath::dirname(filepath::dirname(_omni_exe_path)) + "/lib";
+    auto _omni_lib_path = path::parent_path(_omni_exe_path, 2) + "/lib";
     bin_search_paths.emplace_back(_omni_lib_path + "/rocprofiler-systems");
     bin_search_paths.emplace_back(_omni_lib_path + "/rocprofiler-systems/bin");
 
@@ -323,8 +322,7 @@ main(int argc, char** argv)
     lib_search_paths.emplace_back(_omni_lib_path + "/rocprofiler-systems/lib64");
 
     auto _omni_internal_libexec_path =
-        filepath::dirname(filepath::dirname(_omni_exe_path)) +
-        "/libexec/rocprofiler-systems";
+        path::parent_path(_omni_exe_path, 2) + "/libexec/rocprofiler-systems";
 
     ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys bin path: ", _omni_exe_path);
     ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys lib path: ", _omni_lib_path);
@@ -344,8 +342,8 @@ main(int argc, char** argv)
                         "amd_comgr|amd_smi|rocprofiler-register|"
                         "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" }))
         {
-            if(!find(filepath::dirname(itr), lib_search_paths))
-                lib_search_paths.emplace_back(filepath::dirname(itr));
+            if(!find(path::parent_path(itr), lib_search_paths))
+                lib_search_paths.emplace_back(path::parent_path(itr));
         }
     }
 
@@ -1155,7 +1153,7 @@ main(int argc, char** argv)
                        !parser.exists("min-instructions") &&
                            !parser.exists("min-address-range-loop"));
 
-    auto _rocprofsys_exe_path = tim::dirname(path::realpath("/proc/self/exe"));
+    auto _rocprofsys_exe_path = path::parent_path(path::executable_path());
     verbprintf(4, "rocprof-sys exe path: %s\n", _rocprofsys_exe_path.c_str());
 
     if(_cmdv && _cmdv[0] && strlen(_cmdv[0]) > 0)
@@ -1246,7 +1244,7 @@ main(int argc, char** argv)
         log_ofs = std::make_unique<std::ofstream>();
         verbprintf_bare(0, "%s", ::tim::log::color::source());
         verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
-        if(!filepath::open(*log_ofs, logfile))
+        if(!path::open(*log_ofs, logfile))
             throw std::runtime_error("Error opening log output file " + logfile);
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
         print_log_entries(*log_ofs, -1, {}, {}, "", false);
@@ -1326,7 +1324,7 @@ main(int argc, char** argv)
     for(const auto& itr : _dyn_api_rt_paths)
     {
         lib_search_paths.emplace_back(itr);
-        lib_search_paths.emplace_back(filepath::dirname(itr));
+        lib_search_paths.emplace_back(path::parent_path(itr));
     }
 
     find_dyn_api_rt();
@@ -2493,7 +2491,7 @@ main(int argc, char** argv)
         if(outf.find('/') != string_t::npos)
         {
             auto outdir = outf.substr(0, outf.find_last_of('/'));
-            tim::makedir(outdir);
+            (void) path::make_dirs(outdir);
         }
 
         bool success = app_binary->writeFile(outfile.c_str());
@@ -2785,13 +2783,13 @@ get_absolute_filepath(std::string _name, const strvec_t& _search_paths)
         auto _orig = _name;
         for(auto itr : _search_paths)
         {
-            if(!is_directory(itr) || is_file(itr)) itr = filepath::dirname(itr);
+            if(!is_directory(itr) || is_file(itr)) itr = path::parent_path(itr);
 
             auto _exists = false;
             ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
             for(const auto& pitr :
                 { absolute(fmt::format("{}/{}", itr, _name)),
-                  absolute(fmt::format("{}/{}", itr, filepath::basename(_name))) })
+                  absolute(fmt::format("{}/{}", itr, path::filename(_name))) })
             {
                 _exists = exists(pitr) && is_file(pitr);
                 if(_exists)
@@ -2830,7 +2828,7 @@ get_absolute_filepath(std::string _name)
 {
     auto _search_paths  = strvec_t{};
     auto _combine_paths = std::vector<strvec_t>{ bin_search_paths, lib_search_paths };
-    auto _base_name     = std::string_view{ filepath::basename(_name) };
+    auto _base_name     = path::filename(_name);
     // if the name looks like a library, put the lib_search_paths first
     if(_base_name.find("lib") == 0 || _base_name.find(".so") != std::string::npos ||
        _base_name.find(".a") != std::string::npos)
@@ -2870,7 +2868,7 @@ get_absolute_lib_filepath(std::string lib_name)
 bool
 exists(const std::string& name)
 {
-    return filepath::exists(absolute(name));
+    return path::exists(absolute(name));
 }
 
 bool
@@ -2904,8 +2902,6 @@ get_cwd()
 #endif
 }
 
-using tim::dirname;
-
 void
 find_dyn_api_rt()
 {
@@ -2927,7 +2923,8 @@ find_dyn_api_rt()
     {
         rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
         rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
-                                      fmt::format("{}:{}", dirname(_dyn_api_rt_abs),
+                                      fmt::format("{}:{}",
+                                                  path::parent_path(_dyn_api_rt_abs),
                                                   fmt::join(lib_search_paths, ":")),
                                       1);
     }

@@ -6,6 +6,8 @@
 #include "fwd.hpp"
 #include "module_function.hpp"
 
+#include "common/path.hpp"
+
 #include <spdlog/fmt/fmt.h>
 #include <timemory/log/color.hpp>
 #include <timemory/mpl/policy.hpp>
@@ -59,7 +61,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     if(_ext == "txt")
     {
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!::rocprofsys::common::path::open(ofs, _oname))
             _handle_error();
         else
         {
@@ -88,7 +90,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!::rocprofsys::common::path::open(ofs, _oname))
             _handle_error();
         else
         {
@@ -116,7 +118,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
         }
 
         std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
+        if(!::rocprofsys::common::path::open(ofs, _oname))
             _handle_error();
         else
         {
