@@ -38,10 +38,6 @@ __host__ QueuePairIONIC::QueuePairIONIC(uint32_t qpn, void *base_heap, size_t he
     sq{std::move(sq)}, cq{std::move(cq)} {
 }
 
-__device__ void QueuePairIONIC::quiet_single() {
-  quiet_internal_ccqe_single(sq.pos);
-}
-
 __device__ uint32_t QueuePairIONIC::reserve_sq(const ActiveWFInfo& wf_info, uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
@@ -70,23 +66,6 @@ __device__ uint32_t QueuePairIONIC::reserve_sq_single(uint32_t num_wqes) {
   return my_sq_prod;
 }
 
-__device__ uint32_t QueuePairIONIC::commit_sq(const ActiveWFInfo& wf_info, uint32_t my_sq_prod,
-                                              uint32_t num_wqes) {
-  uint32_t dbprod = my_sq_prod + num_wqes;
-
-  spin_lock_acquire_shared(&sq.lock, wf_info.pe_group_mask);
-
-  if (wf_info.is_pe_group_first && ((sq.dbpos - dbprod) & (1u << 31))) {
-    sq.dbpos = dbprod;
-
-    ring_doorbell(dbprod);
-  }
-
-  spin_lock_release_shared(&sq.lock, wf_info.pe_group_mask);
-
-  return dbprod;
-}
-
 __device__ uint32_t QueuePairIONIC::commit_sq_single(uint32_t my_sq_prod, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
@@ -103,27 +82,21 @@ __device__ uint32_t QueuePairIONIC::commit_sq_single(uint32_t my_sq_prod, uint32
   return dbprod;
 }
 
-__device__ void QueuePairIONIC::ring_doorbell(uint32_t pos) {
-  // When threads write at once to the same address, not all writes reach the bus.
-  // Take turns and insert a thread fence between writes to the same address.
-  uint64_t activemask = get_active_lane_mask();
-  int lane_id         = get_active_lane_num(activemask);
-  int lane_count      = get_active_lane_count(activemask);
+__device__ uint32_t QueuePairIONIC::commit_sq(const ActiveWFInfo& wf_info, uint32_t my_sq_prod,
+                                              uint32_t num_wqes) {
+  uint32_t dbprod = my_sq_prod + num_wqes;
 
-  for (int i = 0; i < lane_count; i++) {
-    if (lane_id == i) {
-      __threadfence();
-      __atomic_store_n(sq.dbreg, sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
-    }
+  spin_lock_acquire_shared(&sq.lock, wf_info.pe_group_mask);
+
+  if (wf_info.is_pe_group_first && ((sq.dbpos - dbprod) & (1u << 31))) {
+    sq.dbpos = dbprod;
+
+    ring_doorbell(dbprod);
   }
-  __threadfence();
-}
 
-__device__ void QueuePairIONIC::ring_doorbell_single(uint32_t pos) {
-  // When threads write at once to the same address, not all writes reach the bus.
-  // Take turns and insert a thread fence between writes to the same address.
-  __threadfence();
-  __atomic_store_n(&sq.dbreg[8 * __lane_id()], sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
+  spin_lock_release_shared(&sq.lock, wf_info.pe_group_mask);
+
+  return dbprod;
 }
 
 __device__ void QueuePairIONIC::poll_wave_cqes(uint64_t activemask) {
@@ -287,6 +260,33 @@ __device__ void QueuePairIONIC::quiet_internal(const ActiveWFInfo& wf_info, uint
     spin_lock_release_shared(&cq.lock, wf_info.pe_group_mask);
     break;
   }
+}
+
+__device__ void QueuePairIONIC::ring_doorbell(uint32_t pos) {
+  // When threads write at once to the same address, not all writes reach the bus.
+  // Take turns and insert a thread fence between writes to the same address.
+  uint64_t activemask = get_active_lane_mask();
+  int lane_id         = get_active_lane_num(activemask);
+  int lane_count      = get_active_lane_count(activemask);
+
+  for (int i = 0; i < lane_count; i++) {
+    if (lane_id == i) {
+      __threadfence();
+      __atomic_store_n(sq.dbreg, sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
+    }
+  }
+  __threadfence();
+}
+
+__device__ void QueuePairIONIC::ring_doorbell_single(uint32_t pos) {
+  // When threads write at once to the same address, not all writes reach the bus.
+  // Take turns and insert a thread fence between writes to the same address.
+  __threadfence();
+  __atomic_store_n(&sq.dbreg[8 * __lane_id()], sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
+}
+
+__device__ void QueuePairIONIC::quiet_single() {
+  quiet_internal_ccqe_single(sq.pos);
 }
 
 }  // namespace rocshmem
