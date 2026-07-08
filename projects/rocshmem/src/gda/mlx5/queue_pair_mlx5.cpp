@@ -38,98 +38,6 @@ __host__ QueuePairMLX5::QueuePairMLX5(uint32_t qpn, void *base_heap, size_t heap
     sq{std::move(sq)}, cq{std::move(cq)} {
 }
 
-// precondition: called with all active lanes using different QPs
-__device__ void QueuePairMLX5::quiet_single() {
-  poll_cq_until(sq.depth);
-}
-
-__device__ void QueuePairMLX5::ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
-  // sq_wqebb_counter is the least significant bits of the post counter
-  uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
-  // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
-  gda_mlx5_db_register db_val{wqe};
-  __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
-
-  // get BlueFlame buffer from SQ
-  gda_mlx5_bf_buffer* bf = sq.bf_buffer();
-
-  // store sq_wqebb_counter to doorbell record
-  __hip_atomic_store(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-  // ring doorbell by storing first 8B of WQE to the doorbell register
-  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-
-  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
-             sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,
-             db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
-}
-
-// precondition: called with all active lanes using different QPs
-__device__ void QueuePairMLX5::poll_cq_until(uint16_t requested_available_slots) {
-  uint16_t sq_depth = sq.depth;
-
-  uint64_t sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-  // don't need to check CQ if we haven't ever filled SQ and there's enough space left
-  if (sq_post + requested_available_slots <= sq_depth) {
-    return;
-  }
-
-  while (true) {
-    struct mlx5_cqe64* cqe = cq.buf;
-
-    /* Update the SQ head
-     * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
-    // 32-bit load: big-endian 16-bit field, then two 8-bit fields
-    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
-                                                   __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
-    // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
-    __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-    /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-     * opcode is the top 4 bits of op_own */
-    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
-    uint16_t sq_head = endian::from_be(be_wqe_counter);
-
-    // sq_tail is the least significant bits of the post counter
-    uint16_t sq_tail = static_cast<uint16_t>(sq_post);
-
-    // CQEs are initially invalid, retry until we see a valid CQE
-    if (opcode == MLX5_CQE_INVALID) {
-      LOGD_TRACE("CQ: invalid completion (%x)", opcode);
-      continue;
-    }
-
-#if defined(BUILD_DEBUG_DEVICE)
-    if (opcode != MLX5_CQE_REQ) {
-      /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-       * opcode is the top 4 bits of op_own */
-      uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
-      print_cqe_error(cqe, opcode, owner);
-    }
-#endif  // BUILD_DEBUG_DEVICE
-
-    /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs
-     * sq_head is an index to the *last* completed WQE - need to add one to get *count* of completed WQEs */
-    uint16_t posted    = sq_tail;
-    uint16_t completed = sq_head + 1;
-
-    /* posted >= completed, except when posted has wrapped around 0xFFFF and completed hasn't
-     * but posted - completed is correct even when it wraps around
-     * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
-     * but in that case available_slots will be very large, > requested_available_slots,
-     * and the loop will continue for another iteration */
-    uint16_t consumed_slots  = posted   - completed;
-    uint16_t available_slots = sq_depth - consumed_slots;
-
-    /* continue until both:
-     *   - no additional WQEs have been posted
-     *   - the number of requested SQ slots are available */
-    uint64_t prior_sq_post = sq_post;
-    sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-    if (sq_post == prior_sq_post && available_slots >= requested_available_slots) {
-      return;
-    }
-  }
-}
-
 #define MLX5_LOCK_USE_S_SLEEP  1
 #define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
 // sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles
@@ -166,6 +74,26 @@ __device__ void QueuePairMLX5::release_lock(uint32_t* lock) {
   // wake up any other sleeping waves (in the same workgroup)
   amdgcn_s_wakeup();
 #endif
+}
+
+__device__ void QueuePairMLX5::ring_doorbell(uint64_t sq_post, const gda_mlx5_wqe& wqe) {
+  // sq_wqebb_counter is the least significant bits of the post counter
+  uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
+  // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
+  gda_mlx5_db_register db_val{wqe};
+  __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
+
+  // get BlueFlame buffer from SQ
+  gda_mlx5_bf_buffer* bf = sq.bf_buffer();
+
+  // store sq_wqebb_counter to doorbell record
+  __hip_atomic_store(sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  // ring doorbell by storing first 8B of WQE to the doorbell register
+  __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+
+  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
+             sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,
+             db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 }
 
 #if defined(BUILD_DEBUG_DEVICE)
@@ -250,5 +178,77 @@ QueuePairMLX5::print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode, uint8_t ow
   abort();
 }
 #endif  // BUILD_DEBUG_DEVICE
+
+// precondition: called with all active lanes using different QPs
+__device__ void QueuePairMLX5::poll_cq_until(uint16_t requested_available_slots) {
+  uint16_t sq_depth = sq.depth;
+
+  uint64_t sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+  // don't need to check CQ if we haven't ever filled SQ and there's enough space left
+  if (sq_post + requested_available_slots <= sq_depth) {
+    return;
+  }
+
+  while (true) {
+    struct mlx5_cqe64* cqe = cq.buf;
+
+    /* Update the SQ head
+     * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
+    // 32-bit load: big-endian 16-bit field, then two 8-bit fields
+    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
+                                                   __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
+    __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
+    /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
+     * opcode is the top 4 bits of op_own */
+    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+    uint16_t sq_head = endian::from_be(be_wqe_counter);
+
+    // sq_tail is the least significant bits of the post counter
+    uint16_t sq_tail = static_cast<uint16_t>(sq_post);
+
+    // CQEs are initially invalid, retry until we see a valid CQE
+    if (opcode == MLX5_CQE_INVALID) {
+      LOGD_TRACE("CQ: invalid completion (%x)", opcode);
+      continue;
+    }
+
+#if defined(BUILD_DEBUG_DEVICE)
+    if (opcode != MLX5_CQE_REQ) {
+      /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
+       * opcode is the top 4 bits of op_own */
+      uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
+      print_cqe_error(cqe, opcode, owner);
+    }
+#endif  // BUILD_DEBUG_DEVICE
+
+    /* sq_tail is an index to the next free WQE i.e. counts number of posted WQEs
+     * sq_head is an index to the *last* completed WQE - need to add one to get *count* of completed WQEs */
+    uint16_t posted    = sq_tail;
+    uint16_t completed = sq_head + 1;
+
+    /* posted >= completed, except when posted has wrapped around 0xFFFF and completed hasn't
+     * but posted - completed is correct even when it wraps around
+     * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
+     * but in that case available_slots will be very large, > requested_available_slots,
+     * and the loop will continue for another iteration */
+    uint16_t consumed_slots  = posted   - completed;
+    uint16_t available_slots = sq_depth - consumed_slots;
+
+    /* continue until both:
+     *   - no additional WQEs have been posted
+     *   - the number of requested SQ slots are available */
+    uint64_t prior_sq_post = sq_post;
+    sq_post = __hip_atomic_load(&sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+    if (sq_post == prior_sq_post && available_slots >= requested_available_slots) {
+      return;
+    }
+  }
+}
+
+// precondition: called with all active lanes using different QPs
+__device__ void QueuePairMLX5::quiet_single() {
+  poll_cq_until(sq.depth);
+}
 
 }  // namespace rocshmem

@@ -35,76 +35,6 @@ __host__ QueuePairBNXT::QueuePairBNXT(uint32_t qpn, void *base_heap, size_t heap
     dbr{dbr}, sq{std::move(sq)}, cq{std::move(cq)} {
 }
 
-__device__ void QueuePairBNXT::quiet_single() {
-  poll_cq_until(sq.depth);
-}
-
-__device__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) {
-  struct bnxt_re_db_hdr hdr;
-  uint32_t epoch;
-  uint64_t key_lo;
-  uint64_t key_hi;
-
-  epoch = (sq.flags & BNXT_RE_FLAG_EPOCH_TAIL_MASK) << BNXT_RE_DB_EPOCH_TAIL_SHIFT;
-
-  key_lo = (slot_idx | epoch);
-
-  key_hi = (qp_num & BNXT_RE_DB_QID_MASK)
-         | (((uint64_t) BNXT_RE_QUE_TYPE_SQ & BNXT_RE_DB_TYP_MASK) << BNXT_RE_DB_TYP_SHIFT)
-         | (0x1UL << BNXT_RE_DB_VALID_SHIFT);
-
-  hdr.typ_qid_indx = (key_lo | (key_hi << 32));
-
-  __threadfence_system();
-  __hip_atomic_store(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
-}
-
-__device__ void QueuePairBNXT::poll_cq_until(uint32_t requested_available_slots) {
-  struct bnxt_re_req_cqe *cqe;
-  uint32_t sq_tail;
-  uint32_t sq_head;
-  uint32_t sq_depth;
-  uint32_t consumed_slots;
-  uint32_t available_slots;
-
-  sq_depth = sq.depth;
-
-  do {
-    cqe = (struct bnxt_re_req_cqe *) cq.buf;
-
-#ifdef BUILD_DEBUG_DEVICE
-    uint32_t flg_val =
-        __hip_atomic_load(static_cast<uint32_t*>(
-            __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
-                                                + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
-                                     4)),
-            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-    uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
-    if (status != BNXT_RE_REQ_ST_OK) {
-      print_cqe_error(status);
-    }
-#endif
-
-    /* Update the SQ head
-     * This param provides us the wqe_idx but we need to convert to the slot idx.
-     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
-    sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
-    sq.head = sq_head;
-
-    sq_tail = __hip_atomic_load(&sq.tail, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
-
-    consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
-    available_slots = sq_depth - consumed_slots;
-  } while (available_slots < requested_available_slots);
-}
-
-__device__ void* QueuePairBNXT::get_hwqe(const bnxt_device_sq& sq, uint32_t idx) {
-  idx += sq.tail;
-  if (idx >= sq.depth)
-    idx -= sq.depth;
-  return (void *)((char*)sq.buf + (idx << 4));
-}
-
 __device__ static inline struct bnxt_re_msns* bnxt_re_pull_psn_buff(const bnxt_device_sq& sq) {
   return (struct bnxt_re_msns*)(((char *) sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
 }
@@ -164,6 +94,13 @@ __device__ void QueuePairBNXT::incr_tail(bnxt_device_sq& sq, uint8_t cnt) {
   }
 }
 
+__device__ void* QueuePairBNXT::get_hwqe(const bnxt_device_sq& sq, uint32_t idx) {
+  idx += sq.tail;
+  if (idx >= sq.depth)
+    idx -= sq.depth;
+  return (void *)((char*)sq.buf + (idx << 4));
+}
+
 __device__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
   uint32_t expected;
 
@@ -179,6 +116,25 @@ __device__ void QueuePairBNXT::release_lock(uint32_t* lock) {
   __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
+__device__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) {
+  struct bnxt_re_db_hdr hdr;
+  uint32_t epoch;
+  uint64_t key_lo;
+  uint64_t key_hi;
+
+  epoch = (sq.flags & BNXT_RE_FLAG_EPOCH_TAIL_MASK) << BNXT_RE_DB_EPOCH_TAIL_SHIFT;
+
+  key_lo = (slot_idx | epoch);
+
+  key_hi = (qp_num & BNXT_RE_DB_QID_MASK)
+         | (((uint64_t) BNXT_RE_QUE_TYPE_SQ & BNXT_RE_DB_TYP_MASK) << BNXT_RE_DB_TYP_SHIFT)
+         | (0x1UL << BNXT_RE_DB_VALID_SHIFT);
+
+  hdr.typ_qid_indx = (key_lo | (key_hi << 32));
+
+  __threadfence_system();
+  __hip_atomic_store(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+}
 
 #if defined(BUILD_DEBUG_DEVICE)
 __device__ __attribute__((noinline)) void QueuePairBNXT::print_cqe_error(uint8_t status) {
@@ -222,5 +178,48 @@ __device__ __attribute__((noinline)) void QueuePairBNXT::print_cqe_error(uint8_t
   }
 }
 #endif  // BUILD_DEBUG_DEVICE
+
+__device__ void QueuePairBNXT::poll_cq_until(uint32_t requested_available_slots) {
+  struct bnxt_re_req_cqe *cqe;
+  uint32_t sq_tail;
+  uint32_t sq_head;
+  uint32_t sq_depth;
+  uint32_t consumed_slots;
+  uint32_t available_slots;
+
+  sq_depth = sq.depth;
+
+  do {
+    cqe = (struct bnxt_re_req_cqe *) cq.buf;
+
+#ifdef BUILD_DEBUG_DEVICE
+    uint32_t flg_val =
+        __hip_atomic_load(static_cast<uint32_t*>(
+            __builtin_assume_aligned((char*)cqe + sizeof(struct bnxt_re_req_cqe)
+                                                + offsetof(struct bnxt_re_bcqe, flg_st_typ_ph),
+                                     4)),
+            __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
+    if (status != BNXT_RE_REQ_ST_OK) {
+      print_cqe_error(status);
+    }
+#endif
+
+    /* Update the SQ head
+     * This param provides us the wqe_idx but we need to convert to the slot idx.
+     * We assume a static slots size of GDA_BNXT_WQE_SLOT_COUNT thus can multiply by this value */
+    sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
+    sq.head = sq_head;
+
+    sq_tail = __hip_atomic_load(&sq.tail, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_AGENT);
+
+    consumed_slots  = (sq_tail - sq_head + sq_depth) % sq_depth;
+    available_slots = sq_depth - consumed_slots;
+  } while (available_slots < requested_available_slots);
+}
+
+__device__ void QueuePairBNXT::quiet_single() {
+  poll_cq_until(sq.depth);
+}
 
 }  // namespace rocshmem

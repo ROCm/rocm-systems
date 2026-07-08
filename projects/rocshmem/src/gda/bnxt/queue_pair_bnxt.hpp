@@ -114,6 +114,72 @@ private:
   bnxt_device_cq cq;
 };
 
+template <QueuePairBNXT::OpCode Op, bool CheckSQ>
+__device__ void QueuePairBNXT::write_rma_wqe(
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, bool signaled) {
+  struct bnxt_re_bsqe hdr;
+  struct bnxt_re_rdma rdma;
+  struct bnxt_re_sge sge;
+  struct bnxt_re_bsqe *hdr_ptr;
+  struct bnxt_re_rdma *rdma_ptr;
+  struct bnxt_re_sge *sge_ptr;
+  uint32_t wqe_size;
+  uint32_t wqe_type;
+  uint32_t hdr_flags;
+
+  bool inline_msg = can_inline<Op>(size);
+
+  if constexpr (CheckSQ) {
+    poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  }
+
+  hdr_ptr  = (struct bnxt_re_bsqe*) get_hwqe(sq, 0);
+  rdma_ptr = (struct bnxt_re_rdma*) get_hwqe(sq, 1);
+  sge_ptr  = (struct bnxt_re_sge*)  get_hwqe(sq, 2);
+
+  /* Populate Header Segment */
+  wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
+  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
+  hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
+
+  if (inline_msg) {
+    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_INLINE);
+  }
+
+  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
+                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
+                    | wqe_type;
+  hdr.key_immd      = 0;
+  hdr.lhdr.qkey_len = size;
+
+  /* Populate RDMA Segment */
+  rdma.rva  = raddr;
+  rdma.rkey = rkey;
+
+  if (!inline_msg) {
+    /* Populate SG Segment */
+    sge.pa     = laddr;
+    sge.lkey   = lkey;
+    sge.length = size;
+  }
+
+  /* Write WQE to SQ */
+  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
+  memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
+
+  if (inline_msg) {
+    memcpy(sge_ptr, reinterpret_cast<void*>(laddr), size);
+  } else {
+    memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
+  }
+
+  /* Populate MSN Table */
+  fill_psns_for_msntbl(sq, size);
+
+  /* Update SQ Pointer */
+  incr_tail(sq, GDA_BNXT_WQE_SLOT_COUNT);
+}
+
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, typename... Options>
 __device__ void QueuePairBNXT::post_wqe_rma(
@@ -181,6 +247,69 @@ __device__ void QueuePairBNXT::post_wqe_rma_single(
     // need to at least release so that tail is available
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent");
   }
+}
+
+template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
+__device__ uint64_t* QueuePairBNXT::write_amo_wqe(
+    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
+  static_assert(Fetch != AMOFetchType::NonBlocking);
+  static constexpr size_t size = sizeof(uint64_t);
+
+  struct bnxt_re_bsqe hdr;
+  struct bnxt_re_atomic amo;
+  struct bnxt_re_sge sge;
+  struct bnxt_re_bsqe *hdr_ptr;
+  struct bnxt_re_atomic *amo_ptr;
+  struct bnxt_re_sge *sge_ptr;
+  uint32_t wqe_size;
+  uint32_t wqe_type;
+  uint32_t hdr_flags;
+  uint64_t* atomic_laddr;
+
+  if constexpr (CheckSQ) {
+    poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  }
+
+  hdr_ptr = (struct bnxt_re_bsqe*)   get_hwqe(sq, 0);
+  amo_ptr = (struct bnxt_re_atomic*) get_hwqe(sq, 1);
+  sge_ptr = (struct bnxt_re_sge*)    get_hwqe(sq, 2);
+
+  /* Populate Header Segment */
+  wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
+  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
+  hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
+
+  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
+                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
+                    | wqe_type;
+  hdr.key_immd = rkey;
+  hdr.lhdr.rva = raddr;
+
+  /* Populate AMO Segment */
+  amo.swp_dt = swap_add;
+  amo.cmp_dt = compare;
+
+  /* Populate SG Segment - (Return address of atomic) */
+  atomic_laddr = get_atomic_addr<Fetch>();
+  if constexpr (Fetch == AMOFetchType::Blocking) {
+    atomic_laddr += (fetching_atomic_idx++ % FETCHING_ATOMIC_CNT);
+  }
+  sge.pa     = reinterpret_cast<uintptr_t>(atomic_laddr);
+  sge.lkey   = get_atomic_lkey<Fetch>();
+  sge.length = size;
+
+  /* Write WQE to SQ */
+  memcpy(hdr_ptr, &hdr, sizeof(struct bnxt_re_bsqe));
+  memcpy(amo_ptr, &amo, sizeof(struct bnxt_re_atomic));
+  memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
+
+  /* Populate MSN Table */
+  fill_psns_for_msntbl(sq, size);
+
+  /* Update SQ Pointer */
+  incr_tail(sq, GDA_BNXT_WQE_SLOT_COUNT);
+
+  return atomic_laddr;
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
@@ -266,135 +395,6 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
     quiet_single();
     return *atomic_laddr;
   }
-}
-
-template <QueuePairBNXT::OpCode Op, bool CheckSQ>
-__device__ void QueuePairBNXT::write_rma_wqe(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, bool signaled) {
-  struct bnxt_re_bsqe hdr;
-  struct bnxt_re_rdma rdma;
-  struct bnxt_re_sge sge;
-  struct bnxt_re_bsqe *hdr_ptr;
-  struct bnxt_re_rdma *rdma_ptr;
-  struct bnxt_re_sge *sge_ptr;
-  uint32_t wqe_size;
-  uint32_t wqe_type;
-  uint32_t hdr_flags;
-
-  bool inline_msg = can_inline<Op>(size);
-
-  if constexpr (CheckSQ) {
-    poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
-  }
-
-  hdr_ptr  = (struct bnxt_re_bsqe*) get_hwqe(sq, 0);
-  rdma_ptr = (struct bnxt_re_rdma*) get_hwqe(sq, 1);
-  sge_ptr  = (struct bnxt_re_sge*)  get_hwqe(sq, 2);
-
-  /* Populate Header Segment */
-  wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
-  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
-  hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
-
-  if (inline_msg) {
-    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_INLINE);
-  }
-
-  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                    | wqe_type;
-  hdr.key_immd      = 0;
-  hdr.lhdr.qkey_len = size;
-
-  /* Populate RDMA Segment */
-  rdma.rva  = raddr;
-  rdma.rkey = rkey;
-
-  if (!inline_msg) {
-    /* Populate SG Segment */
-    sge.pa     = laddr;
-    sge.lkey   = lkey;
-    sge.length = size;
-  }
-
-  /* Write WQE to SQ */
-  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
-  memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
-
-  if (inline_msg) {
-    memcpy(sge_ptr, reinterpret_cast<void*>(laddr), size);
-  } else {
-    memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
-  }
-
-  /* Populate MSN Table */
-  fill_psns_for_msntbl(sq, size);
-
-  /* Update SQ Pointer */
-  incr_tail(sq, GDA_BNXT_WQE_SLOT_COUNT);
-}
-
-template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, bool CheckSQ>
-__device__ uint64_t* QueuePairBNXT::write_amo_wqe(
-    uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, bool signaled) {
-  static_assert(Fetch != AMOFetchType::NonBlocking);
-  static constexpr size_t size = sizeof(uint64_t);
-
-  struct bnxt_re_bsqe hdr;
-  struct bnxt_re_atomic amo;
-  struct bnxt_re_sge sge;
-  struct bnxt_re_bsqe *hdr_ptr;
-  struct bnxt_re_atomic *amo_ptr;
-  struct bnxt_re_sge *sge_ptr;
-  uint32_t wqe_size;
-  uint32_t wqe_type;
-  uint32_t hdr_flags;
-  uint64_t* atomic_laddr;
-
-  if constexpr (CheckSQ) {
-    poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
-  }
-
-  hdr_ptr = (struct bnxt_re_bsqe*)   get_hwqe(sq, 0);
-  amo_ptr = (struct bnxt_re_atomic*) get_hwqe(sq, 1);
-  sge_ptr = (struct bnxt_re_sge*)    get_hwqe(sq, 2);
-
-  /* Populate Header Segment */
-  wqe_type  = BNXT_RE_HDR_WT_MASK & static_cast<uint8_t>(Op);
-  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
-  hdr_flags = signaled ? (BNXT_RE_HDR_FLAGS_MASK & BNXT_RE_WR_FLAGS_SIGNALED) : 0;
-
-  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                    | wqe_type;
-  hdr.key_immd = rkey;
-  hdr.lhdr.rva = raddr;
-
-  /* Populate AMO Segment */
-  amo.swp_dt = swap_add;
-  amo.cmp_dt = compare;
-
-  /* Populate SG Segment - (Return address of atomic) */
-  atomic_laddr = get_atomic_addr<Fetch>();
-  if constexpr (Fetch == AMOFetchType::Blocking) {
-    atomic_laddr += (fetching_atomic_idx++ % FETCHING_ATOMIC_CNT);
-  }
-  sge.pa     = reinterpret_cast<uintptr_t>(atomic_laddr);
-  sge.lkey   = get_atomic_lkey<Fetch>();
-  sge.length = size;
-
-  /* Write WQE to SQ */
-  memcpy(hdr_ptr, &hdr, sizeof(struct bnxt_re_bsqe));
-  memcpy(amo_ptr, &amo, sizeof(struct bnxt_re_atomic));
-  memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
-
-  /* Populate MSN Table */
-  fill_psns_for_msntbl(sq, size);
-
-  /* Update SQ Pointer */
-  incr_tail(sq, GDA_BNXT_WQE_SLOT_COUNT);
-
-  return atomic_laddr;
 }
 
 }  // namespace rocshmem
