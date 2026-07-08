@@ -16,7 +16,7 @@ Can do multi-line comments with
 
 ## Find npi tasks
 
-use `scripts/find-npi-tasks.sh` to find tasks.
+Use `scripts/find-npi-tasks.sh` to find tasks.
 
 ## Extra Steps
 

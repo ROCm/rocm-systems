@@ -60,7 +60,7 @@ fi
 git ls-files -z -- "${pathspec[@]}" \
     ":(exclude)${self#"$repo_root"/}" \
     ":(exclude)${docs#"$repo_root"/}" \
-    | xargs -0 -r awk -v cfile="$c_file" -v cline="$c_line" -v creset="$c_reset" '
+    | xargs -0 awk -v cfile="$c_file" -v cline="$c_line" -v creset="$c_reset" '
 # A new file began while a multi-line task was still open: close it out first.
 FNR == 1 && open { flush() }
 

@@ -70,7 +70,7 @@ python -m amdisa [--multi NAME:XML ...] [--gen-isas] [--gen-dbt]
 When neither `--gen-isas` nor `--gen-dbt` is specified, both are
 generated.
 
-<!-- \NPI new ISA family: add a `<isa>:$MRISA/amdgpu_isa_<isa>.xml` entry to
+<!-- \NPI new ISA family: add a `<isa>:$MRISA/amdgpu_isa_<isa>.xml` entry to \
      each `--multi` invocation in the commands below. -->
 
 ## Regenerating everything
