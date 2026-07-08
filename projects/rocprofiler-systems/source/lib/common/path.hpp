@@ -73,19 +73,6 @@ inline namespace common
 {
 namespace path
 {
-inline std::vector<std::string>
-get_link_map(const char*, std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) },
-             bool _include_self = false) ROCPROFSYS_INTERNAL_API;
-
-inline auto
-get_link_map(const char* _name, bool&& _include_self,
-             std::vector<int>&& _open_modes = {
-                 (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-get_origin(const std::string&,
-           std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
-
 inline bool
 exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
@@ -112,18 +99,6 @@ is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-get_rocprofsys_root() ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-get_internal_libpath(const std::string& _lib) ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-get_internal_script_path() ROCPROFSYS_INTERNAL_API;
-
-inline std::string
-get_internal_libdir() ROCPROFSYS_INTERNAL_API;
 
 struct ROCPROFSYS_INTERNAL_API path_type
 {
@@ -343,108 +318,6 @@ is_text_file(const std::string& filename)
     }
 
     return true;
-}
-
-std::vector<std::string>
-get_link_map(const char* _name, std::vector<int>&& _open_modes, bool _include_self)
-{
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto _mode : _open_modes)
-    {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
-    }
-
-    auto _chain = std::vector<std::string>{};
-    if(_handle)
-    {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        // if include_self is false, start at next library
-        struct link_map* _next = (_include_self) ? _link_map : _link_map->l_next;
-        while(_next)
-        {
-            if(_next->l_name != nullptr && !std::string_view{ _next->l_name }.empty())
-            {
-                _chain.emplace_back(_next->l_name);
-            }
-            _next = _next->l_next;
-        }
-
-        if(_noload == false) dlclose(_handle);
-    }
-    return _chain;
-}
-
-auto
-get_link_map(const char* _name, bool&& _include_self, std::vector<int>&& _open_modes)
-{
-    return get_link_map(_name, std::move(_open_modes), _include_self);
-}
-
-std::string
-get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
-{
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto _mode : _open_modes)
-    {
-        _handle = dlopen(_filename.c_str(), _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle) break;
-    }
-
-    auto _chain = std::vector<std::string>{};
-    if(_handle)
-    {
-        char _buffer[PATH_MAX];
-        memset(_buffer, '\0', PATH_MAX * sizeof(char));
-        if(dlinfo(_handle, RTLD_DI_ORIGIN, &_buffer) == 0)
-        {
-            auto _origin = std::string{ _buffer };
-            if(exists(_origin)) return _origin;
-        }
-
-        if(_noload == false) dlclose(_handle);
-    }
-
-    return std::string{};
-}
-
-std::string
-get_rocprofsys_root()
-{
-    auto _exe_rp  = realpath("/proc/self/exe");
-    auto _exe_dir = dirname(_exe_rp);
-    if(_exe_dir.empty()) _exe_dir = "./";
-    return fmt::format("{}/{}", _exe_dir, "..");
-}
-
-std::string
-get_internal_libpath(const std::string& _lib)
-{
-    auto _root = get_rocprofsys_root();
-    for(const auto* libdir : { "lib", "lib64" })
-    {
-        auto _candidate = fmt::format("{}/{}/{}", _root, libdir, _lib);
-        if(exists(_candidate)) return _candidate;
-    }
-    return fmt::format("{}/lib/{}", _root, _lib);
-}
-
-std::string
-get_internal_script_path()
-{
-    auto _root = get_rocprofsys_root();
-    return _root + "/libexec/rocprofiler-systems";
-}
-
-std::string
-get_internal_libdir()
-{
-    return get_rocprofsys_root() + "/lib";
 }
 
 //--------------------------------------------------------------------------------------//
@@ -783,3 +656,9 @@ find_in_dirs(std::string_view name, const std::vector<std::string>& dirs,
 }  // namespace path
 }  // namespace common
 }  // namespace rocprofsys
+
+// Re-include the split-out modules so existing `common::path::` call sites that
+// include only "common/path.hpp" keep seeing these symbols (P1 zero-churn move).
+// Placed after the core definitions above; #pragma once breaks the include cycle.
+#include "common/install_layout.hpp"
+#include "common/link_map.hpp"

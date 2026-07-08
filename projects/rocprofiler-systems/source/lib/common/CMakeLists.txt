@@ -26,7 +26,9 @@ target_sources(
         ${CMAKE_CURRENT_BINARY_DIR}/defines.h
         ${CMAKE_CURRENT_SOURCE_DIR}/delimit.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/environment.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/install_layout.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/link_map.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/md5sum.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
