@@ -1062,6 +1062,30 @@ if(RJ_ENABLE_HIP_TESTS)
         "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_kmd${CMAKE_SHARED_LIBRARY_SUFFIX}"
     )
 
+    # Daemon-mode plugin coverage: reuse the logging-plugin config template, but
+    # bake a placeholder sink dir the test rewrites to a per-test temp directory
+    # at runtime. This exercises plugin loading inside the forked daemon
+    # (explicit-path resolution of librocjitsu_plugin_logging.so plus the single
+    # shared simulator image the CLI and plugin link), matching the contract the
+    # interposer path is already tested against.
+    set(RJ_TEST_SINK_DIR "__RJ_DAEMON_SINK_DIR__")
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+        ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+        @ONLY
+    )
+    if(RJ_INSTALL_TESTS)
+        install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/rocjitsu/configs
+        )
+    endif()
+    _rj_path_from_installed_test_bin(
+        _rj_installed_daemon_logging_config
+        "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+        "daemon_logging_config.json"
+    )
+
     add_executable(daemon_test daemon_test.cpp)
     target_compile_definitions(
         daemon_test
@@ -1080,6 +1104,9 @@ if(RJ_ENABLE_HIP_TESTS)
             RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
             RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
             RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
+            RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
+            RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
+            RJ_INSTALLED_DAEMON_LOGGING_CONFIG="${_rj_installed_daemon_logging_config}"
     )
     target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
     add_dependencies(
@@ -1112,6 +1139,18 @@ if(RJ_ENABLE_HIP_TESTS)
                 "--gtest_filter=${TC}"
         )
     endforeach()
+
+    # Daemon-mode plugin loading: the logging plugin is hosted by the daemon and
+    # must produce its dispatch log while executing a client kernel.
+    rj_add_test(
+        NAME DaemonTest.LoggingPlugin
+        COMMAND daemon_test --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
+        TIMEOUT 120
+        LABELS daemon
+        INSTALL_COMMAND
+            "bin/daemon_test"
+            "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
+    )
 
     if(RCCL_LIB)
         set(RJ_RCCL_TESTS

@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -55,6 +56,7 @@ struct TestPaths {
   std::string hip_vector_add_bin = RJ_HIP_VECTOR_ADD_BIN;
   std::string hip_memcpy_bin = RJ_HIP_MEMCPY_BIN;
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
+  std::string daemon_logging_config = RJ_DAEMON_LOGGING_CONFIG;
 };
 
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
@@ -91,6 +93,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_VECTOR_ADD_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_MEMCPY_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_LOGGING_CONFIG).string(),
   };
 }
 
@@ -121,8 +124,15 @@ const char *hip_memcpy_bin() { return test_paths().hip_memcpy_bin.c_str(); }
 
 const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
+const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
+
 class DaemonTest : public ::testing::Test {
 protected:
+  // Config the daemon is launched with. The base fixture uses the plain KMD
+  // config; subclasses can synthesize a config (e.g. to enable plugins) into
+  // tmp_dir_ and return its path.
+  virtual std::string daemon_config_for_test() { return daemon_config(); }
+
   void SetUp() override {
     // Each test gets its own unique subdirectory under XDG_RUNTIME_DIR
     // for the daemon socket, preventing conflicts when tests run in parallel.
@@ -133,12 +143,15 @@ protected:
     tmp_dir_ = tmpl;
     sock_path_ = tmp_dir_ + "/rocjitsu/daemon.sock";
 
+    ASSERT_NO_FATAL_FAILURE(config_path_ = daemon_config_for_test());
+    ASSERT_FALSE(config_path_.empty()) << "daemon config unavailable";
+
     daemon_pid_ = fork();
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
-      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config(), nullptr);
+      execl(daemon_bin(), daemon_bin(), "--daemon", "--config", config_path_.c_str(), nullptr);
       _exit(127);
     }
 
@@ -252,6 +265,7 @@ protected:
   pid_t daemon_pid_ = -1;
   std::string tmp_dir_;
   std::string sock_path_;
+  std::string config_path_;
 };
 
 // --- hip_vector_add_test ---
@@ -293,6 +307,65 @@ TEST_F(DaemonTest, TwoIndependentClients) {
 
   EXPECT_EQ(r1.exit_code, 0) << "Client 1 (vector_add):\n" << r1.output;
   EXPECT_EQ(r2.exit_code, 0) << "Client 2 (memcpy):\n" << r2.output;
+}
+
+// --- Daemon-mode plugin coverage ---
+//
+// Plugins declared in the config load and run inside the forked daemon, not the
+// interposer. The daemon resolves librocjitsu_plugin_logging.so by explicit
+// path from the CLI's own directory and shares the single simulator image the
+// CLI and plugin both link (librocjitsu_core.so + libsimdojo.so), so this
+// exercises the same shared-library/discovery contract as the interposer path.
+class DaemonPluginTest : public DaemonTest {
+protected:
+  // Rewrite the logging-plugin config template's placeholder sink dir to a
+  // private, writable directory for this test, then run the daemon on it.
+  std::string daemon_config_for_test() override {
+    sink_dir_ = tmp_dir_ + "/plugin_sink";
+    std::error_code ec;
+    std::filesystem::create_directories(sink_dir_, ec);
+
+    std::ifstream in(daemon_logging_config());
+    if (!in.good()) {
+      ADD_FAILURE() << "cannot open daemon logging config: " << daemon_logging_config();
+      return {};
+    }
+    std::string cfg{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+
+    const std::string token = RJ_DAEMON_LOGGING_SINK_TOKEN;
+    for (size_t pos = cfg.find(token); pos != std::string::npos; pos = cfg.find(token, pos)) {
+      cfg.replace(pos, token.size(), sink_dir_);
+      pos += sink_dir_.size();
+    }
+
+    std::string out_path = tmp_dir_ + "/daemon_logging_config.json";
+    std::ofstream out(out_path);
+    out << cfg;
+    if (!out.good()) {
+      ADD_FAILURE() << "cannot write daemon logging config: " << out_path;
+      return {};
+    }
+    return out_path;
+  }
+
+  std::string sink_dir_;
+};
+
+TEST_F(DaemonPluginTest, LoggingPluginDispatchLogged) {
+  auto r = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult");
+  ASSERT_EQ(r.exit_code, 0) << r.output;
+
+  // The logging plugin runs in the daemon and writes <sink_dir>/logging.log as
+  // it executes the client's kernel dispatch. Its presence and contents prove
+  // the plugin loaded and ran in daemon mode.
+  std::string log = sink_dir_ + "/logging.log";
+  ASSERT_TRUE(std::filesystem::exists(log))
+      << "daemon did not produce plugin log at " << log << "\n"
+      << r.output;
+  std::ifstream f(log);
+  std::string contents{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+  EXPECT_NE(contents.find("dispatch"), std::string::npos) << "log:\n" << contents;
+  EXPECT_NE(contents.find("vgprs="), std::string::npos) << "log:\n" << contents;
 }
 
 // --- RCCL collective tests (2-GPU daemon) ---
