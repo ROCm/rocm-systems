@@ -14,7 +14,8 @@
     "cts.gfx950.fpsan.fpsan_amdgcn_ldexp_test",
     "cts.gfx950.fpsan.fpsan_amdgcn_math_extra_test",
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_scaled_test",
-    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test"
+    "cts.gfx950.fpsan.fpsan_mfma_gfx950_smfmac_test",
+    "cts.gfx950.fpsan.fpsan_xlane_test"
   ],
   "kernels": []
 }
