@@ -429,10 +429,6 @@ rocprofiler_add_integration_execute_test(
         "--selected-regions and --att-consecutive-kernels are mutually exclusive")
 
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
-set(ATT_NO_INTERCEPT_DISABLED ${IS_DISABLED})
-if(ROCPROFILER_DISABLE_ATT_QUICK_SCAN)
-    set(ATT_NO_INTERCEPT_DISABLED ON)
-endif()
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-no-intercept
@@ -443,7 +439,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS thread-trace-test-app
     LABELS "integration-tests;thread-trace"
     TIMEOUT 45
-    DISABLED ${ATT_NO_INTERCEPT_DISABLED}
+    DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
@@ -456,7 +452,7 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_att_no_intercept_target_kernel
     TIMEOUT 45
     LABELS "integration-tests;thread-trace"
-    DISABLED ${ATT_NO_INTERCEPT_DISABLED}
+    DISABLED ${IS_DISABLED}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
