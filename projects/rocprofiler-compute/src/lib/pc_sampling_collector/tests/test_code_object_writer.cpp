@@ -4,6 +4,34 @@
 
 #include "nlohmann/json.hpp"
 
+#include <string>
+#include <string_view>
+
+namespace
+{
+template<typename Operation>
+void expect_runtime_throw(Operation operation)
+{
+    EXPECT_THROW(operation(), std::runtime_error);
+}
+
+void expect_kernel_json(const nlohmann::json& kernel, uint64_t id, std::string_view name)
+{
+    EXPECT_EQ(kernel["kernel_id"].get<uint64_t>(), id);
+    EXPECT_EQ(kernel["name"].get<std::string>(), std::string{name});
+}
+
+void expect_instruction_json(const nlohmann::json&                          instruction,
+                             const rocprofiler_compute_tool::instruction_t& expected)
+{
+    EXPECT_EQ(instruction["name"], expected.name);
+    EXPECT_EQ(instruction["comment"], expected.comment);
+    EXPECT_EQ(instruction["virtual_address"], expected.virtual_address);
+    EXPECT_EQ(instruction["code_obj_offset"], expected.code_obj_offset);
+    EXPECT_EQ(instruction["size"], expected.size);
+}
+}  // namespace
+
 TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
 {
     const auto& result = m_writer.get_result();
@@ -26,45 +54,45 @@ TEST_F(test_code_object_writer_t, ProvidedCodeObject_IsNotEmpty)
 TEST_F(test_code_object_writer_t, ProvidedStartCodeObjWithoutEnd_Throws)
 {
     m_writer.start_code_obj(0);
-    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.get_result(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedEndCodeObjWithoutStart_Throws)
 {
-    EXPECT_THROW(m_writer.end_code_obj(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.end_code_obj(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedTwoStartCodeObjCalls_Throws)
 {
     m_writer.start_code_obj(0);
-    EXPECT_THROW(m_writer.start_code_obj(1), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.start_code_obj(1); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedTwoEndCodeObjCalls_Throws)
 {
     m_writer.start_code_obj(0);
     m_writer.end_code_obj();
-    EXPECT_THROW(m_writer.end_code_obj(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.end_code_obj(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedStartSymbolWithoutEnd_Throws)
 {
     m_writer.start_code_obj(0);
     m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{});
-    EXPECT_THROW(m_writer.get_result(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.get_result(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedEndSymbolWithoutStart_Throws)
 {
     m_writer.start_code_obj(0);
-    EXPECT_THROW(m_writer.end_symbol(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.end_symbol(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedTwoStartSymbolCalls_Throws)
 {
     m_writer.start_code_obj(0);
     m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{});
-    EXPECT_THROW(m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{}), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedTwoEndSymbolCalls_Throws)
@@ -72,25 +100,25 @@ TEST_F(test_code_object_writer_t, ProvidedTwoEndSymbolCalls_Throws)
     m_writer.start_code_obj(0);
     m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{});
     m_writer.end_symbol();
-    EXPECT_THROW(m_writer.end_symbol(), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.end_symbol(); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedSymbolCallWithoutStartCodeObj_Throws)
 {
-    EXPECT_THROW(m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{}), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteInstructionWithoutAnyScope_Throws)
 {
-    EXPECT_THROW(m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}),
-                 std::runtime_error);
+    expect_runtime_throw([&]()
+                         { m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteInstructionInsideCodeObjWithoutSymbol_Throws)
 {
     m_writer.start_code_obj(0);
-    EXPECT_THROW(m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}),
-                 std::runtime_error);
+    expect_runtime_throw([&]()
+                         { m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndSymbol_Throws)
@@ -98,8 +126,8 @@ TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndSymbol_Throws)
     m_writer.start_code_obj(0);
     m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{});
     m_writer.end_symbol();
-    EXPECT_THROW(m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}),
-                 std::runtime_error);
+    expect_runtime_throw([&]()
+                         { m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndCodeObj_Throws)
@@ -108,20 +136,20 @@ TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndCodeObj_Throws
     m_writer.start_symbol(rocprofiler_compute_tool::symbol_t{});
     m_writer.end_symbol();
     m_writer.end_code_obj();
-    EXPECT_THROW(m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}),
-                 std::runtime_error);
+    expect_runtime_throw([&]()
+                         { m_writer.write_instruction(rocprofiler_compute_tool::instruction_t{}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteKernelWithoutAnyScope_Throws)
 {
-    EXPECT_THROW(m_writer.write_kernel(1, "kernel0"), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.write_kernel(1, "kernel0"); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteKernelAfterEndCodeObj_Throws)
 {
     m_writer.start_code_obj(0);
     m_writer.end_code_obj();
-    EXPECT_THROW(m_writer.write_kernel(1, "kernel0"), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.write_kernel(1, "kernel0"); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
@@ -172,8 +200,7 @@ TEST_F(test_code_object_writer_t, ProvidedKernel_SerializesItInsideCodeObj)
     const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& kernels = json["code_objects"][0]["kernels"];
     ASSERT_EQ(kernels.size(), 1);
-    EXPECT_EQ(kernels[0]["kernel_id"].get<uint64_t>(), kernel_id);
-    EXPECT_EQ(kernels[0]["name"].get<std::string>(), name);
+    expect_kernel_json(kernels[0], kernel_id, name);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedMultipleKernels_SerializesAllInOrder)
@@ -186,10 +213,8 @@ TEST_F(test_code_object_writer_t, ProvidedMultipleKernels_SerializesAllInOrder)
     const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& kernels = json["code_objects"][0]["kernels"];
     ASSERT_EQ(kernels.size(), 2);
-    EXPECT_EQ(kernels[0]["kernel_id"].get<uint64_t>(), 42);
-    EXPECT_EQ(kernels[0]["name"].get<std::string>(), "kernel0");
-    EXPECT_EQ(kernels[1]["kernel_id"].get<uint64_t>(), 43);
-    EXPECT_EQ(kernels[1]["name"].get<std::string>(), "kernel1");
+    expect_kernel_json(kernels[0], 42, "kernel0");
+    expect_kernel_json(kernels[1], 43, "kernel1");
 }
 
 TEST_F(test_code_object_writer_t, ProvidedKernelsInDifferentCodeObjs_SerializesUnderRespectiveOwners)
@@ -208,15 +233,12 @@ TEST_F(test_code_object_writer_t, ProvidedKernelsInDifferentCodeObjs_SerializesU
 
     EXPECT_EQ(json["code_objects"][0]["id"], 100);
     ASSERT_EQ(json["code_objects"][0]["kernels"].size(), 2);
-    EXPECT_EQ(json["code_objects"][0]["kernels"][0]["kernel_id"].get<uint64_t>(), 42);
-    EXPECT_EQ(json["code_objects"][0]["kernels"][0]["name"].get<std::string>(), "kernel0");
-    EXPECT_EQ(json["code_objects"][0]["kernels"][1]["kernel_id"].get<uint64_t>(), 43);
-    EXPECT_EQ(json["code_objects"][0]["kernels"][1]["name"].get<std::string>(), "kernel1");
+    expect_kernel_json(json["code_objects"][0]["kernels"][0], 42, "kernel0");
+    expect_kernel_json(json["code_objects"][0]["kernels"][1], 43, "kernel1");
 
     EXPECT_EQ(json["code_objects"][1]["id"], 200);
     ASSERT_EQ(json["code_objects"][1]["kernels"].size(), 1);
-    EXPECT_EQ(json["code_objects"][1]["kernels"][0]["kernel_id"].get<uint64_t>(), 44);
-    EXPECT_EQ(json["code_objects"][1]["kernels"][0]["name"].get<std::string>(), "kernel2");
+    expect_kernel_json(json["code_objects"][1]["kernels"][0], 44, "kernel2");
 }
 
 TEST_F(test_code_object_writer_t, ProvidedSymbol_SerializesItInsideCodeObj)
@@ -302,11 +324,7 @@ TEST_F(test_code_object_writer_t, ProvidedInstruction_SerializesItInsideSymbol)
     const auto  json         = nlohmann::json::parse(m_writer.get_result());
     const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]["name"], m_inst0.name);
-    EXPECT_EQ(instructions[0]["comment"], m_inst0.comment);
-    EXPECT_EQ(instructions[0]["virtual_address"], m_inst0.virtual_address);
-    EXPECT_EQ(instructions[0]["code_obj_offset"], m_inst0.code_obj_offset);
-    EXPECT_EQ(instructions[0]["size"], m_inst0.size);
+    expect_instruction_json(instructions[0], m_inst0);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedKernelAndInstruction_PreservesInstructionOutput)
@@ -330,11 +348,7 @@ TEST_F(test_code_object_writer_t, ProvidedKernelAndInstruction_PreservesInstruct
 
     const auto& instructions = symbols[0]["instructions"];
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]["name"], m_inst0.name);
-    EXPECT_EQ(instructions[0]["comment"], m_inst0.comment);
-    EXPECT_EQ(instructions[0]["virtual_address"], m_inst0.virtual_address);
-    EXPECT_EQ(instructions[0]["code_obj_offset"], m_inst0.code_obj_offset);
-    EXPECT_EQ(instructions[0]["size"], m_inst0.size);
+    expect_instruction_json(instructions[0], m_inst0);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedMultipleInstructions_SerializesAllInOrder)
@@ -349,8 +363,8 @@ TEST_F(test_code_object_writer_t, ProvidedMultipleInstructions_SerializesAllInOr
     const auto  json         = nlohmann::json::parse(m_writer.get_result());
     const auto& instructions = json["code_objects"][0]["symbols"][0]["instructions"];
     ASSERT_EQ(instructions.size(), 2);
-    EXPECT_EQ(instructions[0]["name"], m_inst0.name);
-    EXPECT_EQ(instructions[1]["name"], m_inst1.name);
+    expect_instruction_json(instructions[0], m_inst0);
+    expect_instruction_json(instructions[1], m_inst1);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_SerializesUnderRespectiveOwners)
@@ -380,5 +394,5 @@ TEST_F(test_code_object_writer_t, ProvidedInstructionsInDifferentSymbols_Seriali
 
 TEST_F(test_code_object_writer_t, ProvidedEmptyOutputFilePath_Throws)
 {
-    EXPECT_THROW(m_writer.flush(""), std::runtime_error);
+    expect_runtime_throw([&]() { m_writer.flush(""); });
 }

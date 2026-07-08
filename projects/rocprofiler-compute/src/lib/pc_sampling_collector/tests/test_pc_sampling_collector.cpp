@@ -27,6 +27,34 @@ std::set<std::filesystem::path> collect_source_paths_from_comment(std::string co
     collector->finalize(*writer);
     return collector->get_source_paths();
 }
+
+void expect_kernel(const mock_code_object_writer_t::kernel_description_t& kernel,
+                   size_t                                                 code_object_id,
+                   uint64_t                                               kernel_id,
+                   const std::string&                                     name)
+{
+    EXPECT_EQ(kernel.code_object_id, code_object_id);
+    EXPECT_EQ(kernel.kernel_id, kernel_id);
+    EXPECT_EQ(kernel.name, name);
+}
+
+struct source_path_test_params_t
+{
+    std::string                     test_name;
+    std::string                     comment;
+    std::set<std::filesystem::path> expected_paths;
+    std::string                     separator = " -> ";
+};
+
+class test_pc_sampling_collector_source_paths_t
+    : public ::testing::TestWithParam<source_path_test_params_t>
+{
+};
+
+std::string source_path_test_name(const ::testing::TestParamInfo<source_path_test_params_t>& info)
+{
+    return info.param.test_name;
+}
 }  // namespace
 
 TEST_F(test_pc_sampling_collector_t, ProvidedFileCodeObject_PassesItToDecode)
@@ -78,12 +106,8 @@ TEST_F(test_pc_sampling_collector_t, ProvidedKernelSymbols_WritesThemUnderCodeOb
 
     const auto& kernels = m_writer->get_kernel_descriptions();
     ASSERT_EQ(kernels.size(), 2);
-    EXPECT_EQ(kernels[0].code_object_id, m_file_info.code_object_id);
-    EXPECT_EQ(kernels[0].kernel_id, 99);
-    EXPECT_EQ(kernels[0].name, "kernel0");
-    EXPECT_EQ(kernels[1].code_object_id, m_mem_info.code_object_id);
-    EXPECT_EQ(kernels[1].kernel_id, 100);
-    EXPECT_EQ(kernels[1].name, "kernel1");
+    expect_kernel(kernels[0], m_file_info.code_object_id, 99, "kernel0");
+    expect_kernel(kernels[1], m_mem_info.code_object_id, 100, "kernel1");
 }
 
 TEST_F(test_pc_sampling_collector_t, ProvidedOrphanKernelSymbol_DoesNotWriteIt)
@@ -117,15 +141,9 @@ TEST_F(test_pc_sampling_collector_t, ProvidedMultipleKernelSymbols_PreservesOrde
 
     const auto& kernels = m_writer->get_kernel_descriptions();
     ASSERT_EQ(kernels.size(), 3);
-    EXPECT_EQ(kernels[0].code_object_id, m_file_info.code_object_id);
-    EXPECT_EQ(kernels[0].kernel_id, 99);
-    EXPECT_EQ(kernels[0].name, "kernel0");
-    EXPECT_EQ(kernels[1].code_object_id, m_file_info.code_object_id);
-    EXPECT_EQ(kernels[1].kernel_id, 100);
-    EXPECT_EQ(kernels[1].name, "kernel1");
-    EXPECT_EQ(kernels[2].code_object_id, m_file_info.code_object_id);
-    EXPECT_EQ(kernels[2].kernel_id, 101);
-    EXPECT_EQ(kernels[2].name, "kernel2");
+    expect_kernel(kernels[0], m_file_info.code_object_id, 99, "kernel0");
+    expect_kernel(kernels[1], m_file_info.code_object_id, 100, "kernel1");
+    expect_kernel(kernels[2], m_file_info.code_object_id, 101, "kernel2");
 }
 
 TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
@@ -188,80 +206,11 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
     EXPECT_THROW(m_pc_sampling_collector->finalize(*m_writer), std::runtime_error);
 }
 
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedEmptyComment_ReturnsNoPaths)
+TEST_P(test_pc_sampling_collector_source_paths_t, ReturnsExpectedPaths)
 {
-    const auto paths = collect_source_paths_from_comment("");
-    EXPECT_TRUE(paths.empty());
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedSingleFileLine_ReturnsFilePath)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:42");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedMultipleFrames_ReturnsAllFilePaths)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 -> header.h:8");
-    const std::set<std::filesystem::path> expected = {"header.h", "kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedInjectedFrameSeparator_ReturnsAllFilePaths)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 | header.h:8", " | ");
-    const std::set<std::filesystem::path> expected = {"header.h", "kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedUnknownLineToken_ReturnsFilePath)
-{
-    const auto                            paths = collect_source_paths_from_comment("kernel.cpp:?");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedNoColonFrame_ReturnsWholeFrame)
-{
-    const auto                            paths = collect_source_paths_from_comment("kernel.cpp");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedTrailingColon_ReturnsWholeFrame)
-{
-    const auto                            paths = collect_source_paths_from_comment("kernel.cpp:");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp:"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedDuplicateFrames_ReturnsDeduplicatedPaths)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 -> kernel.cpp:42");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedPathWithDirectories_ReturnsDirectoryPath)
-{
-    const auto paths = collect_source_paths_from_comment("/tmp/project/include/header.h:8");
-    const std::set<std::filesystem::path> expected = {"/tmp/project/include/header.h"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedTrailingSeparator_IgnoresEmptyFrame)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:42 -> ");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp"};
-    EXPECT_EQ(paths, expected);
-}
-
-TEST(test_pc_sampling_collector_source_paths_t, ProvidedNonNumericColonSuffix_ReturnsWholeFrame)
-{
-    const auto paths = collect_source_paths_from_comment("kernel.cpp:label");
-    const std::set<std::filesystem::path> expected = {"kernel.cpp:label"};
-    EXPECT_EQ(paths, expected);
+    const auto& params = GetParam();
+    const auto  paths  = collect_source_paths_from_comment(params.comment, params.separator);
+    EXPECT_EQ(paths, params.expected_paths);
 }
 
 TEST_F(test_pc_sampling_collector_t, ProvidedSymbolsAndInstructions_CollectsDeduplicatedSourcePaths)
@@ -308,3 +257,25 @@ void test_pc_sampling_collector_t::SetUp()
     m_file_info.load_base      = 0x1000;
     m_file_info.load_size      = 0x2000;
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    SourcePaths,
+    test_pc_sampling_collector_source_paths_t,
+    ::testing::Values(
+        source_path_test_params_t{"EmptyComment", "", {}},
+        source_path_test_params_t{"SingleFileLine", "kernel.cpp:42", {"kernel.cpp"}},
+        source_path_test_params_t{"MultipleFrames", "kernel.cpp:42 -> header.h:8", {"header.h", "kernel.cpp"}},
+        source_path_test_params_t{"InjectedFrameSeparator",
+                                  "kernel.cpp:42 | header.h:8",
+                                  {"header.h", "kernel.cpp"},
+                                  " | "},
+        source_path_test_params_t{"UnknownLineToken", "kernel.cpp:?", {"kernel.cpp"}},
+        source_path_test_params_t{"NoColonFrame", "kernel.cpp", {"kernel.cpp"}},
+        source_path_test_params_t{"DuplicateFrames", "kernel.cpp:42 -> kernel.cpp:42", {"kernel.cpp"}},
+        source_path_test_params_t{"PathWithDirectories",
+                                  "/tmp/project/include/header.h:8",
+                                  {"/tmp/project/include/header.h"}},
+        source_path_test_params_t{"TrailingColon", "kernel.cpp:", {"kernel.cpp:"}},
+        source_path_test_params_t{"TrailingSeparator", "kernel.cpp:42 -> ", {"kernel.cpp"}},
+        source_path_test_params_t{"NonNumericColonSuffix", "kernel.cpp:label", {"kernel.cpp:label"}}),
+    source_path_test_name);

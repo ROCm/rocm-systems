@@ -7,6 +7,15 @@
 
 using namespace rocprofiler_compute_tool;
 
+namespace
+{
+std::string kernel_symbol_register_test_name(
+    const ::testing::TestParamInfo<kernel_symbol_register_test_params_t>& info)
+{
+    return info.param.kernel_name == nullptr ? "NullName" : "DemangledName";
+}
+}  // namespace
+
 TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
     m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
@@ -167,13 +176,7 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
 
 TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
 {
-    auto collector           = std::make_shared<MockPcSamplingCollector>();
-    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
-    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
-                                                     "unused.json",
-                                                     "unused_sources",
-                                                     collector,
-                                                     snapshotter};
+    auto& collector = enable_pc_sampling();
 
     rocprofiler_callback_tracing_record_t                record  = {};
     rocprofiler_callback_tracing_code_object_load_data_t payload = {};
@@ -184,76 +187,24 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
 
     m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 
-    EXPECT_EQ(collector->load_count, 1);
+    EXPECT_EQ(collector.load_count, 1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedKernelSymbolRegisterWithPcSamplingEnabled_ForwardsToCollector)
+TEST_P(TestSdkCallbacksKernelSymbolRegister, ProvidedKernelSymbolRegister_ForwardsToCollector)
 {
     constexpr size_t   code_object_id = 123;
     constexpr uint64_t kernel_id      = 10;
-    const std::string  kernel_name    = "_Z9my_kernelv";
+    const auto         params         = GetParam();
 
-    auto collector           = std::make_shared<MockPcSamplingCollector>();
-    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
-    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
-                                                     "unused.json",
-                                                     "unused_sources",
-                                                     collector,
-                                                     snapshotter};
+    auto& collector = enable_pc_sampling();
 
-    rocprofiler_callback_tracing_record_t                                  record  = {};
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
-    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
-    record.payload   = &payload;
+    invoke_kernel_symbol_register(code_object_id, kernel_id, params.kernel_name);
 
-    payload.code_object_id = code_object_id;
-    payload.kernel_id      = kernel_id;
-    payload.kernel_name    = kernel_name.c_str();
-
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
-
-    const auto& calls = collector->get_kernel_symbol_register_calls();
+    const auto& calls = collector.get_kernel_symbol_register_calls();
     ASSERT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].code_object_id, code_object_id);
     EXPECT_EQ(calls[0].kernel_id, kernel_id);
-    EXPECT_EQ(calls[0].name, "my_kernel");
-    ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
-    EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id);
-}
-
-TEST_F(TestSdkCallbacks, ProvidedKernelSymbolRegisterWithNullName_ForwardsEmptyName)
-{
-    constexpr size_t   code_object_id = 123;
-    constexpr uint64_t kernel_id      = 10;
-
-    auto collector           = std::make_shared<MockPcSamplingCollector>();
-    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
-    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
-                                                     "unused.json",
-                                                     "unused_sources",
-                                                     collector,
-                                                     snapshotter};
-
-    rocprofiler_callback_tracing_record_t                                  record  = {};
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
-    record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
-    record.kind      = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
-    record.payload   = &payload;
-
-    payload.code_object_id = code_object_id;
-    payload.kernel_id      = kernel_id;
-    payload.kernel_name    = nullptr;
-
-    m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
-
-    const auto& calls = collector->get_kernel_symbol_register_calls();
-    ASSERT_EQ(calls.size(), 1);
-    EXPECT_EQ(calls[0].code_object_id, code_object_id);
-    EXPECT_EQ(calls[0].kernel_id, kernel_id);
-    EXPECT_TRUE(calls[0].name.empty());
+    EXPECT_EQ(calls[0].name, params.expected_name);
     ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
     EXPECT_EQ(*m_tool_data->target_kernel_ids.cbegin(), kernel_id);
 }
@@ -281,6 +232,18 @@ void TestSdkCallbacks::SetUp()
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
     m_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(m_sdk_wrapper);
     m_tool_data     = std::make_unique<tool_data_t>();
+}
+
+MockPcSamplingCollector& TestSdkCallbacks::enable_pc_sampling()
+{
+    m_pc_sampling_collector  = std::make_shared<MockPcSamplingCollector>();
+    m_source_snapshotter     = std::make_shared<MockSourceSnapshotter>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused.json",
+                                                     "unused_sources",
+                                                     m_pc_sampling_collector,
+                                                     m_source_snapshotter};
+    return *m_pc_sampling_collector;
 }
 
 uint64_t TestSdkCallbacks::dispatch_kernel_with_dispatch_info(const kernel_dispatch_info_t& dispatch_info,
@@ -341,6 +304,13 @@ void TestSdkCallbacks::invoke_record_callback(uint64_t           counter_id,
 
 void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name)
 {
+    invoke_kernel_symbol_register(0, kernel_id, kernel_name.c_str());
+}
+
+void TestSdkCallbacks::invoke_kernel_symbol_register(size_t      code_object_id,
+                                                     uint64_t    kernel_id,
+                                                     const char* kernel_name)
+{
     rocprofiler_callback_tracing_record_t                                  record  = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
     record.phase     = ROCPROFILER_CALLBACK_PHASE_LOAD;
@@ -348,8 +318,9 @@ void TestSdkCallbacks::invoke_tool_tracing_callback(uint64_t kernel_id, const st
     record.operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
     record.payload   = &payload;
 
-    payload.kernel_id   = kernel_id;
-    payload.kernel_name = kernel_name.c_str();
+    payload.code_object_id = code_object_id;
+    payload.kernel_id      = kernel_id;
+    payload.kernel_name    = kernel_name;
     m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 }
 
@@ -410,6 +381,14 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
                       rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
+
+//////////////////////////////////////////////////////////////////////////
+/// TestSdkCallbacksKernelSymbolRegister
+INSTANTIATE_TEST_SUITE_P(KernelSymbolRegister,
+                         TestSdkCallbacksKernelSymbolRegister,
+                         ::testing::Values(kernel_symbol_register_test_params_t{"_Z9my_kernelv", "my_kernel"},
+                                           kernel_symbol_register_test_params_t{nullptr, ""}),
+                         kernel_symbol_register_test_name);
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelFiltering
