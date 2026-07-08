@@ -1391,16 +1391,25 @@ class TestAmdSmiCli(unittest.TestCase):
                 data[i][key] = [data1, data2, abs(data1 - data2), unit]
         return data
 
-    def _compare_monitor_metric_data(self, component, data):
+    def _compare_monitor_metric_data(self, component, data, data_baseline=None):
         failures = []
         successes = []
+        diff_percent = 0.1
         for i in range(len(data)):
             msg_title = f"Monitor to {component}: gpu={i}"
             msg_header = f"{'key':>20s} ({'Unit':>4s}): {'Monitor':>8s} {component:>8s}  {'Diff':>8s}   {'Threshold':>8s} {'Status':>7s}"
             for key in data[i]:
                 if data[i][key][3] == "N/A":
                     continue
-                max_diff = max(data[i][key][0], data[i][key][1]) * 0.1
+                # Calculate measurement tolerance
+                if data_baseline is not None:
+                    max_diff = data_baseline[i][key][2] * diff_percent
+                else:
+                    max_diff = data[i][key][2] * diff_percent
+                # Allow for some measurement error
+                if max_diff < 1.0:
+                    max_diff = 1.0
+
                 if data[i][key][2] > max_diff:
                     status = "Failure"
                     compare = ">"
@@ -1440,7 +1449,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
             # Output to std_out
             if verbose == common.VERBOSITY_VERBOSE:
-                self.common.print(f"{msg}")
+                self.common.print(msg)
 
             # Output to std_err
             if fail_on_results:
@@ -1602,43 +1611,89 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor with workload"
         self.common.print(msg)
 
+        self.rvs_exe = "rvs"
+        self.rvs_config_folder = "/opt/rocm/share/rocm-validation-suite/conf"
+        # name, options, ramp_time
+        self.rvs_configs = []
+        self.rvs_configs.append(("iet_single.conf", "", 5.0))
+        self.rvs_configs.append(("mem.conf", "--numTimes 3", 1.0))
+
         # Check for workload generator, skip test if not found
-        cmd = "rvs --version"
+        cmd = f"{self.rvs_exe} --version"
         (rc, _, _) = self.util.RunCmdSync(cmd)
         if rc != 0:
             msg = f"{self.tab}rvs not found, skipping test_monitor_with_workload"
             self.common.print(msg)
             self.skipTest(msg)
+        # Check for workload generator configuration scripts, skip test if not found
+        msgs = []
+        for conf_file, _, ramp_time in self.rvs_configs:
+            conf_path = f"{self.rvs_config_folder}/{conf_file}"
+            if not os.path.exists(conf_path):
+                if len(msgs) == 0:
+                    msgs.append(f"{self.tab}Skipping test_monitor_with_workload")
+                msgs.append(f"\n{self.tab}rvs conf {conf_file} not found")
+        if len(msgs) > 0:
+            self.common.print(msgs)
+            self.skipTest(msgs)
 
-        # Get baseline results
+        # Get first baseline results
         cmd_monitor = f"amd-smi monitor {self.monitor_args} --json"
         (rc, data_baseline, std_err) = self.util.RunCmdSync(cmd_monitor)
         if rc != 0:
             msg = f"{self.tab}Monitor with workload test failed, rc={rc}, std_err={std_err}"
             self.common.print(msg)
             self.fail(msg)
-        monitor_baseline = json.loads(data_baseline)
+        monitor_baseline1 = json.loads(data_baseline)
+
+        # Get second baseline results
+        cmd_monitor = f"amd-smi monitor {self.monitor_args} --json"
+        (rc, data_baseline, std_err) = self.util.RunCmdSync(cmd_monitor)
+        if rc != 0:
+            msg = f"{self.tab}Monitor with workload test failed, rc={rc}, std_err={std_err}"
+            self.common.print(msg)
+            self.fail(msg)
+        monitor_baseline2 = json.loads(data_baseline)
+
+        # Get differences between the two baselines
+        data_baseline = self._get_monitor_metric_data(
+            monitor_baseline1, monitor_baseline2, None, exclude=True
+        )
 
         # Monitor has a delayed start that allows the workload time to initialize and start running.
         # Workload is started immediately and times out after workload has had time to finish
-        time_out = 5.0
-        time_start_delta = 2.0
-        cmd_workload = "rvs --json"
-        cmds = [
-            ("monitor", cmd_monitor, time_start_delta, time_out),
-            ("workload", cmd_workload, 0.0, time_start_delta + time_out + 1.0),
-        ]
+        max_ramp_time = 0.0
+        for _, _, ramp_time in self.rvs_configs:
+            max_ramp_time = max(max_ramp_time, ramp_time)
+        time_out = max_ramp_time + 5.0
+        time_start_delta = max_ramp_time + 1.0
+
+        cmds = [("monitor", cmd_monitor, time_start_delta, time_out)]
+        time_start_delta = 0.0
+        for index, configs in enumerate(self.rvs_configs):
+            conf_file, options, ramp_time = configs
+            conf_path = f"{self.rvs_config_folder}/{conf_file}"
+            cmd_workload = f"{self.rvs_exe} --config {conf_path} {options} --json --quiet"
+            cmds.append((f"workload_{index}", cmd_workload, time_start_delta, time_out))
         worker_datas = self._multiprocess_commands(cmds)
 
         # Data from monitor_baseline and monitor_workload should not be the same
-        if worker_datas[0][0] == "monitor":
-            name, pid, time_stamp, data = worker_datas[0]
-        else:
-            name, pid, time_stamp, data = worker_datas[1]
-        monitor_workload = json.loads(data)
+        monitor_workload = None
+        for worker_data in worker_datas:
+            if worker_data[0] == "monitor":
+                name, pid, time_stamp, data = worker_data
+                monitor_workload = json.loads(data)
+        if monitor_workload is None:
+            msg = f"{self.tab}Monitor with workload test failed, could not get monitor data"
+            self.common.print(msg)
+            self.fail(msg)
 
-        data = self._get_monitor_metric_data(monitor_baseline, monitor_workload, None, exclude=True)
-        monitor_failures, monitor_successes = self._compare_monitor_metric_data("Workload", data)
+        data = self._get_monitor_metric_data(
+            monitor_baseline1, monitor_workload, None, exclude=True
+        )
+        monitor_failures, monitor_successes = self._compare_monitor_metric_data(
+            "Workload", data, data_baseline
+        )
         # Results are opposite, want differences in values
         # So switch failure and success criterion
         for index, cmd_data in enumerate(monitor_failures):
