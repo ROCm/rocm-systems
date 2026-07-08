@@ -123,7 +123,13 @@ their own resources.
   `renderD128/device/gpu_metrics`), so only the primary partition can report whole-GPU
   values such as board power. **Secondary partitions** expose only their own `xcp_metrics`
   (e.g. `renderD129/device/xcp/xcp_metrics`) and therefore report metrics scoped to that
-  partition — the device-wide set is not present on their node.
+  partition — the device-wide set is not present on their node. For example, VCN (Video
+  Core Next) utilization on MI-series GPUs is available per partition via the
+  `xcp_stats.vcn_busy` field in
+  [`gpu_metrics`](/reference/amdsmi-py-api.md#amdsmi_get_gpu_metrics); on
+  Navi/RDNA GPUs, which have no partition model, only the device-wide
+  [`vcn_busy_percent`](/reference/amdsmi-py-api.md#amdsmi_get_vcn_busy_percent)
+  applies.
 - On a bare-metal system `amdsmi_get_socket_handles()` returns one handle per physical
   GPU. On a hypervisor host the socket model reflects the physical topology. Inside an
   SR-IOV guest, each assigned VF appears as a separate processor handle, but the socket

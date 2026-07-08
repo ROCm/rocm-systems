@@ -4723,7 +4723,12 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
  *
  *  @param[out] vcn_busy_percent vcn busy percentage (0-100)
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS on success
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED if the device does not support this query
+ *  @retval ::AMDSMI_STATUS_INVAL if the input parameters are invalid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA if data read from the sysfs file is not in the expected
+ * format or empty
+ *  @return ::amdsmi_status_t
  */
 amdsmi_status_t amdsmi_get_vcn_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* vcn_busy_percent);

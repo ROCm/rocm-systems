@@ -814,14 +814,22 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   std::string line;
   if (std::getline(fs, line)) {
     try {
-      *vcn_busy_percent = std::stoul(line);
+      uint32_t line_value = std::stoul(std::string(trim(line)));
+      if (line_value > 100) {
+        // max of uint32_t is used to indicate the erroneous value
+        *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
+      }
+      *vcn_busy_percent = line_value;
       return AMDSMI_STATUS_SUCCESS;
     } catch (const std::exception&) {
-      return AMDSMI_STATUS_IO;
+      *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+      return AMDSMI_STATUS_UNEXPECTED_DATA;
     }
   }
 
-  return AMDSMI_STATUS_IO;
+  *vcn_busy_percent = std::numeric_limits<uint32_t>::max();
+  return AMDSMI_STATUS_UNEXPECTED_DATA;
 }
 
 std::string smi_amdgpu_split_string(std::string str, char delim) {
