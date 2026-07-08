@@ -20,28 +20,28 @@ def retry(
     """Retry decorator with exponential backoff."""
 
     def decorator(func: F) -> F:
-        def wrapper(*args, **kwargs):
-            attempt = 0
-            while attempt < max_attempts:
+        def wrapper(*args: object, **kwargs: object) -> object:
+            last_exception: BaseException | None = None
+            for attempt in range(max_attempts):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(
+                    last_exception = e
+                    logging.warning(
                         f"Exception {str(e)} thrown when attempting to run, "
-                        f"attempt {attempt} of {max_attempts}"
+                        f"attempt {attempt + 1} of {max_attempts}"
                     )
-                    attempt += 1
-                    if attempt < max_attempts:
-                        backoff = delay_seconds * (2 ** (attempt - 1))
+                    if attempt < max_attempts - 1:
+                        backoff = delay_seconds * (2**attempt)
                         time.sleep(backoff)
-            return func(*args, **kwargs)
+            raise last_exception  # type: ignore[misc]
 
         return wrapper
 
     return decorator
 
 
-@retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError,))
+@retry(max_attempts=3, delay_seconds=2, exceptions=(subprocess.TimeoutExpired,))
 def get_modified_paths(base_ref: str) -> set[str]:
     """Returns paths of files changed relative to the base reference."""
     result = subprocess.run(
