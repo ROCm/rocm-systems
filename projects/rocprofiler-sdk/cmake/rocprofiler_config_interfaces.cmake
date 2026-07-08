@@ -201,12 +201,47 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf QUIET)
-if(LibElf_FOUND)
+find_package(LibElf CONFIG QUIET)
+if(TARGET elf::elf)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
-else()
-    find_package(libelf REQUIRED)
+elseif(TARGET libelf::libelf)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE libelf::libelf)
+else()
+    # libelf is only used internally by rocprofiler-sdk (it is not part of the exported
+    # package interface), so it is discovered inline here rather than through a standalone
+    # find-module: pkg-config first, then a direct search that also covers ROCm sysdeps
+    # locations.
+    set(_rocprofiler_elf_ROOT_HINTS
+        ${rocm_version_DIR} ${ROCM_PATH} $ENV{ROCM_PATH}
+        ${rocm_version_DIR}/lib/rocm_sysdeps ${ROCM_PATH}/lib/rocm_sysdeps
+        $ENV{ROCM_PATH}/lib/rocm_sysdeps)
+
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ELF IMPORTED_TARGET libelf)
+    endif()
+
+    if(TARGET PkgConfig::ELF)
+        target_link_libraries(rocprofiler-sdk-elf INTERFACE PkgConfig::ELF)
+    else()
+        find_path(
+            rocprofiler_elf_INCLUDE_DIR
+            NAMES elf.h
+            HINTS ${_rocprofiler_elf_ROOT_HINTS}
+            PATH_SUFFIXES include REQUIRED)
+
+        find_library(
+            rocprofiler_elf_LIBRARY
+            NAMES elf
+            HINTS ${_rocprofiler_elf_ROOT_HINTS}
+            PATH_SUFFIXES lib lib64 lib/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+
+        target_include_directories(rocprofiler-sdk-elf SYSTEM
+                                   INTERFACE ${rocprofiler_elf_INCLUDE_DIR})
+        target_link_libraries(rocprofiler-sdk-elf INTERFACE ${rocprofiler_elf_LIBRARY})
+    endif()
+
+    unset(_rocprofiler_elf_ROOT_HINTS)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -265,50 +300,81 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(PkgConfig)
+set(_rocprofiler_drm_ROOT_HINTS
+    ${rocm_version_DIR} ${ROCM_PATH} $ENV{ROCM_PATH} ${rocm_version_DIR}/lib/rocm_sysdeps
+    ${ROCM_PATH}/lib/rocm_sysdeps $ENV{ROCM_PATH}/lib/rocm_sysdeps /opt/amdgpu)
 
-if(PkgConfig_FOUND)
-    pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-    pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
-
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${DRM_INCLUDE_DIRS} ${DRM_AMDGPU_INCLUDE_DIRS})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
-                                                        PkgConfig::DRM_AMDGPU)
-else()
-    find_path(
-        drm_INCLUDE_DIR
-        NAMES drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
-
-    find_path(
-        xf86drm_INCLUDE_DIR
-        NAMES xf86drm.h
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
-
-    find_library(
-        drm_LIBRARY
-        NAMES drm
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
-
-    find_library(
-        drm_amdgpu_LIBRARY
-        NAMES drm_amdgpu
-        HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-        PATH_SUFFIXES ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
-
-    target_include_directories(rocprofiler-sdk-drm SYSTEM
-                               INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
-    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
-                                                        ${drm_amdgpu_LIBRARY})
+find_package(libdrm CONFIG QUIET)
+if(TARGET libdrm::libdrm)
+    set(_rocprofiler_drm_TARGET libdrm::libdrm)
+elseif(TARGET drm::drm)
+    set(_rocprofiler_drm_TARGET drm::drm)
+elseif(TARGET libdrm)
+    set(_rocprofiler_drm_TARGET libdrm)
 endif()
+
+find_package(libdrm_amdgpu CONFIG QUIET)
+if(TARGET libdrm_amdgpu::libdrm_amdgpu)
+    set(_rocprofiler_drm_amdgpu_TARGET libdrm_amdgpu::libdrm_amdgpu)
+elseif(TARGET libdrm::amdgpu)
+    set(_rocprofiler_drm_amdgpu_TARGET libdrm::amdgpu)
+elseif(TARGET drm::amdgpu)
+    set(_rocprofiler_drm_amdgpu_TARGET drm::amdgpu)
+elseif(TARGET libdrm_amdgpu)
+    set(_rocprofiler_drm_amdgpu_TARGET libdrm_amdgpu)
+endif()
+
+if(_rocprofiler_drm_TARGET AND _rocprofiler_drm_amdgpu_TARGET)
+    target_link_libraries(rocprofiler-sdk-drm INTERFACE ${_rocprofiler_drm_TARGET}
+                                                        ${_rocprofiler_drm_amdgpu_TARGET})
+else()
+    find_package(PkgConfig)
+
+    if(PkgConfig_FOUND)
+        pkg_check_modules(DRM IMPORTED_TARGET libdrm)
+        pkg_check_modules(DRM_AMDGPU IMPORTED_TARGET libdrm_amdgpu)
+    endif()
+
+    if(TARGET PkgConfig::DRM AND TARGET PkgConfig::DRM_AMDGPU)
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM
+                                                            PkgConfig::DRM_AMDGPU)
+    else()
+        find_path(
+            drm_INCLUDE_DIR
+            NAMES drm.h
+            HINTS ${_rocprofiler_drm_ROOT_HINTS}
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+
+        find_path(
+            xf86drm_INCLUDE_DIR
+            NAMES xf86drm.h
+            HINTS ${_rocprofiler_drm_ROOT_HINTS}
+            PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+
+        find_library(
+            drm_LIBRARY
+            NAMES drm
+            HINTS ${_rocprofiler_drm_ROOT_HINTS}
+            PATH_SUFFIXES lib lib64 lib/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu
+                          ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+
+        find_library(
+            drm_amdgpu_LIBRARY
+            NAMES drm_amdgpu
+            HINTS ${_rocprofiler_drm_ROOT_HINTS}
+            PATH_SUFFIXES lib lib64 lib/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu
+                          ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu REQUIRED)
+
+        target_include_directories(rocprofiler-sdk-drm SYSTEM
+                                   INTERFACE ${drm_INCLUDE_DIR} ${xf86drm_INCLUDE_DIR})
+        target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY}
+                                                            ${drm_amdgpu_LIBRARY})
+    endif()
+endif()
+
+unset(_rocprofiler_drm_ROOT_HINTS)
+unset(_rocprofiler_drm_TARGET)
+unset(_rocprofiler_drm_amdgpu_TARGET)
 
 # ----------------------------------------------------------------------------------------#
 #

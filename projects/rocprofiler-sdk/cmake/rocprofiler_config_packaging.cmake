@@ -196,8 +196,14 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
 if(rocm_version_DIR)
     # library directory of ROCm install is treated as private directory for shlibdeps
     # since most ROCm packages do not set CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS=ON
+    #
+    # TheRock/ROCm sysdeps ship bundled copies of system libraries (e.g.
+    # librocm_sysdeps_dw.so) under lib/rocm_sysdeps/lib. When rocprofiler-sdk is built
+    # against such an install it links these sysdeps libraries, so that directory is
+    # treated as a private directory for shlibdeps as well.
     list(APPEND CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
-         "${rocm_version_DIR}/${CMAKE_INSTALL_LIBDIR}")
+         "${rocm_version_DIR}/${CMAKE_INSTALL_LIBDIR}"
+         "${rocm_version_DIR}/lib/rocm_sysdeps/lib")
 endif()
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
     set(CPACK_DEBIAN_PACKAGE_RELEASE
@@ -226,6 +232,13 @@ set(CPACK_RPM_PACKAGE_AUTOREQ
     ON
     CACHE BOOL "") # auto-generate deps based on shared libs
 set(CPACK_RPM_PACKAGE_AUTOPROV ON) # generate list of shared libs provided by package
+
+# Keep bundled ROCm sysdeps libraries private to this package, matching the Debian
+# shlibdeps private-dirs behavior above. Without this, RPM auto-requires can emit a public
+# soname dependency on librocm_sysdeps_*.so for binaries that intentionally link the
+# bundled sysdeps copies.
+set(CPACK_RPM_REQUIRES_EXCLUDE_FROM "^librocm_sysdeps_.*")
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES_EXCLUDE_FROM "^librocm_sysdeps_.*")
 set(CPACK_RPM_TESTS_PACKAGE_AUTOREQ OFF) # disable for tests package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOPROV OFF) # disable for tests package
 if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
