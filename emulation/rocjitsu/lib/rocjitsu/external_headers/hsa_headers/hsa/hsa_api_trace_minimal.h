@@ -125,6 +125,11 @@ struct AmdExtTable {
   void *hsa_amd_external_semaphore_handle_open_fn;
   void *hsa_amd_external_semaphore_handle_close_fn;
 };
+static_assert(offsetof(AmdExtTable, hsa_amd_memory_get_preferred_copy_engine_fn) == 592);
+static_assert(offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn) == 640);
+static_assert(offsetof(AmdExtTable, hsa_amd_agent_preload_fn) == 648);
+static_assert(offsetof(AmdExtTable, hsa_amd_external_semaphore_handle_close_fn) == 680);
+static_assert(sizeof(AmdExtTable) == 688);
 
 /// @brief Minimal mirror of ROCR's `CoreApiTable` through agent code-object load.
 ///

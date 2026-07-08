@@ -780,15 +780,15 @@ const char *arch_to_string(rj_code_arch_t arch) {
 
 LoadedConfig load_config(const std::string &json_path, const std::string &schema_text) {
   std::string json_text = read_config_file(json_path);
-  flatbuffers::Parser parser;
-  auto *fb_config = parse_simulation_config_json(json_text, schema_text, parser);
-  return build_from_fb(fb_config);
+  return with_parsed_simulation_config_json(
+      json_text, schema_text,
+      [](const fb::SimulationConfig *fb_config) { return build_from_fb(fb_config); });
 }
 
 LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text) {
-  flatbuffers::Parser parser;
-  auto *fb_config = parse_simulation_config_json(json, schema_text, parser);
-  return build_from_fb(fb_config);
+  return with_parsed_simulation_config_json(
+      json, schema_text,
+      [](const fb::SimulationConfig *fb_config) { return build_from_fb(fb_config); });
 }
 
 } // namespace config

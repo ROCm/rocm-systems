@@ -134,6 +134,20 @@ struct hsa_amd_memory_copy_op_t {
   } signal;
   uint64_t reserved1[1];
 };
+static_assert(offsetof(hsa_amd_memory_copy_op_t, version) == 0);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, type) == 2);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, num_entries) == 4);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, traffic_class) == 6);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, completion_signal) == 8);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, src) == 16);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, src_agent) == 24);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, dst_agent) == 32);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, dst) == 40);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, size) == 48);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, wait) == 64);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, signal) == 96);
+static_assert(offsetof(hsa_amd_memory_copy_op_t, reserved1) == 120);
+static_assert(sizeof(hsa_amd_memory_copy_op_t) == 128);
 
 using hsa_amd_agent_iterate_memory_pools_fn_t = hsa_status_t(HSA_API *)(
     hsa_agent_t, hsa_status_t (*)(hsa_amd_memory_pool_t memory_pool, void *data), void *);

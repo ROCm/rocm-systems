@@ -321,18 +321,23 @@ std::string canonical_existing_path(const std::filesystem::path &candidate) {
   return ec ? std::string{} : canonical.string();
 }
 
-std::string find_interposer_lib() {
+std::string find_runtime_lib(std::string_view lib_name) {
   auto self = current_executable_path();
   if (!self)
     return {};
   auto bin_dir = self->parent_path();
-  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu.so
-  //                   or <prefix>/bin/rocjitsu → <prefix>/lib64/librocjitsu.so
-  // Build layout: build/tools/rocjitsu/rocjitsu → build/librocjitsu.so
-  for (auto &candidate : {
-           bin_dir / ".." / "lib" / "librocjitsu.so",
-           bin_dir / ".." / "lib64" / "librocjitsu.so",
-           bin_dir / ".." / ".." / "librocjitsu.so",
+  const std::filesystem::path library_name{std::string(lib_name)};
+
+  // Installed layouts use <prefix>/lib or <prefix>/lib64. CMake build trees may
+  // place shared libraries either at the build root or under target directories,
+  // so use the same ordered probe list for both the interposer and HSA hooks.
+  for (const auto &candidate : {
+           bin_dir / ".." / "lib" / library_name,
+           bin_dir / ".." / "lib64" / library_name,
+           bin_dir / ".." / ".." / library_name,
+           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "hooks" / library_name,
+           bin_dir / ".." / ".." / "lib64" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
+               library_name,
        }) {
     if (std::string path = canonical_existing_path(candidate); !path.empty())
       return path;
@@ -340,24 +345,9 @@ std::string find_interposer_lib() {
   return {};
 }
 
-std::string find_hooks_lib() {
-  auto self = current_executable_path();
-  if (!self)
-    return {};
-  auto bin_dir = self->parent_path();
-  for (auto &candidate : {
-           bin_dir / ".." / "lib" / "librocjitsu_hooks.so",
-           bin_dir / ".." / "lib64" / "librocjitsu_hooks.so",
-           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
-               "librocjitsu_hooks.so",
-           bin_dir / ".." / ".." / "lib64" / "rocjitsu" / "src" / "rocjitsu" / "hooks" /
-               "librocjitsu_hooks.so",
-       }) {
-    if (std::string path = canonical_existing_path(candidate); !path.empty())
-      return path;
-  }
-  return {};
-}
+std::string find_interposer_lib() { return find_runtime_lib("librocjitsu.so"); }
+
+std::string find_hooks_lib() { return find_runtime_lib("librocjitsu_hooks.so"); }
 
 void prepend_env_path(const char *name, const std::string &value) {
   if (const char *old_value = std::getenv(name); old_value && *old_value) {

@@ -106,9 +106,28 @@ constexpr std::array<TargetInfo, 4> kArchAliases = {{
     {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA4)},
 }};
 
-#define RJ_AMD_EXT_HAS_FIELD(table, field)                                                         \
-  ((table) != nullptr &&                                                                           \
-   (table)->version.minor_id >= offsetof(AmdExtTable, field) + sizeof((table)->field))
+/// @brief Return the byte offset immediately after an API-table field.
+///
+/// @details ROCR uses `ApiTableVersion::minor_id` as the HSA-tools table size.
+/// Checking the end offset before reading a tail field lets the hook run against
+/// older runtimes whose table stops before recently-added AMD extension entries.
+template <typename Table, typename Field>
+constexpr uint32_t api_table_field_end_offset(size_t field_offset, Field Table::*) {
+  return static_cast<uint32_t>(field_offset + sizeof(Field));
+}
+
+/// @brief Return true when @p table is large enough to contain @p field.
+template <typename Table, typename Field>
+[[nodiscard]] bool api_table_has_field(const Table *table, size_t field_offset,
+                                       Field Table::*field) {
+  return table != nullptr &&
+         table->version.minor_id >= api_table_field_end_offset(field_offset, field);
+}
+
+static_assert(api_table_field_end_offset(offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn),
+                                         &AmdExtTable::hsa_amd_memory_async_batch_copy_fn) == 648);
+static_assert(api_table_field_end_offset(offsetof(AmdExtTable, hsa_amd_agent_preload_fn),
+                                         &AmdExtTable::hsa_amd_agent_preload_fn) == 656);
 
 /// @brief Runtime configuration consumed by the HSA tools hook.
 struct HookConfig {
@@ -859,12 +878,14 @@ void clear_agent_mapper();
   X(amd_memory_fill, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_fill_fn,                  \
     rj_amd_memory_fill, hsa_amd_memory_fill_fn_t)                                                  \
   X(amd_memory_async_batch_copy, amd_ext_,                                                         \
-    amd_ext_ != nullptr && RJ_AMD_EXT_HAS_FIELD(amd_ext_, hsa_amd_memory_async_batch_copy_fn),     \
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn),       \
+                        &AmdExtTable::hsa_amd_memory_async_batch_copy_fn),                         \
     true, hsa_amd_memory_async_batch_copy_fn, rj_amd_memory_async_batch_copy,                      \
     hsa_amd_memory_async_batch_copy_fn_t)                                                          \
   X(amd_agent_preload, amd_ext_,                                                                   \
-    amd_ext_ != nullptr && RJ_AMD_EXT_HAS_FIELD(amd_ext_, hsa_amd_agent_preload_fn), true,         \
-    hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_agent_preload_fn),                 \
+                        &AmdExtTable::hsa_amd_agent_preload_fn),                                   \
+    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
@@ -1514,6 +1535,55 @@ void clear_memory_pool_mapper() { MemoryPoolMapper::instance().clear(); }
 /// @brief Clear agent mappings when the HSA layer unloads.
 void clear_agent_mapper() { AgentMapper::instance().clear(); }
 
+/// @brief Map one execution-facing agent from the visible guest handle to the host handle.
+[[nodiscard]] hsa_agent_t mapped_agent(hsa_agent_t agent) {
+  return AgentMapper::instance().map(agent);
+}
+
+/// @brief Map one guest memory pool to the matching host memory pool.
+[[nodiscard]] hsa_amd_memory_pool_t mapped_memory_pool(hsa_amd_memory_pool_t pool) {
+  return MemoryPoolMapper::instance().map(pool);
+}
+
+/// @brief Function-call argument that must be forwarded as a mapped HSA agent.
+struct MappedAgentArg {
+  hsa_agent_t value{};
+};
+
+/// @brief Function-call argument that must be forwarded as a mapped AMD memory pool.
+struct MappedPoolArg {
+  hsa_amd_memory_pool_t value{};
+};
+
+/// @brief Create a typed forwarding marker for agent arguments.
+[[nodiscard]] MappedAgentArg mapped_agent_arg(hsa_agent_t agent) {
+  return MappedAgentArg{mapped_agent(agent)};
+}
+
+/// @brief Create a typed forwarding marker for memory-pool arguments.
+[[nodiscard]] MappedPoolArg mapped_pool_arg(hsa_amd_memory_pool_t pool) {
+  return MappedPoolArg{mapped_memory_pool(pool)};
+}
+
+/// @brief Unwrap a non-mapped forwarding argument without changing its value category.
+template <typename Arg> decltype(auto) forward_amd_arg(Arg &&arg) { return std::forward<Arg>(arg); }
+
+/// @brief Unwrap an explicitly mapped agent marker for AMD-extension forwarding.
+inline hsa_agent_t forward_amd_arg(MappedAgentArg arg) { return arg.value; }
+
+/// @brief Unwrap an explicitly mapped pool marker for AMD-extension forwarding.
+inline hsa_amd_memory_pool_t forward_amd_arg(MappedPoolArg arg) { return arg.value; }
+
+/// @brief Forward an AMD-extension call after call-site arguments have declared mapping policy.
+///
+/// @details This helper is intentionally small: each wrapper still names the API
+/// semantics and any logging/output rewriting, but execution-facing handles are
+/// visibly marked with `mapped_agent_arg` or `mapped_pool_arg` at the call site.
+template <typename Original, typename... Args>
+hsa_status_t forward_amd_call(Original original, Args &&...args) {
+  return original(forward_amd_arg(std::forward<Args>(args))...);
+}
+
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader) {
   auto *original = layer().create_from_memory();
@@ -1622,6 +1692,45 @@ MappedAccessAgents map_access_agent_array(const hsa_agent_t *agents, uint32_t co
   }
 
   return mapped;
+}
+
+/// @brief Agent fields used by one supported AMD batch-copy operation shape.
+struct BatchCopyAgentShape {
+  bool src_scalar = false;
+  bool dst_scalar = false;
+  bool dst_list = false;
+};
+
+/// @brief Return the current ROCR-owned agent fields for a batch-copy descriptor.
+///
+/// @details `hsa_amd_memory_copy_op_t` stores scalar and list fields in unions.
+/// Current ROCR uses a scalar `src_agent` for every supported operation and uses
+/// `dst_agent_list` for multi-entry/broadcast forms. `src_agent_list` is
+/// documented as reserved, so probing it as a pointer misclassifies ordinary
+/// scalar source-agent handles as caller-owned arrays.
+BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
+  switch (static_cast<hsa_amd_memory_copy_op_type_t>(op.type)) {
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+    return BatchCopyAgentShape{
+        .src_scalar = true,
+        .dst_scalar = op.num_entries == 0,
+        .dst_list = op.num_entries > 0,
+    };
+  case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+    return BatchCopyAgentShape{
+        .src_scalar = true,
+        .dst_scalar = false,
+        .dst_list = true,
+    };
+  }
+
+  // Unknown future operation types have an unknown union contract. Forward them
+  // unchanged so the runtime can reject or handle them without rocjitsu guessing.
+  return {};
 }
 
 /// @brief Remap pointer-info accessible agents to guest handles and remove duplicates.
@@ -1875,7 +1984,7 @@ hsa_status_t HSA_API rj_amd_agent_iterate_memory_pools(
   auto *original = layer().amd_agent_iterate_memory_pools();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogDebug, "amd_agent_iterate_memory_pools agent=%llu mapped=%llu",
               static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle));
@@ -1899,11 +2008,11 @@ hsa_status_t HSA_API rj_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_po
   auto *original = layer().amd_memory_pool_allocate();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_amd_memory_pool_t mapped_pool = MemoryPoolMapper::instance().map(memory_pool);
+  hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
   log_message(kLogVerbose, "amd_memory_pool_allocate pool=%llu mapped=%llu size=%zu flags=0x%x",
               static_cast<unsigned long long>(memory_pool.handle),
               static_cast<unsigned long long>(mapped_pool.handle), size, flags);
-  hsa_status_t status = original(mapped_pool, size, flags, ptr);
+  hsa_status_t status = forward_amd_call(original, MappedPoolArg{mapped_pool}, size, flags, ptr);
   log_message(kLogVerbose, "amd_memory_pool_allocate status=%d ptr=%p", static_cast<int>(status),
               ptr ? *ptr : nullptr);
   return status;
@@ -1933,8 +2042,8 @@ hsa_status_t HSA_API rj_amd_profiling_get_dispatch_time(hsa_agent_t agent, hsa_s
   auto *original = layer().amd_profiling_get_dispatch_time();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
-  hsa_status_t status = original(mapped, signal, time);
+  hsa_agent_t mapped = mapped_agent(agent);
+  hsa_status_t status = forward_amd_call(original, MappedAgentArg{mapped}, signal, time);
   log_message(kLogVerbose,
               "amd_profiling_get_dispatch_time agent=%llu mapped=%llu signal=%llu status=%d "
               "start=%llu end=%llu",
@@ -1952,8 +2061,8 @@ hsa_status_t HSA_API rj_amd_profiling_convert_tick_to_system_domain(hsa_agent_t 
   auto *original = layer().amd_profiling_convert_tick_to_system_domain();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
-  hsa_status_t status = original(mapped, agent_tick, system_tick);
+  hsa_agent_t mapped = mapped_agent(agent);
+  hsa_status_t status = forward_amd_call(original, MappedAgentArg{mapped}, agent_tick, system_tick);
   log_message(kLogVerbose,
               "amd_profiling_convert_tick_to_system_domain agent=%llu mapped=%llu status=%d "
               "agent_tick=%llu system_tick=%llu",
@@ -1971,8 +2080,8 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
   auto *original = layer().amd_agent_memory_pool_get_info();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
-  hsa_amd_memory_pool_t mapped_pool = MemoryPoolMapper::instance().map(memory_pool);
+  hsa_agent_t mapped = mapped_agent(agent);
+  hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
   log_message(
       kLogDebug,
       "amd_agent_memory_pool_get_info agent=%llu mapped=%llu pool=%llu mapped=%llu "
@@ -1980,7 +2089,8 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
       static_cast<unsigned long long>(agent.handle), static_cast<unsigned long long>(mapped.handle),
       static_cast<unsigned long long>(memory_pool.handle),
       static_cast<unsigned long long>(mapped_pool.handle), static_cast<unsigned>(attribute));
-  return original(mapped, mapped_pool, attribute, value);
+  return forward_amd_call(original, MappedAgentArg{mapped}, MappedPoolArg{mapped_pool}, attribute,
+                          value);
 }
 
 hsa_status_t HSA_API rj_amd_agents_allow_access(uint32_t num_agents, const hsa_agent_t *agents,
@@ -2008,8 +2118,8 @@ hsa_status_t HSA_API rj_amd_memory_async_copy(void *dst, hsa_agent_t dst_agent, 
   auto *original = layer().amd_memory_async_copy();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped_dst = AgentMapper::instance().map(dst_agent);
-  hsa_agent_t mapped_src = AgentMapper::instance().map(src_agent);
+  hsa_agent_t mapped_dst = mapped_agent(dst_agent);
+  hsa_agent_t mapped_src = mapped_agent(src_agent);
   log_message(kLogVerbose,
               "amd_memory_async_copy dst_agent=%llu mapped=%llu src_agent=%llu mapped=%llu "
               "size=%zu",
@@ -2017,8 +2127,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy(void *dst, hsa_agent_t dst_agent, 
               static_cast<unsigned long long>(mapped_dst.handle),
               static_cast<unsigned long long>(src_agent.handle),
               static_cast<unsigned long long>(mapped_src.handle), size);
-  return original(dst, mapped_dst, src, mapped_src, size, num_dep_signals, dep_signals,
-                  completion_signal);
+  return forward_amd_call(original, dst, MappedAgentArg{mapped_dst}, src,
+                          MappedAgentArg{mapped_src}, size, num_dep_signals, dep_signals,
+                          completion_signal);
 }
 
 hsa_status_t HSA_API rj_amd_memory_async_copy_on_engine(
@@ -2028,8 +2139,8 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_on_engine(
   auto *original = layer().amd_memory_async_copy_on_engine();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped_dst = AgentMapper::instance().map(dst_agent);
-  hsa_agent_t mapped_src = AgentMapper::instance().map(src_agent);
+  hsa_agent_t mapped_dst = mapped_agent(dst_agent);
+  hsa_agent_t mapped_src = mapped_agent(src_agent);
   log_message(kLogVerbose,
               "amd_memory_async_copy_on_engine dst_agent=%llu mapped=%llu src_agent=%llu "
               "mapped=%llu size=%zu engine=%u",
@@ -2038,8 +2149,9 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_on_engine(
               static_cast<unsigned long long>(src_agent.handle),
               static_cast<unsigned long long>(mapped_src.handle), size,
               static_cast<unsigned>(engine_id));
-  return original(dst, mapped_dst, src, mapped_src, size, num_dep_signals, dep_signals,
-                  completion_signal, engine_id, force_copy_on_sdma);
+  return forward_amd_call(original, dst, MappedAgentArg{mapped_dst}, src,
+                          MappedAgentArg{mapped_src}, size, num_dep_signals, dep_signals,
+                          completion_signal, engine_id, force_copy_on_sdma);
 }
 
 hsa_status_t HSA_API rj_amd_memory_async_copy_rect(
@@ -2050,12 +2162,12 @@ hsa_status_t HSA_API rj_amd_memory_async_copy_rect(
   auto *original = layer().amd_memory_async_copy_rect();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(copy_agent);
+  hsa_agent_t mapped = mapped_agent(copy_agent);
   log_message(kLogVerbose, "amd_memory_async_copy_rect agent=%llu mapped=%llu dir=%u",
               static_cast<unsigned long long>(copy_agent.handle),
               static_cast<unsigned long long>(mapped.handle), static_cast<unsigned>(dir));
-  return original(dst, dst_offset, src, src_offset, range, mapped, dir, num_dep_signals,
-                  dep_signals, completion_signal);
+  return forward_amd_call(original, dst, dst_offset, src, src_offset, range, MappedAgentArg{mapped},
+                          dir, num_dep_signals, dep_signals, completion_signal);
 }
 
 hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -2063,8 +2175,8 @@ hsa_status_t HSA_API rj_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa
   auto *original = layer().amd_memory_copy_engine_status();
   if (!original)
     return HSA_STATUS_ERROR;
-  return original(AgentMapper::instance().map(dst_agent), AgentMapper::instance().map(src_agent),
-                  engine_ids_mask);
+  return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
+                          engine_ids_mask);
 }
 
 hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent,
@@ -2073,8 +2185,8 @@ hsa_status_t HSA_API rj_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_age
   auto *original = layer().amd_memory_get_preferred_copy_engine();
   if (!original)
     return HSA_STATUS_ERROR;
-  return original(AgentMapper::instance().map(dst_agent), AgentMapper::instance().map(src_agent),
-                  engine_id);
+  return forward_amd_call(original, mapped_agent_arg(dst_agent), mapped_agent_arg(src_agent),
+                          engine_id);
 }
 
 hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents,
@@ -2095,9 +2207,8 @@ hsa_status_t HSA_API rj_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa
     return HSA_STATUS_ERROR;
   auto mapped = num_agent > 0 ? map_agent_array(agents, static_cast<size_t>(num_agent))
                               : std::vector<hsa_agent_t>{};
-  hsa_amd_memory_pool_t mapped_pool = MemoryPoolMapper::instance().map(pool);
-  return original(host_ptr, size, mapped.empty() ? agents : mapped.data(), num_agent, mapped_pool,
-                  flags, agent_ptr);
+  return forward_amd_call(original, host_ptr, size, mapped.empty() ? agents : mapped.data(),
+                          num_agent, mapped_pool_arg(pool), flags, agent_ptr);
 }
 
 hsa_status_t HSA_API rj_amd_memory_fill(void *ptr, uint32_t value, size_t count) {
@@ -2138,11 +2249,12 @@ hsa_status_t HSA_API rj_amd_svm_prefetch_async(void *ptr, size_t size, hsa_agent
   auto *original = layer().amd_svm_prefetch_async();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_svm_prefetch_async ptr=%p size=%zu agent=%llu mapped=%llu", ptr,
               size, static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle));
-  return original(ptr, size, mapped, num_dep_signals, dep_signals, completion_signal);
+  return forward_amd_call(original, ptr, size, MappedAgentArg{mapped}, num_dep_signals, dep_signals,
+                          completion_signal);
 }
 
 hsa_status_t HSA_API rj_amd_vmem_set_access(void *va, size_t size,
@@ -2155,7 +2267,7 @@ hsa_status_t HSA_API rj_amd_vmem_set_access(void *va, size_t size,
   if (desc && desc_cnt > 0) {
     mapped.assign(desc, desc + desc_cnt);
     for (auto &entry : mapped)
-      entry.agent_handle = AgentMapper::instance().map(entry.agent_handle);
+      entry.agent_handle = mapped_agent(entry.agent_handle);
   }
   log_message(kLogVerbose, "amd_vmem_set_access va=%p size=%zu desc_cnt=%zu", va, size, desc_cnt);
   return original(va, size, mapped.empty() ? desc : mapped.data(), desc_cnt);
@@ -2166,22 +2278,22 @@ hsa_status_t HSA_API rj_amd_vmem_get_access(void *va, hsa_access_permission_t *p
   auto *original = layer().amd_vmem_get_access();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent_handle);
+  hsa_agent_t mapped = mapped_agent(agent_handle);
   log_message(kLogVerbose, "amd_vmem_get_access va=%p agent=%llu mapped=%llu", va,
               static_cast<unsigned long long>(agent_handle.handle),
               static_cast<unsigned long long>(mapped.handle));
-  return original(va, perms, mapped);
+  return forward_amd_call(original, va, perms, MappedAgentArg{mapped});
 }
 
 hsa_status_t HSA_API rj_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
   auto *original = layer().amd_agent_set_async_scratch_limit();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_set_async_scratch_limit agent=%llu mapped=%llu threshold=%zu",
               static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle), threshold);
-  return original(mapped, threshold);
+  return forward_amd_call(original, MappedAgentArg{mapped}, threshold);
 }
 
 hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t *copy_ops,
@@ -2194,30 +2306,21 @@ hsa_status_t HSA_API rj_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op
     return original(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
 
   std::vector<hsa_amd_memory_copy_op_t> mapped(copy_ops, copy_ops + num_copy_ops);
-  std::vector<std::vector<hsa_agent_t>> mapped_src_lists;
   std::vector<std::vector<hsa_agent_t>> mapped_dst_lists;
-  mapped_src_lists.reserve(num_copy_ops);
   mapped_dst_lists.reserve(num_copy_ops);
   log_message(kLogVerbose, "amd_memory_async_batch_copy ops=%u deps=%u", num_copy_ops,
               num_dep_signals);
   for (uint32_t i = 0; i < num_copy_ops; ++i) {
     auto &op = mapped[i];
-    if (op.num_entries == 0) {
-      op.src_agent = AgentMapper::instance().map(op.src_agent);
-      op.dst_agent = AgentMapper::instance().map(op.dst_agent);
-      continue;
-    }
-    if (op.src_agent_list != nullptr) {
-      mapped_src_lists.push_back(map_agent_array(op.src_agent_list, op.num_entries));
-      op.src_agent_list = mapped_src_lists.back().data();
-    } else {
-      op.src_agent = AgentMapper::instance().map(op.src_agent);
-    }
-    if (op.dst_agent_list != nullptr) {
+    const BatchCopyAgentShape shape = batch_copy_agent_shape(op);
+
+    if (shape.src_scalar)
+      op.src_agent = mapped_agent(op.src_agent);
+    if (shape.dst_scalar)
+      op.dst_agent = mapped_agent(op.dst_agent);
+    if (shape.dst_list && op.dst_agent_list != nullptr) {
       mapped_dst_lists.push_back(map_agent_array(op.dst_agent_list, op.num_entries));
       op.dst_agent_list = mapped_dst_lists.back().data();
-    } else {
-      op.dst_agent = AgentMapper::instance().map(op.dst_agent);
     }
   }
   return original(mapped.data(), num_copy_ops, num_dep_signals, dep_signals);
@@ -2227,12 +2330,12 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
   auto *original = layer().amd_agent_preload();
   if (!original)
     return HSA_STATUS_ERROR;
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
+  hsa_agent_t mapped = mapped_agent(agent);
   log_message(kLogVerbose, "amd_agent_preload agent=%llu mapped=%llu flags=0x%llx",
               static_cast<unsigned long long>(agent.handle),
               static_cast<unsigned long long>(mapped.handle),
               static_cast<unsigned long long>(flags));
-  return original(mapped, flags);
+  return forward_amd_call(original, MappedAgentArg{mapped}, flags);
 }
 
 /// @brief Create an HSA reader from translated ELF bytes and keep the storage alive.

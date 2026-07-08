@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace rocjitsu {
 namespace config {
@@ -30,15 +31,24 @@ inline std::string read_config_file(const std::string &path) {
   return contents.str();
 }
 
-inline const fb::SimulationConfig *parse_simulation_config_json(const std::string &json,
-                                                                const std::string &schema_text,
-                                                                flatbuffers::Parser &parser) {
+/// @brief Parse simulation-config JSON and consume the FlatBuffer while parser storage is alive.
+///
+/// @details FlatBuffers returns pointers into `Parser::builder_`. Keeping the
+/// parser local to this helper makes the lifetime explicit: callers must copy
+/// any values they need inside @p callback rather than retaining raw pointers.
+template <typename Callback>
+decltype(auto) with_parsed_simulation_config_json(const std::string &json,
+                                                  const std::string &schema_text,
+                                                  Callback &&callback) {
+  flatbuffers::Parser parser;
   parser.opts.skip_unexpected_fields_in_json = true;
   if (!parser.Parse(schema_text.c_str()))
     throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
   if (!parser.Parse(json.c_str()))
     throw std::runtime_error("Failed to parse JSON config: " + std::string(parser.error_));
-  return flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
+  const fb::SimulationConfig *config =
+      flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
+  return std::forward<Callback>(callback)(config);
 }
 
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.

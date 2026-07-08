@@ -192,15 +192,34 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
 
   for (uint32_t op_idx = 0; op_idx < num_copy_ops; ++op_idx) {
     const hsa_amd_memory_copy_op_t &op = copy_ops[op_idx];
-    if (op.num_entries == 0) {
-      g_last_batch_src_agents.push_back(op.src_agent.handle);
-      g_last_batch_dst_agents.push_back(op.dst_agent.handle);
+    switch (static_cast<hsa_amd_memory_copy_op_type_t>(op.type)) {
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+      if (op.num_entries == 0) {
+        g_last_batch_src_agents.push_back(op.src_agent.handle);
+        g_last_batch_dst_agents.push_back(op.dst_agent.handle);
+        continue;
+      }
+      if (op.dst_agent_list == nullptr)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
+        g_last_batch_src_agents.push_back(op.src_agent.handle);
+        g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
+      }
+      continue;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+      if (op.num_entries == 0 || op.dst_agent_list == nullptr)
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
+        g_last_batch_src_agents.push_back(op.src_agent.handle);
+        g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
+      }
       continue;
     }
-    for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
-      g_last_batch_src_agents.push_back(op.src_agent_list[entry_idx].handle);
-      g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
-    }
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -351,6 +370,23 @@ void release_agent_blocker() {
   g_agent_cv.notify_all();
 }
 
+void expect_batch_copy_forwarding(const hsa_amd_memory_copy_op_t &op,
+                                  const std::vector<uint64_t> &expected_src_agents,
+                                  const std::vector<uint64_t> &expected_dst_agents) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  g_last_batch_src_agents.clear();
+  g_last_batch_dst_agents.clear();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_memory_async_batch_copy_fn, fake_amd_memory_async_batch_copy);
+
+  EXPECT_EQ(api.amd.hsa_amd_memory_async_batch_copy_fn(&op, 1, 0, nullptr), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_last_batch_src_agents, expected_src_agents);
+  EXPECT_EQ(g_last_batch_dst_agents, expected_dst_agents);
+}
+
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
@@ -392,26 +428,80 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
   EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
 }
 
-TEST(HsaHooksUnitTest, BatchCopyMapsSourceAndDestinationAgentLists) {
-  reset_pool_blocker(false);
-  reset_agent_blocker(false);
-  g_last_batch_src_agents.clear();
-  g_last_batch_dst_agents.clear();
-  FakeApiTable api;
-  InstalledHook hook(api);
-  ASSERT_TRUE(hook.installed());
-  ASSERT_NE(api.amd.hsa_amd_memory_async_batch_copy_fn, fake_amd_memory_async_batch_copy);
-
-  hsa_agent_t src_agents[] = {kGuestAgent, kHostAgent};
-  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+TEST(HsaHooksUnitTest, BatchCopyMapsScalarSourceAndDestinationAgents) {
   hsa_amd_memory_copy_op_t op{};
-  op.num_entries = 2;
-  op.src_agent_list = src_agents;
-  op.dst_agent_list = dst_agents;
+  op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+  op.src_agent = kGuestAgent;
+  op.dst_agent = kGuestAgent;
+  op.size = 64;
 
-  EXPECT_EQ(api.amd.hsa_amd_memory_async_batch_copy_fn(&op, 1, 0, nullptr), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(g_last_batch_src_agents, (std::vector<uint64_t>{kHostAgent.handle, kHostAgent.handle}));
-  EXPECT_EQ(g_last_batch_dst_agents, (std::vector<uint64_t>{kHostAgent.handle, kHostAgent.handle}));
+  expect_batch_copy_forwarding(op, {kHostAgent.handle}, {kHostAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, BatchCopyMapsMultiLinearScalarSourceAndDestinationList) {
+  int src0 = 0;
+  int src1 = 0;
+  int dst0 = 0;
+  int dst1 = 0;
+  void *src_list[] = {&src0, &src1};
+  void *dst_list[] = {&dst0, &dst1};
+  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+  size_t sizes[] = {64, 128};
+
+  hsa_amd_memory_copy_op_t op{};
+  op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+  op.num_entries = 2;
+  op.src_list = src_list;
+  op.src_agent = kGuestAgent;
+  op.dst_agent_list = dst_agents;
+  op.dst_list = dst_list;
+  op.size_list = sizes;
+
+  expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
+                               {kHostAgent.handle, kHostAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, BatchCopyMapsBroadcastScalarSourceAndDestinationList) {
+  int src = 0;
+  int dst0 = 0;
+  int dst1 = 0;
+  void *dst_list[] = {&dst0, &dst1};
+  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+
+  hsa_amd_memory_copy_op_t op{};
+  op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+  op.num_entries = 2;
+  op.src = &src;
+  op.src_agent = kGuestAgent;
+  op.dst_agent_list = dst_agents;
+  op.dst_list = dst_list;
+  op.size = 64;
+
+  expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
+                               {kHostAgent.handle, kHostAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, BatchCopyMapsMultiIndirectScalarSourceAndDestinationList) {
+  int src0 = 0;
+  int src1 = 0;
+  int dst0 = 0;
+  int dst1 = 0;
+  void *src_list[] = {&src0, &src1};
+  void *dst_list[] = {&dst0, &dst1};
+  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+  size_t sizes[] = {64, 128};
+
+  hsa_amd_memory_copy_op_t op{};
+  op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
+  op.num_entries = 2;
+  op.src_list = src_list;
+  op.src_agent = kGuestAgent;
+  op.dst_agent_list = dst_agents;
+  op.dst_list = dst_list;
+  op.size_list = sizes;
+
+  expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
+                               {kHostAgent.handle, kHostAgent.handle});
 }
 
 TEST(HsaHooksUnitTest, PointerInfoReportsGuestIdentityOnce) {

@@ -37,10 +37,9 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
 }
 
 DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
-  flatbuffers::Parser parser;
-  const fb::SimulationConfig *config =
-      parse_simulation_config_json(read_config_file(path), rocjitsu::kEmbeddedSchema, parser);
-  return dbt_guest_from_fb(config->dbt_guest());
+  return with_parsed_simulation_config_json(
+      read_config_file(path), rocjitsu::kEmbeddedSchema,
+      [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); });
 }
 
 std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
