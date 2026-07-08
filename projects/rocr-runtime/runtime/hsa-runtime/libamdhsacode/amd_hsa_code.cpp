@@ -52,6 +52,8 @@
 #include <sstream>
 #include <cstdlib>
 #include <algorithm>
+#include <vector>
+#include "amd_hsa_alloc_bounds.hpp"
 
 #ifdef SP3_STATIC_LIB
 #include "sp3.h"
@@ -1402,9 +1404,15 @@ namespace code {
     void AmdHsaCode::PrintRawData(std::ostream& out, Section* section)
     {
       out << "    Data:" << std::endl;
-      unsigned char *sdata = (unsigned char*)alloca(section->size());
-      section->getData(0, sdata, section->size());
-      PrintRawData(out, sdata, section->size());
+      const size_t section_size = section->size();
+      if (!detail::IsWithinSectionPrintLimit(section_size)) {
+        out << "      (section data too large to display: " << section_size
+            << " bytes)" << std::endl;
+        return;
+      }
+      std::vector<unsigned char> sdata(section_size);
+      section->getData(0, sdata.data(), section_size);
+      PrintRawData(out, sdata.data(), section_size);
     }
 
     void AmdHsaCode::PrintRawData(std::ostream& out, const unsigned char *data, size_t size)
