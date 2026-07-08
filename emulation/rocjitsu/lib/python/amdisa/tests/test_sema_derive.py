@@ -989,7 +989,7 @@ class TestDeriveVectorUnary:
         assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' not in cpp
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'wf.cu().write_vgpr' in cpp
+        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),

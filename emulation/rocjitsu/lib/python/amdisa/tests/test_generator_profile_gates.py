@@ -779,10 +779,22 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
     vds_body = body_for('ENC_VDS')
     ds_body = body_for('ENC_DS')
 
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.addr, i);' in vds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.data0, i);' not in vds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.addr, i);' in ds_body
-    assert 'src_data[i] = cu.read_vgpr(vb + inst_.data0, i);' not in ds_body
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+        in vds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+        not in vds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.addr, 1, full_lane_mask);'
+        in ds_body
+    )
+    assert (
+        'auto src_region = regs.read_vgpr_region(vb + inst_.data0, 1, full_lane_mask);'
+        not in ds_body
+    )
     assert '2u * (lane & 0x3u)' in vds_body
     assert '2u * (lane & 0x3u)' in ds_body
 

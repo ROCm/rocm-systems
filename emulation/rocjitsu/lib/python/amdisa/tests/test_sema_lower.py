@@ -349,11 +349,11 @@ class TestLowerVectorAdd:
         result = lower_sema_block(block, ctx)
 
         assert (
-            'wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
+            'amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane)'
             in result
         )
         assert (
-            'wf.cu().write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
+            'amdgpu::RegisterAccess(wf.cu()).write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged)'
             in result
         )
         assert '0x0000ffffu' in result
@@ -559,7 +559,7 @@ class TestLowerVectorAdd:
 
         assert (
             '((inst_.opsel & 0x8u) != 0 ? '
-            '(wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
+            '(amdgpu::RegisterAccess(wf.cu()).read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
             in result
         )
 
