@@ -338,7 +338,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PROPERTIES INSTALL_RPATH "$ORIGIN"
     )
 else()
-    # Single aggregated shared library (no interposer / CLI / plugins).
+    # Aggregated shared library holding the simulator object libs (no
+    # interposer / CLI / plugins). It dynamically links the standalone
+    # simdojo shared library rather than bundling it.
     add_library(rocjitsu_shared SHARED)
     set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
     target_link_libraries(
@@ -386,14 +388,20 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# On Linux the simulator lives in standalone shared libraries that
-# librocjitsu.so, the CLI, and the plugins all link; install them alongside so
-# the co-located $ORIGIN RPATH resolves them.
+# simdojo is a standalone shared library on every platform; install it next to
+# its consumers so the co-located loader path ($ORIGIN RPATH on Linux, the
+# module directory on Windows) resolves it at load time.
+install(
+    TARGETS simdojo
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# On Linux the simulator core is its own shared library that librocjitsu.so,
+# the CLI, and the plugins all link; install it alongside so the co-located
+# $ORIGIN RPATH resolves it.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(
-        TARGETS rocjitsu_core simdojo
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
+    install(TARGETS rocjitsu_core LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

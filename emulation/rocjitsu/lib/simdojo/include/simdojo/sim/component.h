@@ -8,6 +8,7 @@
 #ifndef SIMDOJO_SIM_COMPONENT_H_
 #define SIMDOJO_SIM_COMPONENT_H_
 
+#include "simdojo/export.h"
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/message.h"
@@ -52,7 +53,7 @@ class SimulationEngine;
 /// @details Nodes form a compound graph where edges are either:
 ///   - Inclusion edges (parent-child in the component tree)
 ///   - Adjacency edges (links between ports)
-class Node {
+class SIMDOJO_EXPORT Node {
 public:
   /// @brief Construct a node with the given name.
   /// @param[in] name Human-readable name for this node.
@@ -107,7 +108,7 @@ private:
 /// @details Components are the active simulation entities. They own ports
 /// and interact with the simulation engine. Event handlers are registered
 /// directly on Ports via Port::set_handler().
-class Component : public Node {
+class SIMDOJO_EXPORT Component : public Node {
 public:
   /// @brief Construct a component with the given name.
   /// @param[in] name Human-readable name for this component.
@@ -200,7 +201,7 @@ private:
 };
 
 /// @brief A component that contains child components (inclusion edges).
-class CompositeComponent : public Component {
+class SIMDOJO_EXPORT CompositeComponent : public Component {
 public:
   /// @brief Construct a composite component with the given name.
   /// @param[in] name Human-readable name.
@@ -257,7 +258,7 @@ private:
 ///
 /// @details Links carry messages between ports and model communication latency.
 /// They are the adjacency edges in the compound graph.
-class Link {
+class SIMDOJO_EXPORT Link {
 public:
   /// @brief Construct a link between two ports.
   /// @param[in] id Unique link identifier.
@@ -328,7 +329,7 @@ private:
 ///
 /// @details Ports are the endpoints of Links. Each port belongs to a single component
 /// and connects to at most one peer port via a link.
-class Port : public Node {
+class SIMDOJO_EXPORT Port : public Node {
 public:
   /// @brief Construct a port.
   /// @param[in] name Human-readable port name.
@@ -408,7 +409,7 @@ private:
 /// @details Unlike the base Link which immediately routes messages through the
 /// simulation engine, QueuedLink stores them internally. The receiving
 /// component explicitly pops or drains messages when ready.
-class QueuedLink : public Link {
+class SIMDOJO_EXPORT QueuedLink : public Link {
 public:
   /// @brief Construct a queued link with bounded capacity.
   /// @param[in] id Unique link identifier.

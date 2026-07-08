@@ -7,6 +7,7 @@
 #ifndef SIMDOJO_SIM_TOPOLOGY_H_
 #define SIMDOJO_SIM_TOPOLOGY_H_
 
+#include "simdojo/export.h"
 #include "simdojo/sim/clock_domain.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -51,7 +52,7 @@ struct Partition {
 ///   - Edges = links between ports of different components
 ///   - Edge weights = link weights (for cut cost)
 ///   - Node weights = component weights (for balance)
-class AdjacencyGraph {
+class SIMDOJO_EXPORT AdjacencyGraph {
 public:
   /// @brief Build an adjacency graph from a collected component list and links.
   /// @param components Flat list of all components (from collect_all_components).
@@ -72,7 +73,7 @@ public:
 /// @details Topology owns all components (via the root CompositeComponent), all links,
 /// and all partitions. It provides component creation, link creation,
 /// graph traversal, and partitioning into sub-graphs for parallel execution.
-class Topology {
+class SIMDOJO_EXPORT Topology {
 public:
   Topology() = default;
 
@@ -184,7 +185,7 @@ private:
 /// 2. Initial partitioning: FM bisection on the coarsened graph
 /// 3. Uncoarsening/refinement: project back, FM refine at each level
 /// 4. k-way: recursive bisection
-class Partitioner {
+class SIMDOJO_EXPORT Partitioner {
 public:
   /// @brief Configuration parameters for graph partitioning.
   struct Config {
