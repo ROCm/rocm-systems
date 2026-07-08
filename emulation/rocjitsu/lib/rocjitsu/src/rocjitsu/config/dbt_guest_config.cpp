@@ -18,7 +18,6 @@
 
 namespace rocjitsu {
 namespace config {
-namespace {
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)

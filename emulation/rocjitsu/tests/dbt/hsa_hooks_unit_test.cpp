@@ -281,6 +281,22 @@ hsa_status_t HSA_API fake_amd_pointer_info(const void *, hsa_amd_pointer_info_t 
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_amd_pointer_info(const void *, hsa_amd_pointer_info_t *info,
+                                           void *(*)(size_t), uint32_t *num_agents_accessible,
+                                           hsa_agent_t **accessible) {
+  if (info != nullptr) {
+    info->size = sizeof(hsa_amd_pointer_info_t);
+    info->agentOwner = kHostAgent;
+  }
+  if (num_agents_accessible != nullptr && accessible != nullptr) {
+    g_pointer_info_accessible[0] = kHostAgent;
+    g_pointer_info_accessible[1] = kGuestAgent;
+    *num_agents_accessible = 2;
+    *accessible = g_pointer_info_accessible;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data) {
   if (callback == nullptr)
@@ -686,6 +702,83 @@ TEST(HsaHooksUnitTest, VmemSetAccessDeduplicatesDescriptorsAfterGuestMapping) {
   EXPECT_EQ(api.amd.hsa_amd_vmem_set_access_fn(&storage, sizeof(storage), desc, 2),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_last_vmem_access_agents, std::vector<uint64_t>{kHostAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, PoolAllocateWaitsForAgentDiscoveryPublication) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(true);
+  g_last_allocate_pool = {};
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_iterate_agents_fn, fake_iterate_agents);
+  ASSERT_NE(api.amd.hsa_amd_memory_pool_allocate_fn, fake_amd_memory_pool_allocate);
+
+  std::vector<uint64_t> seen;
+  hsa_status_t iterate_status = HSA_STATUS_ERROR;
+  std::thread iterate_thread([&] {
+    iterate_status = api.core.hsa_iterate_agents_fn(
+        [](hsa_agent_t agent, void *data) -> hsa_status_t {
+          static_cast<std::vector<uint64_t> *>(data)->push_back(agent.handle);
+          return HSA_STATUS_SUCCESS;
+        },
+        &seen);
+  });
+
+  bool mapper_entered_agent_iteration = false;
+  {
+    std::unique_lock lock(g_agent_mutex);
+    mapper_entered_agent_iteration = g_agent_cv.wait_for(lock, std::chrono::seconds(1),
+                                                         [] { return g_agent_iteration_entered; });
+  }
+  if (!mapper_entered_agent_iteration) {
+    release_agent_blocker();
+    iterate_thread.join();
+    ADD_FAILURE() << "agent mapper did not enter discovery iteration";
+    return;
+  }
+
+  std::atomic_bool allocate_done = false;
+  hsa_status_t allocate_status = HSA_STATUS_ERROR;
+  std::thread allocate_thread([&] {
+    void *ptr = nullptr;
+    allocate_status = api.amd.hsa_amd_memory_pool_allocate_fn(kGuestPool, 4096, 0, &ptr);
+    allocate_done.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_FALSE(allocate_done.load());
+
+  release_agent_blocker();
+  iterate_thread.join();
+  allocate_thread.join();
+
+  EXPECT_EQ(iterate_status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+  EXPECT_EQ(allocate_status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_last_allocate_pool.handle, kHostPool.handle);
+  reset_agent_blocker(false);
+}
+
+TEST(HsaHooksUnitTest, PointerInfoReportsGuestIdentityOnce) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.amd.hsa_amd_pointer_info_fn, fake_amd_pointer_info);
+
+  hsa_amd_pointer_info_t info{};
+  uint32_t accessible_count = 0;
+  hsa_agent_t *accessible = nullptr;
+  hsa_status_t status = api.amd.hsa_amd_pointer_info_fn(&g_fake_allocation_storage, &info, nullptr,
+                                                        &accessible_count, &accessible);
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(info.agentOwner.handle, kGuestAgent.handle);
+  ASSERT_NE(accessible, nullptr);
+  ASSERT_EQ(accessible_count, 1u);
+  EXPECT_EQ(accessible[0].handle, kGuestAgent.handle);
 }
 
 TEST(HsaHooksUnitTest, PoolAllocateWaitsForAgentDiscoveryPublication) {
