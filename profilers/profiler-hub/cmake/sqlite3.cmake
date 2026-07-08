@@ -219,9 +219,7 @@ else()
             SQLITE_OMIT_SHARED_CACHE=1
     )
 
-    if(MSVC)
-        target_compile_options(profiler-hub-sqlite3-static PRIVATE /O2)
-    else()
+    if(NOT MSVC)
         target_compile_options(profiler-hub-sqlite3-static PRIVATE -O2 -fPIC)
     endif()
 
