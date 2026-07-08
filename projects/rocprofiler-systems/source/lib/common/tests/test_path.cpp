@@ -372,3 +372,309 @@ TEST_F(PathTest, NestedDirectories)
     EXPECT_EQ(dirname(subdir3), subdir2);
     EXPECT_EQ(dirname(subdir2), subdir1);
 }
+
+//======================================================================================//
+//
+//  New unified filesystem API (design §5) — additive tests
+//
+//======================================================================================//
+
+// ---- 5.1 parent_path: full edge table (design §5.1) ----
+
+TEST_F(PathTest, ParentPath_StripOne) { EXPECT_EQ(parent_path("/a/b/c"), "/a/b"); }
+
+TEST_F(PathTest, ParentPath_StripTwo) { EXPECT_EQ(parent_path("/a/b/c", 2), "/a"); }
+
+TEST_F(PathTest, ParentPath_StripToRoot) { EXPECT_EQ(parent_path("/a/b/c", 3), "/"); }
+
+TEST_F(PathTest, ParentPath_AbsoluteClampsAtRoot) { EXPECT_EQ(parent_path("/a", 1), "/"); }
+
+TEST_F(PathTest, ParentPath_AbsoluteOverWalk) { EXPECT_EQ(parent_path("/a", 5), "/"); }
+
+TEST_F(PathTest, ParentPath_RootParentIsRoot) { EXPECT_EQ(parent_path("/", 3), "/"); }
+
+TEST_F(PathTest, ParentPath_Relative) { EXPECT_EQ(parent_path("a/b", 1), "a"); }
+
+TEST_F(PathTest, ParentPath_RelativeBottomsOut) { EXPECT_EQ(parent_path("a/b", 5), ""); }
+
+TEST_F(PathTest, ParentPath_NoSeparator) { EXPECT_EQ(parent_path("file", 1), ""); }
+
+TEST_F(PathTest, ParentPath_NoSeparatorOverWalk) { EXPECT_EQ(parent_path("file", 3), ""); }
+
+TEST_F(PathTest, ParentPath_ZeroLevelsIsIdentity)
+{
+    EXPECT_EQ(parent_path("/a/b/c", 0), "/a/b/c");
+}
+
+TEST_F(PathTest, ParentPath_TrailingSlash) { EXPECT_EQ(parent_path("/a/b/"), "/a/b"); }
+
+// ---- 5.1 filename / stem / extension ----
+
+TEST_F(PathTest, Filename_Standard) { EXPECT_EQ(filename("/a/b.so"), "b.so"); }
+
+TEST_F(PathTest, Filename_NoDir) { EXPECT_EQ(filename("b.so"), "b.so"); }
+
+TEST_F(PathTest, Stem_MultiExtension) { EXPECT_EQ(stem("/a/b.tar.gz"), "b.tar"); }
+
+TEST_F(PathTest, Stem_NoExtension) { EXPECT_EQ(stem("/a/name"), "name"); }
+
+TEST_F(PathTest, Extension_WithDot) { EXPECT_EQ(extension("/a/b.so"), ".so"); }
+
+TEST_F(PathTest, Extension_None) { EXPECT_EQ(extension("a"), ""); }
+
+TEST_F(PathTest, Normalize_CollapsesDotDot) { EXPECT_EQ(normalize("a/./b/../c"), "a/c"); }
+
+TEST_F(PathTest, IsAbsolute_True) { EXPECT_TRUE(is_absolute("/a/b")); }
+
+TEST_F(PathTest, IsAbsolute_False) { EXPECT_FALSE(is_absolute("a/b")); }
+
+TEST_F(PathTest, IsRelative_True) { EXPECT_TRUE(is_relative("a/b")); }
+
+// ---- 5.2 classification ----
+
+TEST_F(PathTest, HasExtension_WithAndWithoutDot)
+{
+    EXPECT_TRUE(has_extension("x.so", ".so"));
+    EXPECT_TRUE(has_extension("x.so", "so"));
+    EXPECT_FALSE(has_extension("x.so", "o"));
+    EXPECT_FALSE(has_extension("libfoo.so.1", ".so"));
+}
+
+TEST_F(PathTest, HasAnyExtension)
+{
+    EXPECT_TRUE(has_any_extension("libx.a", { ".so", ".a" }));
+    EXPECT_FALSE(has_any_extension("libx.dylib", { ".so", ".a" }));
+}
+
+TEST_F(PathTest, StripKnownExtension)
+{
+    EXPECT_EQ(strip_known_extension("f.json", { ".txt", ".json" }), "f");
+    EXPECT_EQ(strip_known_extension("f.cfg", { ".txt", ".json" }), "f.cfg");
+}
+
+// ---- 5.3 read_symlink ----
+
+TEST_F(PathTest, ReadSymlink_Link)
+{
+    std::string target    = create_file("rs_target.txt");
+    std::string link_path = create_symlink(target, "rs_link");
+    EXPECT_EQ(read_symlink(link_path), target);
+}
+
+TEST_F(PathTest, ReadSymlink_NotALink)
+{
+    std::string file_path = create_file("rs_notalink.txt");
+    EXPECT_EQ(read_symlink(file_path), file_path);
+}
+
+// ---- 5.4 type predicates ----
+
+TEST_F(PathTest, IsDirectory_Dir) { EXPECT_TRUE(is_directory(m_test_dir)); }
+
+TEST_F(PathTest, IsDirectory_File)
+{
+    EXPECT_FALSE(is_directory(create_file("id_file.txt")));
+}
+
+TEST_F(PathTest, IsDirectory_Missing) { EXPECT_FALSE(is_directory("/no/such/dir")); }
+
+TEST_F(PathTest, IsRegularFile_File)
+{
+    EXPECT_TRUE(is_regular_file(create_file("irf_file.txt")));
+}
+
+TEST_F(PathTest, IsRegularFile_Dir) { EXPECT_FALSE(is_regular_file(m_test_dir)); }
+
+TEST_F(PathTest, IsSymlink_Link)
+{
+    std::string target    = create_file("issl_target.txt");
+    std::string link_path = create_symlink(target, "issl_link");
+    EXPECT_TRUE(is_symlink(link_path));
+}
+
+TEST_F(PathTest, IsSymlink_RegularFile)
+{
+    EXPECT_FALSE(is_symlink(create_file("issl_reg.txt")));
+}
+
+// ---- 5.4 is_elf ----
+
+TEST_F(PathTest, IsElf_ElfFile)
+{
+    std::string   file_path = m_test_dir + "/elf_file";
+    std::ofstream ofs(file_path, std::ios::binary);
+    char          magic[] = { (char) 0x7F, 'E', 'L', 'F', 0x02, 0x01 };
+    ofs.write(magic, sizeof(magic));
+    ofs.close();
+    EXPECT_TRUE(is_elf(file_path));
+}
+
+TEST_F(PathTest, IsElf_TextFile)
+{
+    EXPECT_FALSE(is_elf(create_file("elf_text.txt", "not an elf file")));
+}
+
+TEST_F(PathTest, IsElf_EmptyFile)
+{
+    EXPECT_FALSE(is_elf(create_file("elf_empty.txt", "")));
+}
+
+TEST_F(PathTest, IsElf_Unopenable) { EXPECT_FALSE(is_elf("/no/such/elf")); }
+
+// ---- 5.4 file_size_or_zero ----
+
+TEST_F(PathTest, FileSizeOrZero_KnownSize)
+{
+    EXPECT_EQ(file_size_or_zero(create_file("fsz.txt", "12345")), 5u);
+}
+
+TEST_F(PathTest, FileSizeOrZero_Missing)
+{
+    EXPECT_EQ(file_size_or_zero("/no/such/file"), 0u);
+}
+
+// ---- 5.5 make_dirs / make_parent_dirs ----
+
+TEST_F(PathTest, MakeDirs_CreatesTree)
+{
+    std::string nested = m_test_dir + "/x/y/z";
+    EXPECT_TRUE(make_dirs(nested));
+    EXPECT_TRUE(is_directory(nested));
+}
+
+TEST_F(PathTest, MakeDirs_Idempotent)
+{
+    std::string nested = m_test_dir + "/a/b";
+    EXPECT_TRUE(make_dirs(nested));
+    EXPECT_TRUE(make_dirs(nested));  // second call must still succeed
+    EXPECT_TRUE(is_directory(nested));
+}
+
+TEST_F(PathTest, MakeParentDirs_CreatesParent)
+{
+    std::string file_path = m_test_dir + "/p/q/file.txt";
+    EXPECT_TRUE(make_parent_dirs(file_path));
+    EXPECT_TRUE(is_directory(m_test_dir + "/p/q"));
+}
+
+// ---- 5.5 remove / remove_all / list_directory ----
+
+TEST_F(PathTest, Remove_File)
+{
+    std::string file_path = create_file("to_remove.txt");
+    EXPECT_TRUE(rocprofsys::common::path::remove(file_path));
+    EXPECT_FALSE(exists(file_path));
+}
+
+TEST_F(PathTest, Remove_MissingTolerated)
+{
+    EXPECT_TRUE(rocprofsys::common::path::remove(m_test_dir + "/never_existed"));
+}
+
+TEST_F(PathTest, RemoveAll_Tree)
+{
+    std::string nested = m_test_dir + "/ra/sub";
+    ASSERT_TRUE(make_dirs(nested));
+    EXPECT_GT(remove_all(m_test_dir + "/ra"), 0u);
+    EXPECT_FALSE(exists(m_test_dir + "/ra"));
+}
+
+TEST_F(PathTest, ListDirectory_Names)
+{
+    create_file("ld_a.txt");
+    create_file("ld_b.txt");
+    auto names = list_directory(m_test_dir);
+    EXPECT_EQ(names.size(), 2u);
+}
+
+TEST_F(PathTest, ListDirectory_Filtered)
+{
+    create_file("keep.json");
+    create_file("skip.txt");
+    auto names = list_directory(
+        m_test_dir, [](const std::string& n) { return has_extension(n, ".json"); });
+    ASSERT_EQ(names.size(), 1u);
+    EXPECT_EQ(names.front(), "keep.json");
+}
+
+TEST_F(PathTest, ListDirectory_MissingIsEmpty)
+{
+    EXPECT_TRUE(list_directory("/no/such/dir").empty());
+}
+
+// ---- 5.6 open shim: auto-mkdir + ./base fallback ----
+
+TEST_F(PathTest, Open_OutputAutoCreatesParentDir)
+{
+    std::string   file_path = m_test_dir + "/auto/made/out.txt";
+    std::ofstream ofs{};
+    EXPECT_TRUE(open(ofs, file_path));
+    ofs << "hello";
+    ofs.close();
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, Open_OutputWithFlags)
+{
+    std::string   file_path = m_test_dir + "/bin/out.bin";
+    std::ofstream ofs{};
+    EXPECT_TRUE(open(ofs, file_path, std::ios::out | std::ios::binary));
+    ofs.close();
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+TEST_F(PathTest, Open_InputExisting)
+{
+    std::string   file_path = create_file("open_in.txt", "content");
+    std::ifstream ifs{};
+    EXPECT_TRUE(open(ifs, file_path));
+}
+
+TEST_F(PathTest, Open_InputMissingFails)
+{
+    std::ifstream ifs{};
+    EXPECT_FALSE(open(ifs, m_test_dir + "/missing_in.txt"));
+}
+
+TEST_F(PathTest, Fopen_AutoCreatesParentDir)
+{
+    std::string file_path = m_test_dir + "/cauto/made/out.dat";
+    std::FILE*  f         = rocprofsys::common::path::fopen(file_path, "w");
+    ASSERT_NE(f, nullptr);
+    std::fclose(f);
+    EXPECT_TRUE(is_regular_file(file_path));
+}
+
+// ---- 5.7 process / environment paths ----
+
+TEST_F(PathTest, TempDir_NonEmpty) { EXPECT_FALSE(temp_dir().empty()); }
+
+TEST_F(PathTest, ExecutablePath_Absolute)
+{
+    auto exe = executable_path();
+    EXPECT_FALSE(exe.empty());
+    EXPECT_TRUE(is_absolute(exe));
+}
+
+TEST_F(PathTest, FindInDirs_Found)
+{
+    create_file("fid.txt");
+    EXPECT_EQ(find_in_dirs("fid.txt", { m_test_dir }), m_test_dir + "/fid.txt");
+}
+
+TEST_F(PathTest, FindInDirs_NotFoundReturnsInput)
+{
+    EXPECT_EQ(find_in_dirs("nope.txt", { m_test_dir }), "nope.txt");
+}
+
+// ---- realpath verbatim-fallback pinned invariant (design §7, issue #4) ----
+
+TEST_F(PathTest, Realpath_VerbatimFallbackNonexistent)
+{
+    EXPECT_EQ(realpath("/does/not/exist"), "/does/not/exist");
+}
+
+TEST_F(PathTest, Realpath_VerbatimFallbackRelativeNonexistent)
+{
+    EXPECT_EQ(realpath("./a/../b"), "./a/../b");
+}
