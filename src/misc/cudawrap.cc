@@ -148,6 +148,20 @@ DECLARE_CUDA_PFN(cuPointerGetAttribute, 4000);
 /* transport/collNet.cc/net.cc*/
 DECLARE_CUDA_PFN(cuMemGetHandleForAddressRange, 11070); // DMA-BUF support
 #endif
+#if CUDA_VERSION >= 13030
+/* Logical endpoint support */
+DECLARE_CUDA_PFN(cuLogicalEndpointIdReserve, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointIdRelease, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointCreate, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointDestroy, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointAddDevice, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointQuery, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointGetLimits, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointExport, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointImport, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointBindAddr, 13030);
+DECLARE_CUDA_PFN(cuLogicalEndpointUnbind, 13030);
+#endif
 #if CUDA_VERSION >= 12010
 /* NVSwitch Multicast support */
 DECLARE_CUDA_PFN(cuMulticastAddDevice, 12010);
@@ -252,6 +266,20 @@ static ncclResult_t cudaPfnFuncLoader(void) {
   LOAD_SYM(cuPointerGetAttribute, 4000, 1);
 #if CUDA_VERSION >= 11070
   LOAD_SYM(cuMemGetHandleForAddressRange, 11070, 1); // DMA-BUF support
+#endif
+#if CUDA_VERSION >= 13030
+/* Logical endpoint support */
+  LOAD_SYM(cuLogicalEndpointIdReserve, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointIdRelease, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointCreate, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointDestroy, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointAddDevice, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointQuery, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointGetLimits, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointExport, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointImport, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointBindAddr, 13030, 1);
+  LOAD_SYM(cuLogicalEndpointUnbind, 13030, 1);
 #endif
 #if CUDA_VERSION >= 12010
 /* NVSwitch Multicast support */

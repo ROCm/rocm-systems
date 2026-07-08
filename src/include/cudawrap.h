@@ -138,6 +138,50 @@ DECLARE_CUDA_PFN_EXTERN(cuMemGetAllocationPropertiesFromHandle, 10020);
 #if CUDA_VERSION >= 11070
 DECLARE_CUDA_PFN_EXTERN(cuMemGetHandleForAddressRange, 11070); // DMA-BUF support
 #endif
+
+#if CUDA_VERSION >= 13030
+#define DECLARE_CUDA_TYPE_EXTERN_V13030(...)  /* provided by cudaTypedefs.h */
+#define DECLARE_CUDA_PFN_EXTERN_V13030(sym, ...) DECLARE_CUDA_PFN_EXTERN(sym, 13030)
+#else
+#define DECLARE_CUDA_TYPE_EXTERN_V13030(...) __VA_ARGS__
+#define DECLARE_CUDA_PFN_EXTERN_V13030(sym, ...) \
+  static inline CUresult pfn_##sym(__VA_ARGS__) { \
+    return CUDA_ERROR_NOT_SUPPORTED; \
+  }
+#endif
+
+// CFT support requires cuda 13.3
+// clang-format off: maintain hand-formatted code
+DECLARE_CUDA_TYPE_EXTERN_V13030(
+  typedef struct {
+    int type;
+    int flags;
+    int ipcHandleTypes;
+    size_t size;
+    struct { int device; } unicast;
+    struct { unsigned int numDevices; } multicast;
+  } CUlogicalEndpointProp;
+  typedef struct {} CUlogicalEndpointFabricHandle;
+  enum {
+    CU_LOGICAL_ENDPOINT_TYPE_UNICAST          = 0,
+    CU_LOGICAL_ENDPOINT_TYPE_MULTICAST        = 0,
+    CU_LOGICAL_ENDPOINT_FLAG_NONE             = 0,
+    CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC = 0,
+  };
+)
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointIdReserve, uint32_t* id, uint32_t count);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointIdRelease, uint32_t id, uint32_t count);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointCreate,    uint32_t id, CUlogicalEndpointProp* prop);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointDestroy,   uint32_t id);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointAddDevice, uint32_t id, CUdevice dev);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointQuery,     uint32_t id, uint32_t count, int* status);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointGetLimits, cuuint64_t* bindAlignment, cuuint64_t* maxSize, CUlogicalEndpointProp* prop);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointExport,    CUlogicalEndpointFabricHandle* handle, uint32_t id, int ipcHandleType);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointImport,    uint32_t id, CUlogicalEndpointFabricHandle* handle, int ipcHandleType);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointBindAddr,  uint32_t id, CUdevice dev, size_t offset, void* addr, size_t size, int flags);
+DECLARE_CUDA_PFN_EXTERN_V13030(cuLogicalEndpointUnbind,    uint32_t id, CUdevice dev, size_t offset, size_t size);
+// clang-format on
+
 #if CUDA_VERSION >= 12010
 /* NVSwitch Multicast support */
 DECLARE_CUDA_PFN_EXTERN(cuMulticastAddDevice, 12010);
