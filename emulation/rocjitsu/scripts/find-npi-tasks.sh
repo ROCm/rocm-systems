@@ -21,7 +21,7 @@
 #   path/to/file:LINE: I am a big complicated todo that takes multiple lines to describe.
 #
 # Usage:
-#   ./scripts/find-npi.sh [pathspec ...]
+#   ./scripts/find-npi-tasks.sh [pathspec ...]
 #
 # With no arguments it scans tracked files under emulation/. Any arguments are
 # forwarded to `git ls-files` as pathspecs (relative to the repository root).

@@ -6,7 +6,7 @@ This guide is not complete.
 
 Mark tasks that need to be done when introducing a new product with `\NPI` comment.
 
-can do multi-line comments with
+Can do multi-line comments with
 
 ```c
 /// \NPI I am a big complicated todo \
