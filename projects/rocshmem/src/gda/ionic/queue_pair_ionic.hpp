@@ -134,11 +134,6 @@ private:
   __device__ __attribute__((noinline)) void quiet_internal(const ActiveWFInfo& wf_info,
                                                            uint32_t cons);
 
-#if defined(BUILD_DEBUG_DEVICE)
-  __device__ __attribute__((noinline)) void print_cqe_error(const mlx5_cqe64* cqe,
-                                                            uint8_t opcode, uint8_t owner);
-#endif
-
   ionic_device_sq sq;
   ionic_device_cq cq;
 
