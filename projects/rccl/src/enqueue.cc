@@ -131,6 +131,19 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
@@ -375,13 +388,6 @@ bool ncclTestBudget(
   return ok;
 }
 
-// Returns whether this should be disabled at the device level.  Should be called after devWork fields have been set for what
-// it depends on.
-bool gfx9CheapFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
-    bool fenceOk = devWork.regUsed == 0 && devWork.netRegUsed == 0 && !disabledByPrecheck;
-    return !fenceOk;
-}
-
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl *task;
@@ -463,7 +469,6 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -2318,8 +2323,17 @@ static ncclResult_t updateCollCostTable(
         if (!inRange) continue;
       }
     }
+    // Cache NCCL_PROTO env once: when the user explicitly asks for LL128
+    // (e.g. NCCL_PROTO=LL128 cross-node), bypass the XGMI-only gate below.
+    static bool userProtoInputCached = false;
+    static int userProtoInput = 0;
+    if (!userProtoInputCached) {
+      const char* protoEnv = ncclGetEnv("NCCL_PROTO");
+      userProtoInput = !protoEnv ? 0 : 1;
+      userProtoInputCached = true;
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3336,14 +3350,9 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    if (comm->symmetricSupport) {
-      struct ncclWindow_vidmem* peerWinDevHost = NULL;
-      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
-    } else {
-      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
-      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
-    }
+    struct ncclWindow_vidmem* peerWinDevHost = NULL;
+    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
@@ -3354,23 +3363,21 @@ static ncclResult_t rmaTaskAppend(
       WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    if (comm->symmetricSupport) {
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
-    } else {
-      // hostRmaSupport path: source buffer must be inside a registered window so
-      // the GIN proxy can resolve its MR handle.  Look it up the same way.
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL) {
-        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+
+    // RCCL: Source buffer must be inside a registered window. The winFlags
+    // symmetric hint is enforced only on the sym VMM path (user contract:
+    // offsets symmetric across ranks); IPC and proxy do not require the flag.
+    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+    if (srcWinHost == NULL) {
+      WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+      return ncclInvalidArgument;
     }
+    if (comm->symmetricSupport &&
+        !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+      return ncclInvalidArgument;
+    }
+    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
 
     // Relevant for symmetric window only
     bool isMultiSegment = (comm->symmetricSupport)
@@ -3418,16 +3425,15 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
-#ifdef RCCL_RMA_CU_PATH_ENABLED
   // Check if RMA CE needs initialization
-  if (!comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+  if (!comm->rmaState.rmaCeState.initialized &&
+      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECK(ncclCalloc(&ceTask, 1));
     ceTask->comm = comm;
     ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
-#endif
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);

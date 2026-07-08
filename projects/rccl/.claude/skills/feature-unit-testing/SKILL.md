@@ -288,19 +288,13 @@ A branch is covered only when **both sides** of a conditional have been exercise
 if (result != ncclSuccess) goto fail;   // ← "fail" branch: count = 0
 ```
 
-**Example from net_ib.cc** (single MI300x node, Mellanox CX-7 — numbers will differ on other hardware):
-
-```
-Metric          Before stress tests    After 14 stress tests
-────────────────────────────────────────────────────────────
-Line coverage       ~72%                   ~72%    Δ +0.2 pp
-Branch coverage     ~41%                   ~42%    Δ +1.0 pp
-```
-
-Line coverage looks healthy at 71%. Branch coverage at 40% reveals that roughly
-**6 in 10 decision points** are only partially tested. For transport code where the
-uncovered side is usually the error path or the hardware-specific path, this gap
-directly maps to bugs that tests cannot catch.
+**Typical pattern in transport code:** adding a batch of stress tests can leave
+line coverage essentially flat while moving branch coverage only marginally —
+because the new tests re-exercise already-covered happy-path lines, while the
+uncovered side of each decision (the error or hardware-specific path) stays
+untaken. A healthy-looking line-coverage figure can hide that a large share of
+decision points are only half-tested. For transport code that gap maps directly
+to bugs tests cannot catch.
 
 **Functions coverage is the least informative metric for systems code.** A function
 called once with the happy-path arguments appears fully covered even if it contains
@@ -314,12 +308,11 @@ genhtml --branch-coverage merged.lcov.info -o html/
 # Without this flag, the HTML report does not show per-branch hit counts.
 ```
 
-**lcov vs llvm-cov branch counts differ:**
-- lcov (BRDA parsing): 1821 branches for net_ib.cc
-- `llvm-cov report`: 1954 branches (includes C++ exception pseudo-branches)
-
-Use one tool consistently within a comparison. Mixing denominators makes deltas
-meaningless. lcov/genhtml is preferred for branch-level HTML drill-down.
+**lcov vs llvm-cov branch counts differ:** the two tools report different branch
+denominators for the same file (llvm-cov includes C++ exception pseudo-branches
+that lcov's BRDA parsing excludes). Use one tool consistently within a comparison
+— mixing denominators makes deltas meaningless. lcov/genhtml is preferred for
+branch-level HTML drill-down.
 
 **Read BRDA lines, not DA lines, when hunting gaps:**
 ```
@@ -562,59 +555,55 @@ sbatch --nodes=2 --ntasks-per-node=1 --exclusive --time=00:10:00 \
 
 ---
 
-## Living Document
+## Maintaining This Skill
 
-Updated after each testing iteration. Add new patterns and anti-patterns here as they emerge.
+This document is the **fixed record of the methodology** — not a lab notebook.
+It changes rarely and only for durable reasons.
 
-**Coverage numbers below are approximate.** Exact values depend on hardware (NIC model,
-number of ports, GDR/DMA-buf support), cluster topology (single-node loopback vs cross-host),
-compiler version (affects branch count — C++ exception pseudobranches inflate the denominator),
-and which env-var combinations were exercised. Re-measure on your hardware; do not treat
-these numbers as universal targets.
+**Add or change something only when:**
+- A genuinely new methodology emerges (a new class of technique, phase, or
+  acceptance rule) that future testers should follow, or
+- An existing rule is shown to be wrong or incomplete and the methodology itself
+  must change.
 
-**Approximate baseline progression** (net_ib.cc, ~1800 lcov branches, single MI300x node with Mellanox CX-7):
+**Never add:**
+- Concrete coverage numbers, test counts, branch tallies, or per-run deltas — they
+  are snapshots of one hardware/build and rot immediately. They belong in a
+  per-feature coverage report (e.g. an `*_COVERAGE.md` next to the work), not here.
+- Incident logs, "resolved puzzle" notes, or one-off debugging anecdotes.
+- Tool-version specifics, exact env-var flag lists, cluster paths, or other
+  details that vary by environment — reference the *kind* of thing, not the value.
 
-| Phase | Branch (approx) | Line (approx) | What moved the needle |
-|-------|:---------------:|:--------------:|----------------------|
-| GeneralTests only | ~40% | ~72% | 18 basic functional tests |
-| + 14 stress tests | ~42% | ~72% | Resource churn, multi-connection, bidirectional |
-| + branch-coverage tests | ~43% | ~73% | Targeted BRDA gaps: size clamping, NULL comm, nreqs>1 |
-| + env-var sweeps | ~44–45% | ~74–75% | MERGE_VFS, ECE, SL/TC, DMABUF, RELAXED_ORDERING, etc. |
-| + multi-rank (4-rank loopback) | ~44–45% | ~74–75% | FanIn/FanOut/AllToAll — diminishing returns on loopback |
+**When tempted to record a finding:** ask "is this a reusable rule, or a
+measurement?" Measurements go in the coverage report and link back here by
+reference. Only the rule (if any) belongs in the skill.
 
-**Total tests:** ~27 in StressTests.cpp (14 stress + 13 branch-coverage) + GeneralTests.
+Keep entries principle-level and environment-agnostic: describe *what to do* and
+*why*, with categories and references, never specific magnitudes.
 
-**Note on denominators**: genhtml `--branch-coverage` shows ~1821 branches (exception
-pseudobranches excluded); raw `llvm-cov export` shows ~1954. Use one tool consistently
-within a comparison — mixing denominators makes deltas meaningless.
+## Coverage Ceiling Is Hardware-Dependent (principle)
 
-**Resolved puzzle**: Always verify BRDA counts against a profdata that actually includes the
-relevant test execution. A branch showing `count=0` may just mean the profdata was built
-from an incomplete run — not that the branch is uncovered.
+The reachable branch-coverage ceiling is bounded by available hardware and
+infrastructure, not by test effort. A large fraction of transport branches are
+error/fault/hardware paths unreachable without special infrastructure
+(fault-injection hooks, GDR/DMA-buf hardware, multi-port/RoCE fabric, cross-host
+or `netem` latency for connect/accept mid-states). Therefore:
 
-### Hardware-dependent coverage ceiling
+- **Establish the realistic ceiling for your specific hardware before setting a
+  target** — otherwise the target is unachievable by design and the gap is not a
+  quality problem.
+- Classify each uncovered branch (Trivial / Structural / Hardware / Fault
+  injection / Dead) and count only the reachable classes toward a projected delta.
+- Some branches are genuinely unreachable on a given setup (compiler exception
+  pseudo-branches, single-thread-only race windows, log-macro internals).
+  Document them as the ceiling; do not contrive tests to flip them.
 
-The coverage ceiling is determined by what hardware and infrastructure are available.
-Most uncovered branches fall into categories that require specific capabilities:
+**Lever, not magnitude:** record *which techniques move coverage* (multi-QP split,
+MR-cache churn, shuffled multi-recv, env-var sweeps, fault injection), not the
+percentage each produced — that varies per build and lives in the coverage report.
 
-| Category | Approx branches | Requirement |
-|----------|:--------------:|-------------|
-| Connect/Accept state machine mid-transitions | ~30 | Cross-host run or `tc netem` latency injection |
-| RoCE/GID selection paths | ~100 | Multiple RoCE port types or IB fabric |
-| GDR/DMA-buf paths | ~50 | GDR kernel module + GPU direct RDMA support |
-| WC error / fatal-error paths | ~30 | LD_PRELOAD shim to inject bad work completions |
-| NCCLCHECK error fallback branches | ~600 | Systematic fault injection at each call site |
-
-**Realistic ceiling without LD_PRELOAD shims or GDR hardware: ~44–45%.** This is not a
-quality problem — it reflects that ~55% of branches are error/fault/hardware paths that
-cannot be reached without special infrastructure. Establish the ceiling for your specific
-hardware before setting a target; otherwise the target is unachievable by design.
-
-**Env-var technique** — run existing tests with specific env vars to cover additional branches
-without writing new tests:
-- `NCCL_IB_SL=N NCCL_IB_TC=N` — SL/TC configuration branches
-- `NCCL_IB_ECE_ENABLE=0` — ECE disabled path in connect loop
-- `NCCL_IB_MERGE_VFS=0` — VFS merge disabled paths in init
-- `RCCL_FORCE_ENABLE_DMABUF=1` — forceDmaBuf branch in accept
-- `sudo tc qdisc add dev lo root netem delay Xms` — SendDevList reentry on loopback
-- Each env-var run should be merged with the existing profdata, not treated as standalone.
+**Env-var technique** — run existing tests under additional env-var combinations to
+reach configuration branches without writing new tests; merge each run's profile
+into the same profdata rather than measuring it standalone. (Which specific env
+vars apply is project/version-specific — find them via BRDA analysis, don't
+hardcode a list here.)

@@ -42,8 +42,11 @@
 
 // HSA C to C++ interface implementation.
 // This file does argument checking and conversion to C++.
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <sys/types.h>
 
@@ -61,6 +64,8 @@
 #include "core/inc/hsa_ven_amd_loader_impl.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "core/inc/hotswap.hpp"
+#include "core/util/os.h"
 
 namespace rocr {
 
@@ -321,7 +326,7 @@ hsa_status_t hsa_system_major_extension_supported(uint16_t extension, uint16_t v
 
   if ((extension == HSA_EXTENSION_AMD_AQLPROFILE) && (version_major == 1)) {
     *version_minor = 0;
-    *result = true;
+    *result = core::Runtime::runtime_singleton_->AqlProfileAvailable();
     return HSA_STATUS_SUCCESS;
   }
 
@@ -2122,6 +2127,24 @@ Loader *GetLoader() {
   return core::Runtime::runtime_singleton_->loader();
 }
 
+hsa_status_t LoadOriginalCodeObject(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* exec = static_cast<Executable*>(context);
+  return exec->LoadCodeObject(agent, code_object, options, uri,
+                              loaded_code_object);
+}
+
+hsa_status_t LoadSizedCodeObject(
+    void* context, hsa_agent_t agent, hsa_code_object_t code_object,
+    size_t code_object_size, const char* options, const std::string& uri,
+    hsa_loaded_code_object_t* loaded_code_object) {
+  auto* exec = static_cast<Executable*>(context);
+  return exec->LoadCodeObject(agent, code_object, code_object_size, options,
+                              uri, loaded_code_object);
+}
+
 } // namespace anonymous
 
 hsa_status_t hsa_code_object_reader_create_from_file(
@@ -2253,6 +2276,7 @@ hsa_status_t hsa_executable_destroy(
   }
 
   GetLoader()->DestroyExecutable(exec);
+  hotswap::ReleaseRetainedRewrittenElfBuffers(executable);
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -2328,10 +2352,17 @@ hsa_status_t hsa_executable_load_agent_code_object(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
   }
 
-  hsa_code_object_t code_object =
-      {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
-  return exec->LoadCodeObject( agent, code_object, options,
-                              reader->GetUri(), loaded_code_object);
+  hotswap::CodeObjectView code_object;
+  code_object.data = reader->GetCodeObjectMemory();
+  code_object.size = reader->GetCodeObjectSize();
+  code_object.uri = reader->GetUri();
+
+  hotswap::LoadAgentCodeObjectCallbacks callbacks;
+  callbacks.context = exec;
+  callbacks.load_original_code_object = LoadOriginalCodeObject;
+  callbacks.load_rewritten_code_object = LoadSizedCodeObject;
+  return hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, agent, code_object, options, loaded_code_object, callbacks);
   CATCH;
 }
 

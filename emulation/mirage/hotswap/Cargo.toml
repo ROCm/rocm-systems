@@ -8,3 +8,4 @@ path = "src/lib.rs"
 
 [dependencies]
 mirage_core = { workspace = true }
+inventory = { workspace = true }

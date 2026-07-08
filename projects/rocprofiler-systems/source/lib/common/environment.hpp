@@ -586,13 +586,14 @@ enum class update_mode : std::uint8_t
 ///        strings pass through.
 /// @return The string representation of @p val.
 template <typename Tp>
+    requires(std::is_same_v<std::decay_t<Tp>, std::string> ||
+             std::is_same_v<std::decay_t<Tp>, const char*> ||
+             std::is_same_v<std::decay_t<Tp>, bool> ||
+             std::is_arithmetic_v<std::decay_t<Tp>>)
 inline std::string
 to_env_string(Tp&& val)
 {
     using T = std::decay_t<Tp>;
-    static_assert(std::is_same_v<T, std::string> || std::is_same_v<T, const char*> ||
-                      std::is_same_v<T, bool> || std::is_arithmetic_v<T>,
-                  "to_env_string: unsupported type. Use string, bool, or numeric types.");
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
         return std::string{ val };

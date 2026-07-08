@@ -1174,14 +1174,30 @@ class TestAmdSmiCli(unittest.TestCase):
 
             # set --power-cap defaults
             for power_type in self.power_types:
-                socket_power_limit = self.static_data["gpu_data"][index]["limit"][power_type][
-                    "socket_power_limit"
-                ]
+                _power_type = self.static_data["gpu_data"][index]["limit"][power_type]
+                socket_power_limit = _power_type["socket_power_limit"]
                 if socket_power_limit != "N/A":
                     socket_power = socket_power_limit["value"]
                     cmds.append(
                         (
                             f"amd-smi set --power-cap {socket_power} {power_type} --gpu {index}",
+                            self.PASS,
+                        )
+                    )
+                    # Both bounds are inclusive: the exact min and max must
+                    # succeed. A reported min of 0 means the technical minimum
+                    # is 1, since setting 0 reads back the current cap.
+                    min_power = max(_power_type["min_power_limit"]["value"], 1)
+                    max_power = _power_type["max_power_limit"]["value"]
+                    cmds.append(
+                        (
+                            f"amd-smi set --power-cap {min_power} {power_type} --gpu {index}",
+                            self.PASS,
+                        )
+                    )
+                    cmds.append(
+                        (
+                            f"amd-smi set --power-cap {max_power} {power_type} --gpu {index}",
                             self.PASS,
                         )
                     )

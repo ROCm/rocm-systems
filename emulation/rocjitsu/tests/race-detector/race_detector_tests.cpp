@@ -125,6 +125,36 @@ TEST(RaceDetector, LdsCrossWave_WithBarrier) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, LdsCrossWave_WarMissingBarrier) {
+  // WAR: wave 0 reads LDS[0], waitcnt, then wave 1 writes to LDS[0]
+  // without barrier → RACE on the write.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  // Missing barrier!
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
+}
+
+TEST(RaceDetector, LdsCrossWave_WarWithBarrier) {
+  // WAR: wave 0 reads LDS[0], waitcnt, barrier, then wave 1 writes → safe.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.barrier();
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, LdsCrossWave_WarNoOverlap) {
+  // WAR: wave 0 reads LDS[0..4), wave 1 writes LDS[4..8) → safe (no overlap).
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+  b.ldsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/0);
+  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
 // ---- LDS same-wave races ----
 
 TEST(RaceDetector, LdsSameWave_WriteWriteOk) {
@@ -407,6 +437,18 @@ TEST(RaceDetector, LdsCrossWave_GlobalLoadToLdsWriteMissingVmcnt) {
   b.checkVgprRead(/*wave=*/0, /*reg=*/1,
                   /*lane=*/0); // simulates ds_write reading v1
   EXPECT_TRUE(b.hasVgprRace(1));
+}
+
+TEST(RaceDetector, GlobalToLdsHonorsLaneMask) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, /*waveSize=*/4);
+  b.globalToLds(/*wave=*/0, /*ldsAddrs=*/{0, 4, 8, 12}, /*bytesPerLane=*/4,
+                /*exec=*/0x1);
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(0));
 }
 
 TEST(RaceDetector, LdsSameWave_MultiLaneReadOk) {

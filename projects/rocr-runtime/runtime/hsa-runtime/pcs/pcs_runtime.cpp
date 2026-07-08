@@ -46,11 +46,17 @@
 #include <mutex>
 
 #include "core/inc/runtime.h"
+#include "core/util/utils.h"
 
 #include "core/inc/amd_gpu_agent.h"
 
 namespace rocr {
 namespace pcs {
+
+// Thread-local storage for sample buffer info during DataCopyCallback.
+// Each thread invoking the callback has its own copy, eliminating the need
+// for cross-thread mutex serialization.
+thread_local PcsRuntime::PcSamplingSession::data_ready_info_t pending_sample_copy = {};
 
 #define IS_BAD_PTR(ptr)                                          \
 do {                                                           \
@@ -131,11 +137,6 @@ PcsRuntime::PcSamplingSession::PcSamplingSession(
   csd.buffer_size = buffer_size;
   csd.data_ready_callback = data_ready_callback;
   csd.client_callback_data = client_callback_data;
-
-  data_rdy.buf1 = nullptr;
-  data_rdy.buf1_sz = 0;
-  data_rdy.buf2 = nullptr;
-  data_rdy.buf2_sz = 0;
 }
 
 void PcsRuntime::PcSamplingSession::GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo) {
@@ -178,10 +179,24 @@ hsa_status_t PcSamplingDataCopyCallback(void* _session, size_t bytes_to_copy, vo
 
 hsa_status_t PcsRuntime::PcSamplingSession::DataCopyCallback(uint8_t* buffer,
                                                              size_t bytes_to_copy) {
-  if (bytes_to_copy != (data_rdy.buf1_sz + data_rdy.buf2_sz)) return HSA_STATUS_ERROR_EXCEPTION;
+  // Read from thread-local pending_sample_copy (set by HandleSampleData on this thread).
+  //
+  // This function must be called from within the data_ready_callback,
+  // on the same thread that invoked the callback. Calling from a different thread
+  // or after the callback has returned will fail because the thread-local storage
+  // will not contain valid buffer pointers.
 
-  if (data_rdy.buf1_sz) memcpy(buffer, data_rdy.buf1, data_rdy.buf1_sz);
-  if (data_rdy.buf2_sz) memcpy(buffer + data_rdy.buf1_sz, data_rdy.buf2, data_rdy.buf2_sz);
+  if (pending_sample_copy.buf1 == nullptr && pending_sample_copy.buf2 == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (bytes_to_copy != (pending_sample_copy.buf1_sz + pending_sample_copy.buf2_sz))
+    return HSA_STATUS_ERROR_EXCEPTION;
+
+  if (pending_sample_copy.buf1_sz)
+    memcpy(buffer, pending_sample_copy.buf1, pending_sample_copy.buf1_sz);
+  if (pending_sample_copy.buf2_sz)
+    memcpy(buffer + pending_sample_copy.buf1_sz, pending_sample_copy.buf2,
+           pending_sample_copy.buf2_sz);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -189,10 +204,21 @@ hsa_status_t PcsRuntime::PcSamplingSession::DataCopyCallback(uint8_t* buffer,
 hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size_t buf1_sz,
                                                              uint8_t* buf2, size_t buf2_sz,
                                                              size_t lost_sample_count) {
-  data_rdy.buf1 = buf1;
-  data_rdy.buf1_sz = buf1_sz;
-  data_rdy.buf2 = buf2;
-  data_rdy.buf2_sz = buf2_sz;
+  // Store buffer info in thread-local storage for DataCopyCallback.
+  // Each XCC thread has its own pending_sample_copy, so no mutex is needed.
+  // The user's callback runs on this same thread and can safely call DataCopyCallback.
+  //
+  // Save and restore previous state to handle nested reentry safely.
+  // If data_ready_callback triggers another HandleSampleData on the same thread,
+  // the inner call's cleanup won't clobber the outer call's data.
+  // Use RAII guard to ensure restore even if callback throws an exception.
+  data_ready_info_t saved_copy = pending_sample_copy;
+  MAKE_SCOPE_GUARD([&]() { pending_sample_copy = saved_copy; });
+
+  pending_sample_copy.buf1 = buf1;
+  pending_sample_copy.buf1_sz = buf1_sz;
+  pending_sample_copy.buf2 = buf2;
+  pending_sample_copy.buf2_sz = buf2_sz;
 
   AMD::GpuAgent* gpuAgent = static_cast<AMD::GpuAgent*>(agent);
 
@@ -234,6 +260,10 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
   csd.data_ready_callback(csd.client_callback_data, buf1_sz + buf2_sz, lost_sample_count,
                           &PcSamplingDataCopyCallback,
                           /* hsa_callback_data*/ this);
+
+  // RAII scope guard restores pending_sample_copy automatically on scope exit,
+  // even if callback threw an exception.
+
   return HSA_STATUS_SUCCESS;
 }
 

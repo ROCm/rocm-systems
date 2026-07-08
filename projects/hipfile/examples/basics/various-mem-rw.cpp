@@ -88,7 +88,7 @@ alloc_buf(mem_mode_t mode, size_t size, void **out_buf)
             hip_err = hipHostMalloc(out_buf, size, hipHostMallocDefault);
             break;
         default:
-            fprintf(stderr, "alloc_buf: invalid mode %d\n", (int)mode);
+            fprintf(stderr, "alloc_buf: invalid mode %d\n", static_cast<int>(mode));
             return 1;
     }
     if (hipSuccess != hip_err) {
@@ -112,7 +112,7 @@ free_buf(mem_mode_t mode, void *buf)
             hip_err = hipHostFree(buf);
             break;
         default:
-            fprintf(stderr, "free_buf: invalid mode %d\n", (int)mode);
+            fprintf(stderr, "free_buf: invalid mode %d\n", static_cast<int>(mode));
             return 1;
     }
     if (hipSuccess != hip_err) {
@@ -162,7 +162,7 @@ main(int argc, char *argv[])
         fprintf(stderr, "MODE must be 1 (device), 2 (managed), or 3 (pinned-host)\n");
         return EXIT_FAILURE;
     }
-    const mem_mode_t mode = (mem_mode_t)mode_raw;
+    const mem_mode_t mode = static_cast<mem_mode_t>(mode_raw);
 
     /* Stat the input file to get its size and the filesystem block size. */
     size_t file_size, block_size;
@@ -172,8 +172,8 @@ main(int argc, char *argv[])
             fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
             return EXIT_FAILURE;
         }
-        file_size  = (size_t)statbuf.st_size;
-        block_size = (size_t)statbuf.st_blksize;
+        file_size  = static_cast<size_t>(statbuf.st_size);
+        block_size = static_cast<size_t>(statbuf.st_blksize);
         if (!is_power_of_two(block_size)) {
             fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
             return EXIT_FAILURE;
@@ -221,7 +221,7 @@ main(int argc, char *argv[])
                 IS_HIPFILE_ERR(nbytes) ? HIPFILE_ERRSTR(nbytes) : strerror(errno));
         goto release_buf;
     }
-    if ((size_t)nbytes < payload_size) {
+    if (static_cast<size_t>(nbytes) < payload_size) {
         fprintf(stderr, "Short read on %s: got %zd bytes, expected at least %zu\n", in_path, nbytes,
                 payload_size);
         goto release_buf;
@@ -240,7 +240,7 @@ main(int argc, char *argv[])
         goto close_out;
     }
 
-    if (-1 == ftruncate(out_fd, (off_t)payload_size)) {
+    if (-1 == ftruncate(out_fd, static_cast<off_t>(payload_size))) {
         fprintf(stderr, "Could not truncate %s (%s)\n", out_path, strerror(errno));
         goto close_out;
     }

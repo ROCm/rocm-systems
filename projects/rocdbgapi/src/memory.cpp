@@ -694,59 +694,9 @@ host_address_space_t::convert (const wave_t &wave,
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_CONVERSION);
 }
 
-template <typename AddressType>
-void
-memory_cache_t<AddressType>::fetch_cache_line (cache_line_t &cache_line,
-                                               AddressType address) const
-{
-  dbgapi_assert (!cache_line.m_dirty);
-
-  size_t xfer_size = m_xfer_global_memory (address, &cache_line.m_data[0],
-                                           nullptr, cache_line.m_data.size ());
-
-  if (xfer_size != cache_line.m_data.size ())
-    throw memory_access_error_t (
-      /* FIXME_lmoriche:  */
-      address_space_t::global (), address + cache_line_size);
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
-void
-memory_cache_t<AddressType>::commit_cache_line (cache_line_t &cache_line,
-                                                AddressType address) const
-{
-  if (!cache_line.m_dirty)
-    return;
-
-  size_t xfer_size = m_xfer_global_memory (
-    address, nullptr, &cache_line.m_data[0], cache_line.m_data.size ());
-
-  if (xfer_size != cache_line.m_data.size ())
-    throw memory_access_error_t (
-      /* FIXME_lmoriche:  */
-      address_space_t::global (), address + xfer_size);
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
-void
-memory_cache_t<AddressType>::allocate_0_cache_line (
-  cache_line_t &cache_line) const
-{
-  dbgapi_assert (!cache_line.m_dirty);
-
-  memset (&cache_line.m_data[0], '\0', cache_line.m_data.size ());
-
-  cache_line.m_dirty = false;
-}
-
-template <typename AddressType>
 bool
-memory_cache_t<AddressType>::contains_all (AddressType address,
-                                           amd_dbgapi_size_t size) const
+memory_cache_t::contains_all (agent_address_t address,
+                              amd_dbgapi_size_t size) const
 {
   dbgapi_assert (address < (address + size) && "invalid size");
   auto cache_line_begin = utils::align_down (address, cache_line_size);
@@ -761,12 +711,10 @@ memory_cache_t<AddressType>::contains_all (AddressType address,
   return true;
 }
 
-template <typename AddressType>
 void
-memory_cache_t<AddressType>::prefetch (AddressType address,
-                                       amd_dbgapi_size_t size)
+memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
 {
-  if (policy == policy_t::uncached || size == 0)
+  if (size == 0)
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
@@ -778,8 +726,8 @@ memory_cache_t<AddressType>::prefetch (AddressType address,
 
   try
     {
-      m_xfer_global_memory (cache_line_begin, &staging_buffer[0], nullptr,
-                            cache_line_end - cache_line_begin);
+      m_xfer_agent_memory (cache_line_begin, &staging_buffer[0], nullptr,
+                           cache_line_end - cache_line_begin);
     }
   catch (const memory_error_t &)
     {
@@ -809,13 +757,11 @@ memory_cache_t<AddressType>::prefetch (AddressType address,
     }
 }
 
-template <typename AddressType>
 void
-memory_cache_t<AddressType>::write_back (AddressType address,
-                                         amd_dbgapi_size_t size)
+memory_cache_t::write_back (agent_address_t address, amd_dbgapi_size_t size)
 {
   std::exception_ptr exception;
-  if (policy != policy_t::write_back || size == 0)
+  if (size == 0)
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
@@ -867,13 +813,12 @@ memory_cache_t<AddressType>::write_back (AddressType address,
 
       try
         {
-          size_t xfer_size = m_xfer_global_memory (
+          size_t xfer_size = m_xfer_agent_memory (
             cache_line_address, nullptr, &staging_buffer[0], request_size);
 
           if (xfer_size != request_size)
-            throw memory_access_error_t (
-              /* FIXME_lmoriche:  */
-              address_space_t::global (), cache_line_address + xfer_size);
+            throw memory_access_error_t (m_agent.agent_address_space (),
+                                         cache_line_address + xfer_size);
         }
       catch (const process_exited_exception_t &)
         {
@@ -893,11 +838,9 @@ memory_cache_t<AddressType>::write_back (AddressType address,
     std::rethrow_exception (exception);
 }
 
-template <typename AddressType>
 void
-memory_cache_t<AddressType>::discard (AddressType address,
-                                      amd_dbgapi_size_t size,
-                                      [[maybe_unused]] bool force_discard)
+memory_cache_t::discard (agent_address_t address, amd_dbgapi_size_t size,
+                         [[maybe_unused]] bool force_discard)
 {
   if (size == 0)
     return;
@@ -917,18 +860,24 @@ memory_cache_t<AddressType>::discard (AddressType address,
     }
 }
 
-template <typename AddressType>
 size_t
-memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
-                                                 void *read, const void *write,
-                                                 size_t size)
+memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
+                                   const void *write, size_t size)
 {
   if (size == 0)
     return 0;
 
-  /* Clamp to the end of the global address space.  */
-  if (address > (address + size))
-    size = AddressType{} - address;
+  /* Clamp to the end of the agent address space.  */
+  auto max = m_agent.agent_address_space ().last_address ();
+  if (address > max)
+    throw memory_access_error_t (m_agent.agent_address_space (), address);
+  /* Clamp SIZE so that the last accessed byte (ADDRESS + SIZE - 1)
+     does not exceed MAX, the last representable address.  The
+     comparison is in terms of the last byte rather than a byte count,
+     because the count MAX - ADDRESS + 1 would wrap to zero when
+     ADDRESS is 0 and MAX is std::numeric_limits<decltype(max)>::max.  */
+  if (size - 1 > max - address)
+    size = static_cast<size_t> (max - address) + 1;
 
   auto first_line = utils::align_down (address, cache_line_size);
   auto last_line = utils::align_down (address + size - 1, cache_line_size);
@@ -937,9 +886,9 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
   auto begin = m_cache_line_map.lower_bound (first_line);
   auto end = m_cache_line_map.upper_bound (last_line);
 
-  /* If uncached or there are no cache lines affected by this access.  */
-  if (policy == policy_t::uncached || begin == end)
-    return m_xfer_global_memory (address, read, write, size);
+  /* If there are no cache lines affected by this access.  */
+  if (begin == end)
+    return m_xfer_agent_memory (address, read, write, size);
 
   /* For cached accesses, handle one cache line at a time.  */
   if (first_line != last_line)
@@ -950,7 +899,7 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
           auto limit = utils::align_up (ptr + 1, cache_line_size);
           auto request_size = std::min (limit, ptr + size) - ptr;
 
-          auto xfer_size = xfer_global_memory (ptr, read, write, request_size);
+          auto xfer_size = xfer_agent_memory (ptr, read, write, request_size);
 
           ptr += xfer_size;
           if (read != nullptr)
@@ -976,18 +925,11 @@ memory_cache_t<AddressType>::xfer_global_memory (AddressType address,
   else
     {
       memcpy (&cache_line.m_data[0] + offset, write, size);
-
-      if (policy != policy_t::write_back)
-        return m_xfer_global_memory (address, nullptr, write, size);
-
       cache_line.m_dirty = true;
     }
 
   return size;
 }
-
-template class memory_cache_t<agent_address_t>;
-template class memory_cache_t<host_address_t>;
 
 } /* namespace amd::dbgapi */
 

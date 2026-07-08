@@ -559,7 +559,6 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_15, "NETPORT_FEC_CW_SYMBOL_ERRS_15"},
     {IFOE_TELEM_ID_NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE,
      "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
-
 };
 
 const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {

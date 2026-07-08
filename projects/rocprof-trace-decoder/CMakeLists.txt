@@ -128,7 +128,7 @@ if(BUILD_TESTS
         # Remove stale profiling data
         COMMAND find ${CMAKE_BINARY_DIR} -name "*.gcda" -delete
         # Run tests (skip sanitizer variants)
-        COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/test -E sanitize -E ubsan -E asan -j8
+        COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}/test -E "sanitize|ubsan|asan" -j8
                 --output-on-failure
         # Capture coverage
         COMMAND ${LCOV} --quiet --capture --directory ${CMAKE_BINARY_DIR} --output-file
@@ -143,6 +143,6 @@ if(BUILD_TESTS
         COMMAND ${CMAKE_COMMAND} -E echo "Coverage report: ${CMAKE_BINARY_DIR}/coverage_report/index.html"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
-        DEPENDS unit_tests rocprof-trace-decoder
+        DEPENDS unit_tests unit_tests_logging rocprof-trace-decoder
         VERBATIM)
 endif()

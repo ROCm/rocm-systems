@@ -43,6 +43,7 @@ static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 constexpr uint32_t kMaxVgprGranulatedField = 63;
 constexpr uint32_t kMaxSgprGranulatedField = 15;
+constexpr uint64_t kKernargPreloadSkipBytes = 256;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -335,6 +336,10 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
+[[nodiscard]] uint32_t kernarg_preload_length(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH);
+}
+
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
@@ -520,6 +525,9 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.entry_text_offset = entry_text_offset;
   result.target_entry_text_offset = entry_text_offset;
   result.target_body_entry_text_offset = entry_text_offset;
+  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
+  result.kernarg_preload_entry_text_offset =
+      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not

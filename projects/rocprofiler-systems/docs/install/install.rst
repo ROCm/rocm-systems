@@ -107,6 +107,10 @@ This includes the ROCm profilers, dependencies, and base packages.
             # Install ROCm and the profilers from the AMD package repository.
             python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
 
+         .. note::
+
+            This pip installation option installs only the components required to run ROCm profiling tools (ROCm Systems Profiler and :doc:`ROCm Compute Profiler <rocprofiler-compute:index>`). It doesn't include other components for developing or building ROCm applications. To install the full development environment, use ``pip install "rocm[devel]"`` or refer to the appropriate pip installation instruction under :doc:`Install AMD ROCm <rocm:install/rocm>` for your system environment.
+
 .. _post-installation-steps:
 
 Post-installation steps

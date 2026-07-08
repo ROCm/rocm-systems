@@ -75,6 +75,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);
@@ -88,7 +89,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -137,6 +138,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   HIP_INIT_API(hipFreeAsync, dev_ptr, stream);
 
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   auto hip_stream =
@@ -146,7 +148,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      return hipErrorStreamCaptureUnsupported;
+      HIP_RETURN(hipErrorStreamCaptureUnsupported);
     }
   }
 
@@ -359,6 +361,7 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  CHECK_STREAM_DETACHED_API(stream);
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);

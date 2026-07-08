@@ -11,6 +11,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../test_paths.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/executable.h"
@@ -34,10 +35,8 @@ using namespace rocjitsu;
 
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
-std::string kernel_hsaco_path(const char *name) {
-  return std::string(KERNEL_DIR) + "/" + name + ".hsaco";
-}
+using test::kernel_hsaco_path;
+using test::kernel_path;
 
 std::vector<uint8_t> load_kernel_hsaco_bytes(const char *name) {
   std::ifstream file(kernel_hsaco_path(name), std::ios::binary);
