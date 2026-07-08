@@ -530,11 +530,14 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
             NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
         }
         NCCLCHECK(ncclGroupEnd());
+        CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
+                                  cudaMemcpyDeviceToHost, stream));
+        CUDACHECK(cudaStreamSynchronize(stream));
 
         struct ncclInfo info = { ncclFuncAlltoAllv, "AlltoAllv",
                 sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream,
                 ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr };
-        info.sizes = (size_t*)comm->gatheredSizes;
+        info.sizes = gatheredSizes.data();
 
         return ncclEnqueueCheck(&info);
   } else {
