@@ -527,12 +527,13 @@ class TestExecutor:
         elif self.args.verbose:
             print("SKIP: MPI check skipped (--skip-mpi-check)")
 
-        # Check RCCL library (if not building or using custom lib)
+        # HACK: this branch runs only against the RCCL provided on
+        # LD_LIBRARY_PATH (no local build). A librccl.so in build_dir is
+        # optional -- do not abort when it is absent; just report where RCCL
+        # will be loaded from so the run is self-documenting.
         if self.args.no_build or self.using_custom_lib:
             lib_path = os.path.join(self.build_dir, "librccl.so")
-            if not os.path.isfile(lib_path):
-                errors.append(f"RCCL library not found: {lib_path}")
-            else:
+            if os.path.isfile(lib_path):
                 if self.args.verbose:
                     print(f"Found RCCL library: {lib_path}")
                 # Fail fast: --coverage-report requires an instrumented library,
@@ -540,6 +541,9 @@ class TestExecutor:
                 if self.args.coverage_report and not self._check_coverage_instrumentation(lib_path):
                     self._print_coverage_missing_error(lib_path)
                     return False
+            else:
+                print(f"NOTE: no librccl.so in {self.build_dir}; using RCCL from "
+                      f"LD_LIBRARY_PATH={os.environ.get('LD_LIBRARY_PATH', '(unset)')}")
 
         if errors:
             print("ERROR: Environment check failed:")
@@ -1364,9 +1368,17 @@ class TestExecutor:
             os.close(fd)
             cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
 
+        # HACK: build_dir/test may not exist when running against an
+        # LD_LIBRARY_PATH-provided RCCL (no local build). Fall back to a dir
+        # that exists -- perf binaries are resolved by absolute path, so cwd is
+        # not load-bearing for them.
+        run_cwd = os.path.join(self.build_dir, "test")
+        if not os.path.isdir(run_cwd):
+            run_cwd = self.build_dir if os.path.isdir(self.build_dir) else os.getcwd()
+
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
-            print(f"  Working directory: {os.path.join(self.build_dir, 'test')}")
+            print(f"  Working directory: {run_cwd}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
@@ -1391,7 +1403,7 @@ class TestExecutor:
             wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
             proc = subprocess.Popen(
                 ["bash", "-c", wrapped],
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1399,7 +1411,7 @@ class TestExecutor:
             proc = subprocess.Popen(
                 cmd,
                 shell=True,
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
