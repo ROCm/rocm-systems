@@ -136,3 +136,55 @@ ROCSHMEM_BUFFER_UNREGISTER_ALL
 **Description:**
 Deregisters all buffers that were previously registered using
 `rocshmem_buffer_register`.
+
+ROCSHMEM_BUFFER_REGISTER_SYMMETRIC
+----------------------------------
+
+.. cpp:function:: __host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length);
+
+  :param addr:   Pointer to previously allocated VMM memory.
+  :param length: Length of ``addr`` in bytes.
+  :returns: The rocSHMEM-managed symmetric address on success, ``NULL``
+            otherwise.
+
+**Description:**
+Registers a user-allocated buffer so that it can be used as the remote target
+of RMA operations. Unlike :ref:`rocshmem_buffer_register`, this is a
+**collective** operation that must be called by all PEs with a buffer of the
+same ``length``.
+
+The call maps the user's buffer to a rocSHMEM-managed virtual address and
+returns it. That returned address (**not** ``addr``) is the symmetric handle
+the caller must use as the target for RMA routines, and the same address must
+later be passed to :ref:`rocshmem_buffer_unregister_symmetric`.
+
+Notes:
+
+* This routine is restricted to memory allocated through the HIP
+  Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing a non-VMM
+  pointer returns ``NULL``.
+* Each PE may supply a different underlying buffer, but all PEs must agree on
+  ``length`` and on the buffer's alignment so the region is symmetric across
+  the job.
+* The underlying buffer ranges must not overlap a region that is already
+  registered.
+
+ROCSHMEM_BUFFER_UNREGISTER_SYMMETRIC
+------------------------------------
+
+.. cpp:function:: __host__ int rocshmem_buffer_unregister_symmetric(void *addr);
+
+  :param addr:   The symmetric address returned by
+                 ``rocshmem_buffer_register_symmetric``.
+  :returns: ROCSHMEM_SUCCESS on success, ROCSHMEM_ERROR otherwise.
+
+**Description:**
+Deregisters a buffer that was previously registered using
+:ref:`rocshmem_buffer_register_symmetric`. This is a **collective** operation
+that must be called by all PEs that participated in the matching
+``rocshmem_buffer_register_symmetric`` call.
+
+The ``addr`` argument must be the rocSHMEM-managed symmetric address returned by
+``rocshmem_buffer_register_symmetric`` (not the caller's original buffer
+pointer). The call unmaps the rocSHMEM-managed virtual address; the user's
+original buffer is left untouched.
