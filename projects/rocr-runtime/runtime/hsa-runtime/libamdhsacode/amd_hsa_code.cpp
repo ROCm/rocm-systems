@@ -64,11 +64,9 @@ namespace hsa {
 namespace code {
 namespace detail {
 
+// Upper bound for variable-length AMD HSA note payloads built from compiler
+// metadata; larger values indicate malformed or attacker-controlled input.
 constexpr size_t kMaxAmdNoteBufferSize = 4096;
-
-inline bool IsWithinAmdNoteBufferLimit(size_t size) {
-  return size <= kMaxAmdNoteBufferSize;
-}
 
 }  // namespace detail
 
@@ -530,12 +528,12 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
       return true;
     }
 
-    void AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
+    bool AmdHsaCode::AddNoteIsa(const std::string& vendor_name, const std::string& architecture_name, uint32_t major, uint32_t minor, uint32_t stepping)
     {
       size_t size = sizeof(amdgpu_hsa_note_isa_t) + vendor_name.length() + architecture_name.length() + 1;
-      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+      if (size > detail::kMaxAmdNoteBufferSize) {
         out << "ISA note buffer size exceeds limit: " << size << std::endl;
-        return;
+        return false;
       }
       std::vector<char> buffer(size);
       amdgpu_hsa_note_isa_t* desc = reinterpret_cast<amdgpu_hsa_note_isa_t*>(buffer.data());
@@ -548,6 +546,7 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
       memcpy(desc->vendor_and_architecture_name, vendor_name.c_str(), vendor_name.length() + 1);
       memcpy(desc->vendor_and_architecture_name + desc->vendor_name_size, architecture_name.c_str(), architecture_name.length() + 1);
       AddAmdNote(NT_AMD_HSA_ISA_VERSION, desc, size);
+      return true;
     }
 
     bool AmdHsaCode::GetNoteIsa(std::string& vendor_name, std::string& architecture_name, uint32_t* major_version, uint32_t* minor_version, uint32_t* stepping)
@@ -823,12 +822,12 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
       }
     }
 
-    void AmdHsaCode::AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer)
+    bool AmdHsaCode::AddNoteProducer(uint32_t major, uint32_t minor, const std::string& producer)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_t) + producer.length();
-      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+      if (size > detail::kMaxAmdNoteBufferSize) {
         out << "Producer note buffer size exceeds limit: " << size << std::endl;
-        return;
+        return false;
       }
       std::vector<char> buffer(size);
       amdgpu_hsa_note_producer_t* desc = reinterpret_cast<amdgpu_hsa_note_producer_t*>(buffer.data());
@@ -838,6 +837,7 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
       desc->producer_minor_version = minor;
       memcpy(desc->producer_name, producer.c_str(), producer.length() + 1);
       AddAmdNote(NT_AMD_HSA_PRODUCER, desc, size);
+      return true;
     }
 
     bool AmdHsaCode::GetNoteProducer(uint32_t* major, uint32_t* minor, std::string& producer_name)
@@ -850,22 +850,24 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
       return true;
     }
 
-    void AmdHsaCode::AddNoteProducerOptions(const std::string& options)
+    bool AmdHsaCode::AddNoteProducerOptions(const std::string& options)
     {
       size_t size = sizeof(amdgpu_hsa_note_producer_options_t) + options.length();
-      if (!detail::IsWithinAmdNoteBufferLimit(size)) {
+      if (size > detail::kMaxAmdNoteBufferSize) {
         out << "Producer options note buffer size exceeds limit: " << size << std::endl;
-        return;
+        return false;
       }
       std::vector<char> buffer(size);
       amdgpu_hsa_note_producer_options_t *desc =
           reinterpret_cast<amdgpu_hsa_note_producer_options_t*>(buffer.data());
+      memset(desc, 0, size);
       desc->producer_options_size = options.length();
       memcpy(desc->producer_options, options.c_str(), options.length() + 1);
       AddAmdNote(NT_AMD_HSA_PRODUCER_OPTIONS, desc, size);
+      return true;
     }
 
-    void AmdHsaCode::AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options)
+    bool AmdHsaCode::AddNoteProducerOptions(int32_t call_convention, const hsa_ext_control_directives_t& user_directives, const std::string& user_options)
     {
       using namespace code_options;
       std::ostringstream ss;
@@ -876,7 +878,7 @@ inline bool IsWithinAmdNoteBufferLimit(size_t size) {
         ss << space << user_options;
       }
 
-      AddNoteProducerOptions(ss.str());
+      return AddNoteProducerOptions(ss.str());
     }
 
     bool AmdHsaCode::GetNoteProducerOptions(std::string& options)
