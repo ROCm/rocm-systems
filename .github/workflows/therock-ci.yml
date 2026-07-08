@@ -123,7 +123,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
-          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx125X' }}
+          AMDGPU_FAMILIES: ${{ inputs.linux_amdgpu_families || 'gfx94X, gfx950, gfx110X, gfx1151, gfx120X, gfx125X, gfx900, gfx906, gfx908, gfx90a, gfx101X, gfx103X, gfx1150, gfx1152, gfx1153' }}
           CI_CONFIG_PATH: ci-config
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -131,7 +131,7 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          AMDGPU_FAMILIES: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
+          AMDGPU_FAMILIES: ${{ inputs.windows_amdgpu_families || 'gfx110X, gfx1151, gfx120X, gfx900, gfx906, gfx908, gfx90a, gfx101X, gfx103X, gfx1150, gfx1152, gfx1153' }}
           CI_CONFIG_PATH: ci-config
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
