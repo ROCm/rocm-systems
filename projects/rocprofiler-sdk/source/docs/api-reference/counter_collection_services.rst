@@ -71,7 +71,7 @@ The following dimensions are supported:
 Querying counter dimensions
 +++++++++++++++++++++++++++
 
-Dimensions depend on the counter's architecture. To discover which dimensions a counter has (and their sizes), query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. This call does not take an agent Id; it reports the dimensions for the counter's architecture, selecting a representative agent of that architecture internally. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above).
+Dimensions depend on the counter and the specific agent it is collected on. To discover which dimensions a counter has (and their sizes), query the counter info with ``rocprofiler_query_counter_info`` using ``ROCPROFILER_COUNTER_INFO_VERSION_1``. This call does not take an agent Id; it selects a representative agent of that counter's architecture internally and reports the dimensions for that agent. The returned ``rocprofiler_counter_info_v1_t`` reports ``dimensions_count`` and, in ``dimensions``, the name and extent of each dimension. To read the coordinate of a specific value within a dimension from a collected record, use ``rocprofiler_query_record_dimension_position`` with the value's instance Id (see the buffered callback example above).
 
 Using the counter collection service
 ------------------------------------
