@@ -14,6 +14,7 @@ RJ_DIAGNOSTIC_POP
 
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -84,10 +85,10 @@ void validate_cluster_shape(const DispatchEntry &dp) {
   }
 }
 
-uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr) {
+uint32_t read_memory_u32(GpuMemory *memory, uint64_t addr, uint32_t vmid = 0) {
   uint32_t value = 0;
   for (uint32_t i = 0; i < sizeof(value); ++i)
-    value |= static_cast<uint32_t>(memory->read8(addr + i)) << (i * 8);
+    value |= static_cast<uint32_t>(memory->read8(addr + i, vmid)) << (i * 8);
   return value;
 }
 
@@ -239,7 +240,8 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
       uint64_t preload_addr = pkt.kernarg_addr + static_cast<uint64_t>(preload_offset) * 4;
       for (uint32_t i = 0; i < preload_length; ++i)
-        cu->write_sgpr(sbase + idx + i, read_memory_u32(memory_, preload_addr + i * 4));
+        cu->write_sgpr(sbase + idx + i,
+                       read_memory_u32(memory_, preload_addr + i * 4, pkt.process_id));
       util::Logger::vm("CP: init_wf kernarg preload s[", idx, ":", idx + preload_length - 1,
                        "] length=", preload_length, " offset=", preload_offset, " sbase=", sbase);
       idx += preload_length;
@@ -922,9 +924,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t wfs_per_wg = (wg_size + wave_size - 1) / wave_size;
 
   uint32_t num_dims = pkt.setup & 0x3;
-  uint32_t grid_wgs_x = pkt.workgroup_size_x > 0 ? pkt.grid_size_x / pkt.workgroup_size_x : 1;
-  uint32_t grid_wgs_y = pkt.workgroup_size_y > 0 ? pkt.grid_size_y / pkt.workgroup_size_y : 1;
-  uint32_t grid_wgs_z = pkt.workgroup_size_z > 0 ? pkt.grid_size_z / pkt.workgroup_size_z : 1;
+  uint32_t grid_wgs_x =
+      util::ceil_div_or_one(pkt.grid_size_x, static_cast<uint32_t>(pkt.workgroup_size_x));
+  uint32_t grid_wgs_y =
+      util::ceil_div_or_one(pkt.grid_size_y, static_cast<uint32_t>(pkt.workgroup_size_y));
+  uint32_t grid_wgs_z =
+      util::ceil_div_or_one(pkt.grid_size_z, static_cast<uint32_t>(pkt.workgroup_size_z));
   uint32_t total_wgs = grid_wgs_x * grid_wgs_y * grid_wgs_z;
 
   DispatchEntry dp{};
@@ -1478,7 +1483,7 @@ static void *resolve_sdma_ptr(GpuMemory *memory, uint64_t va, uint32_t vmid) {
   return page_base + (va & 0xFFF);
 }
 
-// SDMA opcodes (from sdma_registers.h).
+// SDMA opcodes.
 namespace sdma {
 constexpr uint8_t OP_NOP = 0;
 constexpr uint8_t OP_COPY = 1;
@@ -1506,7 +1511,26 @@ constexpr uint32_t ATOMIC_SIZE = 8;
 constexpr uint32_t CONST_FILL_SIZE = 5;
 constexpr uint32_t TIMESTAMP_SIZE = 3;
 constexpr uint32_t GCR_SIZE = 5;
-constexpr uint32_t GCR_GFX11_PLUS_SIZE = 6;
+constexpr uint32_t GCR_GFX1250_SIZE = 6;
+
+// GCR GL2 cache-op control bits. The control dword and bit positions genuinely
+// differ by dialect (the gfx1250 GCR packet is a distinct layout, not a resized
+// legacy packet). Legacy/gfx9-12 pack gcr_control[15:0] into DW2 starting at
+// bit 16 (DW2 low 16 bits hold BaseVA_HI); gfx1250 makes DW2 a full 25-bit base
+// VA and relocates the control field to DW3 starting at bit 0. Only the GL2
+// writeback/invalidate/discard bits matter for the functional GL2 model.
+//   Legacy DW2:  GL2_DISCARD=29, GL2_INV=30, GL2_WB=31  (= gcr_control 13/14/15 + 16)
+//   gfx1250 DW3: GL2_DISCARD=13, GL2_INV=14, GL2_WB=15
+// Layouts and sizes (legacy 5 dwords, gfx1250 6 dwords) match the vendored
+// runtime SDMA GCR packet definitions for each dialect.
+constexpr uint32_t GCR_LEGACY_CONTROL_DW = 2;
+constexpr uint32_t GCR_LEGACY_GL2_DISCARD_BIT = 1u << 29;
+constexpr uint32_t GCR_LEGACY_GL2_INV_BIT = 1u << 30;
+constexpr uint32_t GCR_LEGACY_GL2_WB_BIT = 1u << 31;
+constexpr uint32_t GCR_GFX1250_CONTROL_DW = 3;
+constexpr uint32_t GCR_GFX1250_GL2_DISCARD_BIT = 1u << 13;
+constexpr uint32_t GCR_GFX1250_GL2_INV_BIT = 1u << 14;
+constexpr uint32_t GCR_GFX1250_GL2_WB_BIT = 1u << 15;
 constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE = 19;
 constexpr uint32_t FENCE_64B_GFX11_PLUS_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX11_PLUS_SIZE = 8;
@@ -1538,6 +1562,30 @@ bool sdma_compare_u64(uint32_t func, uint64_t value, uint64_t reference) {
 }
 
 } // namespace
+
+void CommandProcessor::flush_gpu_caches() {
+  // Write back dirty scalar L1 (K$) lines into L2 first, then flush L2 to
+  // backing, so a dirty K$ line overlapping an SDMA destination is published
+  // before the direct write (which happens after this helper returns) rather
+  // than being written out over it by a later K$ flush. Each line is written
+  // back under its own owning vmid. Vector L1 (V$) is write-through, so it only
+  // needs invalidation. Ordering: K$ -> L2 -> backing, then invalidate V$.
+  for (auto *cu : cus_) {
+    cu->l1_scalar().writeback_all();
+    cu->l1_scalar().invalidate_all();
+  }
+  for (auto *l2 : l2_caches_)
+    l2->flush_all();
+  for (auto *cu : cus_)
+    cu->l1_vector().invalidate_all();
+}
+
+void CommandProcessor::invalidate_gpu_caches() {
+  for (auto *l2 : l2_caches_)
+    l2->invalidate_all();
+  for (auto *cu : cus_)
+    cu->l1_vector().invalidate_all();
+}
 
 void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx) {
   uint32_t ring_mask = (queue.ring_size / sizeof(uint32_t)) - 1;
@@ -1660,18 +1708,21 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           return stop_and_retry_current_packet();
         }
 
+        // Emulated SDMA writes straight to the backing store, bypassing the GPU
+        // caches. Real SDMA does not snoop GL2; coherence is re-established by
+        // the consuming kernel's acquire fence at dispatch. We model that with a
+        // coarse writeback+invalidate that runs BEFORE the direct write: the
+        // writeback publishes any dirty L2 lines (e.g. from K$ writeback) so
+        // they are not lost, and — critically — a dirty line overlapping the
+        // destination is written back first, so the subsequent SDMA write
+        // supersedes it instead of being clobbered by a later flush. After the
+        // flush the caches are empty, so the destination re-reads fresh backing.
+        flush_gpu_caches();
         std::memcpy(dst_ptr, src_ptr, count);
-
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
-        for (auto *cu : cus_)
-          cu->l1_vector().invalidate_all();
 
         if (signal_decrement) {
           std::atomic_ref<int64_t>(*signal_ptr)
               .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(signal_addr, sizeof(int64_t));
         }
 
         pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX11_PLUS_SIZE;
@@ -1703,17 +1754,16 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (!dst2_ptr) {
           return stop_and_retry_current_packet();
         }
+        // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
+        // destination-overlapping dirty L2 line must be written back first so
+        // the SDMA write supersedes it rather than being clobbered afterward.
+        flush_gpu_caches();
         std::memcpy(dst_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
         std::memcpy(dst2_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst2_va, count);
         pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
       } else {
+        flush_gpu_caches();
         std::memcpy(dst_ptr, src_ptr, count);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst_va, count);
         pkt_dwords = sdma::COPY_LINEAR_SIZE;
       }
       break;
@@ -1730,9 +1780,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t data = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
         auto *ptr = static_cast<uint64_t *>(resolve(addr_va));
         if (ptr) {
+          // Flush before the store so a destination-overlapping dirty line is
+          // published first and the fence write supersedes it.
+          flush_gpu_caches();
           std::atomic_ref<uint64_t>(*ptr).store(data, std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, sizeof(uint64_t));
         }
         pkt_dwords = sdma::FENCE_64B_GFX11_PLUS_SIZE;
         break;
@@ -1742,9 +1793,8 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t data = dw(3);
       auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
       if (ptr) {
+        flush_gpu_caches();
         std::atomic_ref<uint32_t>(*ptr).store(data, std::memory_order_release);
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(addr_va, sizeof(uint32_t));
       }
       pkt_dwords = sdma::FENCE_SIZE;
       break;
@@ -1831,10 +1881,13 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       if (atomic_op == 47 && addr_va > 0x1000) {
         auto *ptr = static_cast<int64_t *>(resolve(addr_va));
         if (ptr) {
+          // Flush before the RMW: the fetch_add reads the backing value, so a
+          // dirty overlapping L2 line must be written back first or the atomic
+          // would operate on stale data. The flush also leaves caches empty so
+          // the new value re-reads fresh.
+          flush_gpu_caches();
           std::atomic_ref<int64_t>(*ptr).fetch_add(static_cast<int64_t>(src_data),
                                                    std::memory_order_release);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, sizeof(int64_t));
           if (static_cast<int64_t>(src_data) < 0 && interrupt_cb_) {
             // Signal layout: addr is at offset 8 (value field) from sig base.
             uint64_t sig_base = addr_va - 8;
@@ -1845,10 +1898,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
             if (mailbox_ptr != 0) {
               auto *mb_dst = static_cast<uint64_t *>(resolve(mailbox_ptr));
               if (mb_dst) {
+                flush_gpu_caches();
                 std::atomic_ref<uint64_t>(*mb_dst).store(uint64_t(event_id),
                                                          std::memory_order_release);
-                for (auto *l2 : l2_caches_)
-                  l2->invalidate_range(mailbox_ptr, sizeof(uint64_t));
               }
             }
             interrupt_cb_(queue.process_id, event_id);
@@ -1865,14 +1917,15 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       uint32_t fillsize = (header >> 30) & 0x3;
       auto *dst = static_cast<uint8_t *>(resolve(addr_va));
       if (dst) {
+        // Flush before the fill so a destination-overlapping dirty line is
+        // published first and the fill supersedes it.
+        flush_gpu_caches();
         if (fillsize == 2) {
           for (uint32_t i = 0; i < count; i += 4)
             std::memcpy(dst + i, &data, 4);
         } else {
           std::memset(dst, static_cast<int>(data & 0xFF), count);
         }
-        for (auto *l2 : l2_caches_)
-          l2->invalidate_range(addr_va, count);
       }
       pkt_dwords = sdma::CONST_FILL_SIZE;
       break;
@@ -1884,26 +1937,47 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t ts = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
         auto *ptr = static_cast<uint64_t *>(resolve(addr_va));
-        if (ptr)
+        if (ptr) {
+          // Flush before the direct store so a dirty cached line overlapping the
+          // timestamp address is published first and the timestamp supersedes it
+          // rather than being clobbered by a later flush (see other direct-write
+          // SDMA ops).
+          flush_gpu_caches();
           std::atomic_ref<uint64_t>(*ptr).store(ts, std::memory_order_release);
+        }
       }
       pkt_dwords = sdma::TIMESTAMP_SIZE;
       break;
     }
     case sdma::OP_GCR: {
-      uint64_t base_va =
-          (static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32)) & ~0xFULL;
-      uint64_t size_field =
-          (static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32)) & ~0xFULL;
-      uint32_t range =
-          size_field > 0 ? static_cast<uint32_t>(std::min(size_field, uint64_t(UINT32_MAX))) : 0;
-      for (auto *l2 : l2_caches_) {
-        if (range > 0)
-          l2->invalidate_range(base_va, range);
-        else
-          l2->invalidate_all();
+      // GCR is the real SDMA cache-maintenance packet. It carries a base/size
+      // range plus separate GL2 writeback / invalidate / discard control bits.
+      // GFX9+ HW services the range at coarse (whole-cache) granularity, so we
+      // ignore the range but honor the control bits: a writeback must publish
+      // dirty L2 lines to backing (flush), while invalidate/discard drop them.
+      // Treating every GCR as an invalidate would silently lose simulator data
+      // that a writeback-only packet was meant to publish.
+      const bool gfx1250 = uses_gfx1250_gcr_packet();
+      const uint32_t control =
+          gfx1250 ? dw(sdma::GCR_GFX1250_CONTROL_DW) : dw(sdma::GCR_LEGACY_CONTROL_DW);
+      const uint32_t wb_bit = gfx1250 ? sdma::GCR_GFX1250_GL2_WB_BIT : sdma::GCR_LEGACY_GL2_WB_BIT;
+      const uint32_t inv_bit =
+          gfx1250 ? sdma::GCR_GFX1250_GL2_INV_BIT : sdma::GCR_LEGACY_GL2_INV_BIT;
+      const uint32_t discard_bit =
+          gfx1250 ? sdma::GCR_GFX1250_GL2_DISCARD_BIT : sdma::GCR_LEGACY_GL2_DISCARD_BIT;
+      const bool gl2_wb = (control & wb_bit) != 0;
+      const bool gl2_inv = (control & (inv_bit | discard_bit)) != 0;
+      if (gl2_wb) {
+        // Any writeback must publish dirty L2 data before it can be dropped. In
+        // the functional model a subsequent re-fetch from backing returns the
+        // same bytes, so the (harmless) invalidate inside flush is kept even for
+        // writeback-without-invalidate requests.
+        flush_gpu_caches();
+      } else if (gl2_inv) {
+        // Invalidate/discard only: drop without writeback.
+        invalidate_gpu_caches();
       }
-      pkt_dwords = uses_gfx11_plus_sdma_packets() ? sdma::GCR_GFX11_PLUS_SIZE : sdma::GCR_SIZE;
+      pkt_dwords = gfx1250 ? sdma::GCR_GFX1250_SIZE : sdma::GCR_SIZE;
       break;
     }
     case sdma::OP_HDP_FLUSH:
@@ -1919,10 +1993,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       if (addr_va > 0x1000 && rpos + 4 + count <= wpos) {
         auto *dst = static_cast<uint32_t *>(resolve(addr_va));
         if (dst) {
+          // Flush before the write so a destination-overlapping dirty line is
+          // published first and the SDMA write supersedes it.
+          flush_gpu_caches();
           for (uint32_t i = 0; i < count; ++i)
             dst[i] = dw(4 + i);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(addr_va, count * sizeof(uint32_t));
         }
       }
       pkt_dwords = 4 + count;
