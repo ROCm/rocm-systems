@@ -55,6 +55,9 @@ public:
   void store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0);
 
   /// @brief Write back all dirty K$ lines to L2 (s_dcache_wb).
+  /// @param vmid Ignored. Each dirty line is written back under its own owning
+  /// vmid (recorded in the line tag), so a caller-supplied vmid cannot be
+  /// correct for a bulk writeback. Retained only for call-site signature symmetry.
   void writeback_all(uint32_t vmid = 0);
 
   /// @brief Invalidate all K$ lines without writeback (s_dcache_inv).

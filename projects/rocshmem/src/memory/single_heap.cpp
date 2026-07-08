@@ -36,8 +36,8 @@ HIPAllocator *default_allocator_{nullptr};
 
 SingleHeap::SingleHeap() {
 
-  HIPAllocator *allocator = get_default_allocator();
-  heap_mem_ = new HeapMemoryType(*allocator, envvar::heap_size.get_value());
+  allocator_ = get_default_allocator();
+  heap_mem_ = new HeapMemoryType(*allocator_, envvar::heap_size.get_value());
   assert(heap_mem_ != nullptr);
 
   strat_ = new DLAllocatorStrategy<HeapMemoryType>(static_cast<HeapMemoryType *>(heap_mem_));
@@ -81,5 +81,11 @@ size_t SingleHeap::get_size() { return heap_mem_->get_size(); }
 size_t SingleHeap::get_used() { return strat_->get_used(); }
 
 size_t SingleHeap::get_avail() { return get_size() - get_used(); }
+
+AllocatorType SingleHeap::get_type() { return heap_mem_->type_; }
+
+size_t SingleHeap::get_granularity() { return heap_mem_->granularity_; }
+
+HIPAllocator *SingleHeap::get_allocator() { return allocator_; }
 
 }  // namespace rocshmem
