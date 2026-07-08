@@ -73,7 +73,7 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
         m_buffer.reserve(m_buffer.size() + bytes.size() + bytes.size() / 8);
 
     static constexpr std::size_t SINGLE_FILE_BUFFER_WARN_THRESHOLD =
-        std::size_t{ 1 } * 1024 * 1024 * 1024;
+        std::size_t{ 1 } * 1024 * 1024 * 1024;  // 1 GiB
     if(m_buffer.size() < SINGLE_FILE_BUFFER_WARN_THRESHOLD &&
        m_buffer.size() + bytes.size() >= SINGLE_FILE_BUFFER_WARN_THRESHOLD)
     {

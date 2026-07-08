@@ -52,7 +52,7 @@ std::unordered_map<int, std::thread::id> g_pid_owner_tids{};
 // ----------------------------------------------------------------------------
 
 // Perfetto SDK keeps interceptors experimental: TracingMuxerImpl::
-// RegisterInterceptor (perfetto.cc:~37265) silently rejects descriptors
+// RegisterInterceptor (perfetto.cc) silently rejects descriptors
 // whose name is not one of {"test_interceptor", "console", "etwexport"}.
 // The check predates upstreamable knobs and lives inside vendored
 // submodule code we don't fork; using "test_interceptor" keeps the

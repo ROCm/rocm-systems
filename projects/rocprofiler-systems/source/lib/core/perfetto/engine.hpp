@@ -78,8 +78,12 @@ public:
     void collect_packet_bytes(int pid, const void* data, std::size_t size) noexcept;
 
 private:
-    static constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE =
-        std::size_t{ 8 } * 1024 * 1024;
+    // Initial per-pid capacity hint, not a cap -- collect_packet_bytes grows the
+    // vector past this via normal amortized reallocation. Kept small because
+    // preregister_pids reserves this for every cached pid up front; a large value
+    // multiplies with pid count on high-rank-count MPI workloads.
+    static constexpr std::size_t COLLECTED_BYTES_INITIAL_CAPACITY =
+        std::size_t{ 256 } * 1024;
 
     [[nodiscard]] bool is_system_backend() const noexcept;
     static void        collect_thunk(void* engine, int pid, const void* data,

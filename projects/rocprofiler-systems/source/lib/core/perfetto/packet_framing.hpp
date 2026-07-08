@@ -41,6 +41,11 @@ inline constexpr std::uint32_t WIRE_TYPE_MASK          = 0x7;
 inline constexpr std::size_t   WIRE_TYPE_FIXED64_BYTES = 8;
 inline constexpr std::size_t   WIRE_TYPE_FIXED32_BYTES = 4;
 
+inline constexpr std::uint32_t WIRE_TYPE_VARINT           = 0;
+inline constexpr std::uint32_t WIRE_TYPE_FIXED64          = 1;
+inline constexpr std::uint32_t WIRE_TYPE_LENGTH_DELIMITED = 2;
+inline constexpr std::uint32_t WIRE_TYPE_FIXED32          = 5;
+
 // Decodes a protobuf varint from data[offset..size). Advances offset past the
 // last byte read. Returns true on success, false on truncated input or
 // >64-bit overflow.
@@ -85,6 +90,14 @@ enum class rewrite_trace_packet_status
     seq_id_out_of_range,
 };
 
+// Headroom for the re-emitted trusted_packet_sequence_id field: 1 tag byte
+// (TRUSTED_SEQ_ID_TAG) plus the varint encoding of a value in the uint32
+// seq-id domain (see TRUSTED_SEQ_ID_MAX_EXCLUSIVE), which needs at most 5 bytes.
+inline constexpr std::size_t TRUSTED_SEQ_ID_TAG_BYTES = 1;
+inline constexpr std::size_t SEQ_ID_VARINT_MAX_BYTES  = 5;
+inline constexpr std::size_t SEQ_ID_FIELD_MAX_ENCODED_BYTES =
+    TRUSTED_SEQ_ID_TAG_BYTES + SEQ_ID_VARINT_MAX_BYTES;
+
 // Walks one TracePacket payload, copies every field verbatim EXCEPT
 // trusted_packet_sequence_id (field 10), then appends a fresh field 10
 // carrying `seq_id_offset + original_seq_id` (or just `seq_id_offset`
@@ -109,7 +122,7 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
                              std::uint64_t seq_id_limit_exclusive)
 {
     std::vector<char> rewritten_packet;
-    rewritten_packet.reserve(size + 5);
+    rewritten_packet.reserve(size + SEQ_ID_FIELD_MAX_ENCODED_BYTES);
 
     std::uint64_t original_seq_id = 0;
 
@@ -125,7 +138,7 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
         std::size_t field_end = offset;
         switch(wire_type)
         {
-            case 0:  // varint
+            case WIRE_TYPE_VARINT:
             {
                 std::uint64_t field_value = 0;
                 if(!read_varint(packet, size, offset, field_value))
@@ -134,7 +147,7 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
                 if(field_tag == TRUSTED_SEQ_ID_TAG) original_seq_id = field_value;
                 break;
             }
-            case 2:  // length-delimited
+            case WIRE_TYPE_LENGTH_DELIMITED:
             {
                 std::uint64_t field_length = 0;
                 if(!read_varint(packet, size, offset, field_length))
@@ -145,13 +158,15 @@ rewrite_trace_packet_checked(std::vector<char>& output, const char* packet,
                 field_end = offset;
                 break;
             }
-            case 1:  // fixed64 -- bounds-check before increment so offset cannot wrap
+            // Bounds-check before increment so offset cannot wrap.
+            case WIRE_TYPE_FIXED64:
                 if(WIRE_TYPE_FIXED64_BYTES > size - offset)
                     return rewrite_trace_packet_status::malformed_input;
                 offset += WIRE_TYPE_FIXED64_BYTES;
                 field_end = offset;
                 break;
-            case 5:  // fixed32 -- same bounds-check discipline as fixed64
+            // Same bounds-check discipline as fixed64.
+            case WIRE_TYPE_FIXED32:
                 if(WIRE_TYPE_FIXED32_BYTES > size - offset)
                     return rewrite_trace_packet_status::malformed_input;
                 offset += WIRE_TYPE_FIXED32_BYTES;

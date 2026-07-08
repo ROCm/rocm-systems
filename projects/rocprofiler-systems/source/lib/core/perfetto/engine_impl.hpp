@@ -182,7 +182,7 @@ basic_cached_perfetto_engine<Backend>::preregister_pids(
         for(int pid : source_pids)
         {
             auto& bytes = m_collected_bytes[pid];
-            bytes.reserve(COLLECTED_BYTES_SLAB_SIZE);
+            bytes.reserve(COLLECTED_BYTES_INITIAL_CAPACITY);
         }
     }
 
