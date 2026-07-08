@@ -85,7 +85,7 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
 
   __shared__ rocshmem_ctx_t ctx;
 
-  rocshmem_wg_team_create_ctx(teams[flat_wf_id], ctx_type, &ctx);
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   __syncthreads();
 
@@ -196,12 +196,18 @@ void ReduceWaveTester<T1, T2>::resetBuffers([[maybe_unused]] size_t size) {
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::verifyResults(size_t size) {
   int num_elems = size / sizeof(T1);
-  for (uint64_t i = 0; i < num_elems; i++) {
-    auto r = verify_buf((T1)r_buf[i], (T1)n_pes);
-    if (r.first == false) {
-      fprintf(stderr, "Data validation error at idx %lu\n", i);
-      fprintf(stderr, "%s.\n", r.second.c_str());
-      exit(-1);
+  int total_wfs = args.num_wgs * num_warps;
+
+  for (int wf = 0; wf < total_wfs; ++wf) {
+    T1* wf_r_buf = r_buf + (wf * num_elems);
+
+    for (uint64_t i = 0; i < static_cast<uint64_t>(num_elems); i++) {
+      auto r = verify_buf(static_cast<T1>(wf_r_buf[i]), static_cast<T1>(n_pes));
+      if (!r.first) {
+        fprintf(stderr, "Data validation error at wf %d idx %lu\n", wf, i);
+        fprintf(stderr, "%s.\n", r.second.c_str());
+        exit(-1);
+      }
     }
   }
 }
