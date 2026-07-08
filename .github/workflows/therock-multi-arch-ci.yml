@@ -28,6 +28,8 @@
 name: TheRock Multi-Arch CI
 
 on:
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -89,17 +91,25 @@ jobs:
       - name: Determine changed projects from git diff
         id: configure
         run: |
-          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # For scheduled runs, run all tests
+            echo "Event: schedule - running all tests"
+            echo "run_all_tests=true" >> "$GITHUB_OUTPUT"
+            echo "skip_tests=false" >> "$GITHUB_OUTPUT"
+            echo "changed_projects=" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.pull_request.base.sha }}" ]; then
             # For PRs, compute the merge-base to match the actual PR diff
             BASE_REF=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
             echo "Using merge-base for PR: $BASE_REF"
+            export BASE_REF
+            python3 .github/scripts/get_changed_projects.py
           else
             # For pushes, compare against the previous commit
             BASE_REF="HEAD^"
             echo "Using HEAD^ for push"
+            export BASE_REF
+            python3 .github/scripts/get_changed_projects.py
           fi
-          export BASE_REF
-          python3 .github/scripts/get_changed_projects.py
 
   setup:
     needs: configure
