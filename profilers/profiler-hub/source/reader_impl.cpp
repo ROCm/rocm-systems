@@ -472,6 +472,53 @@ reader_t::impl::synthesize_derived_tracks()
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 
+    // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
+    // memory_copy + memory_allocate events sharing that stream. Additive to the gpu_queue
+    // and dma tracks above — the same events also appear in their per-op tracks, matching
+    // Optiq's Stream track. stream_info gives the identity (reused from dma).
+    for(const auto& s : m_read_statements->distinct_stream_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::stream;
+
+        auto node_it = m_node_info_utility.find(s.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(s.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto stream_it = m_stream_info_utility.find(s.stream_id);
+        if(stream_it != m_stream_info_utility.end() && stream_it->second)
+        {
+            track_info_ptr->stream_info = stream_it->second;
+        }
+
+        // Display name = stream identity.
+        if(track_info_ptr->stream_info && !track_info_ptr->stream_info->name.empty())
+        {
+            track_info_ptr->name = track_info_ptr->stream_info->name;
+        }
+        else
+        {
+            track_info_ptr->name = "Stream " + std::to_string(s.stream_id);
+        }
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type      = reader_types::track_type_t::stream;
+        qi.nid       = s.nid;
+        qi.pid       = s.pid;
+        qi.stream_id = s.stream_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
     // cpu_thread: one track per distinct (nid, pid, tid, is_sample) in rocpd_region.
     // A thread with both plain and sampled regions yields two tracks (main + sample),
     // mirroring roc-optiq's region-main / region-sample split.
@@ -702,6 +749,59 @@ reader_t::impl::build_v4_tracks()
         qi.stream_id     = track_info.stream_id;
         qi.real_track_id = track_info.id;
         m_track_query_info.emplace(track_info.id, qi);
+    }
+
+    // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
+    // memory_copy + memory_allocate events sharing that stream. Unlike the 1:1 tracks
+    // above, a stream spans multiple rocpd_track rows, so these are synthesized with ids
+    // allocated above the max real rocpd_track id — never colliding with a real track.
+    // Additive: the same events also appear in their per-op tracks, matching Optiq.
+    size_t next_id = 1;
+    for(const auto& track_info : track_info_list)
+    {
+        if(track_info.id >= next_id) next_id = track_info.id + 1;
+    }
+    for(const auto& s : m_read_statements->distinct_stream_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::stream;
+
+        auto node_it = m_node_info_utility.find(s.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(s.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto stream_it = m_stream_info_utility.find(s.stream_id);
+        if(stream_it != m_stream_info_utility.end() && stream_it->second)
+        {
+            track_info_ptr->stream_info = stream_it->second;
+        }
+
+        // Display name = stream identity.
+        if(track_info_ptr->stream_info && !track_info_ptr->stream_info->name.empty())
+        {
+            track_info_ptr->name = track_info_ptr->stream_info->name;
+        }
+        else
+        {
+            track_info_ptr->name = "Stream " + std::to_string(s.stream_id);
+        }
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type      = reader_types::track_type_t::stream;
+        qi.nid       = s.nid;
+        qi.pid       = s.pid;
+        qi.stream_id = s.stream_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 }
 
@@ -1710,6 +1810,9 @@ reader_t::impl::get_interval_track(size_t                              track_id,
 
     std::vector<data_storage::interval_row_result> rows;
     bool                                           name_from_kernel_symbol = false;
+    // Stream tracks mix ops, so name resolution is chosen per-row from op_kind rather
+    // than a single track-wide flag (see the mapping loop below).
+    bool is_stream = false;
 
     if(m_is_v4)
     {
@@ -1732,6 +1835,14 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                 rows =
                     m_read_statements->memory_copy_interval_track_v4()(qi.real_track_id)
                         .to_vector();
+                break;
+            case reader_types::track_type_t::stream:
+                rows = m_read_statements
+                           ->stream_interval_track()(qi.stream_id.value(),
+                                                     qi.stream_id.value(),
+                                                     qi.stream_id.value())
+                           .to_vector();
+                is_stream = true;
                 break;
             case reader_types::track_type_t::counter:
             default:
@@ -1793,6 +1904,14 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                 }
                 break;
             }
+            case reader_types::track_type_t::stream:
+                rows = m_read_statements
+                           ->stream_interval_track()(qi.stream_id.value(),
+                                                     qi.stream_id.value(),
+                                                     qi.stream_id.value())
+                           .to_vector();
+                is_stream = true;
+                break;
             case reader_types::track_type_t::counter:
             default:
                 // A counter track is scalar-only; an interval query returns nothing (Q7).
@@ -1813,9 +1932,21 @@ reader_t::impl::get_interval_track(size_t                              track_id,
         // rocpd_string, v4 via rocpd_info_category), so just carry it through.
         if(r.category.has_value()) ev.category = r.category.value();
 
+        // Stream tracks mix ops; op_kind (kernel_dispatch=1, memory_copy=2,
+        // memory_allocate=3) both selects the per-event get_*_details() overload the
+        // consumer must call and picks the name table for this row.
+        if(r.op_kind.has_value())
+        {
+            ev.op_kind = static_cast<reader_types::event_type_t>(r.op_kind.value());
+        }
+        const bool use_kernel_symbol =
+            is_stream ? (r.op_kind ==
+                         static_cast<size_t>(reader_types::event_type_t::kernel_dispatch))
+                      : name_from_kernel_symbol;
+
         if(r.name_ref.has_value())
         {
-            if(name_from_kernel_symbol)
+            if(use_kernel_symbol)
             {
                 // Q9: gpu_queue per-event label = kernel symbol display name.
                 auto kit = m_kernel_symbol_info_utility.find(r.name_ref.value());
@@ -1923,6 +2054,13 @@ reader_t::impl::get_track_stats(size_t track_id)
                 rows = m_read_statements->memory_copy_stats_track_v4()(qi.real_track_id)
                            .to_vector();
                 break;
+            case reader_types::track_type_t::stream:
+                rows = m_read_statements
+                           ->stream_stats_track()(qi.stream_id.value(),
+                                                  qi.stream_id.value(),
+                                                  qi.stream_id.value())
+                           .to_vector();
+                break;
             case reader_types::track_type_t::counter:
                 rows = m_read_statements->scalar_stats()(qi.real_track_id).to_vector();
                 break;
@@ -1981,6 +2119,13 @@ reader_t::impl::get_track_stats(size_t track_id)
                 }
                 break;
             }
+            case reader_types::track_type_t::stream:
+                rows = m_read_statements
+                           ->stream_stats_track()(qi.stream_id.value(),
+                                                  qi.stream_id.value(),
+                                                  qi.stream_id.value())
+                           .to_vector();
+                break;
             case reader_types::track_type_t::counter:
                 rows = m_read_statements->scalar_stats()(qi.real_track_id).to_vector();
                 break;

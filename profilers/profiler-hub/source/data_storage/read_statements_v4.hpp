@@ -137,6 +137,13 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_sample_track_ids;
     }
+    // Stream tracks are the one v4.0 track type NOT read 1:1 from rocpd_track: multiple
+    // rocpd_track rows can share a stream_id, so stream tracks are synthesized by
+    // distinct (nid, pid, stream_id) with a non-null stream_id.
+    [[nodiscard]] const distinct_stream_func_t& distinct_stream_tracks() const override
+    {
+        return m_distinct_stream_tracks;
+    }
     [[nodiscard]] const counter_track_name_func_t& counter_track_names() const override
     {
         return m_counter_track_names;
@@ -185,6 +192,10 @@ struct read_statements : public read_statements_base
     {
         return m_memory_copy_interval_track_v4;
     }
+    [[nodiscard]] const interval_track_3_func_t& stream_interval_track() const override
+    {
+        return m_stream_interval_track;
+    }
 
     // ----- track_id-anchored stats accessors (v4.0-specific) -----
     [[nodiscard]] const stats_track_1_func_t& region_stats_track_v4() const override
@@ -199,6 +210,10 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const stats_track_1_func_t& memory_copy_stats_track_v4() const override
     {
         return m_memory_copy_stats_track_v4;
+    }
+    [[nodiscard]] const stats_track_3_func_t& stream_stats_track() const override
+    {
+        return m_stream_stats_track;
     }
     [[nodiscard]] const stats_track_1_func_t& scalar_stats() const override
     {
@@ -557,6 +572,21 @@ private:
                 fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
                 &sample_track_id_result::track_id);
 
+        // Stream tracks: v4 stream_id lives on rocpd_track, and multiple tracks can share
+        // a stream_id, so synthesize one stream track per distinct (nid, pid, stream_id)
+        // rather than 1:1 per rocpd_track row. NULL stream_id excluded (a stream track
+        // needs a concrete identity). These stream tracks are ADDITIVE — the same
+        // rocpd_track rows still yield their existing gpu_queue/dma/cpu_thread tracks;
+        // this matches Optiq, which builds queue AND stream tracks from the same events.
+        m_distinct_stream_tracks =
+            m_backend->create_read_statement_executor<distinct_stream_result>(
+                fmt::format("SELECT DISTINCT nid, pid, stream_id FROM rocpd_track_{} "
+                            "WHERE stream_id IS NOT NULL",
+                            u),
+                &distinct_stream_result::nid,
+                &distinct_stream_result::pid,
+                &distinct_stream_result::stream_id);
+
         // Map each counter track_id to its PMC name.
         m_counter_track_names =
             m_backend->create_read_statement_executor<counter_track_name_result>(
@@ -625,6 +655,53 @@ private:
                     &interval_row_result::start,
                     &interval_row_result::end,
                     &interval_row_result::name_ref);
+
+        // stream: aggregates kernel_dispatch + memory_copy + memory_allocate sharing a
+        // stream. v4 stream_id is on rocpd_track, so each leg joins its event table to
+        // rocpd_track and filters T.stream_id = ? (bound three times). start/end resolve
+        // through the timestamp spine; category via rocpd_event/rocpd_info_category (LEFT
+        // JOIN, additive — the per-op v4 interval queries above don't carry it). op_kind
+        // literal per leg (kernel_dispatch=1, memory_copy=2, memory_allocate=3) drives
+        // the reader's per-event name lookup and get_*_details() dispatch. Unlike v3,
+        // memory_allocate carries a name_id in v4, so its name_ref is populated.
+        m_stream_interval_track =
+            m_backend->create_read_statement_executor<interval_row_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format(
+                    "SELECT k.id, ts_s.value, ts_e.value, k.kernel_id, IC.name, 1 "
+                    "FROM rocpd_kernel_dispatch_{u} k "
+                    "JOIN rocpd_track_{u} T ON T.id = k.track_id "
+                    "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
+                    "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = k.event_id "
+                    "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                    "WHERE T.stream_id = ? "
+                    "UNION ALL "
+                    "SELECT mc.id, ts_s.value, ts_e.value, mc.name_id, IC.name, 2 "
+                    "FROM rocpd_memory_copy_{u} mc "
+                    "JOIN rocpd_track_{u} T ON T.id = mc.track_id "
+                    "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
+                    "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = mc.event_id "
+                    "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                    "WHERE T.stream_id = ? "
+                    "UNION ALL "
+                    "SELECT ma.id, ts_s.value, ts_e.value, ma.name_id, IC.name, 3 "
+                    "FROM rocpd_memory_allocate_{u} ma "
+                    "JOIN rocpd_track_{u} T ON T.id = ma.track_id "
+                    "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = ma.start_id "
+                    "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = ma.end_id "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = ma.event_id "
+                    "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                    "WHERE T.stream_id = ? "
+                    "ORDER BY 2",
+                    fmt::arg("u", u)),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref,
+                &interval_row_result::category,
+                &interval_row_result::op_kind);
     }
 
     void initialize_track_stats_statements()
@@ -673,6 +750,37 @@ private:
                     &track_stats_result::min_ts,
                     &track_stats_result::max_ts,
                     &track_stats_result::count);
+
+        // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the v4 stream
+        // interval query (T.stream_id bound three times), through the timestamp spine.
+        m_stream_stats_track =
+            m_backend->create_read_statement_executor<track_stats_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format("SELECT MIN(s), MAX(e), COUNT(*) FROM ("
+                            "SELECT ts_s.value AS s, ts_e.value AS e "
+                            "FROM rocpd_kernel_dispatch_{u} k "
+                            "JOIN rocpd_track_{u} T ON T.id = k.track_id "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = k.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = k.end_id "
+                            "WHERE T.stream_id = ? "
+                            "UNION ALL "
+                            "SELECT ts_s.value, ts_e.value "
+                            "FROM rocpd_memory_copy_{u} mc "
+                            "JOIN rocpd_track_{u} T ON T.id = mc.track_id "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
+                            "WHERE T.stream_id = ? "
+                            "UNION ALL "
+                            "SELECT ts_s.value, ts_e.value "
+                            "FROM rocpd_memory_allocate_{u} ma "
+                            "JOIN rocpd_track_{u} T ON T.id = ma.track_id "
+                            "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = ma.start_id "
+                            "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = ma.end_id "
+                            "WHERE T.stream_id = ?)",
+                            fmt::arg("u", u)),
+                &track_stats_result::min_ts,
+                &track_stats_result::max_ts,
+                &track_stats_result::count);
 
         // counter: samples on track_id joined to their pmc value (matches scalar_track).
         m_scalar_stats =
@@ -1384,15 +1492,18 @@ private:
     pmc_info_statement_func_t           m_pmc_info_statement;
 
     sample_track_id_func_t    m_distinct_sample_track_ids;
+    distinct_stream_func_t    m_distinct_stream_tracks;
     counter_track_name_func_t m_counter_track_names;
 
     interval_track_1_func_t m_region_interval_track_v4;
     interval_track_1_func_t m_kernel_dispatch_interval_track_v4;
     interval_track_1_func_t m_memory_copy_interval_track_v4;
+    interval_track_3_func_t m_stream_interval_track;
 
     stats_track_1_func_t m_region_stats_track_v4;
     stats_track_1_func_t m_kernel_dispatch_stats_track_v4;
     stats_track_1_func_t m_memory_copy_stats_track_v4;
+    stats_track_3_func_t m_stream_stats_track;
     stats_track_1_func_t m_scalar_stats;
 
     scalar_track_func_t  m_scalar_track;

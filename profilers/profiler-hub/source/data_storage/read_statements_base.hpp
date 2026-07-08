@@ -358,6 +358,11 @@ struct interval_row_result
     size_t                     end{};
     std::optional<size_t>      name_ref;
     std::optional<std::string> category;
+    /// Which per-type table this row came from, selected as an integer literal per
+    /// UNION leg by the stream interval query (values match reader_types::event_type_t:
+    /// kernel_dispatch=1, memory_copy=2, memory_allocate=3). nullopt for single-table
+    /// interval queries, which do not select it.
+    std::optional<size_t> op_kind;
 };
 
 /// One scalar (counter) sample on a counter track.
@@ -402,6 +407,17 @@ struct distinct_dma_result
     size_t                pid{};
     std::optional<size_t> queue_id;
     std::optional<size_t> stream_id;
+};
+
+/// Distinct stream-track topology. v3: synthesized from the inline stream_id on
+/// rocpd_kernel_dispatch / rocpd_memory_copy / rocpd_memory_allocate. v4.0: from
+/// rocpd_track.stream_id. One row per (nid, pid, stream_id) with a non-null stream_id;
+/// a stream track aggregates dispatch + copy + alloc events sharing that stream.
+struct distinct_stream_result
+{
+    size_t nid{};
+    size_t pid{};
+    size_t stream_id{};
 };
 
 /// Distinct region-track topology synthesized from rocpd_region (v3). One row per
@@ -567,6 +583,8 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<distinct_dma_result>()>;
     using distinct_region_func_t =
         std::function<sqlite_backend::result_set<distinct_region_result>()>;
+    using distinct_stream_func_t =
+        std::function<sqlite_backend::result_set<distinct_stream_result>()>;
     using sample_track_id_func_t =
         std::function<sqlite_backend::result_set<sample_track_id_result>()>;
     using max_track_id_func_t =
@@ -810,6 +828,13 @@ struct read_statements_base
         static const distinct_region_func_t e{};
         return e;
     }
+    // Distinct stream tracks (both backends). v3 unions the inline stream_id across the
+    // three event tables; v4.0 reads rocpd_track.stream_id. See distinct_stream_result.
+    [[nodiscard]] virtual const distinct_stream_func_t& distinct_stream_tracks() const
+    {
+        static const distinct_stream_func_t e{};
+        return e;
+    }
     [[nodiscard]] virtual const max_track_id_func_t& max_track_id() const
     {
         static const max_track_id_func_t e{};
@@ -880,6 +905,16 @@ struct read_statements_base
         return e;
     }
 
+    // Stream track interval query (both backends): a 3-way UNION over
+    // kernel_dispatch + memory_copy + memory_allocate filtered to one stream, binding
+    // stream_id once per leg (hence the 3-arg form). Each row carries op_kind so the
+    // reader can select the right name lookup and get_*_details() overload.
+    [[nodiscard]] virtual const interval_track_3_func_t& stream_interval_track() const
+    {
+        static const interval_track_3_func_t e{};
+        return e;
+    }
+
     // ----- Track-stats aggregates (MIN/MAX/COUNT) -----
     // Shape-matched to the interval/scalar track statements above so the aggregate
     // scopes to exactly the events that track would return. v3 overrides the
@@ -936,6 +971,14 @@ struct read_statements_base
     [[nodiscard]] virtual const stats_track_1_func_t& memory_copy_stats_track_v4() const
     {
         static const stats_track_1_func_t e{};
+        return e;
+    }
+
+    // Stream track stats (both backends): MIN(start)/MAX(end)/COUNT over the same 3-way
+    // UNION as stream_interval_track, binding stream_id once per leg.
+    [[nodiscard]] virtual const stats_track_3_func_t& stream_stats_track() const
+    {
+        static const stats_track_3_func_t e{};
         return e;
     }
 

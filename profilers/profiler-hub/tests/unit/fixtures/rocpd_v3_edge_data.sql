@@ -47,7 +47,12 @@
 --   Synthesized (not rocpd_track rows):
 --     2 gpu_queue tracks  (distinct nid,pid,agent_id,queue_id in kernel_dispatch)
 --     2 dma tracks        (distinct nid,pid,queue_id,stream_id in memory_copy)
---   => by type: cpu_thread=1, counter=3, gpu_queue=2, dma=2.
+--     2 stream tracks     (distinct nid,pid,stream_id across kernel_dispatch +
+--                          memory_copy + memory_allocate; ADDITIVE to the queue/dma
+--                          tracks -- the same events also appear there):
+--       stream 1 (1,1,1): 3 kernel_dispatch + 2 memory_copy + 1 memory_allocate = 6
+--       stream 2 (1,1,2): 0 kernel_dispatch + 1 memory_copy + 0 memory_allocate = 1
+--   => by type: cpu_thread=1, counter=3, gpu_queue=2, dma=2, stream=2.
 -- =============================================================================
 
 -- Bare alias views ----------------------------------------------------------
@@ -195,10 +200,14 @@ VALUES (1, 1, 1, 2200, 2300, 6, 1024, NULL, 1, 5),
        (2, 1, 1, 2400, 2500, 6, 2048, NULL, 2, NULL),
        (3, 1, 1, 2100, 2150, 6,  512, NULL, 1, NULL);
 
--- Memory allocate (flow target only; not its own track type) -----------------
+-- Memory allocate (flow target + stream-track member; not its own track type) --
+-- stream_id = 1 makes this the sole memory_allocate contribution to a stream track,
+-- exercising the third UNION leg of the stream aggregation (op_kind memory_allocate).
+-- No real capture available to the project has a memory_allocate row with a stream, so
+-- this synthetic row is the only coverage of that leg.
 INSERT INTO "rocpd_memory_allocate{{uuid}}"
-    (id, nid, pid, agent_id, type, level, start, "end", size, event_id)
-VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 7);
+    (id, nid, pid, agent_id, type, level, start, "end", size, stream_id, event_id)
+VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 1, 7);
 
 -- Counter samples + PMC values ----------------------------------------------
 -- Track 2 (counter, no tid) -- pmc 1 GRBM_COUNT. Row-id order != timestamp

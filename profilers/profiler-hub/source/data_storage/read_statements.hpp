@@ -268,6 +268,10 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_region_tracks;
     }
+    [[nodiscard]] const distinct_stream_func_t& distinct_stream_tracks() const override
+    {
+        return m_distinct_stream_tracks;
+    }
     [[nodiscard]] const sample_track_id_func_t& distinct_sample_track_ids() const override
     {
         return m_distinct_sample_track_ids;
@@ -316,6 +320,10 @@ struct read_statements : public read_statements_base
     {
         return m_memory_copy_interval_neither;
     }
+    [[nodiscard]] const interval_track_3_func_t& stream_interval_track() const override
+    {
+        return m_stream_interval_track;
+    }
 
     // Track-stats accessors (aggregates matching the interval-track scoping above)
     [[nodiscard]] const stats_track_3_func_t& region_stats_track_main() const override
@@ -345,6 +353,10 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const stats_track_2_func_t& memory_copy_stats_neither() const override
     {
         return m_memory_copy_stats_neither;
+    }
+    [[nodiscard]] const stats_track_3_func_t& stream_stats_track() const override
+    {
+        return m_stream_stats_track;
     }
     [[nodiscard]] const stats_track_1_func_t& scalar_stats() const override
     {
@@ -1229,6 +1241,29 @@ private:
                 &distinct_region_result::tid,
                 &distinct_region_result::is_sample);
 
+        // Stream tracks aggregate events sharing a stream across three event tables.
+        // v3 stream_id is inline on each, so union the distinct non-null stream
+        // identities (kernel_dispatch.stream_id is NOT NULL; memory_copy /
+        // memory_allocate are nullable). NULL stream_id is excluded: a stream track
+        // requires a concrete stream identity (stream_info_t.stream_id is non-optional).
+        // See the stream interval query below for how the three tables are unioned per
+        // stream.
+        m_distinct_stream_tracks =
+            m_backend->create_read_statement_executor<distinct_stream_result>(
+                fmt::format(
+                    "SELECT DISTINCT nid, pid, stream_id FROM rocpd_kernel_dispatch_{u} "
+                    "WHERE stream_id IS NOT NULL "
+                    "UNION "
+                    "SELECT DISTINCT nid, pid, stream_id FROM rocpd_memory_copy_{u} "
+                    "WHERE stream_id IS NOT NULL "
+                    "UNION "
+                    "SELECT DISTINCT nid, pid, stream_id FROM rocpd_memory_allocate_{u} "
+                    "WHERE stream_id IS NOT NULL",
+                    fmt::arg("u", u)),
+                &distinct_stream_result::nid,
+                &distinct_stream_result::pid,
+                &distinct_stream_result::stream_id);
+
         m_distinct_sample_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
                 fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
@@ -1337,6 +1372,46 @@ private:
             "queue_id IS NULL AND stream_id = ?", bind_types<size_t, size_t, size_t>{});
         m_memory_copy_interval_neither = make_mc_interval(
             "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
+
+        // stream: a single track aggregates kernel_dispatch + memory_copy +
+        // memory_allocate events sharing a stream_id (inline on each table in v3). A
+        // 3-way UNION ALL, one WHERE stream_id = ? per leg (stream_id bound three times).
+        // Each leg carries an op_kind literal (kernel_dispatch=1, memory_copy=2,
+        // memory_allocate=3) so the reader can pick the right name lookup and
+        // get_*_details() overload per event. Category is resolved in-SQL per leg via
+        // rocpd_event/rocpd_string (LEFT JOIN, additive) — the per-op interval queries
+        // above don't carry it, so it is added here. memory_allocate has no name column
+        // (Optiq labels it by category), so its name_ref is NULL. Ordered by start so the
+        // reader's nesting pass sees ascending events.
+        m_stream_interval_track =
+            m_backend->create_read_statement_executor<interval_row_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format(
+                    "SELECT k.id, k.start, k.\"end\", k.kernel_id, CS.string, 1 "
+                    "FROM rocpd_kernel_dispatch_{u} k "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = k.event_id "
+                    "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                    "WHERE k.stream_id = ? "
+                    "UNION ALL "
+                    "SELECT mc.id, mc.start, mc.\"end\", mc.name_id, CS.string, 2 "
+                    "FROM rocpd_memory_copy_{u} mc "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = mc.event_id "
+                    "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                    "WHERE mc.stream_id = ? "
+                    "UNION ALL "
+                    "SELECT ma.id, ma.start, ma.\"end\", NULL, CS.string, 3 "
+                    "FROM rocpd_memory_allocate_{u} ma "
+                    "LEFT JOIN rocpd_event_{u} E ON E.id = ma.event_id "
+                    "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                    "WHERE ma.stream_id = ? "
+                    "ORDER BY 2",
+                    fmt::arg("u", u)),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref,
+                &interval_row_result::category,
+                &interval_row_result::op_kind);
     }
 
     void initialize_track_stats_statements()
@@ -1409,6 +1484,27 @@ private:
                                                    bind_types<size_t, size_t, size_t>{});
         m_memory_copy_stats_neither = make_mc_stats(
             "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
+
+        // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the stream
+        // interval query (stream_id bound three times), so bounds/count agree with a full
+        // slice load.
+        m_stream_stats_track =
+            m_backend->create_read_statement_executor<track_stats_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                fmt::format(
+                    "SELECT MIN(s), MAX(e), COUNT(*) FROM ("
+                    "SELECT start AS s, \"end\" AS e FROM rocpd_kernel_dispatch_{u} "
+                    "WHERE stream_id = ? "
+                    "UNION ALL "
+                    "SELECT start, \"end\" FROM rocpd_memory_copy_{u} "
+                    "WHERE stream_id = ? "
+                    "UNION ALL "
+                    "SELECT start, \"end\" FROM rocpd_memory_allocate_{u} "
+                    "WHERE stream_id = ?)",
+                    fmt::arg("u", u)),
+                &track_stats_result::min_ts,
+                &track_stats_result::max_ts,
+                &track_stats_result::count);
 
         // counter: samples on track_id joined to their pmc value (matches scalar_track).
         m_scalar_stats =
@@ -1571,6 +1667,7 @@ private:
     distinct_gpu_queue_func_t m_distinct_gpu_queue_tracks;
     distinct_dma_func_t       m_distinct_dma_tracks;
     distinct_region_func_t    m_distinct_region_tracks;
+    distinct_stream_func_t    m_distinct_stream_tracks;
     sample_track_id_func_t    m_distinct_sample_track_ids;
     max_track_id_func_t       m_max_track_id;
     counter_track_name_func_t m_counter_track_names;
@@ -1583,6 +1680,7 @@ private:
     interval_track_3_func_t m_memory_copy_interval_q_only;
     interval_track_3_func_t m_memory_copy_interval_s_only;
     interval_track_2_func_t m_memory_copy_interval_neither;
+    interval_track_3_func_t m_stream_interval_track;
 
     // Track-stats statements
     stats_track_3_func_t m_region_stats_track_main;
@@ -1592,6 +1690,7 @@ private:
     stats_track_3_func_t m_memory_copy_stats_q_only;
     stats_track_3_func_t m_memory_copy_stats_s_only;
     stats_track_2_func_t m_memory_copy_stats_neither;
+    stats_track_3_func_t m_stream_stats_track;
     stats_track_1_func_t m_scalar_stats;
 
     // Scalar-track statements
