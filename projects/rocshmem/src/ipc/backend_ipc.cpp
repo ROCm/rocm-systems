@@ -116,6 +116,7 @@ void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
   setup_symm_registration();
+  ipc_user_buf_set_symm_table(ipcImpl.symm_table, num_pes);
 
   setup_wrk_sync_buffers();
 
@@ -579,7 +580,6 @@ int IPCBackend::buffer_register(void *addr, size_t length) {
   }
 
   user_buffers_.push_back(ubuf);
-  sync_user_buf_constmem();
   LOG_TRACE("IPCBackend::buffer_register OK: %p +%zu (total user buffers: %zu)",
             addr, length, user_buffers_.size());
   return ROCSHMEM_SUCCESS;
@@ -603,24 +603,7 @@ int IPCBackend::buffer_unregister(void *addr) {
       break;
     }
   }
-  sync_user_buf_constmem();
   return ROCSHMEM_SUCCESS;
-}
-
-void IPCBackend::sync_user_buf_constmem() {
-  // Add the most recently registered buffer to the master table.
-  // Uses ipc_user_buf_add_entry to avoid overwriting VMM-registered entries.
-  if (user_buffers_.empty()) return;
-  auto &ubuf = user_buffers_.back();
-  ipc_user_buf_entry_t entry = {};
-  entry.local_base = reinterpret_cast<uintptr_t>(ubuf.addr);
-  entry.length = ubuf.length;
-  for (int pe = 0; pe < num_pes && pe < IPC_MAX_PES; pe++) {
-    entry.remote_bases[pe] = reinterpret_cast<uintptr_t>(ubuf.bases[pe]);
-  }
-  ipc_user_buf_add_entry(&entry);
-  LOG_TRACE("IPCBackend::sync_user_buf_constmem: added buffer %p +%zu (master count now includes this)",
-            ubuf.addr, ubuf.length);
 }
 
 void IPCBackend::setup_fence_buffer() {

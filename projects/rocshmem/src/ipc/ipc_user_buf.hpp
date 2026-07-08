@@ -9,26 +9,13 @@
 
 #include <stdint.h>
 
-// Limits for constant-memory user buffer lookup on device
-#define IPC_MAX_USER_BUFS 8
-#define IPC_MAX_PES       16
-
 namespace rocshmem {
 
-// GPU-side user buffer info stored in __constant__ memory.
-// Contains both local and remote base addresses so putmem can
-// compute offsets with pure arithmetic (no HBM loads).
-struct ipc_user_buf_entry_t {
-  uintptr_t local_base;                   // local VA of this buffer
-  uintptr_t remote_bases[IPC_MAX_PES];    // per-PE remote VAs
-  size_t    length;                        // buffer length
-};
+struct IpcSymmTable;
 
-// Host-side function to update the constant memory table (legacy, replaces entire table)
-void ipc_user_buf_update_table(const ipc_user_buf_entry_t* entries, int count);
-
-// Add a single entry to the master table and sync to device constant memory
-int ipc_user_buf_add_entry(const ipc_user_buf_entry_t* entry);
+// Called during IPC backend init to make the symm_table accessible
+// to rocshmem_buffer_register_vmm (free function called from RCCL GIN).
+void ipc_user_buf_set_symm_table(IpcSymmTable *table, int num_pes);
 
 }  // namespace rocshmem
 

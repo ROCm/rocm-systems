@@ -6,66 +6,67 @@
 
 #include "ipc_user_buf.hpp"
 #include <hip/hip_runtime.h>
+#include <vector>
 #include "util.hpp"
+#include "ipc_policy.hpp"
 
 namespace rocshmem {
 
-// Constant memory for device-side user buffer lookup (no HBM loads)
-__constant__ ipc_user_buf_entry_t ipc_user_buf_table[IPC_MAX_USER_BUFS];
-__constant__ int                  ipc_user_buf_count = 0;
+static IpcSymmTable *g_symm_table = nullptr;
+static int g_num_pes = 0;
 
-// Master host-side table — single source of truth for all registration paths
-static ipc_user_buf_entry_t master_entries[IPC_MAX_USER_BUFS];
-static int master_entry_count = 0;
-
-// Sync master table to device constant memory
-static void sync_master_to_device() {
-  int count = master_entry_count;
-  if (count > IPC_MAX_USER_BUFS) count = IPC_MAX_USER_BUFS;
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ipc_user_buf_table), master_entries,
-                               count * sizeof(ipc_user_buf_entry_t), 0, hipMemcpyHostToDevice));
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ipc_user_buf_count), &count,
-                               sizeof(int), 0, hipMemcpyHostToDevice));
-}
-
-// Add a single entry to the master table and sync to device
-int ipc_user_buf_add_entry(const ipc_user_buf_entry_t* entry) {
-  if (master_entry_count >= IPC_MAX_USER_BUFS) return -1;
-  master_entries[master_entry_count++] = *entry;
-  sync_master_to_device();
-  return 0;
-}
-
-// Legacy: replace entire table (used by sync_user_buf_constmem in backend_ipc.cpp)
-void ipc_user_buf_update_table(const ipc_user_buf_entry_t* entries, int count) {
-  // Merge: keep existing master entries and append new ones that aren't duplicates
-  // For simplicity, just replace non-VMM portion. But since both paths now use
-  // ipc_user_buf_add_entry, this function is only called from sync_user_buf_constmem
-  // which rebuilds from IPCBackend::user_buffers_. We need to merge with VMM entries.
-  //
-  // For now, just sync master as-is — sync_user_buf_constmem should use
-  // ipc_user_buf_add_entry instead.
-  if (count > IPC_MAX_USER_BUFS) count = IPC_MAX_USER_BUFS;
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ipc_user_buf_table), entries,
-                               count * sizeof(ipc_user_buf_entry_t), 0, hipMemcpyHostToDevice));
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ipc_user_buf_count), &count,
-                               sizeof(int), 0, hipMemcpyHostToDevice));
+void ipc_user_buf_set_symm_table(IpcSymmTable *table, int num_pes) {
+  g_symm_table = table;
+  g_num_pes = num_pes;
 }
 
 int rocshmem_buffer_register_vmm(void *addr, size_t length,
                                  int my_pe, int n_pes,
                                  ptrdiff_t stride) {
-  if (master_entry_count >= IPC_MAX_USER_BUFS) return -1;
-
-  ipc_user_buf_entry_t entry = {};
-  entry.local_base = reinterpret_cast<uintptr_t>(addr);
-  entry.length = length;
-  for (int pe = 0; pe < n_pes && pe < IPC_MAX_PES; pe++) {
-    entry.remote_bases[pe] = reinterpret_cast<uintptr_t>(addr)
-                           + static_cast<ptrdiff_t>(pe - my_pe) * stride;
+  if (g_symm_table == nullptr) {
+    LOG_ERROR("rocshmem_buffer_register_vmm: symm_table not initialized");
+    return -1;
   }
 
-  return ipc_user_buf_add_entry(&entry);
+  IpcSymmTable host_table{};
+  CHECK_HIP(hipMemcpy(&host_table, g_symm_table, sizeof(IpcSymmTable),
+                       hipMemcpyDeviceToHost));
+
+  if (host_table.count >= host_table.capacity) {
+    LOG_ERROR("rocshmem_buffer_register_vmm: symm_table full (%d/%d)",
+              host_table.count, host_table.capacity);
+    return -1;
+  }
+
+  int num_pes = (n_pes > 0) ? n_pes : g_num_pes;
+
+  std::vector<char *> host_peer_bases(num_pes, nullptr);
+  uintptr_t base = reinterpret_cast<uintptr_t>(addr);
+  for (int pe = 0; pe < num_pes; pe++) {
+    host_peer_bases[pe] = reinterpret_cast<char *>(
+        base + static_cast<ptrdiff_t>(pe - my_pe) * stride);
+  }
+
+  char **peer_bases{nullptr};
+  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&peer_bases),
+                      num_pes * sizeof(char *)));
+  CHECK_HIP(hipMemcpy(peer_bases, host_peer_bases.data(),
+                      num_pes * sizeof(char *), hipMemcpyHostToDevice));
+
+  IpcSymmRegion host_region{};
+  host_region.local_base = base;
+  host_region.length = length;
+  host_region.peer_bases = peer_bases;
+
+  int slot = host_table.count;
+  CHECK_HIP(hipMemcpy(&host_table.regions[slot], &host_region,
+                      sizeof(IpcSymmRegion), hipMemcpyHostToDevice));
+
+  host_table.count = slot + 1;
+  CHECK_HIP(hipMemcpy(g_symm_table, &host_table, sizeof(IpcSymmTable),
+                      hipMemcpyHostToDevice));
+
+  return 0;
 }
 
 }  // namespace rocshmem
