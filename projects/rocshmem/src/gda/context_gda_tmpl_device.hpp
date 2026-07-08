@@ -253,7 +253,7 @@ __device__ void GDAContext::amo_cas(void *dst, T value, T cond, int pe) {
     uint8_t lane = __ffsll((unsigned long long)turns) - 1;
     int pe_turn = __shfl(pe, lane);
     if (pe_turn == pe) {
-      qps[qp_index].atomic_cas_nbi_nofetch(base_heap[pe] + L_offset, cond, value, wf_info);
+      qps[qp_index].atomic_cas_nofetch(base_heap[pe] + L_offset, cond, value, wf_info);
       need_turn = false;
     }
     turns = __ballot(need_turn);
