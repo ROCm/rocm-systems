@@ -4410,10 +4410,11 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -4439,10 +4440,11 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -4468,10 +4470,11 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -4498,10 +4501,11 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -4528,10 +4532,11 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -4557,10 +4562,11 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;

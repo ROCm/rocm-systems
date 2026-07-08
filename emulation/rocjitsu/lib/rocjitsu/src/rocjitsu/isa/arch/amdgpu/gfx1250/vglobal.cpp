@@ -318,10 +318,11 @@ GlobalLoadD16U8Vglobal::GlobalLoadD16U8Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -339,10 +340,11 @@ GlobalLoadD16I8Vglobal::GlobalLoadD16I8Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -360,10 +362,11 @@ GlobalLoadD16B16Vglobal::GlobalLoadD16B16Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -381,10 +384,11 @@ GlobalLoadD16HiU8Vglobal::GlobalLoadD16HiU8Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -402,10 +406,11 @@ GlobalLoadD16HiI8Vglobal::GlobalLoadD16HiI8Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -423,10 +428,11 @@ GlobalLoadD16HiB16Vglobal::GlobalLoadD16HiB16Vglobal(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;

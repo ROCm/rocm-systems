@@ -511,10 +511,11 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -541,10 +542,11 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -572,10 +574,11 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -602,10 +605,11 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -632,10 +636,11 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -663,10 +668,11 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
       vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;

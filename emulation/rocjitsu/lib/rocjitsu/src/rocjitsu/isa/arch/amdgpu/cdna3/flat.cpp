@@ -859,11 +859,12 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -906,11 +907,12 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -953,11 +955,12 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1001,11 +1004,12 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1049,11 +1053,12 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1096,11 +1101,12 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &flat_scratch;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &flat_scratch;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);

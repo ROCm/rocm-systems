@@ -3741,9 +3741,14 @@ constexpr uint32_t kVop3CmpLtF32Op = 17u << 16; // v_cmp_lt_f32_e64 (SGPR vdst)
 // word1: src0=SRC_DPP, src1=VGPR3.
 constexpr uint32_t kVop3DppWord1 = (3u << 9) | 250u;
 
-std::unique_ptr<Instruction> decode_rdna4(const std::array<uint32_t, 3> &words) {
+// VOP3 DPP16 is 3 dwords and a FLAT (D16) load can decode as a 3-dword
+// instruction, so the buffer is zero-padded to avoid out-of-bounds reads during
+// decode when a caller supplies fewer words than the decoded length.
+std::unique_ptr<Instruction> decode_rdna4(std::initializer_list<uint32_t> words) {
+  std::array<uint32_t, 4> buf{};
+  std::copy(words.begin(), words.end(), buf.begin());
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(buf.data()) : nullptr);
 }
 
 TEST(GeneratedInstDefUse, Vop3DppPartialRowMaskReadsVgprDestination) {
@@ -3832,6 +3837,47 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+// --- D16 memory loads: sub-dword loads preserve half of vdst (real decode) ---
+//
+// A D16(_HI) load writes one 16-bit half of the destination VGPR and preserves
+// the other, so it reads the old vdst -- a read-modify-write. The generator
+// marks these as dst-is-also-source (see _dst_is_also_source), so the decoded
+// instruction reports vdst in both defs and uses. A regular (non-D16) load
+// fully overwrites vdst and must not report it as a use.
+//
+// Encodings are the canonical forms from rdna4/test_encodings.h with word1's
+// low byte set to vdst=5 (FLAT VDST is word1[7:0]); vaddr stays v0 (word2=0),
+// so v5 is distinct from the address source.
+TEST(GeneratedInstDefUse, D16HiLoadReadsDestination) {
+  auto inst = decode_rdna4({0xEC084000U, 0x00000005U}); // flat_load_d16_hi_u8, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_d16_hi_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, D16LoLoadReadsDestination) {
+  auto inst = decode_rdna4({0xEC078000U, 0x00000005U}); // flat_load_d16_u8, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_d16_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, RegularLoadDoesNotReadDestination) {
+  auto inst = decode_rdna4({0xEC050000U, 0x00000005U}); // flat_load_b32, vdst=5 (full write)
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_load_b32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 } // namespace

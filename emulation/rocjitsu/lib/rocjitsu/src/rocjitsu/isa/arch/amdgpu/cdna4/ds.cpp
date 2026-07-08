@@ -3748,10 +3748,11 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -3781,10 +3782,11 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -3814,10 +3816,11 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -3848,10 +3851,11 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -3882,10 +3886,11 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
@@ -3915,10 +3920,11 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &addr;
-  src_operands_[1] = &dsmem;
-  num_src_ = 2;
+  src_operands_[1] = &addr;
+  src_operands_[2] = &dsmem;
+  num_src_ = 3;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;

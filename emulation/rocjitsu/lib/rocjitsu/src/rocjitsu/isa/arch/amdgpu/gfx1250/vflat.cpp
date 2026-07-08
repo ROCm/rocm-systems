@@ -305,10 +305,11 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -325,10 +326,11 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -346,10 +348,11 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -367,10 +370,11 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -388,10 +392,11 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
@@ -409,10 +414,11 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &vaddr;
-  src_operands_[1] = &gpumem;
-  num_src_ = 2;
+  src_operands_[1] = &vaddr;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.saddr != OPR_SREG_NULL)
     src_operands_[num_src_++] = &saddr;
