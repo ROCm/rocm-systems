@@ -610,6 +610,21 @@ __host__ void rocshmem_buffer_unregister_all() {
   backend->buffer_unregister_all();
 }
 
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length) {
+  VERIFY_BACKEND();
+  void *registered_addr = nullptr;
+  if (backend->buffer_register_symmetric(addr, length, &registered_addr) !=
+      ROCSHMEM_SUCCESS) {
+    return nullptr;
+  }
+  return registered_addr;
+}
+
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr) {
+  VERIFY_BACKEND();
+  return backend->buffer_unregister_symmetric(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 
