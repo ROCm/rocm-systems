@@ -4,6 +4,7 @@
 #include "library/coverage.hpp"
 #include "api.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "core/config.hpp"
 #include "library/coverage/impl.hpp"
 #include "library/thread_data.hpp"
@@ -30,6 +31,7 @@ namespace rocprofsys
 {
 namespace coverage
 {
+namespace path = ::rocprofsys::common::path;
 namespace
 {
 template <typename... Tp>
@@ -212,7 +214,7 @@ post_process()
     {
         auto          _fname = tim::settings::compose_output_filename("coverage", ".txt");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
                 operation::file_output_message<code_coverage>{}(
@@ -258,7 +260,7 @@ post_process()
         }
         auto _fname = tim::settings::compose_output_filename("coverage", ".json");
         std::ofstream ofs{};
-        if(tim::filepath::open(ofs, _fname))
+        if(path::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
                 operation::file_output_message<code_coverage>{}(
