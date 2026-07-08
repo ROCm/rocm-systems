@@ -36,7 +36,6 @@
 #include <vector>
 
 namespace color    = ::tim::log::color;
-namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
@@ -395,7 +394,8 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
             _generate_configs = true;
             auto _dir         = p.get<std::string>("generate-configs");
             if(!_dir.empty()) _config_folder = std::move(_dir);
-            if(!filepath::exists(_config_folder)) filepath::makedir(_config_folder);
+            // make_dirs is idempotent; drops the false-for-dirs exists pre-guard
+            (void) path::make_dirs(_config_folder);
         });
     parser
         .add_argument({ "--no-defaults" },
