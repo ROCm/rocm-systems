@@ -36,11 +36,11 @@
 #include <cstdint>
 #include <vector>
 
-bool ncclTopoSearchCheckNet(struct ncclTopoSystem* system,
-                            struct ncclTopoGraph*  graph,
-                            struct ncclTopoNode*   startNet,
-                            int                    n,
-                            int                    step);
+// Pull the hipified search.cc directly into this translation unit so we can
+// exercise its internal (Release: hidden-visibility) symbols without relying on
+// external linkage from librccl.so. SEARCH_CC_PATH is defined by test/CMakeLists.txt
+// as the absolute path to the hipify-generated copy of src/graph/search.cc.
+#include SEARCH_CC_PATH
 
 namespace RcclUnitTesting
 {
