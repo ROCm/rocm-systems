@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include <hip/hip_runtime.h>
@@ -59,14 +60,19 @@ main()
         return 2;
     }
 
+    // rocSHMEM requires hipSetDevice() to be called BEFORE rocshmem_init()
+    // so that the MPI PE is bound to its GPU before the symmetric heap is
+    // allocated on that device.  Use OMPI_COMM_WORLD_LOCAL_RANK (set by
+    // Open MPI before any process code runs) to pick the right device.
+    const char* local_rank_env = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
+    const int   local_rank     = local_rank_env ? atoi(local_rank_env) : 0;
+    CHECK_HIP(hipSetDevice(local_rank % num_devices));
+
     rocshmem_init();
 
     const int me   = rocshmem_my_pe();
     const int npes = rocshmem_n_pes();
     const int peer = (me + 1) % npes;
-
-    // Bind each PE to its own GPU (round-robin if fewer GPUs than PEs)
-    CHECK_HIP(hipSetDevice(me % num_devices));
 
     hipStream_t stream = nullptr;
     CHECK_HIP(hipStreamCreate(&stream));
