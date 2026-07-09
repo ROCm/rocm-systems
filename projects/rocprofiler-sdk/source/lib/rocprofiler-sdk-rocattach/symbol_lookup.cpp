@@ -27,12 +27,14 @@
 #include <fmt/format.h>
 
 #include <elf.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -80,6 +82,47 @@ struct target_elf
     std::string             path          = {};
     std::vector<uint8_t>    data          = {};
     std::vector<Elf64_Phdr> load_segments = {};
+};
+
+class unique_fd
+{
+public:
+    explicit unique_fd(int fd)
+    : m_fd{fd}
+    {}
+
+    unique_fd(const unique_fd&) = delete;
+    unique_fd& operator=(const unique_fd&) = delete;
+
+    unique_fd(unique_fd&& other) noexcept
+    : m_fd{std::exchange(other.m_fd, -1)}
+    {}
+
+    unique_fd& operator=(unique_fd&& other) noexcept
+    {
+        if(this != &other)
+        {
+            reset();
+            m_fd = std::exchange(other.m_fd, -1);
+        }
+        return *this;
+    }
+
+    ~unique_fd() { reset(); }
+
+    int get() const { return m_fd; }
+
+    void reset()
+    {
+        if(m_fd >= 0)
+        {
+            ::close(m_fd);
+            m_fd = -1;
+        }
+    }
+
+private:
+    int m_fd = -1;
 };
 
 std::optional<uint64_t>
@@ -280,36 +323,84 @@ find_mapped_objects(pid_t pid, const std::string& library)
 }
 
 std::optional<std::vector<uint8_t>>
-read_file(const std::string& path)
+read_file_from_fd(int fd, const std::string& path, uint64_t size)
 {
-    auto input = std::ifstream{path, std::ios::binary};
-    if(!input) return std::nullopt;
-
-    input.seekg(0, std::ios::end);
-    auto size = input.tellg();
-    if(size <= 0) return std::nullopt;
-    if(static_cast<uint64_t>(size) > MAX_TARGET_ELF_SIZE)
+    if(size == 0 || size > MAX_TARGET_ELF_SIZE)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Refusing to read unusually large target ELF "
                    << path << " (" << size << " bytes)";
         return std::nullopt;
     }
-    input.seekg(0, std::ios::beg);
 
-    auto data = std::vector<uint8_t>(static_cast<size_t>(size));
-    if(!data.empty()) input.read(reinterpret_cast<char*>(data.data()), size);
-    if(!input && !input.eof()) return std::nullopt;
+    auto data       = std::vector<uint8_t>(static_cast<size_t>(size));
+    auto bytes_read = size_t{0};
+    while(bytes_read < data.size())
+    {
+        auto ret = ::read(fd, data.data() + bytes_read, data.size() - bytes_read);
+        if(ret < 0)
+        {
+            if(errno == EINTR) continue;
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Failed reading target ELF " << path << ": "
+                         << std::strerror(errno);
+            return std::nullopt;
+        }
+        if(ret == 0) break;
+        bytes_read += static_cast<size_t>(ret);
+    }
+
+    if(bytes_read != data.size())
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Short read while reading target ELF " << path
+                     << ": expected " << data.size() << " bytes, read " << bytes_read;
+        return std::nullopt;
+    }
+
     return data;
 }
 
-bool
-stat_matches_mapping(const std::string& path, const mapped_object& object)
+std::optional<target_elf>
+read_target_elf_file(const std::string& path, const mapped_object& object)
 {
     struct stat st
     {};
-    if(::stat(path.c_str(), &st) != 0) return false;
-    return major(st.st_dev) == object.device_major && minor(st.st_dev) == object.device_minor &&
-           static_cast<uint64_t>(st.st_ino) == object.inode;
+
+    auto raw_fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if(raw_fd < 0) return std::nullopt;
+    auto fd = unique_fd{raw_fd};
+
+    if(::fstat(fd.get(), &st) != 0)
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not stat opened target ELF " << path
+                     << ": " << std::strerror(errno);
+        return std::nullopt;
+    }
+
+    if(major(st.st_dev) != object.device_major || minor(st.st_dev) != object.device_minor ||
+       static_cast<uint64_t>(st.st_ino) != object.inode)
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Refusing to use " << path
+                     << " because its opened device/inode does not match the mapped object";
+        return std::nullopt;
+    }
+
+    if(!S_ISREG(st.st_mode))
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Refusing to use " << path
+                     << " because the opened target ELF is not a regular file";
+        return std::nullopt;
+    }
+
+    if(st.st_size <= 0)
+    {
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Refusing to use " << path
+                     << " because the opened target ELF has invalid size " << st.st_size;
+        return std::nullopt;
+    }
+
+    auto data = read_file_from_fd(fd.get(), path, static_cast<uint64_t>(st.st_size));
+    if(!data || data->empty()) return std::nullopt;
+
+    return target_elf{path, std::move(*data), {}};
 }
 
 std::optional<target_elf>
@@ -321,14 +412,10 @@ open_target_elf(pid_t pid, const mapped_object& object)
                                           pid,
                                           static_cast<uint64_t>(mapping.start),
                                           static_cast<uint64_t>(mapping.end));
-        if(stat_matches_mapping(map_files_path, object))
+        if(auto elf = read_target_elf_file(map_files_path, object))
         {
-            if(auto data = read_file(map_files_path); data && !data->empty())
-            {
-                ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via "
-                           << map_files_path;
-                return target_elf{map_files_path, std::move(*data), {}};
-            }
+            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << map_files_path;
+            return elf;
         }
     }
 
@@ -336,18 +423,10 @@ open_target_elf(pid_t pid, const mapped_object& object)
     if(!target_path.empty() && target_path.front() == '/')
     {
         auto root_path = fmt::format("/proc/{}/root{}", pid, target_path);
-        if(stat_matches_mapping(root_path, object))
+        if(auto elf = read_target_elf_file(root_path, object))
         {
-            if(auto data = read_file(root_path); data && !data->empty())
-            {
-                ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;
-                return target_elf{root_path, std::move(*data), {}};
-            }
-        }
-        else
-        {
-            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Refusing to use " << root_path
-                         << " because its device/inode does not match the mapped object";
+            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;
+            return elf;
         }
     }
 
