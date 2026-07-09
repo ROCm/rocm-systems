@@ -8,7 +8,4 @@ rj_add_object_library(rocjitsu_kmd
     sysfs.cpp
     transport.cpp
 )
-target_include_directories(
-    rocjitsu_kmd
-    PRIVATE ${GENERATED_DIR}
-)
+target_include_directories(rocjitsu_kmd PRIVATE ${GENERATED_DIR})
