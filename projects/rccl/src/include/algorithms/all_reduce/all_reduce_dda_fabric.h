@@ -24,15 +24,6 @@
 
 namespace meta::comms {
 
-// Bump the device-resident LL epoch counter by one. Enqueued before each LL
-// all-reduce so the flag value re-increments on every HIP graph replay (a
-// host-side counter would be captured once and reused, breaking LL).
-__global__ void ddaLLEpochBump(uint32_t* __restrict__ epoch) {
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    *epoch = *epoch + 1;
-  }
-}
-
 // DDA all-reduce, LL (low-latency) protocol, REMOTE-WRITE one-shot path.
 //
 // Each rank pushes its input as LL {data,flag} packets into every peer's
@@ -60,15 +51,13 @@ __global__ void ddaAllReduceFlatFabricLL(
     size_t numPackets,
     size_t slotStridePkts,
     size_t bankStridePkts,
-    const uint32_t* __restrict__ epochPtr) {
+    uint32_t flagVal) {
   const int nR = (NRANKS_CT > 0) ? NRANKS_CT : nRanks;
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
   const auto stride = gridDim.x * blockDim.x;
 
-  // Epoch was set by the preceding bump kernel (stream-ordered); every thread
-  // reads the same value. It is the packet flag and selects the double-buffer
+  // The host-incremented epoch is the packet flag and selects the double-buffer
   // bank, so a lagging peer's read of op N doesn't collide with op N+1.
-  const uint32_t flagVal = *epochPtr;
   const size_t bankOffset =
       static_cast<size_t>((flagVal - 1) & 1) * bankStridePkts;
   const uint32_t* __restrict__ sendU32 =

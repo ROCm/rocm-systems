@@ -39,7 +39,7 @@ void ncclDdaFabricLLInit(ncclComm* comm) {
   comm->ddaFabricLLRecv = nullptr;
   comm->ddaFabricLLBytes = 0;
   comm->ddaFabricLLPeerPtrsDev = nullptr;
-  comm->ddaFabricLLEpochDev = nullptr;
+  comm->ddaFabricLLEpoch = 0;
 
   const int nRanks = comm->nRanks;
   const size_t llMaxBytes = ddaFabricLLMaxBytes();
@@ -52,7 +52,6 @@ void ncclDdaFabricLLInit(ncclComm* comm) {
   CUmemGenericAllocationHandle llHandle{};
   ncclFabricMemHandler* llMemHandler = nullptr;
   void* llPeerDev = nullptr;
-  uint32_t* llEpochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
   ncclResult_t res = ncclSuccess;
 
@@ -89,25 +88,20 @@ void ncclDdaFabricLLInit(ncclComm* comm) {
                  cudaMemcpyHostToDevice),
       res, ll_fail);
 
-  // Device epoch counter, zero-initialized (first op bumps it to 1; flag 0 is
+  // Host epoch counter starts at 0; the first op increments it to 1 (flag 0 is
   // never valid, matching the cleared-once recv buffer).
-  CUDACHECKGOTO(cudaMalloc(&llEpochDev, sizeof(uint32_t)), res, ll_fail);
-  CUDACHECKGOTO(cudaMemset(llEpochDev, 0, sizeof(uint32_t)), res, ll_fail);
+  comm->ddaFabricLLEpoch = 0;
 
   comm->ddaFabricLLMemHandler = llMemHandler;
   comm->ddaFabricLLRecv = llRecv;
   comm->ddaFabricLLBytes = llBytes;
   comm->ddaFabricLLPeerPtrsDev = llPeerDev;
-  comm->ddaFabricLLEpochDev = llEpochDev;
   INFO(NCCL_INIT,
        "ncclDdaFabricLLInit: nRanks %d, LL recv %zu bytes (vmm), maxBytes=%zu, slotStridePkts=%zu",
        nRanks, llBytes, llMaxBytes, slotStridePkts);
   return;
 
 ll_fail:
-  if (llEpochDev != nullptr) {
-    CUDACHECKIGNORE(cudaFree(llEpochDev));
-  }
   if (llPeerDev != nullptr) {
     CUDACHECKIGNORE(cudaFree(llPeerDev));
   }
@@ -261,10 +255,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
     comm->ddaFabricBarrierState = nullptr;
   }
   // LL remote-write path resources (optional; may be null).
-  if (comm->ddaFabricLLEpochDev != nullptr) {
-    CUDACHECKIGNORE(cudaFree(comm->ddaFabricLLEpochDev));
-    comm->ddaFabricLLEpochDev = nullptr;
-  }
+  comm->ddaFabricLLEpoch = 0;
   if (comm->ddaFabricLLPeerPtrsDev != nullptr) {
     CUDACHECKIGNORE(cudaFree(comm->ddaFabricLLPeerPtrsDev));
     comm->ddaFabricLLPeerPtrsDev = nullptr;

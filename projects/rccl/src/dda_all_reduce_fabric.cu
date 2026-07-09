@@ -24,9 +24,7 @@ namespace {
 
 using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::ddaFabricLLMaxBytes;
-
-// Flat all-reduce kernel below this size; tree kernel at or above it.
-constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
+using nccl_dda_detail::ddaFabricOneShotSimpleMaxBytes;
 
 // LL (low-latency, remote-write) one-shot all-reduce. Used for small messages
 // (<= ddaFabricLLMaxBytes) when the dedicated LL buffer is available. Pushes LL
@@ -54,34 +52,39 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(
 
   auto** peerLLbufs =
       reinterpret_cast<meta::comms::LLPacket16**>(comm->ddaFabricLLPeerPtrsDev);
-  auto* epochDev = comm->ddaFabricLLEpochDev;
+  // Host-side monotonic epoch (packet flag). Incremented per op and passed by
+  // value. Note: not HIP-graph-safe (the flag would be captured once on record).
+  const uint32_t flagVal = ++comm->ddaFabricLLEpoch;
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce: LL one-shot (remote-write) kernel: nRanks=%d count=%zu sizeBytes=%zu numPackets=%zu grid=%u block=%u%s",
        nRanks, count, sizeBytes, numPackets, grid.x, block.x,
-       (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
-
-  // Bump the device epoch first (graph-safe: re-runs on every replay).
-  meta::comms::ddaLLEpochBump<<<1, 1, 0, stream>>>(epochDev);
+       (nRanks == 2 || nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
   switch (nRanks) {
+  case 2:
+    meta::comms::ddaAllReduceFlatFabricLL<T, 2><<<grid, block, 0, stream>>>(
+        peerLLbufs, static_cast<T*>(recvbuff), count,
+        static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
+        slotStridePkts, bankStridePkts, flagVal);
+    break;
   case 4:
     meta::comms::ddaAllReduceFlatFabricLL<T, 4><<<grid, block, 0, stream>>>(
         peerLLbufs, static_cast<T*>(recvbuff), count,
         static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
-        slotStridePkts, bankStridePkts, epochDev);
+        slotStridePkts, bankStridePkts, flagVal);
     break;
   case 8:
     meta::comms::ddaAllReduceFlatFabricLL<T, 8><<<grid, block, 0, stream>>>(
         peerLLbufs, static_cast<T*>(recvbuff), count,
         static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
-        slotStridePkts, bankStridePkts, epochDev);
+        slotStridePkts, bankStridePkts, flagVal);
     break;
   default:
     meta::comms::ddaAllReduceFlatFabricLL<T, 0><<<grid, block, 0, stream>>>(
         peerLLbufs, static_cast<T*>(recvbuff), count,
         static_cast<const T*>(sendbuff), comm->rank, nRanks, numPackets,
-        slotStridePkts, bankStridePkts, epochDev);
+        slotStridePkts, bankStridePkts, flagVal);
     break;
   }
 
@@ -122,7 +125,7 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(
         sendbuff, recvbuff, count, comm, stream);
   }
 
-  const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
+  const bool wantTree = sizeBytes > ddaFabricOneShotSimpleMaxBytes();
   const bool treeOk =
       wantTree && (count % static_cast<size_t>(nRanks) == 0);
 
@@ -271,7 +274,7 @@ bool ncclAllReduceDdaFabricEligible(
     // 16-byte alignment: the DDA kernels do 16-byte vectorized loads.
     return false;
   }
-  if (bytes > kDdaFlatTreeThresholdBytes) {
+  if (bytes > ddaFabricOneShotSimpleMaxBytes()) {
     if (count % comm->nRanks ||
         ((count / comm->nRanks) * ncclTypeSize(datatype)) % 16) {
       // Two-shot/tree path: each rank reduces count/nRanks elements, so that

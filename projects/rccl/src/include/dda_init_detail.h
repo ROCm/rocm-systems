@@ -27,6 +27,11 @@
 // recv buffer. Overridable via RCCL_DDA_FABRIC_LL_MAX_BYTES.
 #define DDA_FABRIC_LL_MAX_BYTES 32768
 
+// DDA fabric Simple (remote-read) all-reduce: messages at or below this many
+// bytes use the flat one-shot kernel; larger sizes use the tree two-shot
+// kernel. Overridable via RCCL_DDA_FABRIC_ONESHOT_SIMPLE_MAX_BYTES.
+#define DDA_FABRIC_ONESHOT_SIMPLE_MAX_BYTES (1ULL << 18)
+
 namespace nccl_dda_detail {
 
 constexpr int kDdaNranks = meta::comms::NRANKS;
@@ -61,6 +66,30 @@ inline size_t ddaFabricLLMaxBytes() {
       }
     }
     // Round down to a 16-byte (one LL packet) multiple; keep a sane floor.
+    n &= ~size_t(15);
+    if (n < 16) {
+      n = 16;
+    }
+    maxBytes = n;
+  }
+  return maxBytes;
+}
+
+// Byte threshold for the DDA fabric Simple flat (one-shot) vs tree (two-shot)
+// all-reduce split. Messages at or below this use the flat one-shot kernel.
+inline size_t ddaFabricOneShotSimpleMaxBytes() {
+  static size_t maxBytes = 0;
+  if (maxBytes == 0) {
+    size_t n = DDA_FABRIC_ONESHOT_SIMPLE_MAX_BYTES;
+    const char* s = getenv("RCCL_DDA_FABRIC_ONESHOT_SIMPLE_MAX_BYTES");
+    if (s != nullptr) {
+      long v = atol(s);
+      if (v > 0) {
+        n = static_cast<size_t>(v);
+      }
+    }
+    // Round down to a 16-byte multiple (kernels do 16-byte vectorized loads);
+    // keep a sane floor.
     n &= ~size_t(15);
     if (n < 16) {
       n = 16;

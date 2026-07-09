@@ -648,10 +648,9 @@ struct ncclComm {
   void* ddaFabricLLRecv;         /* this rank's LL recv buffer (VMM) */
   size_t ddaFabricLLBytes;       /* size of ddaFabricLLRecv */
   void* ddaFabricLLPeerPtrsDev;  /* device array of nRanks peer LL recv bases */
-  // Device-resident monotonic epoch counter (the packet flag value). Bumped by
-  // a 1-thread kernel enqueued before each LL op, so it stays correct under HIP
-  // graph capture/replay (a host-side counter would be baked in at capture).
-  uint32_t* ddaFabricLLEpochDev;
+  // Host-side monotonic epoch counter (the packet flag value), incremented on
+  // the host before each LL op and passed by value into the kernel.
+  uint32_t ddaFabricLLEpoch;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

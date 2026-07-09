@@ -28,6 +28,10 @@ static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
+// Select the per-copy hint passed to hipMemcpyBatchAsync for CE collectives:
+//   0 (default) -> hipMemcpyFlagPreferOverlapWithCompute (runtime default engine choice)
+//   1           -> hipMemcpyFlagExtPreferCE (force the copy engine / SDMA over shader blits)
+RCCL_PARAM(PreferCE, "PREFER_CE", 0);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -446,20 +450,29 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
     params->attrs[0] = {};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
-    params->attrs[0].flags = hipMemcpyFlagPreferOverlapWithCompute;
+    // RCCL_PREFER_CE=1 forces copies onto the copy engine (SDMA) instead of shader
+    // blits; the default keeps the overlap-with-compute hint (runtime picks the engine).
+    params->attrs[0].flags = rcclParamPreferCE()
+                                 ? hipMemcpyFlagExtPreferCE
+                                 : hipMemcpyFlagPreferOverlapWithCompute;
 #else
     params->attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
     params->attrs[0].flags = cudaMemcpyFlagPreferOverlapWithCompute;
 #endif
     params->attrIdxs[0] = 0;
     params->numAttrs = 1;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    const char* ceFlagMode = rcclParamPreferCE() ? "ExtPreferCE" : "PreferOverlapWithCompute";
+#else
+    const char* ceFlagMode = "PreferOverlapWithCompute";
+#endif
 
     if (params->intraBatchSync) {
       // Break into multiple batches with sync between them
       int batchSize = comm->ceColl.intraBatchSyncFreq;
       for (int i = 0; i < params->numOps; i += batchSize) {
         int currentBatchSize = (i + batchSize <= params->numOps) ? batchSize : params->numOps - i;
-        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (hipMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);
+        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (hipMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d, flags=%s", comm->rank, params->numOps, currentBatchSize, ceFlagMode);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
         CUDACHECKGOTO(hipMemcpyBatchAsync(
 #else
@@ -474,7 +487,7 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* 
       }
     } else {
       // Use single batch for all operations
-      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (hipMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);
+      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (hipMemcpyBatchAsync), numOps=%zu, flags=%s", comm->rank, params->numOps, ceFlagMode);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
       CUDACHECKGOTO(hipMemcpyBatchAsync(
 #else
