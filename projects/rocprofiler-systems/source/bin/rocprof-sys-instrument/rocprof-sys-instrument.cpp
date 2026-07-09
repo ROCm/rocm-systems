@@ -150,7 +150,6 @@ using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
 
 bool                                            binary_rewrite       = false;
-bool                                            is_attached          = false;
 bool                                            use_mpi              = false;
 bool                                            is_static_exe        = false;
 bool                                            force_config         = false;
@@ -380,7 +379,6 @@ main(int argc, char** argv)
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
-    process::id_t         _pid          = -1;
 
     fixed_module_functions = {
         { &available_module_functions, false },
@@ -614,10 +612,6 @@ main(int argc, char** argv)
             binary_rewrite = true;
             outfile        = p.get<string_t>("output");
         });
-    parser.add_argument({ "-p", "--pid" }, "Connect to running process")
-        .dtype("int")
-        .count(1)
-        .action([&_pid](parser_t& p) { _pid = p.get<int>("pid"); });
     parser
         .add_argument({ "-M", "--mode" },
                       "Instrumentation mode. 'trace' mode instruments the selected "
@@ -1415,15 +1409,14 @@ main(int argc, char** argv)
 
     //----------------------------------------------------------------------------------//
     //
-    //  Start the instrumentation procedure by opening a file for binary editing,
-    //  attaching to a running process, or starting a process
+    //  Start the instrumentation procedure by opening a file for binary editing
+    //  or starting a process
     //
     //----------------------------------------------------------------------------------//
 
     // prioritize the user environment arguments
-    auto instr_mode_v     = (binary_rewrite) ? InstrumentMode::BinaryRewrite
-                            : (_pid < 0)     ? InstrumentMode::ProcessCreate
-                                             : InstrumentMode::ProcessAttach;
+    auto instr_mode_v =
+        (binary_rewrite) ? InstrumentMode::BinaryRewrite : InstrumentMode::ProcessCreate;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());
@@ -1437,7 +1430,7 @@ main(int argc, char** argv)
     env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_CODE_COVERAGE,
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
-                                              binary_rewrite, _pid, mutname);
+                                              binary_rewrite, mutname);
 
     // addr_space->allowTraps(instr_traps);
 
@@ -1643,10 +1636,6 @@ main(int argc, char** argv)
         app_binary = static_cast<BPatch_binaryEdit*>(addr_space);
     else
         app_thread = static_cast<BPatch_process*>(addr_space);
-
-    is_attached = (_pid >= 0 && app_thread != nullptr);
-
-    ROCPROFSYS_ADD_LOG_ENTRY("address space is attached:", is_attached);
 
     if(!app_binary && !app_thread)
     {
@@ -1991,15 +1980,9 @@ main(int argc, char** argv)
 
     if(main_func) main_sign.get();
 
-    // There is no need to use rocprofsys_push_trace_with_args here. This is only used
-    // for process attach (--pid). Even then, the source_object value will match the name
-    // of this binary, which is already the label of the root region pushed by
-    // rocprofsys_postinit (in dl.cpp), so attaching it as an argument here would be
-    // redundant
-    auto main_call_args = rocprofsys_call_expr(main_sign.get());
     auto init_call_args = rocprofsys_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = rocprofsys_call_expr();
-    auto umpi_call_args = rocprofsys_call_expr(use_mpi, is_attached);
+    auto umpi_call_args = rocprofsys_call_expr(use_mpi);
     auto none_call_args = rocprofsys_call_expr();
     auto set_instr_args = rocprofsys_call_expr(instr_mode_v_int);
 
@@ -2010,7 +1993,6 @@ main(int argc, char** argv)
     auto fini_call      = fini_call_args.get(fini_func);
     auto umpi_call      = umpi_call_args.get(mpi_func);
     auto set_instr_call = set_instr_args.get(set_instr_func);
-    auto main_beg_call  = main_call_args.get(entr_trace);
 
     verbprintf(2, "Done\n");
 
@@ -2034,7 +2016,7 @@ main(int argc, char** argv)
     }
     if(_libname.empty()) _libname = "librocprof-sys-dl.so";
 
-    if(!binary_rewrite && !is_attached) env_vars.clear();
+    if(!binary_rewrite) env_vars.clear();
 
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', rocprofsys::env_vars::INIT_ENABLED,
@@ -2094,8 +2076,6 @@ main(int argc, char** argv)
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
     if(!binary_rewrite && init_call) init_names.emplace_back(init_call.get());
-    if(is_attached && main_func && main_beg_call)
-        init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
         if(itr.second) fini_names.emplace_back(itr.second.get());
@@ -2160,7 +2140,6 @@ main(int argc, char** argv)
     auto _init_sequence = sequence_t{ init_names };
     auto _fini_sequence = sequence_t{ fini_names };
 
-    if(!is_attached)
     {
         auto _insert_init_callbacks = std::function<bool()>{};
         auto _insert_init_snippets  = std::function<bool()>{};
@@ -2575,7 +2554,7 @@ main(int argc, char** argv)
             code = app_thread->getExitCode();
         };
 
-        if(!app_thread->isTerminated() && !is_attached)
+        if(!app_thread->isTerminated())
         {
             pid_t cpid   = app_thread->getPid();
             int   status = 0;
@@ -2607,22 +2586,6 @@ main(int argc, char** argv)
                     WAITPID_DEBUG_MESSAGE(code = WIFCONTINUED(status));
                 }
             } while(WIFEXITED(status) == 0 && WIFSIGNALED(status) == 0);
-        }
-        else if(!app_thread->isTerminated() && is_attached)
-        {
-            bpatch->setDebugParsing(false);
-            bpatch->setDelayedParsing(true);
-            verbprintf(1, "Executing initial snippets...\n");
-            for(auto* itr : init_names)
-                app_thread->oneTimeCode(*itr);
-
-            app_thread->continueExecution();
-            while(!app_thread->isTerminated())
-            {
-                while(bpatch->waitForStatusChange())
-                    app_thread->continueExecution();
-            }
-            _compute_exit_code();
         }
         else
         {
