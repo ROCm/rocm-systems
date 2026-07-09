@@ -2390,17 +2390,52 @@ def main(argv=None):
             if args.collection_period:
                 fatal_error("--collection-period is not compatible with attach mode")
 
+            # SECURITY: this cache file lives at a predictable path in a world-writable
+            # directory (/tmp) and is deserialized with pickle, which would execute
+            # arbitrary code if another user on a shared system planted a malicious
+            # payload. To prevent this, the file is created exclusively (O_EXCL) with
+            # 0600 permissions and is only ever read back if it is owned by the current
+            # user; O_NOFOLLOW prevents symlink redirection attacks. As a result, we only
+            # ever unpickle a file that we created ourselves.
             fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
-            if not os.path.exists(fname):
-                # if this is the first attachment, write the temp configuration file for future attachments
-                with open(fname, "wb") as ofs:
+            try:
+                # if this is the first attachment, exclusively create the temp
+                # configuration file for future attachments
+                fd = os.open(
+                    fname, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+                )
+            except FileExistsError:
+                fd = None
+
+            if fd is not None:
+                with os.fdopen(fd, "wb") as ofs:
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Saving attach configuration to {fname}...")
                     pickle.dump(args, ofs)
             else:
                 # if this is not the first attachment
-                # load the configuration from the previous attachment
-                with open(fname, "rb") as ifs:
+                # load the configuration from the previous attachment.
+                # O_NOFOLLOW rejects symlinks; a stale file owned by another user (from a
+                # crashed session that reused this PID) surfaces here as PermissionError
+                # (0600) or via the ownership check below. Translate any such failure into a
+                # clear, actionable message instead of an unhandled traceback.
+                try:
+                    rfd = os.open(fname, os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as _e:
+                    fatal_error(
+                        f"Could not open attach configuration file {fname}: {_e}. "
+                        "It may be stale or owned by another user; remove it and retry "
+                        "(or wait for the target PID's previous session to clean it up)."
+                    )
+                with os.fdopen(rfd, "rb") as ifs:
+                    # refuse to unpickle a configuration file that is not owned by the
+                    # current user (e.g. planted by another user on a shared system)
+                    if os.fstat(rfd).st_uid != os.getuid():
+                        fatal_error(
+                            f"Refusing to load attach configuration from {fname}: "
+                            f"file is not owned by the current user (uid={os.getuid()}). "
+                            "It may be stale or owned by another user; remove it and retry."
+                        )
                     if args.log_level in ("config", "info", "trace"):
                         print(f"Loading attach configuration from {fname}...")
                     prev_args = pickle.load(ifs)

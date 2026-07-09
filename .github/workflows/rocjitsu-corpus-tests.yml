@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/06/26.
-        default: "9661a80073abfff688fda5a970bfa9de24de2ead"
+        # Last updated on 2026/07/07.
+        default: "3278883f548e1353ffbda1a8090219d866eca035"
         required: true
 
 concurrency:
@@ -102,8 +102,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
-          # Last updated on 2026/06/26.
-          ref: 9661a80073abfff688fda5a970bfa9de24de2ead
+          # Last updated on 2026/07/07.
+          ref: 3278883f548e1353ffbda1a8090219d866eca035
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -147,36 +147,7 @@ jobs:
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
-            "RaceTest\.vgpr_waitcnt"
-            "RaceTest\.vgpr_waitcnt_race"
-            "RaceTest\.sgpr_waitcnt"
-            "RaceTest\.sgpr_waitcnt_race"
-            "RaceTest\.lds_cross_wave"
-            "RaceTest\.lds_cross_wave_race"
-            "RaceTest\.global_to_lds_buffer"
-            "RaceTest\.global_to_lds_buffer_race"
-            "RaceTest\.partial_vmcnt_race"
-            "RaceTest\.multiple_race"
-            "RaceTest\.multi_kernel"
-            "RaceTest\.multi_kernel_race"
-            "RaceTest\.multi_workgroup"
-            "RaceTest\.multi_workgroup_race"
-            "RaceTest\.mixed_counters_race"
-            "RaceTest\.stress_wavefront_reuse"
-            "RaceTest\.stress_wavefront_reuse_race"
-            "RaceTest\.exec_mask"
-            "RaceTest\.exec_mask_race"
-            "RaceTest\.exec_mask_same_wave"
-            "RaceTest\.exec_mask_cross_wave_race"
-            "RaceTest\.exec_mask_cross_wave"
-            "RaceTest\.lds_transpose"
-            "RaceTest\.lds_transpose_race"
-            "RaceTest\.dual_offset_lds"
-            "RaceTest\.dual_offset_lds_race"
-            "RaceTest\.scratch_vmcnt"
-            "RaceTest\.scratch_vmcnt_race"
-            "RaceTest\.f64_vgpr_safe"
-            "RaceTest\.f64_vgpr_race"
+            "RaceTest\..*"
           )
 
           CMAKE_CONFIG_FLAGS=()
@@ -240,62 +211,29 @@ jobs:
           ROCJITSU_BUILD: ${{ env.ROCJITSU_BUILD_DIR }}
         run: |
           targets=(
-            "gfx942 gfx942_cdna3.json iree_gfx942_hip.json"
-            "gfx950 gfx950_cdna4.json iree_gfx950_hip.json"
-            "gfx1100 gfx1100_w7900.json iree_gfx1100_hip.json"
-            "gfx1201 gfx1201_r9700.json iree_gfx1201_hip.json"
-            "gfx1250 gfx1250.json iree_gfx1250_hip.json"
+            "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
+            "gfx950 gfx950_cdna4.json gfx950_skip_tests.json"
+            "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
+            "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
+            "gfx1250 gfx1250.json gfx1250_skip_tests.json"
           )
 
+          ROCM_PATH="$(rocm-sdk path --root)"
+          export ROCM_PATH
+          corpus_status=0
           for target in "${targets[@]}"; do
-            read -r name rocjitsu_config corpus_config <<< "${target}"
+            read -r name rocjitsu_config skip_tests_config <<< "${target}"
             echo "::group::pytest (${name})"
-            rocjitsu \
+            if ! rocjitsu \
               --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
               -- pytest \
-              --config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout 15 \
-              corpus/iree/
+              tests/test_corpus.py -vv \
+              --target "${name}" \
+              --suite iree,kernels,cts \
+              --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
+              --timeout 15; then
+              corpus_status=1
+            fi
             echo "::endgroup::"
           done
-
-          targets=(
-            "gfx942 gfx942_cdna3_kmd.json external_kernel_gfx942.json 15"
-            "gfx950 gfx950_cdna4_kmd.json external_kernel_gfx950.json 15"
-            "gfx1201 gfx1201_r9700.json external_kernel_gfx1201.json 60"
-          )
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config corpus_config timeout <<< "${target}"
-            echo "::group::pytest (${name})"
-            ROCM_PATH=`rocm-sdk path --root` \
-              rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              --fuzz-target-config-files="${ROCJITSU_SOURCE_DIR}/tests/corpus/${corpus_config}" \
-              --timeout "${timeout}" \
-              tests/test_fuzz_targets.py
-            echo "::endgroup::"
-          done
-
-          targets=(
-            # CDNA3 FPSAN has no passing tests yet.
-            # "gfx942 gfx942_cdna3.json fpsan_gfx942.json"
-            "gfx950 gfx950_cdna4.json fpsan_gfx950.json"
-            "gfx1100 gfx1100_w7900.json fpsan_gfx1100.json"
-            "gfx1201 gfx1201_r9700.json fpsan_gfx1201.json"
-            "gfx1250 gfx1250.json fpsan_gfx1250.json"
-          )
-          fpsan_status=0
-          for target in "${targets[@]}"; do
-            read -r name rocjitsu_config fpsan_config <<< "${target}"
-            echo "::group::fpsan ctest (${name})"
-            ROCM_PATH=`rocm-sdk path --root` \
-              rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- \
-              tests/run_fpsan_ctest.sh \
-              --config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${fpsan_config}" \
-              --timeout 15 || fpsan_status=$?
-            echo "::endgroup::"
-          done
-          exit "${fpsan_status}"
+          exit "${corpus_status}"
