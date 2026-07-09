@@ -70,7 +70,9 @@ struct CwsrLayout {
   uint32_t control_stack_size = 0;
   uint32_t wave_state_offset = 0;
   uint32_t wave_state_size = 0;
-  bool ok = false; ///< False if the waves do not fit in the ctx-save area.
+  uint32_t debug_offset = 0; ///< Offset of the debugger displaced-step region.
+  uint32_t debug_size = 0;   ///< Size of the debugger displaced-step region.
+  bool ok = false;           ///< False if the waves do not fit in the ctx-save area.
 };
 
 /// @brief Serialize a queue's stopped waves into its CWSR area.

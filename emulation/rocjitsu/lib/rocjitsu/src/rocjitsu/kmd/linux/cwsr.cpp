@@ -135,17 +135,39 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   if (wave_state_offset > area_size)
     return layout; // does not fit
 
+  // Reserve per-queue debugger memory for rocm-dbgapi's displaced-stepping
+  // instruction buffers. rocm-dbgapi requires a non-zero debug region in the
+  // context-save header; it carves 32-byte chunks from it for a per-queue park
+  // and terminating instruction plus one buffer per concurrent displaced step
+  // (rocdbgapi queue.cpp allocate_displaced_instruction). Without it, stepping
+  // over a breakpoint (`continue`, or any non-simulated single step) aborts with
+  // "Per-queue memory reserved for the debugger is missing" (queue.cpp:111).
+  // Sized after the real KFD (amdgpu kfd_queue.c:398-460):
+  //   debug_memory_size = ALIGN(wave_num * DEBUGGER_BYTES_PER_WAVE, DEBUGGER_BYTES_ALIGN)
+  // with headroom chunks for dbgapi's per-queue park/terminating buffers. The
+  // region lives in the tail slack of the save area (after the wave area), so it
+  // is backed by the same inferior-mapped memory dbgapi reads and writes.
+  constexpr uint32_t kDebuggerBytesPerWave = 32; // DEBUGGER_BYTES_PER_WAVE (kfd_queue.c:399)
+  constexpr uint32_t kDebuggerBytesAlign = 64;   // DEBUGGER_BYTES_ALIGN (kfd_queue.c:398)
+  constexpr uint32_t kDebuggerReserveChunks = 8; // park + terminating + step headroom
+  const uint32_t debug_size =
+      round_up((num_waves + kDebuggerReserveChunks) * kDebuggerBytesPerWave, kDebuggerBytesAlign);
+  const uint32_t debug_offset = round_up(wave_state_offset, kDebuggerBytesAlign);
+  const bool debug_fits = static_cast<uint64_t>(debug_offset) + debug_size <= area_size;
+  const uint32_t hdr_debug_offset = debug_fits ? debug_offset : 0u;
+  const uint32_t hdr_debug_size = debug_fits ? debug_size : 0u;
+
   // --- Header (kfd_context_save_area_header) at the ctx-save base. ---
   write32(ctx_base + 0, control_stack_offset);
   write32(ctx_base + 4, control_stack_size);
   write32(ctx_base + 8, wave_state_offset);
   write32(ctx_base + 12, wave_state_size);
-  write32(ctx_base + 16, 0); // debug_offset
-  write32(ctx_base + 20, 0); // debug_size
-  write32(ctx_base + 24, 0); // err_payload_addr lo
-  write32(ctx_base + 28, 0); // err_payload_addr hi
-  write32(ctx_base + 32, 0); // err_event_id
-  write32(ctx_base + 36, 0); // reserved1
+  write32(ctx_base + 16, hdr_debug_offset); // debug_offset
+  write32(ctx_base + 20, hdr_debug_size);   // debug_size
+  write32(ctx_base + 24, 0);                // err_payload_addr lo
+  write32(ctx_base + 28, 0);                // err_payload_addr hi
+  write32(ctx_base + 32, 0);                // err_event_id
+  write32(ctx_base + 36, 0);                // reserved1
 
   // --- Control stack. ---
   const uint64_t cs_base = ctx_base + control_stack_offset;
@@ -219,6 +241,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   layout.control_stack_size = control_stack_size;
   layout.wave_state_offset = wave_state_offset;
   layout.wave_state_size = wave_state_size;
+  layout.debug_offset = hdr_debug_offset;
+  layout.debug_size = hdr_debug_size;
   layout.ok = true;
   return layout;
 }
