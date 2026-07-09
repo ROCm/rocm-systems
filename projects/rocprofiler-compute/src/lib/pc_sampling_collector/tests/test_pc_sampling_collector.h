@@ -14,6 +14,7 @@ protected:
 
     std::shared_ptr<mock_code_object_translator_t>              m_translator;
     std::shared_ptr<mock_code_object_writer_t>                  m_writer;
+    std::shared_ptr<mock_sdk_wrapper_t>                         m_sdk_wrapper;
     rocprofiler_compute_tool::pc_sampling_collector_impl_t::ptr m_pc_sampling_collector;
     rocprofiler_callback_tracing_code_object_load_data_t        m_mem_info  = {};
     rocprofiler_callback_tracing_code_object_load_data_t        m_file_info = {};
