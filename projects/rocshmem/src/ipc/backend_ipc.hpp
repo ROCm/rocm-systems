@@ -37,17 +37,7 @@
 #include "ipc_policy.hpp"
 #include "bootstrap/bootstrap.hpp"
 
-#include <vector>
-
 namespace rocshmem {
-
-// Tracks a user-registered buffer with its per-PE IPC-mapped bases
-struct IpcUserBuffer {
-  void* addr;           // local base address
-  size_t length;
-  char** bases;         // GPU-accessible array of per-PE base pointers
-  bool is_vmm;          // true if VMM/cuMem (no IPC handles to close)
-};
 
 class IPCBackend : public Backend {
 
@@ -120,9 +110,6 @@ class IPCBackend : public Backend {
    * @copydoc Backend::team_destroy(rocshmem_team_t)
    */
   void team_destroy(rocshmem_team_t team) override;
-
-  int buffer_register(void *addr, size_t length) override;
-  int buffer_unregister(void *addr) override;
 
   /**
    * @copydoc Backend::buffer_register_symmetric
@@ -327,9 +314,6 @@ class IPCBackend : public Backend {
    * of other PEs
   */
   char** wrk_sync_pool_bases_{nullptr};
-
-  // User-registered buffers with IPC-mapped per-PE bases
-  std::vector<IpcUserBuffer> user_buffers_;
 
   /**
    * @brief Initialize memory required for work/sync buffers and open IPC
