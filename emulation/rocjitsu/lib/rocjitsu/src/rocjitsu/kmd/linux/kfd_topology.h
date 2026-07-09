@@ -25,6 +25,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+
 #include <cstdint>
 
 namespace rocjitsu::kmd {
@@ -48,6 +50,83 @@ inline constexpr uint64_t kWatchAddrMaskHiBit = 29ull << HSA_DBG_WATCH_ADDR_MASK
 /// @brief gfx9.4.3/gfx9.4.4 high watch-address-mask bit
 /// (upstream @c HSA_DBG_WATCH_ADDR_MASK_HI_BIT_GFX9_4_3).
 inline constexpr uint64_t kWatchAddrMaskHiBitGfx943 = 30ull << HSA_DBG_WATCH_ADDR_MASK_HI_BIT_SHIFT;
+
+/// @brief Debug-related topology bits derived from a GPU's GFXIP version.
+///
+/// @details Mirrors the per-node values the amdkfd driver programs in
+/// kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c):
+/// the trap-debugger capability flags, the capability2 flags, and the
+/// debug_prop address-watch-mask range that libhsakmt and rocdbgapi read back.
+struct DebugTopology {
+  uint32_t capability = 0;
+  uint32_t capability2 = 0;
+  uint64_t debug_prop = 0;
+};
+
+/// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
+/// identified by @p gfx_target_version.
+///
+/// @details The driver keys every decision on the GC hardware IP version, which
+/// is not the same number as gfx_target_version for CDNA parts (see
+/// gc_ip_version_for_gfx_target_version), so we translate first and then apply
+/// the driver's exact IP_VERSION thresholds. Shared by the sysfs topology
+/// generator and the DBG_TRAP GET_DEVICE_SNAPSHOT path so both advertise the
+/// same debugger-relevant capability/debug_prop.
+///
+/// \NPI sync this with the KFD driver code in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
+inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
+  const uint32_t gc = gc_ip_version_for_gfx_target_version(gfx_target_version);
+
+  DebugTopology topo;
+
+  // Trap-based debugging is advertised for every debug-capable GPU.
+  topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
+
+  // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
+  // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
+  // MES firmware (sched_version >= 70), which the simulator always models.
+  const bool ttmps_always_setup =
+      (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
+      gc >= make_gc_ip_version(11, 0, 0);
+  if (ttmps_always_setup)
+    topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+
+  if (gc < make_gc_ip_version(10, 0, 0)) {
+    // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
+    // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
+    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
+      topo.debug_prop |= kWatchAddrMaskLoBitGfx943 | kWatchAddrMaskHiBitGfx943;
+    else
+      topo.debug_prop |= kWatchAddrMaskLoBitGfx9 | kWatchAddrMaskHiBit;
+
+    if (gc >= make_gc_ip_version(9, 4, 2))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
+
+    // Per-queue reset is withheld only from SR-IOV virtual functions, which the
+    // simulator never models.
+    topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+  } else {
+    // gfx10+ (RDNA).
+    topo.debug_prop |= kWatchAddrMaskLoBitGfx10 | kWatchAddrMaskHiBit;
+
+    if (gc >= make_gc_ip_version(12, 0, 0))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+
+    if (gc >= make_gc_ip_version(12, 1, 0)) {
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
+                         HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+      topo.capability2 |= HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
+    }
+  }
+
+  // Firmware-backed trap debugging (kfd_topology_set_dbg_firmware_support()).
+  // The simulator always provides compatible "firmware", so advertise it.
+  topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
+
+  return topo;
+}
 
 } // namespace rocjitsu::kmd
 

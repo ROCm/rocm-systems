@@ -11,6 +11,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "simdojo/sim/simulation.h"
 
 #include <gtest/gtest.h>
@@ -1377,6 +1378,43 @@ TEST_F(KfdIoctlTest, DestructorDrainsMultiplyOpenedProcess) {
   }
   // No crash / no leak reported == pass. (pid intentionally unused past scope.)
   (void)pid;
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // First call with num_devices=0 reports the total device count.
+  kfd_ioctl_dbg_trap_args count{};
+  count.pid = static_cast<uint32_t>(getpid());
+  count.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  count.device_snapshot.entry_size = sizeof(kfd_dbg_device_info_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count), 0);
+  ASSERT_EQ(count.device_snapshot.num_devices, 1u);
+  EXPECT_EQ(count.device_snapshot.entry_size, sizeof(kfd_dbg_device_info_entry));
+
+  // Second call fills one entry.
+  kfd_dbg_device_info_entry entry{};
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = static_cast<uint32_t>(getpid());
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.entry_size = sizeof(entry);
+  snap.device_snapshot.num_devices = 1;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+
+  EXPECT_EQ(entry.gpu_id, kGpuId);
+  EXPECT_EQ(entry.gfx_target_version, 90500u); // gfx950 fixture config
+  EXPECT_TRUE(entry.capability & HSA_CAP_TRAP_DEBUG_SUPPORT);
+  EXPECT_EQ(entry.debug_prop, 0x5d6u); // gfx950 debug_prop
+  // rocm-dbgapi's agent_snapshot fatal-errors if any of these are zero.
+  EXPECT_NE(entry.simd_count, 0u);
+  EXPECT_NE(entry.max_waves_per_simd, 0u);
+  EXPECT_NE(entry.array_count, 0u);
+  EXPECT_NE(entry.simd_arrays_per_engine, 0u);
 }
 
 } // namespace
