@@ -165,6 +165,24 @@ contract:
   Contract_PeerQuery_LinkTypeAndHopCount_NullOutputs_AreRejected:
     <<: *level_0
     tags: [peer_query]
+  Contract_PeerAccess_Enable_InvalidPeerId_IsRejected:
+    <<: *level_0
+    tags: [peer_access]
+  Contract_PeerAccess_Enable_InvalidFlag_IsRejected:
+    <<: *level_0
+    tags: [peer_access]
+  Contract_PeerAccess_Disable_InvalidPeerId_IsRejected:
+    <<: *level_0
+    tags: [peer_access]
+  Contract_PeerAccess_Disable_NotEnabled_IsRejected:
+    <<: *level_0
+    tags: [peer_access]
+  Contract_PeerAccess_EnableSelf_IsRejected:
+    <<: *level_0
+    tags: [peer_access]
+  Contract_PeerAccess_EnableTwice_ThenDisable_RoundTripsWhenAvailable:
+    <<: *level_0
+    tags: [peer_access]
   Contract_Stream_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [stream]

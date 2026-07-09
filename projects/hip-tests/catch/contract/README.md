@@ -15,6 +15,7 @@ The first domains are:
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
 - `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
+- `peer_access`: peer-access enable/disable invalid-input and lifecycle contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `stream_props`: stream creation flag, priority, identity, device, and event timing contracts
 - `stream_callbacks`: stream callback and host-function ordering contracts
