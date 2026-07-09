@@ -84,6 +84,21 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
                     HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
 
+  // Advertise the four hardware address-watch registers (TCP_WATCH0..3) so
+  // rocm-dbgapi will program data watchpoints. The KFD sets
+  // num_of_watch_points = 4 for the supported debug ASICs
+  // (amd/amdkfd/kfd_device.c) and packs WATCH_POINTS_SUPPORTED plus
+  // ilog2(count) into HSA_CAP_WATCH_POINTS_TOTALBITS (kfd_topology.c). Without
+  // it rocm-dbgapi reports zero watch registers and refuses to insert a
+  // watchpoint ("too many hardware watchpoints").
+  constexpr uint32_t kKfdNumWatchPoints = 4;    // amd/amdkfd/kfd_device.c
+  constexpr uint32_t kWatchPointsTotalBits = 2; // ilog2(kKfdNumWatchPoints)
+  static_assert((1u << kWatchPointsTotalBits) == kKfdNumWatchPoints,
+                "TOTALBITS must be ilog2(num_watch_points)");
+  topo.capability |= HSA_CAP_WATCH_POINTS_SUPPORTED |
+                     ((kWatchPointsTotalBits << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) &
+                      HSA_CAP_WATCH_POINTS_TOTALBITS_MASK);
+
   // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
   // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
   // MES firmware (sched_version >= 70), which the simulator always models.

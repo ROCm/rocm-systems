@@ -137,6 +137,20 @@ public:
     uint32_t flags = 0;                  ///< kfd_dbg_trap_flags (SET_FLAGS).
     uint32_t launch_mode = 0;            ///< kfd_dbg_trap_wave_launch_mode (SET_WAVE_LAUNCH_MODE).
     uint32_t launch_override_enable = 0; ///< Enabled wave-launch trap override mask.
+
+    /// @brief One hardware address watchpoint (gfx9 exposes four TCP_WATCH
+    /// slots). An access at @c address (compared under @c mask) with a matching
+    /// @c mode traps the accessing wave. Mirrors the TCP_WATCHx registers the
+    /// KFD programs (amdgpu kgd_gfx_v9_set_address_watch).
+    struct AddressWatch {
+      bool active = false;
+      uint64_t address = 0; ///< Watched GPU virtual address.
+      uint64_t mask = 0;    ///< Compared bits: a hit needs (addr & mask) == (address & mask).
+      uint32_t mode = 0;    ///< kfd_dbg_trap_address_watch_mode (READ/NONREAD/ATOMIC/ALL).
+    };
+    /// gfx9/gfx9.4 expose four address-watch slots (HSA_CAP watch-point count).
+    static constexpr uint32_t kMaxAddressWatches = 4;
+    AddressWatch address_watches[kMaxAddressWatches];
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.

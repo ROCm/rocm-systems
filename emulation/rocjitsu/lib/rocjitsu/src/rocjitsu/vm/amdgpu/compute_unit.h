@@ -175,6 +175,21 @@ public:
   /// SingleStepHandler).
   void set_single_step_handler(SingleStepHandler cb) { single_step_handler_ = std::move(cb); }
 
+  /// @brief Callback invoked for each active-lane global-memory access to test
+  /// it against the debugger's address watchpoints.
+  /// @details Returns true if the access hit a watchpoint and the wave was
+  /// stopped (it becomes debug-halted and is skipped by the scheduler). The
+  /// command processor wires this to the KFD debug controller; when no debugger
+  /// is attached it is unset and no per-access check runs. @param wf The
+  /// accessing wavefront. @param addr The (post-translation) global address.
+  /// @param bytes Access width in bytes. @param is_write True for stores/atomics.
+  /// @param is_atomic True for atomic read-modify-write accesses.
+  using WatchpointHandler = std::function<bool(Wavefront &wf, uint64_t addr, uint32_t bytes,
+                                               bool is_write, bool is_atomic)>;
+
+  /// @brief Install the address-watchpoint handler (see @ref WatchpointHandler).
+  void set_watchpoint_handler(WatchpointHandler cb) { watchpoint_handler_ = std::move(cb); }
+
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
@@ -561,6 +576,8 @@ protected:
   TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
   SingleStepHandler
       single_step_handler_; ///< single-step completion handler; see set_single_step_handler.
+  WatchpointHandler
+      watchpoint_handler_; ///< address-watchpoint handler; see set_watchpoint_handler.
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;

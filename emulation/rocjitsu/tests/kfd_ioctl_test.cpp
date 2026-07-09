@@ -480,6 +480,13 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_EQ(entry.gpu_id, kGpuId);
   EXPECT_EQ(entry.gfx_target_version, 90500u); // gfx950 fixture config
   EXPECT_TRUE(entry.capability & HSA_CAP_TRAP_DEBUG_SUPPORT);
+  // Four hardware address-watch registers advertised (WATCH_POINTS_SUPPORTED +
+  // TOTALBITS = ilog2(4) = 2); rocm-dbgapi refuses to insert a watchpoint if
+  // the agent snapshot reports zero watch registers.
+  EXPECT_TRUE(entry.capability & HSA_CAP_WATCH_POINTS_SUPPORTED);
+  EXPECT_EQ((entry.capability & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) >>
+                HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT,
+            2u);
   EXPECT_EQ(entry.debug_prop, 0x5d6u); // gfx950 debug_prop
   // rocm-dbgapi's agent_snapshot fatal-errors if any of these are zero.
   EXPECT_NE(entry.simd_count, 0u);
@@ -711,6 +718,65 @@ TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &again), 0);
   EXPECT_EQ(again.launch_override.enable_mask,
             static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
+}
+
+// SET/CLEAR_NODE_ADDRESS_WATCH allocate and free the four hardware watch slots.
+// rocm-dbgapi relies on the returned id to bind a watchpoint to a TCP_WATCH slot;
+// allocation must fail with ENOMEM once all four are in use.
+TEST_F(KfdIoctlTest, DbgTrapNodeAddressWatchAllocatesAndFreesSlots) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  auto set_watch = [&](uint64_t address, uint32_t mode, uint64_t mask, uint32_t *out_id) -> int {
+    kfd_ioctl_dbg_trap_args w{};
+    w.pid = static_cast<uint32_t>(getpid());
+    w.op = KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH;
+    w.set_node_address_watch.gpu_id = kGpuId;
+    w.set_node_address_watch.address = address;
+    w.set_node_address_watch.mode = mode;
+    w.set_node_address_watch.mask = static_cast<uint32_t>(mask);
+    int r = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &w);
+    if (r == 0 && out_id)
+      *out_id = w.set_node_address_watch.id;
+    return r;
+  };
+
+  // Four slots allocate with distinct ids.
+  uint32_t ids[4] = {99, 99, 99, 99};
+  for (int i = 0; i < 4; ++i)
+    EXPECT_EQ(set_watch(0x1000 + i * 0x100, KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL, ~0xFFull, &ids[i]),
+              0);
+  std::set<uint32_t> unique_ids(std::begin(ids), std::end(ids));
+  EXPECT_EQ(unique_ids.size(), 4u) << "watch ids must be distinct slots";
+
+  // The fifth allocation fails: only four TCP_WATCH slots exist.
+  EXPECT_EQ(set_watch(0x9000, KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL, ~0xFFull, nullptr), -ENOMEM);
+
+  // Freeing one slot lets another allocation succeed.
+  kfd_ioctl_dbg_trap_args c{};
+  c.pid = static_cast<uint32_t>(getpid());
+  c.op = KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH;
+  c.clear_node_address_watch.gpu_id = kGpuId;
+  c.clear_node_address_watch.id = ids[1];
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &c), 0);
+  uint32_t reused = 99;
+  EXPECT_EQ(set_watch(0xA000, KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL, ~0xFFull, &reused), 0);
+  EXPECT_EQ(reused, ids[1]) << "the freed slot is reused";
+
+  // Clearing an out-of-range id is rejected.
+  kfd_ioctl_dbg_trap_args bad{};
+  bad.pid = static_cast<uint32_t>(getpid());
+  bad.op = KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH;
+  bad.clear_node_address_watch.gpu_id = kGpuId;
+  bad.clear_node_address_watch.id = 7;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &bad), -EINVAL);
 }
 
 // DISABLE must clean up the session even after the inferior has exited (rocgdb

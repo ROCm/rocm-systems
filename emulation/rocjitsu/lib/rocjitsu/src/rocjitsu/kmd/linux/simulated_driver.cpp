@@ -391,6 +391,10 @@ int SimulatedDriver::open() {
             [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
         cu->set_single_step_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_single_step_complete(wf); });
+        cu->set_watchpoint_handler([this](amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes,
+                                          bool is_write, bool is_atomic) {
+          return on_wave_watchpoint(wf, addr, bytes, is_write, is_atomic);
+        });
       }
     });
     g.cps_initialized = true;
@@ -499,6 +503,10 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
             [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
         cu->set_single_step_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_single_step_complete(wf); });
+        cu->set_watchpoint_handler([this](amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes,
+                                          bool is_write, bool is_atomic) {
+          return on_wave_watchpoint(wf, addr, bytes, is_write, is_atomic);
+        });
       }
     });
     g.cps_initialized = true;
@@ -2149,6 +2157,93 @@ bool SimulatedDriver::on_wave_single_step_complete(amdgpu::Wavefront &wf) {
   return true;
 }
 
+bool SimulatedDriver::on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes,
+                                         bool is_write, bool is_atomic) {
+  // gfx9 address-watch matching. rocm-dbgapi programs up to four TCP_WATCH slots
+  // (SET_NODE_ADDRESS_WATCH) with an address, a compared-bit mask, and an access
+  // mode. Hardware traps a wave whose access hits a watched, in-range address of
+  // the matching mode and sets TRAPSTS.addr_watch<slot>; rocm-dbgapi reads that
+  // bit back (architecture.cpp signaled_exceptions / triggered_watchpoints) to
+  // report WAVE_STOP_REASON_WATCHPOINT for the watchpoint bound to that slot.
+  const uint32_t process_id = wf.process_id();
+  const uint32_t queue_id = wf.queue_id();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  const pid_t target_pid = proc->client_pid();
+
+  // Find a matching active watchpoint for this session.
+  int matched_slot = -1;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto sit = debug_sessions_.find(target_pid);
+    if (sit == debug_sessions_.end() || !sit->second.enabled)
+      return false;
+    for (uint32_t i = 0; i < KfdProcess::DebugSession::kMaxAddressWatches; ++i) {
+      const auto &w = sit->second.address_watches[i];
+      if (!w.active)
+        continue;
+      // Access mode gate (kfd_dbg_trap_address_watch_mode): READ=0 matches
+      // reads, NONREAD=1 matches non-atomic writes, ATOMIC=2 matches atomics,
+      // ALL=3 matches everything.
+      bool mode_ok;
+      if (w.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL)
+        mode_ok = true;
+      else if (is_atomic)
+        mode_ok = (w.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC);
+      else if (is_write)
+        mode_ok = (w.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD);
+      else
+        mode_ok = (w.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ);
+      if (!mode_ok)
+        continue;
+      // The watch covers the aligned block { X : (X & mask) == (address & mask) }.
+      // The low zero bits of the mask span the block; the access [addr, addr+bytes)
+      // hits when it overlaps that block. mask == 0 matches every address.
+      const uint64_t block_base = w.address & w.mask;
+      const uint64_t block_size = ~w.mask + 1; // 0 when mask == 0 (match all)
+      const bool hit =
+          (block_size == 0) || (addr < block_base + block_size && block_base < addr + bytes);
+      if (hit) {
+        matched_slot = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+  if (matched_slot < 0)
+    return false;
+
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto qit = proc->queue_snapshot_map_.find(queue_id);
+    if (qit == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = qit->second.ctx_save_restore_address;
+    ctx_size = qit->second.ctx_save_restore_area_size;
+    gpu_id = qit->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+
+  // Raise TRAPSTS.addr_watch<slot> and enable MODE.excp_en.addr_watch so
+  // rocm-dbgapi recognizes the stop as a watchpoint (it gates the exception on
+  // both bits: architecture.cpp signaled_exceptions). gfx9 TRAPSTS slot bits:
+  // watch0 @7, watch1 @12, watch2 @13, watch3 @14 (architecture.cpp
+  // sq_wave_trapsts_excp*_addr_watch*_mask); MODE.EXCP_EN.ADDR_WATCH @19.
+  static constexpr uint32_t kAddrWatchTrapstsBits[4] = {1u << 7, 1u << 12, 1u << 13, 1u << 14};
+  constexpr uint32_t kModeExcpEnAddrWatchMask = 1u << 19;
+  wf.set_trapsts(wf.trapsts() | kAddrWatchTrapstsBits[matched_slot]);
+  wf.set_mode_raw(wf.mode_raw() | kModeExcpEnAddrWatchMask);
+  // Trap id 0: a watchpoint stop is not an s_trap breakpoint (rocm-dbgapi reads
+  // the addr_watch bits, not TTMP6's trap id).
+  wf.debug_trap(0);
+  report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
+  return true;
+}
+
 void SimulatedDriver::resume_debug_queues(KfdProcess *proc) {
   // Reload each stopped wave from its queue's CWSR area (applying the debugger's
   // register edits and reading the requested run/single-step state that dbgapi
@@ -2619,13 +2714,37 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     args->launch_override.support_request_mask = kSupportedTrapMask;
     return 0;
   }
-  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
-    // Address watchpoints are wired up with the memory pipeline; accept and
-    // report a watch id so the debugger's bookkeeping stays consistent.
-    args->set_node_address_watch.id = 0;
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH: {
+    // kfd_dbg_trap_set_dev_address_watch(): allocate a free hardware watch slot
+    // (gfx9 has four TCP_WATCH slots) and record the address/mask/mode. The
+    // memory pipeline traps any wave whose access matches (see
+    // on_wave_watchpoint). ENOMEM when all slots are in use, matching the
+    // kernel's IDR-exhaustion path.
+    auto &watches = session_it->second.address_watches;
+    int slot = -1;
+    for (uint32_t i = 0; i < KfdProcess::DebugSession::kMaxAddressWatches; ++i)
+      if (!watches[i].active) {
+        slot = static_cast<int>(i);
+        break;
+      }
+    if (slot < 0)
+      return -ENOMEM;
+    watches[slot].active = true;
+    watches[slot].address = args->set_node_address_watch.address;
+    watches[slot].mask = args->set_node_address_watch.mask;
+    watches[slot].mode = args->set_node_address_watch.mode;
+    args->set_node_address_watch.id = static_cast<uint32_t>(slot);
     return 0;
-  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  }
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH: {
+    // kfd_dbg_trap_clear_dev_address_watch(): free the slot the debugger was
+    // handed by SET_NODE_ADDRESS_WATCH.
+    const uint32_t id = args->clear_node_address_watch.id;
+    if (id >= KfdProcess::DebugSession::kMaxAddressWatches)
+      return -EINVAL;
+    session_it->second.address_watches[id] = KfdProcess::DebugSession::AddressWatch{};
     return 0;
+  }
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
     // Drain the next pending wave/queue exception for this target, or EAGAIN.
     return debug_query_event(target_pid, target_proc, args->query_debug_event);
