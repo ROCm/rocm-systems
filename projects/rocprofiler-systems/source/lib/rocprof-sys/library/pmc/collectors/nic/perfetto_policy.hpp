@@ -18,9 +18,6 @@
 namespace rocprofsys::pmc::collectors::nic
 {
 
-namespace
-{
-
 struct nic_track_description
 {
     const char* track_name;
@@ -110,8 +107,6 @@ resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_ke
     if(it == device_tracks.end()) return -1;
     return static_cast<std::int64_t>(it->second);
 }
-
-}  // namespace
 
 /**
  * @brief Output policy for writing NIC RDMA samples directly to Perfetto traces.
