@@ -1094,17 +1094,13 @@ if(HSA_RUNTIME64)
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60
-                ENVIRONMENT
-                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>"
-                    "RJ_DBT_TARGET_ISA=gfx1201"
-                    "RJ_DBT_LOG=1"
                 INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "\${RJ_INSTALLED_CONFIG_DIR}/guest_gfx950_on_gfx1201.json"
+                    "--"
                     "bin/hsa_hooks_test"
                     "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
-                INSTALL_ENVIRONMENT
-                    "HSA_TOOLS_LIB=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
-                    "RJ_DBT_TARGET_ISA=gfx1201"
-                    "RJ_DBT_LOG=1"
             )
         endif()
 
