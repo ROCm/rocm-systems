@@ -12,7 +12,7 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: testing users/geomin12/build-selection branch (PR #5449)
+# TheRock ref: testing users/geomin12/build-select branch (PR #5449)
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -111,7 +111,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/build-selection
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/build-select
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -123,7 +123,7 @@ jobs:
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
-      ref: users/geomin12/build-selection
+      ref: users/geomin12/build-select
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       external_repo: >-
@@ -150,7 +150,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/build-selection
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/build-select
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -161,7 +161,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: users/geomin12/build-selection
+      ref: users/geomin12/build-select
     permissions:
       contents: read
       id-token: write
@@ -175,7 +175,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/build-selection
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/build-select
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -186,7 +186,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: users/geomin12/build-selection
+      ref: users/geomin12/build-select
     permissions:
       contents: read
       id-token: write
@@ -204,7 +204,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: users/geomin12/build-selection
+          ref: users/geomin12/build-select
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
