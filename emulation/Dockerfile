@@ -16,9 +16,8 @@
 # The result has the standard prefix layout under /opt/mirage:
 #   /opt/mirage/bin/mirage                  (Rust CLI/host)
 #   /opt/mirage/bin/rocjitsu                (rocjitsu CLI)
-#   /opt/mirage/lib/librocjitsu.so          (KMD LD_PRELOAD interposer)
-#   /opt/mirage/lib/librocjitsu_core.so     (simulator runtime + VM API)
-#   /opt/mirage/lib/libsimdojo.so           (simulation engine)
+#   /opt/mirage/lib/librocjitsu.so          (combined rocjitsu library:
+#                                            VM API + KMD interposer)
 #   /opt/mirage/lib/librocjitsu_hooks.so    (DBT HSA hooks)
 #   /opt/mirage/share/rocjitsu/configs/*.json
 # `mirage` searches `../lib` relative to its own binary, so
@@ -101,7 +100,7 @@ RUN --mount=type=cache,target=/deps,sharing=locked \
     ninja -C /rjbuild -j"$(nproc)" && \
     echo "== Installing rocjitsu ==" && \
     cmake --install /rjbuild && \
-    ls -lh /opt/mirage/lib/librocjitsu*.so /opt/mirage/lib/libsimdojo.so
+    ls -lh /opt/mirage/lib/librocjitsu*.so
 
 # --------------------------------------------------------------------------
 # mirage (Rust / cargo) -- builds in parallel with rocjitsu.

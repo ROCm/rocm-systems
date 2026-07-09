@@ -260,115 +260,62 @@ add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
-# ---------------------------------------------------------------------------
-# Simulator shared libraries.
-#
-# On Linux the simulator is built as a standalone shared library
-# (librocjitsu_core.so) that exports the rj_vm_* C API and the simulator C++
-# ABI. The LD_PRELOAD interposer (librocjitsu.so), the rocjitsu CLI, and the
-# plugin modules all dynamically link librocjitsu_core.so (+ libsimdojo.so),
-# so the simulator lives in a single runtime image and librocjitsu.so itself
-# no longer bundles or exports the simulator's symbols.
-#
-# On other platforms there is no interposer/CLI/plugins, so the simulator is
-# aggregated directly into the single librocjitsu shared library as before.
-# ---------------------------------------------------------------------------
-set(RJ_SIM_OBJECT_LIBS
-    rocjitsu_analysis
-    rocjitsu_code
-    rocjitsu_isa
-    rocjitsu_isa_cdna1
-    rocjitsu_isa_cdna2
-    rocjitsu_isa_cdna3
-    rocjitsu_isa_cdna4
-    rocjitsu_isa_rdna1
-    rocjitsu_isa_rdna2
-    rocjitsu_isa_rdna3
-    rocjitsu_isa_rdna3_5
-    rocjitsu_isa_rdna4
-    rocjitsu_isa_gfx1250
-    rocjitsu_isa_risc_v
-    rocjitsu_kmd
-    rocjitsu_vm
-    rocjitsu_vm_amdgpu
-    rocjitsu_plugin_loader
-    rocjitsu_vm_risc_v
-    rocjitsu_config
+# Main shared library - assembles all object libraries.
+add_library(rocjitsu_shared SHARED)
+set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
+target_link_libraries(
+    rocjitsu_shared
+    PRIVATE
+        rocjitsu_analysis
+        rocjitsu_code
+        rocjitsu_isa
+        rocjitsu_isa_cdna1
+        rocjitsu_isa_cdna2
+        rocjitsu_isa_cdna3
+        rocjitsu_isa_cdna4
+        rocjitsu_isa_rdna1
+        rocjitsu_isa_rdna2
+        rocjitsu_isa_rdna3
+        rocjitsu_isa_rdna3_5
+        rocjitsu_isa_rdna4
+        rocjitsu_isa_gfx1250
+        rocjitsu_isa_risc_v
+        simdojo
+        rocjitsu_kmd
+        rocjitsu_vm
+        rocjitsu_vm_amdgpu
+        # Host-side plugin loader. The logging/race plugins are no longer
+        # linked in statically; they are separate librocjitsu_plugin_<name>.so
+        # modules discovered and dlopen()ed at runtime.
+        rocjitsu_plugin_loader
+        rocjitsu_vm_risc_v
+        rocjitsu_config
+        util
+        flatbuffers
+        Threads::Threads
 )
+target_include_directories(
+    rocjitsu_shared
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+)
+target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+
+# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(
+        rocjitsu_shared
+        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+    )
+    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
+    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
+    target_link_libraries(rocjitsu_shared PRIVATE dl)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Shared simulator runtime image. simdojo is PUBLIC so consumers that link
-    # rocjitsu_core also get libsimdojo.so and its headers.
-    add_library(rocjitsu_core SHARED)
-    set_target_properties(
-        rocjitsu_core
-        PROPERTIES OUTPUT_NAME rocjitsu_core LINKER_LANGUAGE CXX
-    )
-    target_link_libraries(
-        rocjitsu_core
-        PUBLIC simdojo
-        PRIVATE ${RJ_SIM_OBJECT_LIBS} util flatbuffers Threads::Threads dl
-    )
-    add_dependencies(rocjitsu_core flatbuffers_schemas)
-
-    # librocjitsu.so: the LD_PRELOAD interposer only. It links the shared
-    # simulator image rather than bundling it, so the interposer library does
-    # not itself export the simulator ABI.
-    add_library(
-        rocjitsu_shared
-        SHARED
-        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
-    )
-    set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-    target_link_libraries(rocjitsu_shared PRIVATE rocjitsu_core simdojo dl)
-    # Do not re-export symbols pulled in from any static/archive dependency
-    # (e.g. libutil.a): the interposer's dynamic symbol table should carry
-    # only its own libc overrides and the rj_vm_* API it forwards, never the
-    # simulator ABI. Pairs with -fvisibility=hidden on the object libraries.
     target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
-    target_include_directories(
-        rocjitsu_shared
-        PRIVATE
-            ${ROCJITSU_INCLUDE_DIR}
-            ${ROCJITSU_SRC_DIR}
-            ${GENERATED_DIR}
-            ${DRM_INCLUDE_DIR}
-    )
-    target_include_directories(
-        rocjitsu_shared
-        SYSTEM
-        PRIVATE ${HSA_INCLUDE_DIR}
-    )
-    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
-    add_dependencies(rocjitsu_shared flatbuffers_schemas)
-
-    # Sibling libraries are installed side by side; resolve them via $ORIGIN.
-    set_target_properties(
-        rocjitsu_core
-        rocjitsu_shared
-        PROPERTIES INSTALL_RPATH "$ORIGIN"
-    )
-else()
-    # Aggregated shared library holding the simulator object libs (no
-    # interposer / CLI / plugins). It dynamically links the standalone
-    # simdojo shared library rather than bundling it.
-    add_library(rocjitsu_shared SHARED)
-    set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-    target_link_libraries(
-        rocjitsu_shared
-        PRIVATE ${RJ_SIM_OBJECT_LIBS} simdojo util flatbuffers Threads::Threads
-    )
-    target_include_directories(
-        rocjitsu_shared
-        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
-    )
-    target_include_directories(
-        rocjitsu_shared
-        SYSTEM
-        PRIVATE ${HSA_INCLUDE_DIR}
-    )
-    add_dependencies(rocjitsu_shared flatbuffers_schemas)
 endif()
+
+add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
@@ -398,22 +345,6 @@ install(
     TARGETS rocjitsu_shared rocjitsu_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
-
-# simdojo is a standalone shared library on every platform; install it next to
-# its consumers so the co-located loader path ($ORIGIN RPATH on Linux, the
-# module directory on Windows) resolves it at load time.
-install(
-    TARGETS simdojo
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-# On Linux the simulator core is its own shared library that librocjitsu.so,
-# the CLI, and the plugins all link; install it alongside so the co-located
-# $ORIGIN RPATH resolves it.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(TARGETS rocjitsu_core LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

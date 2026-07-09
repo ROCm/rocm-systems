@@ -13,8 +13,6 @@
 
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/version.h"
-#include "rocjitsu/vm/plugins/plugin_loader.h"
-#include "rocjitsu/vm/rj_vm_impl.h"
 
 #include <cerrno>
 #include <csignal>
@@ -230,20 +228,21 @@ static int run_daemon_server(const char *config_path) {
   // them by explicit path from the directory the interposer library lives in,
   // where the build and install layouts co-locate librocjitsu_plugin_<name>.so.
   //
-  // rocjitsu_bin links the split simulator libraries (librocjitsu_core.so +
-  // libsimdojo.so) rather than statically bundling the simulator object
-  // libraries, so a plugin loaded here resolves its own dependency on those
-  // same libraries to the image the daemon already runs on: the simulator
-  // exists once in the process and the plugin shares its state. Neither the
-  // daemon nor the plugin links librocjitsu.so (the LD_PRELOAD interposer).
-  if (vm->soc) {
+  // rocjitsu_bin statically links the simulator object libraries, and the
+  // plugin is a separate module that resolves nothing from the simulator at
+  // load time (it carries its own logic). Neither the daemon nor the plugin
+  // links librocjitsu.so (the LD_PRELOAD interposer).
+  {
     std::ifstream cfg(config_path, std::ios::binary);
     std::string config_json((std::istreambuf_iterator<char>(cfg)),
                             std::istreambuf_iterator<char>());
     std::string plugin_dir;
     if (auto lib = find_interposer_lib(); !lib.empty())
       plugin_dir = std::filesystem::path(lib).parent_path().string();
-    vm->soc->set_plugin_group(PluginLoader::configure_plugin_group(config_json, plugin_dir));
+    // Attach the config's plugins through the public C API — the same entry
+    // point the mirage daemon uses — instead of reaching into the simulator's
+    // C++ ABI. Non-fatal: the daemon still serves emulation if setup fails.
+    rj_vm_load_plugins(vm, config_json.c_str(), plugin_dir.c_str());
   }
 
   std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });

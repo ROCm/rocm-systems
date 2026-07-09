@@ -148,27 +148,9 @@ public:
     readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
     read = util::lookup_symbol<decltype(read)>(handle, "read");
     fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
-    assert(openat);
-    assert(close);
-    assert(ioctl);
-    assert(mmap);
-    assert(munmap);
-    assert(mprotect);
-    assert(madvise);
-    assert(dup);
-    assert(dup2);
-    assert(dup3);
-    assert(fcntl);
-    assert(fopen);
-    assert(freopen);
-    assert(opendir);
-    assert(stat);
-    assert(lstat);
-    assert(access);
-    assert(fstat_fn);
-    assert(readlink_fn);
-    assert(read);
-    assert(fork);
+    assert(openat && close && read && ioctl && mmap && munmap && mprotect && madvise);
+    assert(dup && dup2 && fcntl && fopen && freopen && opendir && fork);
+    assert(stat && lstat && access && fstat_fn && readlink_fn);
     initialized_ = true;
   }
 

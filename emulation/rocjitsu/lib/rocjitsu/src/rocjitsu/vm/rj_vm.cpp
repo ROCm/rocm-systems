@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -144,6 +145,20 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
     return create_from_loaded(loaded, mode, vm);
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
+}
+
+rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char *plugin_dir) {
+  if (!vm || !config_json)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (!vm->soc)
+    return ROCJITSU_STATUS_ERROR;
+  try {
+    vm->soc->set_plugin_group(
+        PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : ""));
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::exception &) {
+    return ROCJITSU_STATUS_ERROR;
   }
 }
 

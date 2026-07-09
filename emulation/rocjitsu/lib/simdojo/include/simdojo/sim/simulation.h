@@ -7,7 +7,6 @@
 #ifndef SIMDOJO_SIM_SIMULATION_H_
 #define SIMDOJO_SIM_SIMULATION_H_
 
-#include "simdojo/export.h"
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/pacing_controller.h"
 #include "simdojo/sim/topology.h"
@@ -31,7 +30,7 @@ namespace simdojo {
 /// fields are used. In multi-threaded mode, threads synchronize via a
 /// global barrier; each partition publishes its local_next before the
 /// barrier, and the barrier completion function computes the new global LBTS.
-class SIMDOJO_EXPORT alignas(64) PartitionContext {
+class alignas(64) PartitionContext {
 public:
   explicit PartitionContext(PartitionID pid, uint32_t num_partitions) : partition_id(pid) {
     incoming.reserve(num_partitions);
@@ -113,7 +112,7 @@ private:
 ///   auto exit = engine.run(); // starts up components, runs to completion
 ///   // OR: while (engine.step()) {} // starts up on first call, one tick per call
 /// @endcode
-class SIMDOJO_EXPORT SimulationEngine {
+class SimulationEngine {
 public:
   /// @brief Configuration parameters for the simulation engine.
   struct Config {

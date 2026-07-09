@@ -313,9 +313,8 @@ TEST_F(DaemonTest, TwoIndependentClients) {
 //
 // Plugins declared in the config load and run inside the forked daemon, not the
 // interposer. The daemon resolves librocjitsu_plugin_logging.so by explicit
-// path from the CLI's own directory and shares the single simulator image the
-// CLI and plugin both link (librocjitsu_core.so + libsimdojo.so), so this
-// exercises the same shared-library/discovery contract as the interposer path.
+// path from the CLI's own directory, so this exercises the same plugin
+// discovery + load contract as the interposer path.
 class DaemonPluginTest : public DaemonTest {
 protected:
   // Rewrite the logging-plugin config template's placeholder sink dir to a

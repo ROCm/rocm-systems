@@ -7,40 +7,46 @@ add_executable(rocjitsu_bin main.cpp)
 
 target_include_directories(
     rocjitsu_bin
-    PRIVATE
-        ${GENERATED_DIR}
-        ${RJ_VERSION_INCLUDE_DIR}
-        # librocjitsu.so links util/simdojo PRIVATE, so their public header
-        # paths do not propagate to consumers. Pull them in directly for
-        # main.cpp's compile (rj_vm_impl.h transitively includes simdojo).
-        $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
-        $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+    PRIVATE ${GENERATED_DIR} ${RJ_VERSION_INCLUDE_DIR}
 )
 
-# Dynamically link the shared simulator image (librocjitsu_core.so +
-# libsimdojo.so) instead of statically bundling the simulator object libraries.
-# This keeps a single simulator runtime image in the process: a plugin loaded
-# in daemon mode (which links the same libraries) shares the CLI's simulator
-# state. The CLI deliberately does not link librocjitsu.so (the LD_PRELOAD
-# interposer), so it does not pull the interposer's libc overrides into itself.
 target_link_libraries(
     rocjitsu_bin
-    PRIVATE rocjitsu_core simdojo Threads::Threads dl
+    PRIVATE
+        rocjitsu_kmd
+        rocjitsu_analysis
+        rocjitsu_code
+        rocjitsu_isa
+        rocjitsu_isa_cdna1
+        rocjitsu_isa_cdna2
+        rocjitsu_isa_cdna3
+        rocjitsu_isa_cdna4
+        rocjitsu_isa_rdna1
+        rocjitsu_isa_rdna2
+        rocjitsu_isa_rdna3
+        rocjitsu_isa_rdna3_5
+        rocjitsu_isa_rdna4
+        rocjitsu_isa_gfx1250
+        rocjitsu_isa_risc_v
+        simdojo
+        rocjitsu_vm
+        rocjitsu_vm_amdgpu
+        # Plugin loader: rj_vm_load_plugins() dlopen()s plugin modules in
+        # daemon mode.
+        rocjitsu_plugin_loader
+        rocjitsu_vm_risc_v
+        rocjitsu_config
+        util
+        flatbuffers
+        Threads::Threads
+        dl
 )
 
 set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
-
-# librocjitsu.so is now a runtime dependency of the CLI. CMake adds the build
-# tree location to the RPATH automatically; for the installed binary, point at
-# <prefix>/<libdir> where rocjitsu_shared is installed.
-include(GNUInstallDirs)
-set_target_properties(
-    rocjitsu_bin
-    PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-)
 
 rj_configure_target(rocjitsu_bin TOOL)
 
 # Install the rocjitsu CLI so it is usable from a packaged dist (the default
 # entrypoint for driving emulation when mirage is not present).
+include(GNUInstallDirs)
 install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
