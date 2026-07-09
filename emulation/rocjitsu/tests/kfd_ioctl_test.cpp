@@ -663,12 +663,13 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   kfd_ioctl_dbg_trap_args override_args{};
   override_args.pid = pid;
   override_args.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
-  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
   override_args.launch_override.enable_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
   override_args.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), 0);
   EXPECT_EQ(override_args.launch_override.enable_mask, 0u);
-  EXPECT_EQ(override_args.launch_override.support_request_mask, UINT32_MAX);
+  EXPECT_EQ(override_args.launch_override.support_request_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
 
   override_args.launch_override.override_mode = 99;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), -EINVAL);
@@ -704,12 +705,43 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   flags.set_flags.flags = 0;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &flags), 0);
   EXPECT_EQ(flags.set_flags.flags, 0u);
-  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
   override_args.launch_override.enable_mask = 0;
   override_args.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), 0);
   EXPECT_EQ(override_args.launch_override.enable_mask, 0u);
-  EXPECT_EQ(override_args.launch_override.support_request_mask, UINT32_MAX);
+  EXPECT_EQ(override_args.launch_override.support_request_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
+}
+
+TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  kfd_ioctl_dbg_trap_args request{};
+  request.pid = static_cast<uint32_t>(getpid());
+  request.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  request.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &request), -EINVAL);
+
+  request.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
+  request.launch_override.support_request_mask =
+      KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH | KFD_DBG_TRAP_MASK_FP_INVALID;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &request), -EACCES);
+
+  request.launch_override.enable_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  request.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &request), 0);
+  EXPECT_EQ(request.launch_override.enable_mask, 0u);
+  EXPECT_EQ(request.launch_override.support_request_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
 }
 
 // Local mode borrows the debugger's own fd (the session does not own it), so

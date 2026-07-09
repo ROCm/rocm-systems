@@ -2826,13 +2826,15 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     session_it->second.launch_mode = args->launch_mode.launch_mode;
     return 0;
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE: {
-    if (args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_OR &&
-        args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_REPLACE)
+    if (args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_OR)
       return -EINVAL;
+    constexpr uint32_t kGfx94SupportedTrapMask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+    if ((args->launch_override.support_request_mask & ~kGfx94SupportedTrapMask) != 0)
+      return -EACCES;
     const uint32_t previous = session_it->second.launch_override_enable;
     session_it->second.launch_override_enable = args->launch_override.enable_mask;
     args->launch_override.enable_mask = previous;
-    args->launch_override.support_request_mask = UINT32_MAX;
+    args->launch_override.support_request_mask = kGfx94SupportedTrapMask;
     return 0;
   }
   case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
