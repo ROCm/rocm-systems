@@ -948,6 +948,24 @@ contract:
   Contract_Surface_GetChannelDesc_RoundTripsArrayResource:
     <<: *level_0
     tags: [texture]
+  Contract_DriverTexture_CreateAndDestroy_LinearResource_Succeeds:
+    <<: *level_0
+    tags: [driver_texture_object]
+  Contract_DriverTexture_GetResourceDesc_RoundTripsLinearResource:
+    <<: *level_0
+    tags: [driver_texture_object]
+  Contract_DriverTexture_GetTextureDesc_RoundTripsFlags:
+    <<: *level_0
+    tags: [driver_texture_object]
+  Contract_DriverTexture_CreateAndGetResourceDesc_ArrayResource:
+    <<: *level_0
+    tags: [driver_texture_object]
+  Contract_DriverTexture_GetResourceViewDesc_IsQueryableWhenSupported:
+    <<: *level_0
+    tags: [driver_texture_object]
+  Contract_DriverTexture_Create_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [driver_texture_object]
   Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero:
     <<: *level_0
     tags: [context]
