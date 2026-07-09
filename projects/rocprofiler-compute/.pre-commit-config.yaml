@@ -75,9 +75,21 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: python projects/rocprofiler-compute/src/utils/hash_checker.py
+        entry: python projects/rocprofiler-compute/tools/config_management/hash_checker.py
         language: python
         additional_dependencies: [pyyaml==6.0.3]
         files: ^projects/rocprofiler-compute/
         pass_filenames: false
+        stages: [pre-commit]
+
+  # Local hook: YAML and metric equation formatting
+  - repo: local
+    hooks:
+      - id: yaml-format-fix
+        name: YAML metric equation formatting
+        entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
+        language: python
+        additional_dependencies: [pyyaml==6.0.3]
+        files: ^projects/rocprofiler-compute/src/(rocprof_compute_soc/analysis_configs|rocprof_compute_tui/utils)/gfx.*\.yaml$
+        pass_filenames: true
         stages: [pre-commit]

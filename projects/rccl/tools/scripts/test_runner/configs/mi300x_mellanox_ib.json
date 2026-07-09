@@ -565,6 +565,52 @@
         }
       ]
     },
+    "host_api_tests_base": {
+      "extends": "net_ib_base",
+      "env_variables": {
+        "RCCL_RMA_USE_DMABUF": "1"
+      },
+      "tests": [
+        {"name": "HostApi_WindowRegisterDeregister", "description": "Host API: window register/deregister", "test_filter": "HostApiTest.WindowRegisterDeregister"},
+        {"name": "HostApi_SinglePutRank0ToRank1", "description": "Host API: single put rank0 to rank1", "test_filter": "HostApiTest.SinglePutRank0ToRank1"},
+        {"name": "HostApi_PutWithNonZeroOffset", "description": "Host API: put with non-zero offset", "test_filter": "HostApiTest.PutWithNonZeroOffset"},
+        {"name": "HostApi_PutMultipleDataTypes", "description": "Host API: put multiple data types", "test_filter": "HostApiTest.PutMultipleDataTypes"},
+        {"name": "HostApi_SignalOnlyNoData", "description": "Host API: signal only, no data", "test_filter": "HostApiTest.SignalOnlyNoData"},
+        {"name": "HostApi_WaitSignalFenceSemantics", "description": "Host API: wait signal fence semantics", "test_filter": "HostApiTest.WaitSignalFenceSemantics"},
+        {"name": "HostApi_DataVisibilityAfterSync", "description": "Host API: data visibility after sync", "test_filter": "HostApiTest.DataVisibilityAfterSync"},
+        {"name": "HostApi_PutSignalNullLocalbuff", "description": "Host API: put signal null localbuff", "test_filter": "HostApiTest.PutSignalNullLocalbuff"},
+        {"name": "HostApi_PutSignalNullWindow", "description": "Host API: put signal null window", "test_filter": "HostApiTest.PutSignalNullWindow"},
+        {"name": "HostApi_PutSignalOffsetOutOfBounds", "description": "Host API: put signal offset out of bounds", "test_filter": "HostApiTest.PutSignalOffsetOutOfBounds"},
+        {"name": "HostApi_PutSignalInvalidSigIdx", "description": "Host API: put signal invalid sig idx", "test_filter": "HostApiTest.PutSignalInvalidSigIdx"},
+        {"name": "HostApi_SignalCumulativeFence", "description": "Host API: signal cumulative fence", "test_filter": "HostApiTest.SignalCumulativeFence"},
+        {"name": "HostApi_MultipleSendersOneReceiver", "description": "Host API: multiple senders one receiver", "test_filter": "HostApiTest.MultipleSendersOneReceiver"},
+        {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
+        {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
+        {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
+        {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
+        {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
+        {"name": "HostApi_WaitSignalZeroDesc", "description": "Host API: wait signal zero desc", "test_filter": "HostApiTest.WaitSignalZeroDesc"},
+        {"name": "HostApi_TwoCommunicatorsIndependentWindows", "description": "Host API: two communicators independent windows", "test_filter": "HostApiTest.TwoCommunicatorsIndependentWindows"},
+        {"name": "HostApi_StressManySmallPuts", "description": "Host API: stress many small puts", "test_filter": "HostApiTest.StressManySmallPuts"},
+        {"name": "HostApi_PutToSelf", "description": "Host API: put to self", "test_filter": "HostApiTest.PutToSelf"},
+        {"name": "HostApi_DoubleDeregister", "description": "Host API: double deregister", "test_filter": "HostApiTest.DoubleDeregister"},
+        {"name": "HostApi_DestroyCommWithoutDeregister", "description": "Host API: destroy comm without deregister", "test_filter": "HostApiTest.DestroyCommWithoutDeregister"}
+      ]
+    },
+    "host_api_tests_symmem": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      }
+    },
+    "host_api_tests_default": {
+      "extends": "host_api_tests_base",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "0"
+      }
+    },
+
     "unit_tests_standard": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -3568,6 +3614,18 @@
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - SymmMem",
+      "description": "Host API tests with symmetric memory support",
+      "config": "host_api_tests_symmem",
+      "enabled": true
+    },
+    {
+      "name": "Host API Tests - Default",
+      "description": "Host API tests with default memory support",
+      "config": "host_api_tests_default",
       "enabled": true
     }
   ]
