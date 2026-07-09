@@ -80,8 +80,8 @@ int main() {
     // Test case 2: Aligned dimensions (256-byte alignment can push the product higher).
     // rocjpeg samples align height to 256 bytes, which can increase the overflow window.
     {
-        uint32_t width = 65500;
-        uint32_t height = 65500;
+        uint32_t width = 65535;
+        uint32_t height = 65535;
         // Simulate 256-byte alignment on height (same as mem_alignment in samples).
         uint32_t aligned_height = (height + 255) & ~255;
         uint32_t pitch = (width + 255) & ~255;  // pitch is also typically aligned
