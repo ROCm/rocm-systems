@@ -66,7 +66,21 @@ drop `--gdb` to pass your own `rocgdb` invocation for full control.
 3. In ROCgdb: `break <kernel>`, `run`. (`--gdb` already applied
    `set breakpoint pending on`, so the kernel symbol resolves at dispatch.)
 
-## 3. Status
+## 3. Demos
+
+Recorded, runnable walkthroughs live in `emulation/rocjitsu/demos/` (each has a
+`.md` explainer, a runnable `.sh`, and an asciinema `.cast`):
+
+| Demo | Shows |
+|---|---|
+| [rocgdb-quickstart](../demos/rocgdb-quickstart.md) | Debug a GPU kernel with one command; inspect arguments and locals |
+| [rocgdb-watchpoint](../demos/rocgdb-watchpoint.md) | Catch which wave writes a buffer with a hardware watchpoint |
+| [rocgdb-fault](../demos/rocgdb-fault.md) | Catch a GPU memory-access fault (SIGSEGV) |
+| [rocgdb-multiwave](../demos/rocgdb-multiwave.md) | Debug a real multi-wave kernel: both waves, each with its own private data |
+
+Regenerate a `.cast` with `emulation/mirage/scripts/record_demo.sh <demo>.sh`.
+
+## 4. Status
 
 Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
 end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
@@ -101,7 +115,7 @@ memory.
 | Private/scratch reads (`print`, `info args`) | done |
 | Multi-wave workgroup debugging (`info threads`, per-wave scratch) | done |
 
-## 4. Sources
+## 5. Sources
 
 - KFD UAPI: `linux/uapi/kfd_ioctl.h`, `linux/uapi/kfd_sysfs.h` (vendored).
 - KFD driver: `amd/amdkfd/{kfd_chardev.c,kfd_debug.c,kfd_topology.c}`
