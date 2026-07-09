@@ -51,9 +51,11 @@ uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count) {
 
 // Encode the COMPUTE_RELAUNCH "wave" word (bits 30/31 clear so it is neither an
 // event nor a state word).
-uint32_t encode_wave_word(bool first_wave, bool last_wave) {
+uint32_t encode_wave_word(bool first_wave, bool last_wave, uint32_t scratch_scoreboard_id) {
   uint32_t w = 0;
-  // se_id[9:11] = 0, scratch_en[15] = 0, scratch_scoreboard[0:8] = 0.
+  // scratch_scoreboard_id[0:8] locates the wave's private memory; se_id[9:11]=0,
+  // scratch_en[15]=0.
+  w |= (scratch_scoreboard_id & 0x1FFu);
   if (last_wave)
     w |= 1u << 16;
   if (first_wave)
@@ -175,9 +177,13 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   write32(cs_base + 4, 0); // PM4 (skipped)
   write32(cs_base + 8, encode_state_word(vgpr_count, sgpr_count));
   for (uint32_t i = 0; i < num_waves; ++i) {
-    bool first = (i == 0);
-    bool last = (i == num_waves - 1);
-    write32(cs_base + 12 + i * 4, encode_wave_word(first, last));
+    // first/last mark workgroup boundaries in the control stack, not the whole
+    // queue: a wave is "first" if it opens a new workgroup (group leader) and
+    // "last" if it closes one. Callers order waves so each workgroup's waves are
+    // contiguous and set these flags per workgroup.
+    write32(cs_base + 12 + i * 4,
+            encode_wave_word(waves[i].is_first_in_group, waves[i].is_last_in_group,
+                             waves[i].scratch_scoreboard_id));
   }
 
   // --- Per-wave register blocks, laid out high-to-low from wave_state_offset,

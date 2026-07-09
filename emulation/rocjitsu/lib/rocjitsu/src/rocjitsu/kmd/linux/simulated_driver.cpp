@@ -1989,8 +1989,15 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   // dbgapi fails with "wave not found in queue", rocdbgapi queue.cpp).
   w.wave_id = wf.debug_wave_id();
   w.group_ids = {wf.wg_id(), 0u, 0u};
-  w.wave_in_group = 0;
-  w.queue_packet_id = wf.dispatch_id() & 0x1FFFFFFu;
+  w.wave_in_group = wf.wave_in_group();
+  w.queue_packet_id = wf.aql_packet_id() & 0x1FFFFFFu;
+  w.scratch_scoreboard_id = wf.scratch_scoreboard_id();
+  // The emulator always synthesizes the SPI dispatch-bookkeeping TTMPs (group
+  // ids in TTMP8-10, AQL packet id in TTMP11) from the wavefront's dispatch
+  // metadata below, so mark them valid. rocm-dbgapi then correlates the wave to
+  // its real dispatch (workgroup coordinates, packet id) instead of falling back
+  // to a single dummy dispatch.
+  w.spi_ttmps_setup = true;
   w.num_sgprs = wf.num_sgprs();
   w.num_vgprs = wf.num_vgprs();
 
@@ -2067,9 +2074,62 @@ void SimulatedDriver::serialize_queue_debug_waves(uint32_t process_id, uint32_t 
   if (waves.empty())
     return;
 
+  // Order waves so each workgroup's waves are contiguous (grouped by dispatch
+  // packet id and workgroup coordinates, then by position in group) and mark the
+  // first/last wave of each workgroup. rocm-dbgapi builds a workgroup from
+  // consecutive control-stack waves sharing group ids under a group leader, so
+  // waves of different workgroups must not interleave and each group must be
+  // delimited by its first/last flags (rocdbgapi queue.cpp update_waves).
+  std::sort(waves.begin(), waves.end(),
+            [](const kmd::CwsrWaveState &a, const kmd::CwsrWaveState &b) {
+              if (a.queue_packet_id != b.queue_packet_id)
+                return a.queue_packet_id < b.queue_packet_id;
+              if (a.group_ids != b.group_ids)
+                return a.group_ids < b.group_ids;
+              return a.wave_in_group < b.wave_in_group;
+            });
+  auto same_group = [](const kmd::CwsrWaveState &a, const kmd::CwsrWaveState &b) {
+    return a.queue_packet_id == b.queue_packet_id && a.group_ids == b.group_ids;
+  };
+  for (size_t i = 0; i < waves.size(); ++i) {
+    waves[i].is_first_in_group = (i == 0) || !same_group(waves[i], waves[i - 1]);
+    waves[i].is_last_in_group = (i + 1 == waves.size()) || !same_group(waves[i], waves[i + 1]);
+  }
+
   auto *mem = gpu->soc->memory();
   kmd::serialize_queue_cwsr(ctx_base, ctx_size, waves,
                             [&](uint64_t va, uint32_t val) { mem->write32(va, val, process_id); });
+
+  // Hold the queue's read_dispatch_id at the oldest trapped dispatch. rocm-dbgapi
+  // correlates a stopped wave to its dispatch by checking the wave's AQL packet
+  // id lies in [read_dispatch_id, write_dispatch_id), and prunes dispatches whose
+  // packet id is below read_dispatch_id (rocdbgapi queue.cpp). The command
+  // processor advances read_dispatch_id to "drained" as soon as it fetches a
+  // packet, so without this the trapped dispatch would already be out of range.
+  // The CP keeps a private fetch cursor (see fetch_from_queue), so lowering the
+  // guest read pointer here does not cause packets to be re-fetched. The hold is
+  // released naturally when the CP next processes a packet past it.
+  uint64_t min_pkt = ~0ull;
+  for (const auto &w : waves)
+    min_pkt = std::min<uint64_t>(min_pkt, w.queue_packet_id);
+
+  auto proc = find_process(process_id);
+  if (!proc)
+    return;
+  uint64_t read_ptr_va = 0, write_ptr_va = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto qit = proc->queue_snapshot_map_.find(queue_id);
+    if (qit == proc->queue_snapshot_map_.end())
+      return;
+    read_ptr_va = qit->second.read_pointer_address;
+    write_ptr_va = qit->second.write_pointer_address;
+  }
+  if (read_ptr_va == 0 || write_ptr_va == 0)
+    return;
+  const uint64_t write_di = mem->read64(write_ptr_va, process_id);
+  if (min_pkt < write_di)
+    mem->write64(read_ptr_va, min_pkt, process_id);
 }
 
 bool SimulatedDriver::on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id) {
@@ -2110,8 +2170,43 @@ bool SimulatedDriver::on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id) {
   // the resume-time reload captures into debug_wave_id.
   wf.debug_trap(trap_id);
 
+  // Defer reporting until every other wave of this queue has also stopped
+  // (trapped or completed). Waves hit a breakpoint one at a time on the engine;
+  // reporting on the first trap would make rocm-dbgapi read the queue's context
+  // save area while later waves are still trapping, and each re-serialization
+  // shifts every wave's save-area address (the control stack and wave area must
+  // stay adjacent), which defeats rocm-dbgapi's register cache and corrupts
+  // multi-wave correlation. Serializing once, after the queue quiesces, presents
+  // one stable snapshot with all stopped waves. Single-wave dispatches quiesce
+  // immediately, so their behavior is unchanged.
+  if (queue_has_running_waves(process_id, queue_id, gpu_id, &wf))
+    return true; // halted; the report fires when the last wave stops
+
   report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
   return true;
+}
+
+bool SimulatedDriver::queue_has_running_waves(uint32_t process_id, uint32_t queue_id,
+                                              uint32_t gpu_id, const amdgpu::Wavefront *exclude) {
+  // True if any wave of this queue is still executing (not debug-halted and not
+  // in the idle HALTED slot state) — i.e., a wave that may yet trap or complete.
+  // The engine steps waves single-threaded, so sibling states are stable here.
+  auto *gpu = find_gpu(gpu_id);
+  if (!gpu || !gpu->soc)
+    return false;
+  bool running = false;
+  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units()) {
+      for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
+        auto *w = cu->wf(i);
+        if (w == exclude || w->process_id() != process_id || w->queue_id() != queue_id)
+          continue;
+        if (!w->debug_halted() && w->state() != amdgpu::WfState::HALTED)
+          running = true;
+      }
+    }
+  });
+  return running;
 }
 
 void SimulatedDriver::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc,
@@ -2510,6 +2605,66 @@ void SimulatedDriver::suspend_debug_queues(KfdProcess *proc) {
   }
 }
 
+void SimulatedDriver::clear_completed_debug_queues(KfdProcess *proc) {
+  // For each of the process's queues whose stopped waves have all completed (no
+  // wave slot still belongs to the queue), overwrite the context save area with
+  // an empty header. rocm-dbgapi then prunes those waves and their dispatch
+  // cleanly on its next update, instead of reading a stale wave whose AQL packet
+  // id has fallen below the queue's now-advanced read_dispatch_id -- which
+  // dereferences a pruned dispatch and crashes the debugger at process exit.
+  // Queues that still have a stopped (or running) wave are left untouched so the
+  // debugger's register edits and assigned wave id are preserved.
+  if (!proc)
+    return;
+  const uint32_t process_id = proc->process_id();
+
+  std::unordered_map<uint32_t, std::tuple<uint64_t, uint32_t, uint32_t>>
+      queues; // qid -> (ctx,size,gpu)
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    for (auto &[qid, info] : proc->queue_snapshot_map_)
+      queues[qid] = {info.ctx_save_restore_address, info.ctx_save_restore_area_size, info.gpu_id};
+  }
+
+  for (auto &[qid, geom] : queues) {
+    auto [ctx_base, ctx_size, gpu_id] = geom;
+    if (ctx_base == 0)
+      continue;
+    auto *gpu = find_gpu(gpu_id);
+    if (!gpu || !gpu->soc)
+      continue;
+
+    bool has_live_wave = false;
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units()) {
+        for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
+          auto *w = cu->wf(i);
+          // Only a wave still stopped for the debugger keeps the save area alive.
+          // A wave that has resumed and run to completion (s_endpgm) is halted but
+          // no longer debug_halted, and may not have been retired yet, so it must
+          // not pin the stale save area.
+          if (w->debug_halted() && w->process_id() == process_id && w->queue_id() == qid)
+            has_live_wave = true;
+        }
+      }
+    });
+    if (has_live_wave)
+      continue;
+
+    // No wave belongs to this queue anymore: present an empty context save area.
+    // control_stack_end must still equal wave_area_begin (rocdbgapi queue.cpp
+    // header check), so point both at the same offset with zero sizes.
+    auto *mem = gpu->soc->memory();
+    constexpr uint32_t kCsOffset = 0x100u;
+    mem->write32(ctx_base + 0, kCsOffset, process_id); // control_stack_offset
+    mem->write32(ctx_base + 4, 0u, process_id);        // control_stack_size
+    mem->write32(ctx_base + 8, kCsOffset, process_id); // wave_state_offset
+    mem->write32(ctx_base + 12, 0u, process_id);       // wave_state_size
+    for (uint32_t off = 16; off < 40; off += 4)
+      mem->write32(ctx_base + off, 0u, process_id);
+  }
+}
+
 void SimulatedDriver::apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &w) {
   // Apply the debugger's edits (rocm-dbgapi writes registers straight into the
   // CWSR area) back onto the live wave, then set the run/step state the debugger
@@ -2645,8 +2800,11 @@ int SimulatedDriver::debug_query_exception_info(
     info.r_debug = proc->runtime_state_.r_debug;
     info.runtime_state =
         proc->runtime_state_.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
-    info.ttmp_setup =
-        (proc->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
+    // The emulator always synthesizes the SPI dispatch-bookkeeping TTMPs (group
+    // ids, AQL packet id) into the CWSR area for stopped waves, so report them
+    // as set up regardless of the mode mask ROCr requested. This lets
+    // rocm-dbgapi correlate trapped waves to their real dispatch.
+    info.ttmp_setup = 1u;
   }
 
   const uint32_t in_size = args.info_size;
@@ -2783,9 +2941,9 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     if (target_proc != nullptr) {
       std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
       info.r_debug = target_proc->runtime_state_.r_debug;
-      info.ttmp_setup =
-          (target_proc->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u
-                                                                                           : 0u;
+      // See debug_query_exception_info: the emulator always serializes the SPI
+      // bookkeeping TTMPs, so advertise them as initialized.
+      info.ttmp_setup = 1u;
     }
     if (args->enable.rinfo_ptr != 0 && args->enable.rinfo_size >= sizeof(info))
       std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
@@ -2897,12 +3055,14 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     return debug_queue_snapshot(target_proc, args->queue_snapshot);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
     // Waves stop for the debugger by trapping (s_trap breakpoint), which already
-    // freezes and serializes them (on_wave_trap). A suspend of an already-stopped
-    // wave is therefore a no-op here: re-serializing the live wave would discard
-    // the debugger's register edits and rocm-dbgapi's assigned wave id. The
-    // return value is the number of queues handled; their ids are left unmodified
-    // so rocm-dbgapi decodes them back without error/invalid flags (kfd_debug.c:
-    // suspend_queues).
+    // freezes and serializes them (on_wave_trap), so a suspend of a wave that is
+    // still stopped is a no-op: re-serializing the live wave would discard the
+    // debugger's register edits and rocm-dbgapi's assigned wave id. But a queue
+    // whose stopped wave has since completed must be cleared, so rocm-dbgapi
+    // prunes the wave (and its dispatch) cleanly instead of reading a stale wave
+    // whose dispatch the command processor has already drained (which crashes the
+    // debugger at process exit). The return value is the number of queues handled.
+    clear_completed_debug_queues(target_proc);
     return static_cast<int>(args->suspend_queues.num_queues);
   case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
     // Reload the target's stopped waves from their context save areas and let

@@ -236,6 +236,12 @@ private:
   /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
   bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
 
+  /// @brief True if any wave of the given queue is still executing (may yet trap
+  /// or complete). Used to defer the debugger report until all waves of a
+  /// multi-wave dispatch have stopped, so they are serialized atomically.
+  bool queue_has_running_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                               const amdgpu::Wavefront *exclude);
+
   /// @brief Single-step completion handler installed on every compute unit.
   /// @details Runs on the engine thread after a wave rocm-dbgapi placed in
   /// single-step mode (MODE.debug_en=1) has executed exactly one instruction.
@@ -293,6 +299,11 @@ private:
   /// @brief Stop the target's running waves and refresh their CWSR areas
   /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
   void suspend_debug_queues(KfdProcess *proc);
+
+  /// @brief Clear the CWSR area of any of the target's queues whose stopped waves
+  /// have completed, so rocm-dbgapi prunes them cleanly instead of reading a
+  /// stale wave against an advanced read_dispatch_id (KFD_IOC_DBG_TRAP_SUSPEND).
+  void clear_completed_debug_queues(KfdProcess *proc);
 
   /// @brief Apply a wave's reloaded CWSR register state (the debugger's edits)
   /// onto the live wave and set its run/single-step state.
