@@ -37,7 +37,7 @@ make_nic_metric_value(std::initializer_list<std::uint8_t> bit_positions)
     std::uint32_t value = 0;
     for(auto bit : bit_positions)
     {
-        value |= (1u << bit);
+        value |= (std::uint32_t{ 1 } << bit);
     }
     return value;
 }
@@ -60,16 +60,16 @@ inline const std::map<std::uint32_t, nic_track_description>&
 make_default_nic_tracks()
 {
     static const std::map<std::uint32_t, nic_track_description> tracks = {
-        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA BYTES", "bytes", 0 } },
-        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA BYTES", "bytes", 0 } },
-        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA PACKETS", "packets", 0 } },
-        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA PACKETS", "packets", 0 } },
-        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP PACKETS", "packets", 0 } },
-        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP PACKETS", "packets", 0 } },
-        { TX_RDMA_ACK_TIMEOUT_VALUE, { "TX ACK TIMEOUT", "timeouts", 0 } },
-        { RESP_TX_PKT_SEQ_ERR_VALUE, { "RESP TX PKT SEQ ERR", "errors", 0 } },
-        { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERR", "errors", 0 } },
-        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, { "REQ RX IMPL NAK SEQ ERR", "errors", 0 } },
+        { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA BYTES", "bytes" } },
+        { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA BYTES", "bytes" } },
+        { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA PACKETS", "packets" } },
+        { TX_RDMA_UCAST_PKTS_VALUE, { "TX RDMA PACKETS", "packets" } },
+        { RX_RDMA_CNP_PKTS_VALUE, { "RX CNP PACKETS", "packets" } },
+        { TX_RDMA_CNP_PKTS_VALUE, { "TX CNP PACKETS", "packets" } },
+        { TX_RDMA_ACK_TIMEOUT_VALUE, { "TX ACK TIMEOUT", "timeouts" } },
+        { RESP_TX_PKT_SEQ_ERR_VALUE, { "RESP TX PKT SEQ ERR", "errors" } },
+        { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERR", "errors" } },
+        { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, { "REQ RX IMPL NAK SEQ ERR", "errors" } },
     };
     return tracks;
 }
