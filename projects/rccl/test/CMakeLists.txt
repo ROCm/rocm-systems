@@ -17,6 +17,15 @@ if(BUILD_TESTS)
     message("MPI-based tests are enabled")
   endif()
 
+  # CPU-only generator unit test: guards the -fgpu-rdc device-function dispatch
+  # codegen in src/device/generate.py. Needs no GPU and no built library.
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(
+    NAME rccl-generate-device-table
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/src/device/test_generate_device_table.py"
+  )
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")

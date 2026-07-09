@@ -1087,6 +1087,7 @@ RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
+  if (comm->nNodes <= 1) return 0;
   bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
