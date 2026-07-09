@@ -12,6 +12,8 @@ then re-export the .png via draw.io.
 """
 
 import csv
+import json
+import math
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -245,6 +247,9 @@ class Database:
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
+            json_serializer=lambda value: json.dumps(
+                cls._json_sanitize(value), allow_nan=False
+            ),
         )
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
@@ -328,6 +333,17 @@ class Database:
         can't poison it.
         """
         return dict(cls._view_sql_cache)
+
+    @staticmethod
+    def _json_sanitize(value: object) -> object:
+        """Recursively replace non-finite floats (NaN, Inf) with None for valid JSON."""
+        if isinstance(value, dict):
+            return {key: Database._json_sanitize(v) for key, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Database._json_sanitize(item) for item in value]
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
 
     @staticmethod
     def _compile_view_sql() -> dict[str, str]:
