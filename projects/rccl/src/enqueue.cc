@@ -3642,8 +3642,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
 
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
-      bool ceAllReduceFits = true;
-      if (info->coll == ncclFuncAllReduce) {
+      /*bool ceAllReduceFits = true;
+      if (info->coll == ncclFuncAllReduce && ) {
         if (!rcclUseCeAllReduce(comm, info->count, info->datatype, info->op)) {
           ceAvailable = false;
         } else {
@@ -3654,13 +3654,15 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                  totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
-      }
+      }*/
 
-      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment && ceAllReduceFits) {
+      if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && ceAvailable && !hasSysmemSegment /*&& ceAllReduceFits*/) {
+        INFO(NCCL_COLL, "CE Path: appending CE Collective task");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
       }
       // Append kernel-based collective
       else {
+        INFO(NCCL_COLL, "Legacy Path: appending kernel-based collective task");
         // currently legacy sendrecv needs src and dst buffers to be registered
         // we cannot allow UB if alltoall/scatter/gather fallback to legacy sendrecv
         // when src or dst buffers are not registered
