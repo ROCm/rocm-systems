@@ -1420,9 +1420,16 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
   }
 
   // Write to addr1
+  if (verbosity() > 0) {
+    std::cout << "    Writing to addr1..." << std::endl;
+  }
   int* data1 = reinterpret_cast<int*>(addr1);
   for (int i = 0; i < kMemoryAllocSize; ++i) {
     data1[i] = i;
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Finished writing to addr1..." << std::endl;
   }
 
   // Now set RW access on addr2
