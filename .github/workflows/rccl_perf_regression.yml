@@ -26,7 +26,7 @@ on:
   # testing before this workflow lands on develop. Remove once merged.
   push:
     branches:
-      - rccl-ci/perf-regression-gate
+      - shared/rccl-perf-regression-gate
   # Allow manual dispatch for testing the pipeline before the workflow is on develop.
   # Inputs mirror what a PR run would supply; omit them to use the defaults
   # (A=A detect: ref == cand == current built lib, expects 0 regressions).
