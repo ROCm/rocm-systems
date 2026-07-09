@@ -1,7 +1,7 @@
 {
   "system_configurations": {
-    "name": "RCCL-Validate-MI455X-Perf",
-    "description": "rccl-tests perf sweep for MI455X (AINIC): 11 collectives x 12 datatypes (1B-4G)."
+    "name": "RCCL-Validate-MI455X-Perf-512M",
+    "description": "rccl-tests perf sweep for MI455X (AINIC): 11 collectives x 12 datatypes (1B-512M)."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -56,7 +56,7 @@
       "num_gpus": 4,
       "num_ranks": 4,
       "timeout": 1200,
-      "command_args": "-b 1 -e 4G -f 2 -g 1 -n 100 -w 20 -N 6 -A 1",
+      "command_args": "-b 1 -e 512M -f 2 -g 1 -n 100 -w 20 -N 6 -A 1",
       "env_variables": {
         "NCCL_LAUNCH_MODE": "GROUP"
       }
@@ -791,67 +791,67 @@
   "test_suites": [
     {
       "name": "Perf - AllReduce (datatype sweep)",
-      "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-512M)",
       "config": "all_reduce_perf",
       "enabled": true
     },
     {
       "name": "Perf - ReduceScatter (datatype sweep)",
-      "description": "rccl-tests ReduceScatter perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests ReduceScatter perf sweep across 12 datatypes (1B-512M)",
       "config": "reduce_scatter_perf",
       "enabled": true
     },
     {
       "name": "Perf - AllReduceBias (datatype sweep)",
-      "description": "rccl-tests AllReduceBias perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests AllReduceBias perf sweep across 12 datatypes (1B-512M)",
       "config": "all_reduce_bias_perf",
       "enabled": true
     },
     {
       "name": "Perf - Reduce (datatype sweep)",
-      "description": "rccl-tests Reduce perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests Reduce perf sweep across 12 datatypes (1B-512M)",
       "config": "reduce_perf",
       "enabled": true
     },
     {
       "name": "Perf - AllGather (datatype sweep)",
-      "description": "rccl-tests AllGather perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests AllGather perf sweep across 12 datatypes (1B-512M)",
       "config": "all_gather_perf",
       "enabled": true
     },
     {
       "name": "Perf - Broadcast (datatype sweep)",
-      "description": "rccl-tests Broadcast perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests Broadcast perf sweep across 12 datatypes (1B-512M)",
       "config": "broadcast_perf",
       "enabled": true
     },
     {
       "name": "Perf - Gather (datatype sweep)",
-      "description": "rccl-tests Gather perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests Gather perf sweep across 12 datatypes (1B-512M)",
       "config": "gather_perf",
       "enabled": true
     },
     {
       "name": "Perf - Scatter (datatype sweep)",
-      "description": "rccl-tests Scatter perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests Scatter perf sweep across 12 datatypes (1B-512M)",
       "config": "scatter_perf",
       "enabled": true
     },
     {
       "name": "Perf - AlltoAll (datatype sweep)",
-      "description": "rccl-tests AlltoAll perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests AlltoAll perf sweep across 12 datatypes (1B-512M)",
       "config": "alltoall_perf",
       "enabled": true
     },
     {
       "name": "Perf - AlltoAllv (datatype sweep)",
-      "description": "rccl-tests AlltoAllv perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests AlltoAllv perf sweep across 12 datatypes (1B-512M)",
       "config": "alltoallv_perf",
       "enabled": true
     },
     {
       "name": "Perf - SendRecv (datatype sweep)",
-      "description": "rccl-tests SendRecv perf sweep across 12 datatypes (1B-4G)",
+      "description": "rccl-tests SendRecv perf sweep across 12 datatypes (1B-512M)",
       "config": "sendrecv_perf",
       "enabled": true
     }

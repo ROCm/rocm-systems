@@ -1,0 +1,139 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI455X-AllReduce-Smoke",
+    "description": "Smoke config derived from mi455_ainic_roce_perf: AllReduce only (12 datatypes, 1B-512M), 1 cycle x 1 iteration, warmup 20."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "NCCL_CUMEM_ENABLE": "1",
+    "NCCL_MNNVL_ENABLE": "1",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_MSCCL_ENABLE": "0",
+    "NCCL_DEBUG": "VERSION"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "--debug",
+      "-t",
+      "-l",
+      "--log-trace",
+      "--enable-code-coverage",
+      "--enable-mpi-tests",
+      "--no_clean"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx1250",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx1250"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "perf_base": {
+      "is_gtest": false,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "num_ranks": 4,
+      "timeout": 1200,
+      "command_args": "-b 1 -e 512M -f 2 -g 1 -n 1 -w 20 -N 1 -A 1",
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+    "all_reduce_perf": {
+      "extends": "perf_base",
+      "binary": "all_reduce_perf",
+      "tests": [
+        {
+          "name": "AllReduce_int8",
+          "description": "AllReduce perf, datatype int8",
+          "command_args": "-d int8"
+        },
+        {
+          "name": "AllReduce_uint8",
+          "description": "AllReduce perf, datatype uint8",
+          "command_args": "-d uint8"
+        },
+        {
+          "name": "AllReduce_int32",
+          "description": "AllReduce perf, datatype int32",
+          "command_args": "-d int32"
+        },
+        {
+          "name": "AllReduce_uint32",
+          "description": "AllReduce perf, datatype uint32",
+          "command_args": "-d uint32"
+        },
+        {
+          "name": "AllReduce_int64",
+          "description": "AllReduce perf, datatype int64",
+          "command_args": "-d int64"
+        },
+        {
+          "name": "AllReduce_uint64",
+          "description": "AllReduce perf, datatype uint64",
+          "command_args": "-d uint64"
+        },
+        {
+          "name": "AllReduce_half",
+          "description": "AllReduce perf, datatype half",
+          "command_args": "-d half"
+        },
+        {
+          "name": "AllReduce_float",
+          "description": "AllReduce perf, datatype float",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AllReduce_double",
+          "description": "AllReduce perf, datatype double",
+          "command_args": "-d double"
+        },
+        {
+          "name": "AllReduce_bfloat16",
+          "description": "AllReduce perf, datatype bfloat16",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "AllReduce_fp8_e4m3",
+          "description": "AllReduce perf, datatype fp8_e4m3",
+          "command_args": "-d fp8_e4m3"
+        },
+        {
+          "name": "AllReduce_fp8_e5m2",
+          "description": "AllReduce perf, datatype fp8_e5m2",
+          "command_args": "-d fp8_e5m2"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Perf - AllReduce (datatype sweep)",
+      "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-4G), 1 cycle x 1 iteration",
+      "config": "all_reduce_perf",
+      "enabled": true
+    }
+  ]
+}
