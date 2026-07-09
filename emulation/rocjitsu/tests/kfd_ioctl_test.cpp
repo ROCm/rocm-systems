@@ -14,10 +14,13 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
+#include <csignal>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
@@ -476,6 +479,53 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+}
+
+// Cross-process authorization: a debugger may only act on a process it has
+// ptrace-attached. Uses a real forked child and real ptrace so the check
+// exercises the live /proc TracerPid relationship, matching how rocgdb
+// launches and traces the inferior.
+TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+    _exit(0);
+  }
+
+  rocjitsu::SimulatedDriver daemon(*loaded_.soc(), /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  uint32_t inferior = daemon.open_process(child);
+  ASSERT_NE(debugger, 0u);
+  ASSERT_NE(inferior, 0u);
+
+  auto enable_from_debugger = [&]() {
+    kfd_ioctl_dbg_trap_args en{};
+    en.pid = static_cast<uint32_t>(child);
+    en.op = KFD_IOC_DBG_TRAP_ENABLE;
+    en.enable.dbg_fd = KFD_INVALID_FD;
+    return daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en);
+  };
+
+  // Not yet ptrace-attached: the debugger is not the child's tracer -> EPERM.
+  EXPECT_EQ(enable_from_debugger(), -EPERM);
+
+  if (ptrace(PTRACE_ATTACH, child, nullptr, nullptr) == 0) {
+    int status = 0;
+    waitpid(child, &status, 0); // child stops under ptrace
+    // getpid() is now the child's ptrace parent -> ENABLE authorized.
+    EXPECT_EQ(enable_from_debugger(), 0);
+    ptrace(PTRACE_DETACH, child, nullptr, nullptr);
+  } else {
+    GTEST_LOG_(INFO) << "PTRACE_ATTACH not permitted; skipped the authorized case";
+  }
+
+  daemon.close(debugger);
+  daemon.close(inferior);
+  kill(child, SIGKILL);
+  int status = 0;
+  waitpid(child, &status, 0);
 }
 
 } // namespace

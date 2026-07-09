@@ -118,6 +118,18 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
+  case AMDKFD_IOC_DBG_TRAP: {
+    // DBG_TRAP carries an embedded output pointer for two attach-time
+    // operations; the client reserves the trailing buffer, we point the KFD
+    // struct at it so the handler fills it in place, and the client copies it
+    // back into its own buffer on return.
+    auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    if (args->op == KFD_IOC_DBG_TRAP_ENABLE)
+      args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
+    else if (args->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+      args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   default:
     break;
   }

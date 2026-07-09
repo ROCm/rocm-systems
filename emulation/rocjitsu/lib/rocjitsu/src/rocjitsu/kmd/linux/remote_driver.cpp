@@ -40,6 +40,10 @@ constexpr bool has_embedded_pointers(unsigned long request) {
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU:
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
     return true;
+  case AMDKFD_IOC_DBG_TRAP:
+    // Only some DBG_TRAP sub-operations carry an embedded pointer; the per-op
+    // marshaling below keys off args->op and is a no-op for the rest.
+    return true;
   case AMDKFD_IOC_SVM:
     // SVM's variable-length attribute array is part of the ioctl payload, not a
     // client pointer that the daemon has to rewrite.
@@ -334,6 +338,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_events_ptr = 0;
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
+  uint64_t saved_dbg_rinfo_ptr = 0;
+  uint64_t saved_dbg_snapshot_ptr = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -348,6 +354,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       saved_device_ids_ptr =
           static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr;
       break;
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+      if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
+        saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+        saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+      break;
+    }
     default:
       break;
     }
@@ -383,6 +397,19 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
       auto *aperture_args = reinterpret_cast<kfd_ioctl_get_process_apertures_new_args *>(args_base);
       buf.resize(buf.size() + aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures));
+      break;
+    }
+    case AMDKFD_IOC_DBG_TRAP: {
+      auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(args_base);
+      size_t inline_size = 0;
+      if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
+        inline_size = dbg->enable.rinfo_size;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+        inline_size =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+      // Output-only buffer: reserve zeroed space the daemon fills in place.
+      if (inline_size > 0)
+        buf.resize(buf.size() + inline_size);
       break;
     }
     default:
@@ -438,6 +465,14 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg)->device_ids_array_ptr =
             saved_device_ids_ptr;
         break;
+      case AMDKFD_IOC_DBG_TRAP: {
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
+          dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
+        else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+          dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+        break;
+      }
       default:
         break;
       }
@@ -458,6 +493,18 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             reinterpret_cast<void *>(aperture_args->kfd_process_device_apertures_ptr),
             payload.data() + arg_size,
             std::min(aperture_args->num_of_nodes * sizeof(kfd_process_device_apertures), extra));
+        break;
+      }
+      case AMDKFD_IOC_DBG_TRAP: {
+        // Copy the daemon-filled output region back into the debugger's buffer.
+        auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+        void *dst = nullptr;
+        if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
+          dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
+        else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+          dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+        if (dst != nullptr)
+          std::memcpy(dst, payload.data() + arg_size, extra);
         break;
       }
       default:

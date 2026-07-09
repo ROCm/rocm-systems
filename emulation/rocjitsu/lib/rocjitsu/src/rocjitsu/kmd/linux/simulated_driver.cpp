@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <fcntl.h>
 #include <format>
+#include <fstream>
 #include <linux/types.h>
 #include <sstream>
 #include <string_view>
@@ -73,6 +74,26 @@ void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t of
   if (rc < 0)
     return MAP_FAILED;
   return reinterpret_cast<void *>(static_cast<uintptr_t>(rc));
+}
+
+/// @brief Read the TracerPid field from /proc/<pid>/status.
+/// @returns The pid of the process ptrace-attached to @p pid, or 0 if none (or
+/// the target is gone). This exposes the real kernel ptrace relationship that
+/// the KFD debug ioctl authorizes against (kfd_ioctl_set_debug_trap uses
+/// ptrace_parent(target->lead_thread) == current). Both the debugger and the
+/// target are real Linux processes under the emulator, so consulting the live
+/// /proc state models the exact relationship the kernel checks — no mock.
+pid_t tracer_pid_of(pid_t pid) {
+  if (pid <= 0)
+    return 0;
+  std::ifstream status("/proc/" + std::to_string(pid) + "/status");
+  std::string line;
+  constexpr std::string_view kKey = "TracerPid:";
+  while (std::getline(status, line)) {
+    if (std::string_view(line).substr(0, kKey.size()) == kKey)
+      return static_cast<pid_t>(std::strtol(line.c_str() + kKey.size(), nullptr, 10));
+  }
+  return 0;
 }
 
 } // namespace
@@ -1886,12 +1907,14 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::lock_guard<std::mutex> lk(target->debug_mutex_);
   auto &sess = target->debug_session_;
 
-  // PTRACE gate: for any op other than DISABLE, a debugger acting on a process
-  // it does not own must be the attached debugger (kernel: EPERM when
-  // ptrace_parent(target) != current). Cross-process attach is modeled by the
-  // daemon transport in a later change; until then only self-debug is allowed.
+  // PTRACE gate: for any op other than DISABLE, a debugger acting on another
+  // process must be that process's ptrace parent. This mirrors the kernel's
+  // ptrace_parent(target->lead_thread) == current check in
+  // kfd_ioctl_set_debug_trap(); we consult the live /proc TracerPid so the
+  // authorization reflects the real OS ptrace relationship established by the
+  // debugger (e.g. rocgdb launching the inferior). Self-debug is exempt.
   if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
-      sess.debugger_pid != caller.client_pid())
+      tracer_pid_of(target->client_pid()) != caller.client_pid())
     return -EPERM;
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
@@ -1960,6 +1983,11 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
     sess = KfdProcess::DebugSession{};
+    return 0;
+  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
+    // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
+    // debugger wants forwarded. Delivery is wired up with the event channel.
+    sess.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
     return 0;
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return debug_device_snapshot(args->device_snapshot);
