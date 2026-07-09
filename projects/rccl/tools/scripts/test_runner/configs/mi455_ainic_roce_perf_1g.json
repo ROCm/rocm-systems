@@ -52,7 +52,7 @@
   "test_configurations": {
     "perf_base": {
       "is_gtest": false,
-      "num_nodes": 1,
+      "num_nodes": "auto",
       "num_gpus": "auto",
       "num_ranks": "auto",
       "timeout": 1200,
