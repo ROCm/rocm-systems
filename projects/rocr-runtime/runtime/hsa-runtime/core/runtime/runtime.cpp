@@ -3784,6 +3784,10 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
 hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t address,
                                             uint64_t alignment, uint64_t flags) {
+  fprintf(stderr,
+          "[VMEM DBG] VMemoryAddressReserve ENTER: requested_addr=%p size=0x%zx alignment=0x%lx "
+          "flags=0x%lx\n",
+          (void*)address, size, alignment, flags);
   void* addr = (void*)address;
   HsaMemFlags memFlags = {};
 
@@ -3809,6 +3813,8 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 
     reserved_address_map_[aligned] = AddressHandle(mem, size, false);
     *va = aligned;
+    fprintf(stderr, "[VMEM DBG] VMemoryAddressReserve EXIT (NO_REGISTER): va=%p size=0x%zx\n",
+            *va, size);
     return HSA_STATUS_SUCCESS;
   }
 
@@ -3817,18 +3823,27 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
 
   /* Try to reserving the VA requested by user */
   if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
+    fprintf(stderr,
+            "[VMEM DBG] VMemoryAddressReserve: FixedAddress reserve failed for %p, retrying with "
+            "alternate VA\n",
+            (void*)address);
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
+      fprintf(stderr, "[VMEM DBG] VMemoryAddressReserve: alternate VA reserve FAILED size=0x%zx\n",
+              size);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
   *va = addr;
+  fprintf(stderr, "[VMEM DBG] VMemoryAddressReserve EXIT: va=%p size=0x%zx\n", *va, size);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
+  fprintf(stderr, "[VMEM DBG] VMemoryAddressFree ENTER: va=%p size=0x%zx\n", va, size);
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   std::map<const void*, AddressHandle>::iterator it = reserved_address_map_.find(va);
 
@@ -3875,6 +3890,9 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
                                           hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
+  fprintf(stderr,
+          "[VMEM DBG] VMemoryHandleCreate ENTER: region=%p size=0x%zx alloc_flags=0x%x flags=0x%lx\n",
+          (void*)region, size, (unsigned)alloc_flags, flags_unused);
   const AMD::MemoryRegion* memRegion = static_cast<const AMD::MemoryRegion*>(region);
   if (!IsMultipleOf(size, memRegion->GetPageSize()))
   {
@@ -3917,12 +3935,21 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
       memoryHandle->drm_owner = drm_owner;
 
     *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
+    fprintf(stderr,
+            "[VMEM DBG] VMemoryHandleCreate EXIT: handle=0x%lx mem=%p size=0x%zx driver_handle=0x%lx "
+            "dmabuf_fd=%d drm_owner=%p\n",
+            memoryOnlyHandle->handle, mem, size, driver_handle.handle, driver_handle.dmabuf_fd,
+            (void*)drm_owner);
     memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
+  } else {
+    fprintf(stderr, "[VMEM DBG] VMemoryHandleCreate: region->Allocate FAILED status=%d size=0x%zx\n",
+            status, size);
   }
   return status;
 }
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
+  fprintf(stderr, "[VMEM DBG] VMemoryHandleRelease ENTER: handle=0x%lx\n", memoryOnlyHandle.handle);
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(memoryOnlyHandle));
 
@@ -3949,6 +3976,9 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
 hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
                                        hsa_amd_vmem_alloc_handle_t memoryOnlyHandle,
                                        uint64_t flags) {
+  fprintf(stderr,
+          "[VMEM DBG] VMemoryHandleMap ENTER: va=%p size=0x%zx offset=0x%zx handle=0x%lx flags=0x%lx\n",
+          va, size, in_offset, memoryOnlyHandle.handle, flags);
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto addressHandle = VMemoryFindReservedAddressHandle(va);
   if (addressHandle == nullptr ||
@@ -3986,10 +4016,15 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
                               HSA_ACCESS_PERMISSION_NONE));
   addressHandle->use_count++;
   memoryHandle->use_count++;
+  fprintf(stderr,
+          "[VMEM DBG] VMemoryHandleMap EXIT: va=%p size=0x%zx handle=0x%lx addr_use_count=%u "
+          "mem_use_count=%u\n",
+          va, size, memoryOnlyHandle.handle, addressHandle->use_count, memoryHandle->use_count);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
+  fprintf(stderr, "[VMEM DBG] VMemoryHandleUnmap ENTER: va=%p size=0x%zx\n", va, size);
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   std::list<std::pair<void*, MappedHandle*>> mappedHandles;
 
@@ -4047,8 +4082,14 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
     : va(va), size(size), targetAgent(targetAgent), permissions(perms),
       mappedHandle(_mappedHandle) {
 
+  fprintf(stderr,
+          "[VMEM DBG] MappedHandleAllowedAgent CTOR ENTER: va=%p size=0x%zx targetAgent_node=%u "
+          "device_type=%d perms=%d\n",
+          va, size, targetAgent->node_id(), (int)targetAgent->device_type(), (int)perms);
+
   // CPU agents have access as the memory is already mapped to the host.
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+    fprintf(stderr, "[VMEM DBG] MappedHandleAllowedAgent CTOR: CPU agent, returning early\n");
     return;
   }
 
@@ -4059,6 +4100,10 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   if (!memHandle->imported && memHandle->region &&
       memHandle->agentOwner()->device_type() == core::Agent::DeviceType::kAmdCpuDevice &&
       memHandle->drm_owner && memHandle->drm_owner == targetAgent) {
+    fprintf(stderr,
+            "[VMEM DBG] MappedHandleAllowedAgent CTOR: reusing drm_owner driver_handle=0x%lx (no "
+            "import)\n",
+            memHandle->driver_handle.handle);
     driver_handle = memHandle->driver_handle;
     owns_driver_handle = false;
     return;
@@ -4066,14 +4111,23 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
   hsa_status_t status;
   if (memHandle->imported && memHandle->is_fabric_handle) {
+    fprintf(stderr, "[VMEM DBG] MappedHandleAllowedAgent CTOR: ImportMemoryHandle FABRIC_HANDLE\n");
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::FABRIC_HANDLE,
         &memHandle->driver_handle);
   } else {
+    fprintf(stderr,
+            "[VMEM DBG] MappedHandleAllowedAgent CTOR: ImportMemoryHandle DMABUF_FD src_dmabuf_fd=%d "
+            "src_handle=0x%lx\n",
+            memHandle->driver_handle.dmabuf_fd, memHandle->driver_handle.handle);
     status = targetAgent->driver().ImportMemoryHandle(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
         &memHandle->driver_handle);
   }
+  fprintf(stderr,
+          "[VMEM DBG] MappedHandleAllowedAgent CTOR: ImportMemoryHandle returned status=%d "
+          "imported_handle=0x%lx\n",
+          status, driver_handle.handle);
   if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
 }
@@ -4097,6 +4151,10 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
+  fprintf(stderr,
+          "[VMEM DBG] EnableAccess ENTER: va=%p size=0x%zx targetAgent_node=%u device_type=%d "
+          "perms=%d\n",
+          va, size, targetAgent->node_id(), (int)targetAgent->device_type(), (int)perms);
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
 
@@ -4117,19 +4175,35 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
       agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
     }
 
+    fprintf(stderr,
+            "[VMEM DBG] EnableAccess CPU: MapMemory va=%p size=0x%zx mmap_fd=%d mmap_offset=0x%lx\n",
+            va, size, mmap_fd, mappedHandle->mem_handle->driver_handle.mmap_offset);
     if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
                              mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+      fprintf(stderr, "[VMEM DBG] EnableAccess CPU: MapMemory FAILED va=%p\n", va);
       return HSA_STATUS_ERROR;
     }
   } else {
+    fprintf(stderr,
+            "[VMEM DBG] EnableAccess GPU: driver().Map driver_handle=0x%lx va=%p offset=0x%lx "
+            "size=0x%zx perms=%d node=%u\n",
+            driver_handle.handle, va, mappedHandle->offset, size, (int)perms,
+            targetAgent->node_id());
     hsa_status_t status = targetAgent->driver().Map(driver_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());
+    fprintf(stderr, "[VMEM DBG] EnableAccess GPU: driver().Map returned status=%d va=%p\n", status,
+            va);
     if (status != HSA_STATUS_SUCCESS) return status;
   }
   permissions = perms;
+  fprintf(stderr, "[VMEM DBG] EnableAccess EXIT: va=%p perms=%d\n", va, (int)perms);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
+  fprintf(stderr,
+          "[VMEM DBG] RemoveAccess ENTER: va=%p size=0x%zx targetAgent_node=%u device_type=%d "
+          "cur_perms=%d\n",
+          va, size, targetAgent->node_id(), (int)targetAgent->device_type(), (int)permissions);
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
@@ -4141,6 +4215,11 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       permissions = perms;
     }
   } else {
+    fprintf(stderr,
+            "[VMEM DBG] RemoveAccess GPU: driver().Unmap driver_handle=0x%lx va=%p offset=0x%lx "
+            "size=0x%zx node=%u\n",
+            driver_handle.handle, va, mappedHandle->offset, mappedHandle->size,
+            targetAgent->node_id());
     return targetAgent->driver().Unmap(driver_handle, va, mappedHandle->offset, mappedHandle->size, targetAgent->node_id());
   }
   return HSA_STATUS_SUCCESS;
@@ -4229,6 +4308,11 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
                                    const hsa_amd_memory_access_desc_t *desc,
                                    const size_t desc_cnt) {
   MemoryHandle *memHandle = mappedHandle.mem_handle;
+  fprintf(stderr,
+          "[VMEM DBG] VMemorySetAccessPerHandle ENTER: va=%p size=0x%zx desc_cnt=%zu imported=%d "
+          "driver_handle=0x%lx dmabuf_fd=%d\n",
+          va, mappedHandle.size, desc_cnt, (int)memHandle->imported,
+          memHandle->driver_handle.handle, memHandle->driver_handle.dmabuf_fd);
 
   /*
    * For locally-created shareable handles CreateShareableHandle leaves dmabuf_fd as -1 to avoid
@@ -4241,12 +4325,20 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
      * Use drm_owner (the GPU agent used during CreateShareableHandle) instead. */
     Agent *exportAgent = memHandle->drmAgent();
     int dmabuf_fd = -1;
+    fprintf(stderr,
+            "[VMEM DBG] VMemorySetAccessPerHandle: lazily exporting dmabuf via exportAgent_node=%u\n",
+            exportAgent->node_id());
     hsa_status_t status = exportAgent->driver().ExportMemoryHandle(
         *exportAgent, memHandle->driver_handle, ShareType::DMABUF_FD, &dmabuf_fd);
-    if (status != HSA_STATUS_SUCCESS)
+    if (status != HSA_STATUS_SUCCESS) {
+      fprintf(stderr,
+              "[VMEM DBG] VMemorySetAccessPerHandle: lazy ExportMemoryHandle FAILED status=%d\n",
+              status);
       return status;
+    }
     memHandle->driver_handle.dmabuf_fd = dmabuf_fd;
     created_dmabuf_fd = true;
+    fprintf(stderr, "[VMEM DBG] VMemorySetAccessPerHandle: lazy export dmabuf_fd=%d\n", dmabuf_fd);
   }
 
   MAKE_SCOPE_GUARD([&]() {
@@ -4261,9 +4353,16 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
     const size_t &size = mappedHandle.size;
     const hsa_access_permission_t &perm = desc[i].permissions;
 
+    fprintf(stderr,
+            "[VMEM DBG] VMemorySetAccessPerHandle: desc[%d] va=%p targetAgent_node=%u perm=%d\n", i,
+            va, targetAgent->node_id(), (int)perm);
+
     auto agentPermsIt = mappedHandle.allowed_agents.find(targetAgent);
     if (agentPermsIt == mappedHandle.allowed_agents.end()) {
       /* Agent not previously allowed, we need a new entry */
+      fprintf(stderr,
+              "[VMEM DBG] VMemorySetAccessPerHandle: new allowed_agent entry for node=%u\n",
+              targetAgent->node_id());
       agentPermsIt =
           mappedHandle.allowed_agents
               .emplace(std::piecewise_construct,
@@ -4273,32 +4372,50 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
               .first;
 
       if (agentPermsIt->second.EnableAccess(perm) != HSA_STATUS_SUCCESS) {
+        fprintf(stderr,
+                "[VMEM DBG] VMemorySetAccessPerHandle: EnableAccess FAILED (new entry) va=%p "
+                "node=%u\n",
+                va, targetAgent->node_id());
         mappedHandle.allowed_agents.erase(agentPermsIt);
         return HSA_STATUS_ERROR;
       }
     } else {
       /* Previous permissions are same as current permission */
-      if (agentPermsIt->second.permissions == perm)
+      if (agentPermsIt->second.permissions == perm) {
+        fprintf(stderr,
+                "[VMEM DBG] VMemorySetAccessPerHandle: perms unchanged (perm=%d) for node=%u, "
+                "skipping\n",
+                (int)perm, targetAgent->node_id());
         continue;
+      }
 
       /* Permissions are different - update access */
+      fprintf(stderr,
+              "[VMEM DBG] VMemorySetAccessPerHandle: updating perms %d->%d for node=%u\n",
+              (int)agentPermsIt->second.permissions, (int)perm, targetAgent->node_id());
       if (agentPermsIt->second.RemoveAccess() != HSA_STATUS_SUCCESS)
       {
         throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to remove access for memory handle.");
       }
 
       if (agentPermsIt->second.EnableAccess(perm) != HSA_STATUS_SUCCESS) {
+        fprintf(stderr,
+                "[VMEM DBG] VMemorySetAccessPerHandle: EnableAccess FAILED (update) va=%p node=%u\n",
+                va, targetAgent->node_id());
         mappedHandle.allowed_agents.erase(agentPermsIt);
         return HSA_STATUS_ERROR;
       }
     }
   }
+  fprintf(stderr, "[VMEM DBG] VMemorySetAccessPerHandle EXIT: va=%p SUCCESS\n", va);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
                                        const hsa_amd_memory_access_desc_t* desc,
                                        const size_t desc_cnt) {
+  fprintf(stderr, "[VMEM DBG] VMemorySetAccess ENTER: va=%p size=0x%zx desc_cnt=%zu\n", va, size,
+          desc_cnt);
   std::list<std::pair<void*, MappedHandle*>> mappedHandles;
 
   // Validate all agents
@@ -4306,6 +4423,8 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
     Agent* targetAgent = Agent::Convert(desc[i].agent_handle);
 
     if (targetAgent == NULL || !targetAgent->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
+    fprintf(stderr, "[VMEM DBG] VMemorySetAccess: desc[%d] agent_node=%u permission=%d\n", i,
+            targetAgent->node_id(), (int)desc[i].permissions);
   }
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
@@ -4335,9 +4454,11 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
                                        *mappedHandleIt.second, desc, desc_cnt);
     if (status != HSA_STATUS_SUCCESS)
     {
+      fprintf(stderr, "[VMEM DBG] VMemorySetAccess EXIT: va=%p FAILED status=%d\n", va, status);
       return status;
     }
   }
+  fprintf(stderr, "[VMEM DBG] VMemorySetAccess EXIT: va=%p SUCCESS\n", va);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4404,6 +4525,8 @@ hsa_status_t Runtime::VMemoryMapAllowAccess(const void *va,
 
 hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* perms,
                                        hsa_agent_t agent_handle) {
+  fprintf(stderr, "[VMEM DBG] VMemoryGetAccess ENTER: va=%p agent=0x%lx\n", va,
+          agent_handle.handle);
   *perms = HSA_ACCESS_PERMISSION_NONE;
   bool mappedHandleFound = false;
 

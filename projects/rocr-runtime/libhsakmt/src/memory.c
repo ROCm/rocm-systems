@@ -984,6 +984,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
 		int ret = amdgpu_bo_export((amdgpu_bo_handle)desc->buf_handle,
 					amdgpu_bo_handle_type_dma_buf_fd, &res->dmabuf_fd);
 
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtHandleExport DMA_BUF: buf_handle=%p ret=%d dmabuf_fd=%d\n",
+			(void *)desc->buf_handle, ret, res->dmabuf_fd);
 		if (ret)
 			return HSAKMT_STATUS_INVALID_HANDLE;
 
@@ -1008,6 +1011,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 
 	if (!import_desc || !import_res || import_desc->device_handle == NULL)
 		return HSAKMT_STATUS_INVALID_HANDLE;
+
+	fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtHandleImport ENTER: type=%d dmabuf_fd=%d mem=%p\n",
+		(int)import_desc->type, import_desc->dmabuf_fd, import_desc->mem);
 
 	amdgpu_device_handle devhandle = (amdgpu_device_handle)import_desc->device_handle;
 
@@ -1052,8 +1058,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 	}
 	
 	ret = amdgpu_bo_import(devhandle, type, shared_handle, &res);
-	if (ret)
+	if (ret) {
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtHandleImport: amdgpu_bo_import FAILED=%d shared_handle=%u\n",
+			ret, shared_handle);
 		return HSAKMT_STATUS_ERROR;
+	}
+	fprintf(stderr,
+		"[VMEM DBG][THUNK] hsaKmtHandleImport: amdgpu_bo_import OK buf_handle=%p alloc_size=0x%lx\n",
+		(void *)res.buf_handle, (unsigned long)res.alloc_size);
 
 	if (flags->ui32.IPCHandle) {
 		/* Query buffer object for pre-existing metadata */
@@ -1084,6 +1097,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 
 	import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
 	import_res->alloc_size = (HSAuint64)res.alloc_size;
+	fprintf(stderr,
+		"[VMEM DBG][THUNK] hsaKmtHandleImport EXIT: buf_handle=%p alloc_size=0x%lx\n",
+		(void *)import_res->buf_handle, (unsigned long)import_res->alloc_size);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1105,6 +1121,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
 						HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
+	fprintf(stderr,
+		"[VMEM DBG][THUNK] hsaKmtMemoryVaMap ENTER: Handle=%p offset=0x%lx size=0x%lx addr=0x%lx "
+		"flags=%d NodeId=%u\n",
+		(void *)Handle, offset, size, addr, (int)flags, NodeId);
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
     if (!drmhandle) return HSAKMT_STATUS_ERROR;
@@ -1115,14 +1135,22 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 
 	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
-	if (result != HSAKMT_STATUS_SUCCESS)
+	if (result != HSAKMT_STATUS_SUCCESS) {
+		fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemoryVaMap: advance_vm_timeline FAILED=%d NodeId=%u\n",
+			(int)result, NodeId);
 		return result;
+	}
 
 	uint32_t gem_handle = 0;
 	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
-	if (ret)
+	if (ret) {
+		fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemoryVaMap: amdgpu_bo_export FAILED=%d\n", ret);
 		return HSAKMT_STATUS_ERROR;
-	
+	}
+	fprintf(stderr,
+		"[VMEM DBG][THUNK] hsaKmtMemoryVaMap: drm_fd=%d gem_handle=%u syncobj=%u seqnum=%lu "
+		"drm_perm=0x%lx\n",
+		drm_fd, gem_handle, vm_timeline_syncobj, vm_timeline_seqnum, MapDrmPerm(flags));
 
 	struct drm_amdgpu_gem_va va;
 	memset(&va, 0, sizeof(va));
@@ -1138,6 +1166,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
 	if (ret) {
 		pr_err("[%s] DRM_AMDGPU_GEM_VA MAP failed: %d\n", __func__, ret);
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtMemoryVaMap: DRM_AMDGPU_GEM_VA MAP FAILED=%d addr=0x%lx "
+			"gem_handle=%u NodeId=%u\n",
+			ret, addr, gem_handle, NodeId);
 		return HSAKMT_STATUS_ERROR;
 	}
 
@@ -1153,15 +1185,25 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
 
 	if (ret) {
 		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtMemoryVaMap: SYNCOBJ_TIMELINE_WAIT FAILED=%d addr=0x%lx "
+			"NodeId=%u\n",
+			ret, addr, NodeId);
 		return HSAKMT_STATUS_ERROR;
 	}
 
+	fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemoryVaMap EXIT: SUCCESS addr=0x%lx NodeId=%u\n", addr,
+		NodeId);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 						HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
+	fprintf(stderr,
+		"[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap ENTER: Handle=%p offset=0x%lx size=0x%lx addr=0x%lx "
+		"NodeId=%u\n",
+		(void *)Handle, offset, size, addr, NodeId);
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
 
@@ -1174,13 +1216,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 
 	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
-	if (result != HSAKMT_STATUS_SUCCESS)
+	if (result != HSAKMT_STATUS_SUCCESS) {
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap: advance_vm_timeline FAILED=%d NodeId=%u\n",
+			(int)result, NodeId);
 		return result;
+	}
 
 	uint32_t gem_handle = 0;
 	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
-	if (ret)
+	if (ret) {
+		fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap: amdgpu_bo_export FAILED=%d\n", ret);
 		return HSAKMT_STATUS_ERROR;
+	}
 
 	struct drm_amdgpu_gem_va va;
 	memset(&va, 0, sizeof(va));
@@ -1196,6 +1244,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
 	if (ret) {
 		pr_err("[%s] DRM_AMDGPU_GEM_VA UNMAP failed: %d\n", __func__, ret);
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap: DRM_AMDGPU_GEM_VA UNMAP FAILED=%d addr=0x%lx "
+			"NodeId=%u\n",
+			ret, addr, NodeId);
 		return HSAKMT_STATUS_ERROR;
 	}
 
@@ -1211,27 +1263,37 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
 
 	if (ret) {
 		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
+		fprintf(stderr,
+			"[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap: SYNCOBJ_TIMELINE_WAIT FAILED=%d addr=0x%lx "
+			"NodeId=%u\n",
+			ret, addr, NodeId);
 		return HSAKMT_STATUS_ERROR;
 	}
 
+	fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemoryVaUnmap EXIT: SUCCESS addr=0x%lx NodeId=%u\n",
+		addr, NodeId);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
+	fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemHandleFree ENTER: Handle=%p\n", (void *)Handle);
 	CHECK_KFD_OPEN();
 	// Reset metadata for the handle
     struct amdgpu_bo_metadata zero_metadata = {0};
     memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
     int ret = amdgpu_bo_set_metadata((amdgpu_bo_handle)Handle, &zero_metadata);
 	if (ret) {
+		fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemHandleFree: set_metadata FAILED=%d\n", ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 	ret = amdgpu_bo_free((amdgpu_bo_handle)Handle);
 	if (ret) {
+		fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemHandleFree: amdgpu_bo_free FAILED=%d\n", ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 
+	fprintf(stderr, "[VMEM DBG][THUNK] hsaKmtMemHandleFree EXIT: SUCCESS Handle=%p\n", (void *)Handle);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1286,6 +1348,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   	if (ret) return HSAKMT_STATUS_ERROR;
 
   	*cpu_addr = (HSAuint64)args.out.addr_ptr;
+  	fprintf(stderr,
+  		"[VMEM DBG][THUNK] hsaKmtMemoryGetCpuAddr: MemoryHandle=%p gem_handle=%u cpu_addr=0x%lx\n",
+  		(void *)MemoryHandle, gem_handle, (unsigned long)*cpu_addr);
   	return HSAKMT_STATUS_SUCCESS;
 }
 

@@ -473,8 +473,12 @@ hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
     if (flags & EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
       if (export_offset == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       void* mem = reinterpret_cast<void*>(handle.handle);
-      if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset)) !=
-          HSAKMT_STATUS_SUCCESS) {
+      HSAKMT_STATUS s = HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset));
+      fprintf(stderr,
+              "[VMEM DBG][KFD] ExportMemoryHandleImpl: hsaKmtExportDMABufHandle mem=%p size=0x%zx "
+              "returned=%d dmabuf_fd=%d offset=0x%lx\n",
+              mem, handle.size, (int)s, *dmabuf_fd, *export_offset);
+      if (s != HSAKMT_STATUS_SUCCESS) {
         return HSA_STATUS_ERROR;
       }
       return HSA_STATUS_SUCCESS;
@@ -535,6 +539,7 @@ hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
 hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::DriverMemoryHandle* handle,
                                            core::ShareType type, void* import_handle,
                                            void* mem) {
+  fprintf(stderr, "[VMEM DBG][KFD] ImportMemoryHandle ENTER: type=%d mem=%p\n", (int)type, mem);
   if (handle == nullptr || import_handle == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -551,7 +556,13 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     desc.metadata = 0;
     HsaHandleImportFlags hflags = {0};
     HsaHandleImportResult res = {};
+    fprintf(stderr, "[VMEM DBG][KFD] ImportMemoryHandle: hsaKmtHandleImport DMABUF_FD dmabuf_fd=%d\n",
+            dmabuf_fd);
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+    fprintf(stderr,
+            "[VMEM DBG][KFD] ImportMemoryHandle: hsaKmtHandleImport returned=%d buf_handle=%p "
+            "alloc_size=0x%llx\n",
+            (int)status, (void*)res.buf_handle, (unsigned long long)res.alloc_size);
     if (status != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR;
     }
@@ -590,11 +601,17 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
                             hsa_access_permission_t perms, uint32_t node_id) {
+  fprintf(stderr,
+          "[VMEM DBG][KFD] Map ENTER: handle=0x%lx mem=%p offset=0x%zx size=0x%zx perms=%d "
+          "node_id=%u\n",
+          handle.handle, mem, offset, size, (int)perms, node_id);
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle,
                                      static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
                                      mem_perm(perms), node_id));
+  fprintf(stderr, "[VMEM DBG][KFD] Map: hsaKmtMemoryVaMap returned=%d mem=%p node_id=%u\n",
+          (int)status, mem, node_id);
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
@@ -602,10 +619,15 @@ hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, s
 
 hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
                               size_t offset, size_t size, uint32_t node_id) {
+  fprintf(stderr,
+          "[VMEM DBG][KFD] Unmap ENTER: handle=0x%lx mem=%p offset=0x%zx size=0x%zx node_id=%u\n",
+          handle.handle, mem, offset, size, node_id);
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(memhandle,
                                      static_cast<HSAuint64>(offset),
                                      static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem), node_id));
+  fprintf(stderr, "[VMEM DBG][KFD] Unmap: hsaKmtMemoryVaUnmap returned=%d mem=%p node_id=%u\n",
+          (int)status, mem, node_id);
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
@@ -615,6 +637,8 @@ hsa_status_t KfdDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
 hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                               const core::Agent& agent,
                                               core::DriverMemoryHandle* handle, uint64_t* offset) {
+  fprintf(stderr, "[VMEM DBG][KFD] CreateShareableHandle ENTER: va=%p mem=%p size=0x%zx\n", va, mem,
+          size);
   // Create handle by exporting and importing the memory from the owning agent.
   (void)va;
 
@@ -674,10 +698,15 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
    */
   handle->dmabuf_fd = -1;
   handle->size = size;
+  fprintf(stderr,
+          "[VMEM DBG][KFD] CreateShareableHandle EXIT: handle=0x%lx mmap_offset=0x%lx size=0x%zx\n",
+          handle->handle, handle->mmap_offset, size);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  fprintf(stderr, "[VMEM DBG][KFD] DestroyMemoryHandle ENTER: handle=0x%lx dmabuf_fd=%d\n",
+          handle->handle, handle->dmabuf_fd);
   hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
