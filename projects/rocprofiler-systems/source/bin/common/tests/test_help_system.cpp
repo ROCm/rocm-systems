@@ -5,13 +5,60 @@
 
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <sstream>
 #include <string>
+#include <utility>
 
 using namespace rocprofsys::common_utils;
 
 class help_system_test : public ::testing::Test
 {};
+
+// Minimal parser stub satisfying the interface dispatch_help() requires:
+// exists()/get() to read the requested --help value, and set_ostream()/
+// print_help() used by capture_help_text(). print_help() emits nothing here
+// because the unknown-topic path never finds a matching section anyway.
+class mock_help_parser
+{
+public:
+    explicit mock_help_parser(std::string help_value)
+    : m_help_value{ std::move(help_value) }
+    {}
+
+    bool exists(std::string_view key) const { return key == "help"; }
+
+    template <typename Tp>
+    Tp get(std::string_view) const
+    {
+        return m_help_value;
+    }
+
+    std::ostream* set_ostream(std::ostream* next)
+    {
+        auto* prev = m_ostream;
+        m_ostream  = next;
+        return prev;
+    }
+
+    void print_help() const {}
+
+private:
+    std::string   m_help_value;
+    std::ostream* m_ostream = nullptr;
+};
+
+// Capture whatever a callable writes to std::cerr.
+template <typename Fn>
+static std::string
+capture_cerr(Fn&& fn)
+{
+    std::ostringstream oss;
+    auto*              prev = std::cerr.rdbuf(oss.rdbuf());
+    std::forward<Fn>(fn)();
+    std::cerr.rdbuf(prev);
+    return oss.str();
+}
 
 // Synthetic help output that mimics print_help() format (no ANSI codes).
 // ANSI stripping is tested separately below.
@@ -174,6 +221,26 @@ TEST_F(help_system_test, compact_help_lists_tool_specific_topics)
     // A tool-agnostic topic (empty 'tools' list) is advertised for both tools.
     EXPECT_NE(run_out.find("Output format selection"), std::string::npos);
     EXPECT_NE(sample_out.find("Output format selection"), std::string::npos);
+}
+
+// The unknown-topic fallback listing must honor the same tool gating as the
+// compact --help listing: 'execution' is run-only, so it must NOT appear when
+// an unknown topic is requested on rocprof-sys-sample. (Regression guard for
+// the compact/fallback divergence: compact was gated, fallback was not.)
+TEST_F(help_system_test, unknown_topic_fallback_respects_tool_gating)
+{
+    mock_help_parser sample_parser{ "definitely-not-a-real-topic" };
+    auto             fallback = capture_cerr([&] {
+        [[maybe_unused]] auto rc =
+            dispatch_help(sample_parser, "sample", /*exit_code=*/1);
+    });
+
+    // Sanity: we actually hit the unknown-topic branch.
+    EXPECT_NE(fallback.find("Unknown help topic"), std::string::npos);
+    // A tool-agnostic topic is still advertised.
+    EXPECT_NE(fallback.find("output"), std::string::npos);
+    // The run-only 'execution' topic must be gated out for sample.
+    EXPECT_EQ(fallback.find("execution"), std::string::npos);
 }
 
 // ============================================================================
