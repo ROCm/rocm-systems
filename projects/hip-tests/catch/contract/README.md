@@ -85,6 +85,7 @@ The first domains are:
 - `ipc`: capability-gated same-process IPC memory and event handle contracts
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts
 - `module_load_ex`: HIPRTC-backed module load-data-with-options contracts
+- `module_load_file`: module load-from-file and fat-binary invalid-input contracts
 - `module_exec`: HIPRTC-backed module function-count, occupancy, and cooperative launch contracts
 - `jit_link`: AMD-gated JIT linker lifecycle and invalid-input contracts
 - `library`: AMD-gated HIPRTC-backed library load, kernel, global, and kernel-object contracts

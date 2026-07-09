@@ -1248,6 +1248,24 @@ contract:
   Contract_ModuleLoadEx_LaunchWritesExpectedValue:
     <<: *level_0
     tags: [module_load_ex]
+  Contract_ModuleLoadFile_LoadNullModule_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
+  Contract_ModuleLoadFile_LoadNullFilename_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
+  Contract_ModuleLoadFile_LoadEmptyFilename_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
+  Contract_ModuleLoadFile_LoadMissingFile_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
+  Contract_ModuleLoadFile_LoadFatBinaryNullFatbin_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
+  Contract_ModuleLoadFile_LoadFatBinaryNullModule_IsRejected:
+    <<: *level_0
+    tags: [module_load_file]
   Contract_ModuleExec_GetFunctionCount_ReturnsPositiveCount:
     <<: *level_0
     tags: [module_exec]
