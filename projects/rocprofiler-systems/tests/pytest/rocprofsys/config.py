@@ -8,6 +8,7 @@ import getpass
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 from typing import Optional
 import re
