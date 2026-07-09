@@ -70,12 +70,13 @@ drop `--gdb` to pass your own `rocgdb` invocation for full control.
 
 Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
 end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
-wave registers / PC / disassembly, single-steps instructions, and continues the
-kernel to correct completion. `info agents` lists the synthetic `gfx950 /
-MI350X` agent, a breakpoint on a GPU kernel stops the trapping wave, and a
-hardware `watch` on GPU memory traps the wave that accesses it. The remaining
-wave-control features (faults, private memory, multi-wave) build on this and are
-tracked below.
+wave registers / PC / disassembly, single-steps instructions, resolves
+source-level arguments and locals from private/scratch memory (`print`,
+`info args`), and continues the kernel to correct completion. `info agents` lists
+the synthetic `gfx950 / MI350X` agent, a breakpoint on a GPU kernel stops the
+trapping wave, and a hardware `watch` on GPU memory traps the wave that accesses
+it. The remaining wave-control feature (multi-wave) builds on this and is tracked
+below.
 
 | Area | Status |
 |---|---|
@@ -96,7 +97,8 @@ tracked below.
 | GPU address watchpoints (`watch`/`rwatch`/`awatch`) | done |
 | Illegal-instruction exception (SIGILL) | done |
 | Memory-access violation (SIGSEGV) | done |
-| Private/scratch reads / multi-wave | pending |
+| Private/scratch reads (`print`, `info args`) | done |
+| Multi-wave kernels | pending |
 
 ## 4. Sources
 

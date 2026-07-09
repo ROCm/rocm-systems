@@ -306,6 +306,49 @@ else
   echo "  SKIP: could not build bad_access.hip for $arch"
 fi
 
+# --- Sixth scenario: private/scratch variable reads ---------------------------
+# At the kernel breakpoint, read scratch-resident kernel arguments and locals
+# (`data`, `n`) and a dereferenced device value (`data[0]`). This exercises the
+# full private-memory path: the emulator stores scratch in the hardware
+# dword-interleaved layout, publishes scratch_backing_memory_location +
+# COMPUTE_TMPRING_SIZE and the flat_scratch register into the CWSR, and
+# rocm-dbgapi resolves the DWARF private_lane locations against it. A regression
+# shows up as "Cannot access memory at address private_lane#..." or the dbgapi
+# warning "flat_scratch may be corrupted, private memory access is disabled".
+echo "running rocgdb (private/scratch variable reads) ..."
+outfile6="$workdir/rocgdb6.out"
+timeout 180 "$mirage_bin" run --profile "$profile" -- \
+  rocgdb --batch \
+    -ex 'set breakpoint pending on' \
+    -ex 'break add_one' \
+    -ex 'run' \
+    -ex 'print data' \
+    -ex 'print n' \
+    -ex 'print data[0]' \
+    -ex 'info args' \
+    -ex 'continue' \
+    "$app" </dev/null >"$outfile6" 2>&1
+out6="$(cat "$outfile6")"
+echo "--------------------------------------------------------------------"
+echo "$out6"
+echo "--------------------------------------------------------------------"
+check6() { # <regex> <description>  (checks the sixth run's output)
+  if grep -qaE "$1" <<<"$out6"; then
+    echo "  ok: $2"
+  else
+    echo "  MISSING: $2 (/$1/)" >&2
+    fail=1
+  fi
+}
+check6 '\$1 = \(int \*\) 0x[0-9a-f]+' 'scratch-resident pointer arg `data` resolves'
+check6 '\$2 = 64' 'scratch-resident scalar arg `n` resolves to 64'
+check6 '\$3 = 0' 'dereferenced device value data[0] reads back 0'
+check6 'n = 64' '`info args` reports the scratch-resident argument'
+if grep -qaE 'Cannot access memory at address private_lane|flat_scratch may be corrupted' <<<"$out6"; then
+  echo "  FAIL: scratch/private memory was not readable" >&2
+  fail=1
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1

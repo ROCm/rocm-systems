@@ -7,8 +7,8 @@ AMD GPU required.
 ROCgdb, and makes kernel breakpoints pending so `break <kernel>` resolves when
 the GPU code object loads at dispatch. This demo builds a tiny HIP kernel and
 drives ROCgdb through it: setting a breakpoint on the GPU kernel, running to the
-stopped wave, reading its PC and the instruction at PC, and continuing to
-completion.
+stopped wave, reading its source-level arguments and locals (`info args`,
+`print n`, `print data[0]`), and continuing to completion.
 
 It is the fastest way to see the emulated GPU debugger working end to end, and
 the same flow (`mirage run --gdb -- ./your_app`) drops you into an interactive

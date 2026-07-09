@@ -353,6 +353,13 @@ int SimulatedDriver::open() {
       continue;
     if (!g.soc)
       continue;
+    const uint32_t se_div =
+        (i < gpu_infos_.size() && gpu_infos_[i].num_shader_arrays_per_engine != 0)
+            ? std::max(1u, gpu_infos_[i].num_shader_engines /
+                               gpu_infos_[i].num_shader_arrays_per_engine)
+            : 1u;
+    g.soc->for_each_cp(
+        [se_div](amdgpu::CommandProcessor *cp) { cp->set_scratch_wave_divisor(se_div); });
     uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
     uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
     g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
@@ -471,6 +478,13 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
       continue;
     if (!g.soc)
       continue;
+    const uint32_t se_div =
+        (i < gpu_infos_.size() && gpu_infos_[i].num_shader_arrays_per_engine != 0)
+            ? std::max(1u, gpu_infos_[i].num_shader_engines /
+                               gpu_infos_[i].num_shader_arrays_per_engine)
+            : 1u;
+    g.soc->for_each_cp(
+        [se_div](amdgpu::CommandProcessor *cp) { cp->set_scratch_wave_divisor(se_div); });
     uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
     uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
     g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
@@ -1954,6 +1968,10 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   w.pc = wf.pc;
   w.exec = wf.exec();
   w.vcc = wf.vcc();
+  // FLAT_SCRATCH holds this wave's private (scratch) base. rocm-dbgapi validates
+  // the scratch base it derives from COMPUTE_TMPRING_SIZE against this register
+  // before allowing private-memory reads (wave.cpp scratch_memory_region).
+  w.flat_scratch = wf.scratch_base();
   w.m0 = wf.m0();
   w.mode = wf.mode_raw();
   w.trapsts = wf.trapsts();

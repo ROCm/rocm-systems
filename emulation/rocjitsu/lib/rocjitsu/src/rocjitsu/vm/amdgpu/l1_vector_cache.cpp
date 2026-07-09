@@ -145,15 +145,19 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         bool request_l1_bypass, uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t vmid, uint32_t addr_stride) {
   uint32_t stride = num_elems * elem_size;
+  // Per-element address stride: contiguous (elem_size) by default, or the
+  // scratch swizzle stride (lane_count * sizeof(uint32_t)) so consecutive
+  // dwords land in the hardware dword-interleaved layout rocm-dbgapi reads.
+  uint32_t astride = addr_stride ? addr_stride : elem_size;
   uint64_t remaining = lane_mask;
   while (remaining) {
     uint32_t lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * elem_size;
+      uint64_t ea = base + e * astride;
       read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal,
                  request_l1_bypass, vmid);
     }
@@ -162,8 +166,9 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
-                          uint32_t vmid) {
+                          uint32_t vmid, uint32_t addr_stride) {
   uint32_t stride = num_elems * elem_size;
+  uint32_t astride = addr_stride ? addr_stride : elem_size;
   uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
@@ -175,7 +180,7 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
     remaining &= remaining - 1;
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {
-      uint64_t ea = base + e * elem_size;
+      uint64_t ea = base + e * astride;
       write_bytes(ea, src + lane * stride + e * elem_size, elem_size, mtype, non_temporal, vmid);
     }
   }

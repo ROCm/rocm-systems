@@ -106,6 +106,15 @@ struct VectorMemState : DynamicInstState {
   // cacheability and response policy used by the downstream memory path.
   bool request_force_l1_bypass = false;
   bool sign_extend = false;
+  // Scratch (private) accesses store data in the hardware dword-interleaved
+  // ("swizzled") layout that rocm-dbgapi reads: consecutive dwords of a lane's
+  // private space are lane_count*4 bytes apart, not contiguous. When
+  // scratch_swizzle is set, per_lane_addr holds the swizzled address of element
+  // 0 and scratch_addr_stride (= lane_count * sizeof(uint32_t)) is the per-element
+  // destination-address stride; the register/LDS buffer indexing is unchanged.
+  // See rocm-dbgapi memory.cpp private_swizzled conversion.
+  bool scratch_swizzle = false;
+  uint32_t scratch_addr_stride = 0;
   bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
   bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
