@@ -2613,6 +2613,23 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "nccl4py_build_smoke": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/nccl4py",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "NCCL4Py_BuildSmoke_All",
+          "description": "pip install -e nccl4py + CPU smoke pytest modules; self-skips without librccl.so",
+          "test_filter": "ALL"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -3028,6 +3045,12 @@
       "name": "IR Device Tests",
       "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
       "config": "ir_device",
+      "enabled": true
+    },
+    {
+      "name": "nccl4py Build Smoke",
+      "description": "pip install -e nccl4py + CPU smoke pytest modules; self-skips without librccl.so",
+      "config": "nccl4py_build_smoke",
       "enabled": true
     }
   ]

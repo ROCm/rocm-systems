@@ -1,0 +1,7 @@
+venv/
+.venv/
+logs/
+nccl4py_build/
+.pytest_cache/
+__pycache__/
+*.pyc
