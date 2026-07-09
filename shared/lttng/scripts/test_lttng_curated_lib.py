@@ -13,7 +13,7 @@ from lttng_curated_lib import (
     DSL_TYPES, ALLOWED_DIRS, ParseError, BudgetError, IN_ARG_KIND,
 )
 
-# ---- Schema parsing ----
+# ---- Schema parsing (explicit per-arg shape; see compact-schema tests below) ----
 
 def test_parses_minimal_api():
     apis = parse_yaml_text("""
@@ -25,14 +25,16 @@ def test_parses_minimal_api():
 """)
     assert len(apis) == 1
     assert apis[0]['api'] == 'hipMemcpyAsync'
+    # 'category' has no schema meaning any more (Phase 3) but is passed
+    # through untouched as an arbitrary extra key, same as 'notes'.
     assert apis[0]['category'] == 'memory'
     assert len(apis[0]['args']) == 2
 
 def test_rejects_missing_required_top_field():
     try:
-        parse_yaml_text("- api: foo\n  args: []\n")  # no category
+        parse_yaml_text("- api: foo\n")  # no args
     except ParseError as e:
-        assert 'category' in str(e)
+        assert 'args' in str(e)
         return
     raise AssertionError("expected ParseError")
 
@@ -61,7 +63,9 @@ def test_rejects_unknown_dir():
     raise AssertionError("expected ParseError")
 
 def test_rejects_inout_v1():
-    """dir: INOUT is hard-error in v1."""
+    """dir: INOUT was never implemented and is not part of the direction
+    vocabulary; an explicit-shape arg using it is just an unknown-dir
+    error (same code path as any other bogus value)."""
     try:
         parse_yaml_text("""
 - api: foo
@@ -72,6 +76,118 @@ def test_rejects_inout_v1():
         assert 'INOUT' in str(e)
         return
     raise AssertionError("expected ParseError")
+
+# ---- Compact schema parsing ----
+
+def test_compact_minimal_api():
+    """args: [...] with no out/pack_dim3/strings/types — every arg
+    resolves to dir IN, and 'type' is deliberately NOT populated (real
+    type inference needs header access; see lttng_curated_verify)."""
+    apis = parse_yaml_text("""
+- api: hipMemcpyAsync
+  args: [dst, src, sizeBytes, kind, stream]
+""")
+    assert len(apis) == 1
+    api = apis[0]
+    assert api['api'] == 'hipMemcpyAsync'
+    assert [a['name'] for a in api['args']] == ['dst', 'src', 'sizeBytes', 'kind', 'stream']
+    assert all(a['dir'] == 'IN' for a in api['args'])
+    assert all('type' not in a for a in api['args'])
+    assert api['pack_dim3'] == []
+    assert api['strings'] == []
+    assert api['types_override'] == {}
+
+def test_compact_out_list_resolves_direction():
+    apis = parse_yaml_text("""
+- api: hipMalloc
+  args: [ptr, size]
+  out: [ptr]
+""")
+    args_by_name = {a['name']: a for a in apis[0]['args']}
+    assert args_by_name['ptr']['dir'] == 'OUT'
+    assert args_by_name['size']['dir'] == 'IN'
+
+def test_compact_pack_dim3_and_strings_and_types_roundtrip():
+    apis = parse_yaml_text("""
+- api: hipModuleGetFunction
+  args: [function, module, kname]
+  out: [function]
+  strings: [kname]
+- api: hipLaunchKernel
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream]
+  pack_dim3: [numBlocks, dimBlocks]
+""")
+    a0, a1 = apis
+    assert a0['strings'] == ['kname']
+    assert a1['pack_dim3'] == ['numBlocks', 'dimBlocks']
+
+def test_compact_types_override_validated_against_dsl_types():
+    try:
+        parse_yaml_text("""
+- api: foo
+  args: [x]
+  types: {x: gizmo}
+""")
+    except ParseError as e:
+        assert 'gizmo' in str(e)
+        return
+    raise AssertionError("expected ParseError")
+
+def test_compact_out_referencing_unknown_arg_rejected():
+    try:
+        parse_yaml_text("""
+- api: foo
+  args: [x]
+  out: [y]
+""")
+    except ParseError as e:
+        assert 'y' in str(e) and 'out' in str(e)
+        return
+    raise AssertionError("expected ParseError")
+
+def test_compact_pack_dim3_and_strings_overlap_rejected():
+    try:
+        parse_yaml_text("""
+- api: foo
+  args: [x]
+  pack_dim3: [x]
+  strings: [x]
+""")
+    except ParseError as e:
+        assert 'x' in str(e)
+        return
+    raise AssertionError("expected ParseError")
+
+def test_compact_duplicate_args_rejected():
+    try:
+        parse_yaml_text("""
+- api: foo
+  args: [x, x]
+""")
+    except ParseError as e:
+        assert 'duplicate' in str(e).lower()
+        return
+    raise AssertionError("expected ParseError")
+
+def test_compact_zero_args_api():
+    """An empty args list (e.g. hipDeviceSynchronize) is valid in either
+    shape and needs no expansion step to be usable."""
+    apis = parse_yaml_text("- api: hipDeviceSynchronize\n  args: []\n")
+    assert apis[0]['args'] == []
+
+def test_explicit_shape_still_accepted_for_fixtures():
+    """The fully-explicit {name, type, dir} per-arg shape (used by
+    libclang-independent --sigs test fixtures) still parses, validates,
+    and budget-checks immediately, unchanged from the pre-Phase-3
+    behavior."""
+    apis = parse_yaml_text("""
+- api: hipMemcpyAsync
+  args:
+    - {name: dst, type: ptr, dir: IN}
+    - {name: src, type: ptr, dir: IN}
+""")
+    assert apis[0]['args'][0]['type'] == 'ptr'
+    assert 'pack_dim3' not in apis[0]
 
 # ---- Field-budget calculation ----
 

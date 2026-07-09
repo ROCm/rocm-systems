@@ -63,9 +63,11 @@ import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from lttng_curated_lib import parse_yaml_file
+from lttng_curated_lib import parse_yaml_file, validate_api, ParseError, BudgetError
 from lttng_curated_verify import (parse_headers, compute_sidecar,
-                                  AmbiguousDeclarationError)
+                                  expand_compact_apis,
+                                  AmbiguousDeclarationError,
+                                  AmbiguousInferenceError)
 
 # Repo root, used to locate the clang-format style file for HIP's emit.h
 # post-process pass. shared/lttng/scripts -> shared/lttng -> shared -> root.
@@ -547,12 +549,44 @@ def load_sigs_by_api(yaml_path, sigs_path, header_paths, extra_args):
     return compute_sidecar(apis, header_decls)
 
 
+def resolve_apis(yaml_path, sigs_path, header_paths, extra_args):
+    """Resolve curated_apis.yaml into the fully-expanded, budget-checked
+    {api, args: [{name, type, dir}, ...]} representation the rest of
+    codegen (emit_tp_h/emit_emit_h) operates on.
+
+    Compact-schema entries (real production YAML) need real per-arg C
+    types to infer DSL types from — that means a live libclang --header
+    parse (see lttng_curated_verify.expand_compact_apis()). `--sigs`
+    mode (a pre-computed {api: [{name, c_type}]} JSON, with no
+    canonical-type/is_enum info) can only be used with the fully-explicit
+    {name, type, dir} YAML shape (test fixtures), since it lacks what
+    inference needs; a compact-schema entry combined with --sigs is a
+    clear usage error, not silently-wrong output."""
+    raw_apis = parse_yaml_file(yaml_path)
+    if sigs_path is not None:
+        # A zero-arg api (e.g. hipDeviceSynchronize) needs no type
+        # resolution at all regardless of which internal shape
+        # parse_yaml_file() happened to route it through, so only
+        # non-empty compact-shape apis (args present, but no 'type' key)
+        # are actually a --sigs-mode usage error.
+        bad = [a['api'] for a in raw_apis if a['args'] and 'type' not in a['args'][0]]
+        if bad:
+            sys.exit(
+                f"ERROR: --sigs mode requires the fully-explicit "
+                f"{{name, type, dir}} YAML shape (no live header available "
+                f"to infer the compact schema's types from); compact-shape "
+                f"api(s) found: {bad}")
+        return raw_apis
+    header_decls = parse_headers(header_paths, extra_args)
+    return expand_compact_apis(raw_apis, header_decls)
+
+
 # ---------------------------------------------------------------------------
 # Top-level generation entry point (shared by normal mode and --check mode)
 # ---------------------------------------------------------------------------
-def generate(cfg, yaml_path, tp_out_path, emit_out_path, sigs_by_api, regen_cmd):
-    """Return (tp_text, emit_text)."""
-    apis = parse_yaml_file(yaml_path)
+def generate(cfg, apis, yaml_path, tp_out_path, emit_out_path, sigs_by_api, regen_cmd):
+    """Return (tp_text, emit_text). `apis` must already be the fully-
+    expanded/resolved representation (see resolve_apis())."""
     with open(yaml_path, 'rb') as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
 
@@ -629,12 +663,13 @@ def main():
 
     try:
         sigs_by_api = load_sigs_by_api(args.yaml, args.sigs, args.header, args.extra_arg)
-    except AmbiguousDeclarationError as e:
+        apis = resolve_apis(args.yaml, args.sigs, args.header, args.extra_arg)
+    except (AmbiguousDeclarationError, AmbiguousInferenceError, ParseError, BudgetError) as e:
         sys.exit(f"ERROR: {e}")
     regen_cmd = _regen_cmd(cfg, args.yaml, args.tp_out, args.emit_out,
                            sigs_path=args.sigs, header_paths=args.header,
                            extra_args=args.extra_arg)
-    tp_text, emit_text = generate(cfg, args.yaml, args.tp_out, args.emit_out,
+    tp_text, emit_text = generate(cfg, apis, args.yaml, args.tp_out, args.emit_out,
                                   sigs_by_api, regen_cmd)
 
     if args.check:

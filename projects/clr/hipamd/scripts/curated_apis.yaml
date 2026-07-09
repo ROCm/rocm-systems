@@ -1,585 +1,273 @@
 # Curated HIP APIs for typed parameter capture.
 #
-# Schema:
-#   - api: string (must match HIP header function name exactly)
-#     category: streams | events | kernel_launch | memory | graphs | module
-#     args:
-#       - {name: <param_name>, type: <DSL type>, dir: IN | OUT}
+# Schema (see shared/lttng/scripts/lttng_curated_lib.py for full details):
+#   - api: <name>                  # must match the real HIP header function name
+#     args: [<name>, ...]          # allowlist of captured params, in header order
+#     out: [<name>, ...]           # optional; subset of args captured OUT (default: all IN)
+#     pack_dim3: [<name>, ...]     # optional; dim3 args packed into one uint64 field
+#     strings: [<name>, ...]       # optional; char*/const char* args captured as strings
+#     types: {<name>: <DSL type>}  # optional; explicit override for a genuinely
+#                                  # ambiguous real C type (see lttng_curated_verify.py)
 #
-# DSL types: handle | ptr | device_ptr | size | int32 | uint32 | int64 |
-#            uint64 | float | enum | bool | dim3 | dim3_packed | cstring
-#
-# Direction: IN (captured at entry, emitted at exit) | OUT (deref'd at exit).
-# INOUT is rejected in v1.
-#
-# Field budget: each API may have at most 9 payload fields after corr_id.
-# Use `dim3_packed` instead of `dim3` to fit high-arity launch APIs.
-#
-# Names are validated against the HIP header signature by a libclang-based
-# drift verifier (stacked PR2).
+# Per-arg DSL type and the field-budget check are resolved and enforced
+# automatically from the real HIP header via a live libclang parse (see
+# lttng_curated_verify.py's infer_dsl_type()/expand_compact_apis()). Arg
+# names are cross-checked against the real header signature by the same
+# libclang-based drift verifier.
 
-# ============================================================
-# A.1 HIP streams + sync (12)
-# ============================================================
-
+# --- streams + sync ---
 - api: hipStreamCreate
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: OUT}
+  args: [stream]
+  out: [stream]
 
 - api: hipStreamCreateWithFlags
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: OUT}
-    - {name: flags,  type: uint32, dir: IN}
+  args: [stream, flags]
+  out: [stream]
 
 - api: hipStreamCreateWithPriority
-  category: streams
-  args:
-    - {name: stream,   type: handle, dir: OUT}
-    - {name: flags,    type: uint32, dir: IN}
-    - {name: priority, type: int32,  dir: IN}
+  args: [stream, flags, priority]
+  out: [stream]
 
 - api: hipStreamDestroy
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: IN}
+  args: [stream]
 
 - api: hipStreamGetFlags
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: IN}
-    - {name: flags,  type: uint32, dir: OUT}
+  args: [stream, flags]
+  out: [flags]
 
 - api: hipStreamGetPriority
-  category: streams
-  args:
-    - {name: stream,   type: handle, dir: IN}
-    - {name: priority, type: int32,  dir: OUT}
+  args: [stream, priority]
+  out: [priority]
 
 - api: hipStreamSynchronize
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: IN}
+  args: [stream]
 
 - api: hipStreamWaitEvent
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: IN}
-    - {name: event,  type: handle, dir: IN}
-    - {name: flags,  type: uint32, dir: IN}
+  args: [stream, event, flags]
 
 - api: hipStreamQuery
-  category: streams
-  args:
-    - {name: stream, type: handle, dir: IN}
+  args: [stream]
 
 - api: hipStreamAddCallback
-  category: streams
-  args:
-    - {name: stream,   type: handle, dir: IN}
-    - {name: callback, type: ptr,    dir: IN}
-    - {name: userData, type: ptr,    dir: IN}
-    - {name: flags,    type: uint32, dir: IN}
+  args: [stream, callback, userData, flags]
 
 - api: hipDeviceSynchronize
-  category: streams
   args: []
 
 - api: hipStreamAttachMemAsync
-  category: streams
-  args:
-    - {name: stream,  type: handle, dir: IN}
-    - {name: dev_ptr, type: ptr,    dir: IN}
-    - {name: length,  type: size,   dir: IN}
-    - {name: flags,   type: uint32, dir: IN}
+  args: [stream, dev_ptr, length, flags]
 
-# ============================================================
-# A.2 HIP events (7)
-# ============================================================
-
+# --- events ---
 - api: hipEventCreate
-  category: events
-  args:
-    - {name: event, type: handle, dir: OUT}
+  args: [event]
+  out: [event]
 
 - api: hipEventCreateWithFlags
-  category: events
-  args:
-    - {name: event, type: handle, dir: OUT}
-    - {name: flags, type: uint32, dir: IN}
+  args: [event, flags]
+  out: [event]
 
 - api: hipEventDestroy
-  category: events
-  args:
-    - {name: event, type: handle, dir: IN}
+  args: [event]
 
 - api: hipEventRecord
-  category: events
-  args:
-    - {name: event,  type: handle, dir: IN}
-    - {name: stream, type: handle, dir: IN}
+  args: [event, stream]
 
 - api: hipEventSynchronize
-  category: events
-  args:
-    - {name: event, type: handle, dir: IN}
+  args: [event]
 
 - api: hipEventQuery
-  category: events
-  args:
-    - {name: event, type: handle, dir: IN}
+  args: [event]
 
-# Note: header param is `stop`, not `end` (spec Appendix A line 635 has typo).
 - api: hipEventElapsedTime
-  category: events
-  args:
-    - {name: ms,    type: float,  dir: OUT}
-    - {name: start, type: handle, dir: IN}
-    - {name: stop,  type: handle, dir: IN}
+  args: [ms, start, stop]
+  out: [ms]
 
-# ============================================================
-# A.3 HIP kernel launch + module (10)
+# --- kernel launch + module ---
 #
-# Note: hipExtModuleLaunchKernel is OMITTED — declared in hip_ext.h, not
-# hip_runtime_api.h, and would require adding hip_ext.h to the verifier
-# CMake invocation. Follow-up task.
-# ============================================================
-
-# Field budget: 6 = 1(ptr) + 1(dim3_packed) + 1(dim3_packed) + 1(ptr) + 1(size) + 1(handle).
+# hipExtModuleLaunchKernel is intentionally OMITTED: it is declared
+# in hip_ext.h, not hip_runtime_api.h, and would require adding
+# hip_ext.h to the verifier's CMake invocation. Follow-up task.
 - api: hipLaunchKernel
-  category: kernel_launch
-  args:
-    - {name: function_address, type: ptr,         dir: IN}
-    - {name: numBlocks,        type: dim3_packed, dir: IN}
-    - {name: dimBlocks,        type: dim3_packed, dir: IN}
-    - {name: args,             type: ptr,         dir: IN}
-    - {name: sharedMemBytes,   type: size,        dir: IN}
-    - {name: stream,           type: handle,      dir: IN}
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream]
+  pack_dim3: [numBlocks, dimBlocks]
 
-# Header has gridDim/blockDimX (not numBlocks/dimBlocks); both are dim3 so dim3_packed applies.
-# Field budget: 1(ptr) + 1(packed) + 1(packed) + 1(ptr) + 1(uint32) + 1(handle) = 6.
 - api: hipLaunchCooperativeKernel
-  category: kernel_launch
-  args:
-    - {name: f,              type: ptr,         dir: IN}
-    - {name: gridDim,        type: dim3_packed, dir: IN}
-    - {name: blockDimX,      type: dim3_packed, dir: IN}
-    - {name: kernelParams,   type: ptr,         dir: IN}
-    - {name: sharedMemBytes, type: uint32,      dir: IN}
-    - {name: stream,         type: handle,      dir: IN}
+  args: [f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream]
+  pack_dim3: [gridDim, blockDimX]
 
 - api: hipLaunchCooperativeKernelMultiDevice
-  category: kernel_launch
-  args:
-    - {name: launchParamsList, type: ptr,    dir: IN}
-    - {name: numDevices,       type: int32,  dir: IN}
-    - {name: flags,            type: uint32, dir: IN}
+  args: [launchParamsList, numDevices, flags]
 
-# hipModuleLaunchKernel: header has individual gridDimX/Y/Z + blockDimX/Y/Z
-# uint32s (NOT dim3 args), so dim3_packed is not applicable to those.
-# Drop the 6 dim params to fit the budget; keep f, sharedMemBytes, stream,
-# kernelParams, extra = 5 payload fields.
 - api: hipModuleLaunchKernel
-  category: kernel_launch
-  args:
-    - {name: f,              type: handle, dir: IN}
-    - {name: sharedMemBytes, type: uint32, dir: IN}
-    - {name: stream,         type: handle, dir: IN}
-    - {name: kernelParams,   type: ptr,    dir: IN}
-    - {name: extra,          type: ptr,    dir: IN}
+  args: [f, sharedMemBytes, stream, kernelParams, extra]
 
-# Field budget for hipExtLaunchKernel: 1+1+1+1+1+1+1+1+1 = 9 exactly.
 - api: hipExtLaunchKernel
-  category: kernel_launch
-  args:
-    - {name: function_address, type: ptr,         dir: IN}
-    - {name: numBlocks,        type: dim3_packed, dir: IN}
-    - {name: dimBlocks,        type: dim3_packed, dir: IN}
-    - {name: args,             type: ptr,         dir: IN}
-    - {name: sharedMemBytes,   type: size,        dir: IN}
-    - {name: stream,           type: handle,      dir: IN}
-    - {name: startEvent,       type: handle,      dir: IN}
-    - {name: stopEvent,        type: handle,      dir: IN}
-    - {name: flags,            type: int32,       dir: IN}
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags]
+  pack_dim3: [numBlocks, dimBlocks]
 
 - api: hipExtLaunchMultiKernelMultiDevice
-  category: kernel_launch
-  args:
-    - {name: launchParamsList, type: ptr,    dir: IN}
-    - {name: numDevices,       type: int32,  dir: IN}
-    - {name: flags,            type: uint32, dir: IN}
+  args: [launchParamsList, numDevices, flags]
 
 - api: hipModuleGetFunction
-  category: module
-  args:
-    - {name: function, type: handle,  dir: OUT}
-    - {name: module,   type: handle,  dir: IN}
-    - {name: kname,    type: cstring, dir: IN}
+  args: [function, module, kname]
+  out: [function]
+  strings: [kname]
 
 - api: hipModuleLoadData
-  category: module
-  args:
-    - {name: module, type: handle, dir: OUT}
-    - {name: image,  type: ptr,    dir: IN}
+  args: [module, image]
+  out: [module]
 
 - api: hipModuleLoadDataEx
-  category: module
-  args:
-    - {name: module,       type: handle, dir: OUT}
-    - {name: image,        type: ptr,    dir: IN}
-    - {name: numOptions,   type: uint32, dir: IN}
-    - {name: options,      type: ptr,    dir: IN}
-    - {name: optionValues, type: ptr,    dir: IN}
+  args: [module, image, numOptions, options, optionValues]
+  out: [module]
 
 - api: hipModuleUnload
-  category: module
-  args:
-    - {name: module, type: handle, dir: IN}
+  args: [module]
 
-# ============================================================
-# A.4 HIP memory (26)
-# ============================================================
-
+# --- memory ---
 - api: hipMemcpy
-  category: memory
-  args:
-    - {name: dst,       type: ptr,  dir: IN}
-    - {name: src,       type: ptr,  dir: IN}
-    - {name: sizeBytes, type: size, dir: IN}
-    - {name: kind,      type: enum, dir: IN}
+  args: [dst, src, sizeBytes, kind]
 
-# Note: header param is `sizeBytes`, not `size` (spec uses `size` shorthand).
 - api: hipMemcpyDtoH
-  category: memory
-  args:
-    - {name: dst,       type: ptr,        dir: IN}
-    - {name: src,       type: device_ptr, dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
+  args: [dst, src, sizeBytes]
 
 - api: hipMemcpyHtoD
-  category: memory
-  args:
-    - {name: dst,       type: device_ptr, dir: IN}
-    - {name: src,       type: ptr,        dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
+  args: [dst, src, sizeBytes]
 
 - api: hipMemcpyDtoD
-  category: memory
-  args:
-    - {name: dst,       type: device_ptr, dir: IN}
-    - {name: src,       type: device_ptr, dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
+  args: [dst, src, sizeBytes]
 
 - api: hipMemcpyPeer
-  category: memory
-  args:
-    - {name: dst,         type: ptr,   dir: IN}
-    - {name: dstDeviceId, type: int32, dir: IN}
-    - {name: src,         type: ptr,   dir: IN}
-    - {name: srcDeviceId, type: int32, dir: IN}
-    - {name: sizeBytes,   type: size,  dir: IN}
+  args: [dst, dstDeviceId, src, srcDeviceId, sizeBytes]
 
 - api: hipMemcpyAsync
-  category: memory
-  args:
-    - {name: dst,       type: ptr,    dir: IN}
-    - {name: src,       type: ptr,    dir: IN}
-    - {name: sizeBytes, type: size,   dir: IN}
-    - {name: kind,      type: enum,   dir: IN}
-    - {name: stream,    type: handle, dir: IN}
+  args: [dst, src, sizeBytes, kind, stream]
 
 - api: hipMemcpyDtoHAsync
-  category: memory
-  args:
-    - {name: dst,       type: ptr,        dir: IN}
-    - {name: src,       type: device_ptr, dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
-    - {name: stream,    type: handle,     dir: IN}
+  args: [dst, src, sizeBytes, stream]
 
 - api: hipMemcpyHtoDAsync
-  category: memory
-  args:
-    - {name: dst,       type: device_ptr, dir: IN}
-    - {name: src,       type: ptr,        dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
-    - {name: stream,    type: handle,     dir: IN}
+  args: [dst, src, sizeBytes, stream]
 
 - api: hipMemcpyDtoDAsync
-  category: memory
-  args:
-    - {name: dst,       type: device_ptr, dir: IN}
-    - {name: src,       type: device_ptr, dir: IN}
-    - {name: sizeBytes, type: size,       dir: IN}
-    - {name: stream,    type: handle,     dir: IN}
+  args: [dst, src, sizeBytes, stream]
 
-# Note: header has `srcDevice` (not `srcDeviceId`).
 - api: hipMemcpyPeerAsync
-  category: memory
-  args:
-    - {name: dst,         type: ptr,    dir: IN}
-    - {name: dstDeviceId, type: int32,  dir: IN}
-    - {name: src,         type: ptr,    dir: IN}
-    - {name: srcDevice,   type: int32,  dir: IN}
-    - {name: sizeBytes,   type: size,   dir: IN}
-    - {name: stream,      type: handle, dir: IN}
+  args: [dst, dstDeviceId, src, srcDevice, sizeBytes, stream]
 
-# 8 args = 8 fields, fits.
 - api: hipMemcpy2DAsync
-  category: memory
-  args:
-    - {name: dst,    type: ptr,    dir: IN}
-    - {name: dpitch, type: size,   dir: IN}
-    - {name: src,    type: ptr,    dir: IN}
-    - {name: spitch, type: size,   dir: IN}
-    - {name: width,  type: size,   dir: IN}
-    - {name: height, type: size,   dir: IN}
-    - {name: kind,   type: enum,   dir: IN}
-    - {name: stream, type: handle, dir: IN}
+  args: [dst, dpitch, src, spitch, width, height, kind, stream]
 
 - api: hipMemcpy3DAsync
-  category: memory
-  args:
-    - {name: p,      type: ptr,    dir: IN}
-    - {name: stream, type: handle, dir: IN}
+  args: [p, stream]
 
 - api: hipMalloc
-  category: memory
-  args:
-    - {name: ptr,  type: ptr,  dir: OUT}
-    - {name: size, type: size, dir: IN}
+  args: [ptr, size]
+  out: [ptr]
 
-# Note: header has `dev_ptr` (not `ptr`).
 - api: hipMallocAsync
-  category: memory
-  args:
-    - {name: dev_ptr, type: ptr,    dir: OUT}
-    - {name: size,    type: size,   dir: IN}
-    - {name: stream,  type: handle, dir: IN}
+  args: [dev_ptr, size, stream]
+  out: [dev_ptr]
 
-# Note: header hipMallocHost has only ptr+size (no flags) in HIP 7.x.
 - api: hipMallocHost
-  category: memory
-  args:
-    - {name: ptr,  type: ptr,  dir: OUT}
-    - {name: size, type: size, dir: IN}
+  args: [ptr, size]
+  out: [ptr]
 
 - api: hipHostMalloc
-  category: memory
-  args:
-    - {name: ptr,   type: ptr,    dir: OUT}
-    - {name: size,  type: size,   dir: IN}
-    - {name: flags, type: uint32, dir: IN}
+  args: [ptr, size, flags]
+  out: [ptr]
 
-# Note: header has `dev_ptr` (not `ptr`).
 - api: hipMallocManaged
-  category: memory
-  args:
-    - {name: dev_ptr, type: ptr,    dir: OUT}
-    - {name: size,    type: size,   dir: IN}
-    - {name: flags,   type: uint32, dir: IN}
+  args: [dev_ptr, size, flags]
+  out: [dev_ptr]
 
 - api: hipFree
-  category: memory
-  args:
-    - {name: ptr, type: ptr, dir: IN}
+  args: [ptr]
 
-# Note: header has `dev_ptr`.
 - api: hipFreeAsync
-  category: memory
-  args:
-    - {name: dev_ptr, type: ptr,    dir: IN}
-    - {name: stream,  type: handle, dir: IN}
+  args: [dev_ptr, stream]
 
 - api: hipFreeHost
-  category: memory
-  args:
-    - {name: ptr, type: ptr, dir: IN}
+  args: [ptr]
 
 - api: hipHostFree
-  category: memory
-  args:
-    - {name: ptr, type: ptr, dir: IN}
+  args: [ptr]
 
 - api: hipMemset
-  category: memory
-  args:
-    - {name: dst,       type: ptr,   dir: IN}
-    - {name: value,     type: int32, dir: IN}
-    - {name: sizeBytes, type: size,  dir: IN}
+  args: [dst, value, sizeBytes]
 
 - api: hipMemsetAsync
-  category: memory
-  args:
-    - {name: dst,       type: ptr,    dir: IN}
-    - {name: value,     type: int32,  dir: IN}
-    - {name: sizeBytes, type: size,   dir: IN}
-    - {name: stream,    type: handle, dir: IN}
+  args: [dst, value, sizeBytes, stream]
 
-# Note: header has `dest` (not `dst`); value is `unsigned char` / `unsigned
-# short` which the verifier widens to DSL `uint32` (helper takes uint32_t).
 - api: hipMemsetD8
-  category: memory
-  args:
-    - {name: dest,  type: device_ptr, dir: IN}
-    - {name: value, type: uint32,     dir: IN}
-    - {name: count, type: size,       dir: IN}
+  args: [dest, value, count]
 
 - api: hipMemsetD16
-  category: memory
-  args:
-    - {name: dest,  type: device_ptr, dir: IN}
-    - {name: value, type: uint32,     dir: IN}
-    - {name: count, type: size,       dir: IN}
+  args: [dest, value, count]
 
-# D32: value is `int`, mappable via int32.
 - api: hipMemsetD32
-  category: memory
-  args:
-    - {name: dest,  type: device_ptr, dir: IN}
-    - {name: value, type: int32,      dir: IN}
-    - {name: count, type: size,       dir: IN}
+  args: [dest, value, count]
 
 - api: hipMemPrefetchAsync
-  category: memory
-  args:
-    - {name: dev_ptr, type: ptr,    dir: IN}
-    - {name: count,   type: size,   dir: IN}
-    - {name: device,  type: int32,  dir: IN}
-    - {name: stream,  type: handle, dir: IN}
+  args: [dev_ptr, count, device, stream]
 
 - api: hipMemAdvise
-  category: memory
-  args:
-    - {name: dev_ptr, type: ptr,   dir: IN}
-    - {name: count,   type: size,  dir: IN}
-    - {name: advice,  type: enum,  dir: IN}
-    - {name: device,  type: int32, dir: IN}
+  args: [dev_ptr, count, advice, device]
 
-# ============================================================
-# A.5 HIP graphs (16)
-# ============================================================
-
+# --- graphs ---
 - api: hipGraphCreate
-  category: graphs
-  args:
-    - {name: pGraph, type: handle, dir: OUT}
-    - {name: flags,  type: uint32, dir: IN}
+  args: [pGraph, flags]
+  out: [pGraph]
 
 - api: hipGraphDestroy
-  category: graphs
-  args:
-    - {name: graph, type: handle, dir: IN}
+  args: [graph]
 
 - api: hipGraphInstantiate
-  category: graphs
-  args:
-    - {name: pGraphExec, type: handle, dir: OUT}
-    - {name: graph,      type: handle, dir: IN}
-    - {name: pErrorNode, type: ptr,    dir: IN}
-    - {name: pLogBuffer, type: ptr,    dir: IN}
-    - {name: bufferSize, type: size,   dir: IN}
+  args: [pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize]
+  out: [pGraphExec]
 
 - api: hipGraphExecDestroy
-  category: graphs
-  args:
-    - {name: graphExec, type: handle, dir: IN}
+  args: [graphExec]
 
 - api: hipStreamBeginCapture
-  category: graphs
-  args:
-    - {name: stream, type: handle, dir: IN}
-    - {name: mode,   type: enum,   dir: IN}
+  args: [stream, mode]
 
 - api: hipStreamEndCapture
-  category: graphs
-  args:
-    - {name: stream, type: handle, dir: IN}
-    - {name: pGraph, type: handle, dir: OUT}
+  args: [stream, pGraph]
+  out: [pGraph]
 
-# Note: header has `pCaptureStatus` (not `status`).
 - api: hipStreamIsCapturing
-  category: graphs
-  args:
-    - {name: stream,         type: handle, dir: IN}
-    - {name: pCaptureStatus, type: enum,   dir: OUT}
+  args: [stream, pCaptureStatus]
+  out: [pCaptureStatus]
 
 - api: hipGraphAddKernelNode
-  category: graphs
-  args:
-    - {name: pGraphNode,      type: handle, dir: OUT}
-    - {name: graph,           type: handle, dir: IN}
-    - {name: pDependencies,   type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
-    - {name: pNodeParams,     type: ptr,    dir: IN}
+  args: [pGraphNode, graph, pDependencies, numDependencies, pNodeParams]
+  out: [pGraphNode]
 
-# Header has `pCopyParams` (not `pNodeParams`) for memcpy.
 - api: hipGraphAddMemcpyNode
-  category: graphs
-  args:
-    - {name: pGraphNode,      type: handle, dir: OUT}
-    - {name: graph,           type: handle, dir: IN}
-    - {name: pDependencies,   type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
-    - {name: pCopyParams,     type: ptr,    dir: IN}
+  args: [pGraphNode, graph, pDependencies, numDependencies, pCopyParams]
+  out: [pGraphNode]
 
-# Header has `pMemsetParams` for memset.
 - api: hipGraphAddMemsetNode
-  category: graphs
-  args:
-    - {name: pGraphNode,      type: handle, dir: OUT}
-    - {name: graph,           type: handle, dir: IN}
-    - {name: pDependencies,   type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
-    - {name: pMemsetParams,   type: ptr,    dir: IN}
+  args: [pGraphNode, graph, pDependencies, numDependencies, pMemsetParams]
+  out: [pGraphNode]
 
 - api: hipGraphAddEventRecordNode
-  category: graphs
-  args:
-    - {name: pGraphNode,      type: handle, dir: OUT}
-    - {name: graph,           type: handle, dir: IN}
-    - {name: pDependencies,   type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
-    - {name: event,           type: handle, dir: IN}
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
 
 - api: hipGraphAddEventWaitNode
-  category: graphs
-  args:
-    - {name: pGraphNode,      type: handle, dir: OUT}
-    - {name: graph,           type: handle, dir: IN}
-    - {name: pDependencies,   type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
-    - {name: event,           type: handle, dir: IN}
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
 
 - api: hipGraphAddDependencies
-  category: graphs
-  args:
-    - {name: graph,           type: handle, dir: IN}
-    - {name: from,            type: ptr,    dir: IN}
-    - {name: to,              type: ptr,    dir: IN}
-    - {name: numDependencies, type: size,   dir: IN}
+  args: [graph, from, to, numDependencies]
 
 - api: hipGraphLaunch
-  category: graphs
-  args:
-    - {name: graphExec, type: handle, dir: IN}
-    - {name: stream,    type: handle, dir: IN}
+  args: [graphExec, stream]
 
-# Header has `hGraphExec` (not `graphExec`).
 - api: hipGraphExecKernelNodeSetParams
-  category: graphs
-  args:
-    - {name: hGraphExec,  type: handle, dir: IN}
-    - {name: node,        type: handle, dir: IN}
-    - {name: pNodeParams, type: ptr,    dir: IN}
+  args: [hGraphExec, node, pNodeParams]
 
-# Header has `hGraphExec`, `count`, `kind` (not graphExec/sizeBytes).
 - api: hipGraphExecMemcpyNodeSetParams1D
-  category: graphs
-  args:
-    - {name: hGraphExec, type: handle, dir: IN}
-    - {name: node,       type: handle, dir: IN}
-    - {name: dst,        type: ptr,    dir: IN}
-    - {name: src,        type: ptr,    dir: IN}
-    - {name: count,      type: size,   dir: IN}
-    - {name: kind,       type: enum,   dir: IN}
+  args: [hGraphExec, node, dst, src, count, kind]

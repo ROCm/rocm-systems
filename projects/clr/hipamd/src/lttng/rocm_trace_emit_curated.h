@@ -2,7 +2,7 @@
  * Do not edit by hand — regenerate instead (see command below).
  *
  * SHA256(curated_apis.yaml) at generation:
- * b7b86b497b96d2e2c99568d911387ff1cfc7cb08aef2488bacd402d08f469ec0
+ * 89202352f92c8874cd1bc9e2d18a2f3de1843261cec62f4606c58d4bd121c112
  *
  * Per-API typed emit helpers for curated parameter capture. Every
  * helper takes (<captured-args...>, <status_type> status); status is
