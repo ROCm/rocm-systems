@@ -762,6 +762,21 @@ contract:
   Contract_PitchedMemory_FreePitchedAllocation_Succeeds:
     <<: *level_0
     tags: [pitched_memory]
+  Contract_DriverPitchedMemory_AllocPitch_ReturnsPitchAtLeastWidth:
+    <<: *level_0
+    tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_Memcpy2D_HostDeviceRoundTripsRows:
+    <<: *level_0
+    tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_MemsetD2D32_RoundTripsWords:
+    <<: *level_0
+    tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_FreePitchedAllocation_Succeeds:
+    <<: *level_0
+    tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_RejectsInvalidArgs:
+    <<: *level_0
+    tags: [driver_pitched_memory]
   Contract_ArrayMemory_MallocArray_ReturnsUsableArray:
     <<: *level_0
     tags: [array_memory]

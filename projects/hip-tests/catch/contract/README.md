@@ -55,6 +55,7 @@ The first domains are:
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
+- `driver_pitched_memory`: driver-style pitched allocation and 2D copy contracts
 - `array_memory`: HIP array allocation and 2D array copy contracts
 - `array_copy`: legacy and async HIP array copy contracts
 - `array_copy_ext`: remaining driver-style and async HIP array copy contracts
