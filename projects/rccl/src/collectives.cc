@@ -18,6 +18,7 @@
 #include "dda_all_gather.h"
 #include "dda_alltoall.h"
 #include "sym_kernels.h"
+#include "dev_runtime.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -145,6 +146,23 @@ static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx94
   return threshold > 0 && totalBytes <= threshold;
 }
 
+// Check if symmteric kernels is requested for this collective
+static bool isSymmetricKernelRequested(
+    ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
+    size_t nElts, const void* sendbuff, void* recvbuff) {
+  if (comm == nullptr || !comm->symmetricSupport) return false;
+  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
+  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
+
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  return sendWin != nullptr && recvWin != nullptr &&
+         (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
+         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+}
+
 enum rcclAllGatherAlgo {
   RCCL_AG_RING,
   RCCL_AG_DIRECT,
@@ -244,7 +262,14 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  if (rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible = isSymmetricKernelRequested(
+      comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount,
+      sendbuff, recvbuff);
+
+  if (!symEligible &&
+      rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         INFO(NCCL_COLL,
@@ -468,7 +493,14 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
+  // Let the symmetric kernel take priority when the user registered these
+  // buffers as symmetric windows; otherwise fall through to DDA.
+  bool symEligible = (op == ncclSum) &&
+      isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
+                           count, sendbuff, recvbuff);
+
+  if (!symEligible &&
+      rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
         INFO(NCCL_COLL,
@@ -613,12 +645,11 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
   // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
-  bool symEligible = false;
-  if (comm->symmetricSupport && (op == ncclSum || op == ncclAvg)) {
-    NCCLCHECK(ncclSymkInitOnce(comm));
-    int symkOp = (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum;
-    symEligible = ncclSymkAvailable(comm, ncclFuncReduceScatter, symkOp, datatype, recvcount);
-  }
+  bool symEligible = (op == ncclSum || op == ncclAvg) &&
+      isSymmetricKernelRequested(
+          comm, ncclFuncReduceScatter,
+          (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
+          datatype, recvcount, sendbuff, recvbuff);
 
   if (!symEligible &&
       rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
