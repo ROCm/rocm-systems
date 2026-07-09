@@ -29,6 +29,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace hsa
 {
 namespace queue_interposition
@@ -158,6 +163,9 @@ cas_write_index_impl(QueueState*       state,
 uint64_t
 load_write_index_impl(const QueueState* state, std::memory_order order = std::memory_order_relaxed);
 
+size_t
+get_async_signal_handler_thread_count();
+
 /// Type alias for doorbell function callback
 using doorbell_fn_t = std::function<void(hsa_signal_t, hsa_signal_value_t)>;
 
@@ -215,6 +223,12 @@ destroy_queue_state(const hsa_queue_t* queue);
  */
 bool
 supports_queue_interposition();
+
+void
+notify_queue_interposition_consumer_context_started(const context::context* ctx);
+
+void
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx);
 
 /**
  * @brief Install interposition wrappers into the HSA core API table

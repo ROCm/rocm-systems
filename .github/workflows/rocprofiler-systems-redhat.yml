@@ -436,3 +436,90 @@ jobs:
         set +e
         RUNNING_PROCS=$(pgrep trace_processor_shell)
         if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+  rhel-compiler-check:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-${{ matrix.rocm-version }}-rhel-${{ matrix.os-release }}
+      options: --shm-size=512m
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os-release: [ '8.10' ]
+        rocm-version: [ '7.2' ]
+        gcc-toolset: [ '13', '14', '15' ]
+        build-type: ['Release']
+
+    steps:
+    - *sparse-checkout
+
+    - name: Install GCC Toolset
+      shell: bash
+      run: |
+        dnf install -y \
+          gcc-toolset-${{ matrix.gcc-toolset }}-binutils \
+          gcc-toolset-${{ matrix.gcc-toolset }}-gcc \
+          gcc-toolset-${{ matrix.gcc-toolset }}-gcc-c++ \
+          gcc-toolset-${{ matrix.gcc-toolset }}-gcc-gfortran
+        TS=/opt/rh/gcc-toolset-${{ matrix.gcc-toolset }}/root/usr/bin
+        echo "CC=${TS}/gcc" >> $GITHUB_ENV
+        echo "CXX=${TS}/g++" >> $GITHUB_ENV
+        echo "${TS}" >> $GITHUB_PATH
+        "${TS}/gcc" --version
+
+    - name: Configure Env
+      shell: bash
+      run: |
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-gcc${{ matrix.gcc-toolset }}-${{ matrix.rocm-version }}-
+
+    - *configure-ccache
+
+    - name: Configure
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        cmake --version
+        cmake -B build . \
+          -DCMAKE_C_COMPILER=${CC} \
+          -DCMAKE_CXX_COMPILER=${CXX} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+          -DROCPROFSYS_BUILD_TESTING=OFF \
+          -DROCPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_TBB=ON \
+          -DROCPROFSYS_BUILD_ELFUTILS=ON \
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+
+    - name: Build
+      timeout-minutes: 60
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: |
+        cmake --build build --target all --parallel $(nproc)
+
+    - *ccache-stats

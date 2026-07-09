@@ -78,9 +78,12 @@
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
+ * - 1.27 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
+ * - 1.28 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED
+ * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 26
+#define HSA_AMD_INTERFACE_VERSION_MINOR 29
 
 #ifdef __cplusplus
 extern "C" {
@@ -969,6 +972,14 @@ typedef enum hsa_amd_agent_info_s {
    * Returns uint32_t. Zero if the device does not support dynamic data prefetch.
    */
   HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS = 0xA123,
+  /**
+   * Queries whether the agent supports virtual memory API operations on
+   * host memory that can be exported as a DMA-BUF file descriptor.
+   * For CPU agents: indicates host memory can be allocated and exported.
+   * For GPU agents: indicates the GPU can access such host-allocated memory.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1587,7 +1598,7 @@ typedef struct hsa_amd_image_descriptor_s {
  *
  * @param agent[in] Agent on which to create the image
  *
- * @param[in] image_descriptor[in] Vendor specific image format
+ * @param[in] image_descriptor Vendor specific image format
  *
  * @param[in] image_data Pointer to image backing store
  *
@@ -1613,6 +1624,42 @@ hsa_status_t HSA_API hsa_amd_image_create(
     hsa_access_permission_t access_permission,
     hsa_ext_image_t *image
 );
+
+/**
+ * @brief Creates an image from an opaque vendor specific image format.
+ * Does not modify data at image_data.  Intended initially for
+ * accessing interop images.
+ *
+ * @param agent[in] Agent on which to create the image
+ *
+ * @param[in] image_descriptor Vendor specific image format
+ *
+ * @param[in] image_layout Opaque vendor-specific image layout descriptor (may be NULL
+ *                         when image metadata is not available from an interop source)
+ *
+ * @param[in] image_data Pointer to image backing store
+ *
+ * @param[in] access_permission Access permissions for the image object
+ *
+ * @param[out] image Created image object.
+ *
+ * @retval HSA_STATUS_SUCCESS Image created successfully
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Bad or mismatched descriptor,
+ * null image_data, or mismatched access_permission.
+ */
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+    hsa_agent_t agent,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_t* image);
 
 /**
  * @brief Query image limits.
@@ -2889,6 +2936,55 @@ hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t
                                                 const void** metadata);
 
 /**
+ * @brief Maps an interop object into the HSA flat address space with a
+ * caller-supplied size hint and establishes memory residency.
+ * The metadata pointer is valid during the lifetime of the
+ * map (until hsa_amd_interop_unmap_buffer is called).
+ * Multiple calls to hsa_amd_interop_map_buffer with the same interop_handle
+ * result in multiple mappings with potentially different addresses and
+ * different metadata pointers.  Concurrent operations on these addresses are
+ * not coherent.  Memory must be fenced to system scope to ensure consistency,
+ * between mappings and with any views of this buffer in the originating
+ * software stack.
+ * It is identical to hsa_amd_interop_map_buffer except that @p size_hint provides
+ * the known byte size of the resource to the runtime.  Use this variant when
+ * the resource was created by a foreign API (e.g. D3D11 USAGE_DYNAMIC constant
+ * buffer) whose KMD private data does not encode the allocation size in a
+ * format the runtime can parse.  Pass 0 when the size is unknown and will be deduced.
+ *
+ * @param[in] num_agents Number of agents which require access to the memory
+ *
+ * @param[in] agents List of accessing agents.
+ *
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
+ *
+ * @param [in] flags Reserved, must be 0
+ *
+ * @param [in] size_hint the hinted size of the buffer.
+ *
+ * @param[out] size Size in bytes of the mapped object
+ *
+ * @param[out] ptr Base address of the mapped object
+ *
+ * @param[out] metadata_size Size of metadata in bytes, may be NULL
+ *
+ * @param[out] metadata Pointer to metadata, may be NULL
+ *
+ * @retval HSA_STATUS_SUCCESS if successfully mapped
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
+ */
+hsa_status_t HSA_API hsa_amd_interop_map_buffer_with_size(
+    uint32_t num_agents, hsa_agent_t* agents, hsa_handle_t interop_handle, uint32_t flags,
+    size_t size_hint, size_t* size, void** ptr, size_t* metadata_size, const void** metadata);
+
+/**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
  * Ends lifetime for the mapping's associated metadata pointer.
  */
@@ -3219,12 +3315,8 @@ typedef enum {
  * @brief Imported external semaphore. Opaque; created by
  * hsa_amd_external_semaphore_handle_open and released by
  * hsa_amd_external_semaphore_handle_close. Internally encodes the
- * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE.
- *
- * @note This release adds the import / close half only. The HSA queue
- * signal/wait APIs that consume hsa_amd_external_semaphore_t will land
- * in a separate change; until then the imported handle is only useful
- * as a lifecycle owner.
+ * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE. Consumed by
+ * hsa_amd_queue_signal_external_semaphore / _wait_external_semaphore.
  */
 typedef struct hsa_amd_external_semaphore_s {
   uint64_t handle;
@@ -3246,11 +3338,6 @@ typedef struct {
  * agent's KMD node. The returned semaphore must be released with
  * hsa_amd_external_semaphore_handle_close.
  *
- * @note This release adds the import / close path only. There is no
- * HSA queue signal/wait API in this header that consumes
- * hsa_amd_external_semaphore_t yet; the submission half will land in
- * a separate change.
- *
  * @param[in] agent A GPU agent whose node owns the imported syncobj.
  * @param[in] desc Descriptor naming the OS handle and its type.
  * @param[out] out_sem On success, the imported semaphore.
@@ -3258,8 +3345,10 @@ typedef struct {
  * @retval HSA_STATUS_SUCCESS Imported.
  * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
  *   KMD node has no associated WDDM device.
- * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null,
- *   the OS handle is null, or the handle type is unsupported.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null, or the
+ *   OS handle is null.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED The handle type is unsupported,
+ *   or libhsakmt lacks the import/destroy thunks (incl. Linux/KFD stub).
  * @retval HSA_STATUS_ERROR Underlying KMD import failed.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
@@ -3268,13 +3357,80 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
     hsa_amd_external_semaphore_t *out_sem);
 
 /**
- * @brief Releases an imported external semaphore. Until the HSA queue
- * signal/wait API for hsa_amd_external_semaphore_t is added, callers
- * are expected to keep the handle alive only for as long as the
- * higher-level (HIP / rocclr) wrapper that owns the same syncobj.
+ * @brief Releases an imported external semaphore. Keep the handle alive
+ * as long as any queued signal/wait that references it may still be
+ * in flight, and as long as the higher-level (HIP / rocclr) wrapper that
+ * owns the same syncobj.
  */
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem);
+
+/**
+ * @brief Submits a GPU-side signal of an imported external semaphore
+ * onto @p queue, queued behind prior packets on the AQL ring. Windows
+ * routes to D3DKMTSignalSynchronizationObjectFromGpu via libhsakmt;
+ * Linux / KFD is currently a stub (HSA_STATUS_ERROR_NOT_SUPPORTED).
+ *
+ * @param queue Must be an AMD GPU AQL queue. A null, non-GPU, or
+ *   non-AQL queue returns HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL
+ *   queue whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle from hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value written to the syncobj (passed verbatim).
+ *
+ * @retval HSA_STATUS_SUCCESS                Signal queued.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    Null/invalid/non-GPU queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    Queue's node has no WDDM
+ *   device, or its node differs from the one that imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  KMD signal ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_signal_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
+
+/**
+ * @brief Submits a GPU-side wait on an imported external semaphore
+ * onto @p queue. The wait blocks any subsequent packets on the AQL
+ * ring until the imported syncobj reaches @p value. Ordering against
+ * prior submissions is the caller's responsibility (rocclr's
+ * host-queue worker submits commands sequentially, so the wait is
+ * appended in program order ahead of subsequent submitKernel /
+ * submitCopyMemory calls).
+ *
+ * Wired to KMD via libhsakmt's hsaKmtQueueWaitExternalSemaphore,
+ * which on Windows resolves to D3DKMTWaitForSynchronizationObjectFromGpu
+ * against the queue's WDDM context. Linux / KFD route is currently a
+ * stub returning HSA_STATUS_ERROR_NOT_SUPPORTED.
+ *
+ * @param queue Must be an AMD GPU AQL queue. Null, HostQueue, and AIE
+ *   queues return HSA_STATUS_ERROR_INVALID_QUEUE; a valid AQL queue
+ *   whose node differs from the one that imported @p sem returns
+ *   HSA_STATUS_ERROR_INVALID_AGENT.
+ * @param sem   Handle returned by hsa_amd_external_semaphore_handle_open.
+ * @param value Fence value to wait for. Vulkan binary semaphores
+ *   conventionally use 0 / 1 but the value is passed through verbatim
+ *   so timeline-style callers can pick their own.
+ *
+ * @retval HSA_STATUS_SUCCESS                Wait queued successfully.
+ * @retval HSA_STATUS_ERROR_INVALID_QUEUE    queue is null, invalid, or
+ *   not an AMD GPU AQL queue.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT sem.handle is malformed.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT    The queue's KMD node has
+ *   no associated WDDM device, or it differs from the one that
+ *   imported @p sem.
+ * @retval HSA_STATUS_ERROR_NOT_SUPPORTED    libhsakmt lacks the thunk
+ *   (incl. Linux/KFD stub).
+ * @retval HSA_STATUS_ERROR                  Underlying KMD wait
+ *   ioctl failed.
+ */
+hsa_status_t HSA_API hsa_amd_queue_wait_external_semaphore(
+    hsa_queue_t                  *queue,
+    hsa_amd_external_semaphore_t  sem,
+    uint64_t                      value);
 
 /** @} */
 
@@ -4389,7 +4545,7 @@ typedef enum {
  * To minimize internal memory fragmentation, align the size to the recommended allocation granule
  * size, see HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE
  *
- * @param[in] pool memory to use. Only GPU agent pools are supported.
+ * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
  * @param[in] flags - currently unsupported

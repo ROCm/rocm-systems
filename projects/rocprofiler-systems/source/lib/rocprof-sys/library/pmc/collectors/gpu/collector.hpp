@@ -19,9 +19,11 @@ namespace rocprofsys::pmc::collectors::gpu
  * state across samples while keeping traits stateless.
  *
  * @tparam DeviceProvider Type providing GPU device enumeration and management
- * @tparam Config Configuration policy providing settings and output policies
+ * @tparam DeviceType     Concrete GPU device type (e.g. device<backend<>>)
+ * @tparam Config         Configuration policy providing settings and output policies
  */
-template <typename DeviceProvider, typename Config>
-using collector = base::collector<gpu_traits<DeviceProvider>, DeviceProvider, Config>;
+template <typename DeviceProvider, typename DeviceType, typename Config>
+using collector =
+    base::collector<gpu_traits<DeviceProvider, DeviceType>, DeviceProvider, Config>;
 
 }  // namespace rocprofsys::pmc::collectors::gpu
