@@ -100,17 +100,36 @@ Such support for additional formats shall have a manageable maintenance cost and
 Profiler Hub interface serves exactly this purpose, therefore this HLD defines the target architecture which we want to achieve as a result of Profiler Hub integration.
 
 ## Requirements
+### Design requirements
 - Profiler Hub shall abstract read write operations in native collector for profiling database in both `profile` and `analysis` phases of ROCm Compute.
 - Design shall cover counters data and be extendable to PC Sampling data (including Source, ISA, instruction dependencies).
 - Design shall allow easy swap of rocpd format to any other format (ex. Parquet). This means that ROCm Compute code shall not depend and know about a concrete format or file structure on the disk.
 - Design shall cover counters data read/write on a first stage but be expandable for future data collected by native-collector, such as PC sampling.
+- Profiling phase shall try to reduce number of artifacts produced in order to make it more convenient to manage them (ex. copy from remote machine or load in script).
+
+### Profiler Hub prerequisites
+This section is a summary of requirements from Profiler Hub. Design section below provides more context on how these requirements will be used.
+- Profiler Hub needs to have python bindings for its interface as they are required to access captured data in analysis scripts. See https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/source/lib/python/rocpd for an example.
+- Profiler Hub interface shall support storage of PC sampling data.
+- Profiler Hub back-end shall be extendable to other data formats, ex Parquet.
 
 
 ## Design
+### Linking with Profiler Hub
+- Profiler Hub should be compiled and linked with `rocprofiler-compute-tool.so` via out-of-source-tree `add_subdirectory`. 
+- For this, compute shall be moved in `projects/profilers` directory, so that dependent projects are localized. This localization, for example, would allow to impose a clear requirement to sparse-checkout whole `projects/profilers` directory in order to build profilers. And this requirement in turn would make it easier to reuse code between components.
+- Other options considered:
+    - Sparse-checkout of Profiler Hub as submodule. Rejected because that adds an unnecessary complexity to the dependency with component which is part of profilers anyway.
+    - Distribution of ProfilerHub and its includes as part of ROCm installation. Rejected because this could cause API and ABI incompatibilities.
+
+
 ### Profiling phase
 The following architectural changes are to be made to switch counter collection in profiling phase onto Profiler Hub:
 - `rocprofiler-compute-tool` collector creates Profiler Hub storage file and writes counters data into it. This file name shall include `<pid>` because real workloads will spawn multiple processes.
-- `Profile` mode of `ROCm Compute` still merges per-process Profiler Hub storage files into a single file in scope of a single pass. However, it does it by using Profiler Hub interface as well in order to abstract this logic from concrete format on the disk. This is not a strong requirement and we may reconsider it if there are performance and implementation cost implications. But the reasoning for this requirement is convenience as it will reduce a number of resulting files by an order of magnitude.
+- `Profile` mode of `ROCm Compute` still merges per-process Profiler Hub storage files into a single file in scope of a single pass. However, it does it by using Profiler Hub interface in order to abstract this analysis scripts from concrete format on the disk. Other options considered were:
+    - Implementing merge functionality in Profiler Hub. Has been rejected because merge functionality is a compute requirement only.
+    - Use existing merge functionality in analysis scripts. Has been rejected because this leaves a coupling of analysis script with concrete data format, which defeats the purpose of this design.
+    - Remove merging logic completely. Has been rejected because this would produce up to 100 artifacts in multi-pass multi-process workloads even on a single node. And that number would be larger in multi-node scenarios.
 - Data from `rocpd` and `Profiler Hub` produce separate artifacts and have separate processing code paths. This is because the long-term plan is to fully switch on rocprofiler-compute-tool for data collection and therefore on ProfilerHub for data read/write. Therefore, merge of `rocpd` and `Profiler Hub` data would introduce unnecessary coupling between these data formats which would increase the cost of aforementioned switch.
 
 ```mermaid
