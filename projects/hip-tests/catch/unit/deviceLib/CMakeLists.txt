@@ -74,11 +74,18 @@ set(AMD_TEST_SRC
     fp4_ocp.cc
     ext_ocp_fp8.cc
     ext_ocp_fp4.cc
-    ext_ocp_fp6.cc
     memcpy_async.cc
     bfloat16_atomic_test.cc
     fp16_atomic_test.cc
 )
+
+# The fp6 host reference (fcbx packed bitfield structs in amd_hip_ocp_host.hpp)
+# relies on Itanium bitfield packing and fails a static_assert under the MSVC
+# bitfield ABI on Windows. Only compile the fp6 OCP test on non-Windows until
+# the header is made portable.
+if(NOT WIN32)
+  list(APPEND TEST_SRC ext_ocp_fp6.cc)
+endif()
 
 set(AMD_ARCH_SPEC_TEST_SRC
     AtomicAdd_Coherent.cc
