@@ -19,6 +19,7 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -1890,22 +1891,26 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   // KFD_SCHED_POLICY_NO_HWS -> EINVAL guard is not applicable.
 
   // Resolve the target process by Linux pid (kernel: find_get_pid() +
-  // kfd_lookup_process_by_pid()).
-  KfdProcess *target = nullptr;
-  std::shared_ptr<KfdProcess> target_ref;
-  if (caller.client_pid() != 0 && static_cast<pid_t>(args->pid) == caller.client_pid()) {
-    target = &caller; // self-debug (local mode)
-  } else {
-    target_ref = find_process_by_client_pid(static_cast<pid_t>(args->pid));
-    target = target_ref.get();
+  // kfd_lookup_process_by_pid()). The target's KfdProcess may not exist yet:
+  // rocgdb enables debug on the inferior right after exec, before its ROCr has
+  // opened /dev/kfd. The debug session is keyed by the target pid
+  // (debug_sessions_) independently of the KfdProcess, mirroring the kernel
+  // creating the target kfd_process in the ENABLE path. Operations that need
+  // live GPU state look the process up lazily.
+  const auto target_pid = static_cast<pid_t>(args->pid);
+  const bool self_debug = caller.client_pid() != 0 && target_pid == caller.client_pid();
+  std::shared_ptr<KfdProcess> target_ref =
+      self_debug ? nullptr : find_process_by_client_pid(target_pid);
+  KfdProcess *target_proc = self_debug ? &caller : target_ref.get();
+
+  // Existence check (kernel: ESRCH from find_get_pid/get_task_mm). A target that
+  // has not connected is still valid if it is a live OS process; a pid that maps
+  // to no process at all is rejected.
+  if (!self_debug && target_proc == nullptr) {
+    errno = 0;
+    if (::kill(target_pid, 0) != 0 && errno == ESRCH)
+      return -ESRCH;
   }
-  if (target == nullptr)
-    return -ESRCH;
-
-  const bool self_debug = (target == &caller);
-
-  std::lock_guard<std::mutex> lk(target->debug_mutex_);
-  auto &sess = target->debug_session_;
 
   // PTRACE gate: for any op other than DISABLE, a debugger acting on another
   // process must be that process's ptrace parent. This mirrors the kernel's
@@ -1914,18 +1919,24 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   // authorization reflects the real OS ptrace relationship established by the
   // debugger (e.g. rocgdb launching the inferior). Self-debug is exempt.
   if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
-      tracer_pid_of(target->client_pid()) != caller.client_pid())
+      tracer_pid_of(target_pid) != caller.client_pid())
     return -EPERM;
 
+  std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+  auto session_it = debug_sessions_.find(target_pid);
+  const bool enabled = session_it != debug_sessions_.end() && session_it->second.enabled;
+
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
-  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !sess.enabled)
+  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !enabled)
     return -EINVAL;
 
-  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE.
-  const bool runtime_enabled = [&] {
-    std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
-    return target->runtime_state_.enabled;
-  }();
+  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE on the
+  // inferior; false until the inferior connects and enables its runtime.
+  bool runtime_enabled = false;
+  if (target_proc != nullptr) {
+    std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
+    runtime_enabled = target_proc->runtime_state_.enabled;
+  }
 
   // DBG_HW_OPs require the runtime to be enabled (kernel: EPERM). Note that the
   // real driver includes SET_FLAGS in this gated set.
@@ -1956,8 +1967,9 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
 
   switch (args->op) {
   case KFD_IOC_DBG_TRAP_ENABLE: {
-    if (sess.enabled)
+    if (enabled)
       return -EINVAL; // target process is already debug enabled
+    KfdProcess::DebugSession sess{};
     sess.enabled = true;
     sess.debugger_pid = caller.client_pid();
     sess.dbg_fd = static_cast<int>(args->enable.dbg_fd);
@@ -1966,35 +1978,39 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
         runtime_enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
 
     // Copy kfd_runtime_info back to the debugger (kernel: kfd_dbg_trap_enable
-    // copies the saved runtime info and returns its size).
+    // copies the saved runtime info and returns its size). The inferior may not
+    // have runtime-enabled yet, in which case the defaults (disabled, r_debug=0)
+    // are correct.
     kfd_runtime_info info{};
-    {
-      std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
-      info.r_debug = target->runtime_state_.r_debug;
-      info.ttmp_setup =
-          (target->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
-    }
     info.runtime_state = sess.runtime_state;
+    if (target_proc != nullptr) {
+      std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
+      info.r_debug = target_proc->runtime_state_.r_debug;
+      info.ttmp_setup =
+          (target_proc->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u
+                                                                                           : 0u;
+    }
     if (args->enable.rinfo_ptr != 0 && args->enable.rinfo_size >= sizeof(info))
       std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
                   sizeof(info));
     args->enable.rinfo_size = sizeof(info);
+
+    debug_sessions_[target_pid] = sess;
     return 0;
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
-    sess = KfdProcess::DebugSession{};
+    debug_sessions_.erase(target_pid);
     return 0;
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
     // debugger wants forwarded. Delivery is wired up with the event channel.
-    sess.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
+    session_it->second.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
     return 0;
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return debug_device_snapshot(args->device_snapshot);
   default:
-    // SEND_RUNTIME_EVENT, SET_EXCEPTIONS_ENABLED, wave-launch, queue suspend/
-    // resume, address watch, flags, and the query/queue-snapshot ops are wired
-    // in subsequent changes.
+    // SEND_RUNTIME_EVENT, wave-launch, queue suspend/resume, address watch,
+    // flags, and the query/queue-snapshot ops are wired in subsequent changes.
     return -ENOSYS;
   }
 }

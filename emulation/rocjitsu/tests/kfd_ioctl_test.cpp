@@ -528,4 +528,54 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
   waitpid(child, &status, 0);
 }
 
+// PR: debug sessions are keyed by the inferior's Linux pid in a driver-level
+// table, independent of any KfdProcess. rocgdb enables debug on the inferior
+// right after exec, before its ROCr has opened /dev/kfd, so ENABLE must succeed
+// for a live, ptraced pid that has NO KfdProcess yet. This is the scenario the
+// pid-keyed session unblocked (previously it failed with ESRCH).
+TEST_F(KfdIoctlTest, DbgTrapEnableSucceedsForPtracedPidWithoutKfdProcess) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+    _exit(0);
+  }
+
+  rocjitsu::SimulatedDriver daemon(*loaded_.soc(), /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+  // Deliberately do NOT open_process(child): the inferior has not connected to
+  // /dev/kfd, so it has no KfdProcess.
+
+  auto enable_child = [&]() {
+    kfd_ioctl_dbg_trap_args en{};
+    en.pid = static_cast<uint32_t>(child);
+    en.op = KFD_IOC_DBG_TRAP_ENABLE;
+    en.enable.dbg_fd = KFD_INVALID_FD;
+    return daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en);
+  };
+
+  if (ptrace(PTRACE_ATTACH, child, nullptr, nullptr) == 0) {
+    int status = 0;
+    waitpid(child, &status, 0);
+    // The session is created in the driver-level table for a pid with no
+    // KfdProcess.
+    EXPECT_EQ(enable_child(), 0);
+
+    kfd_ioctl_dbg_trap_args dis{};
+    dis.pid = static_cast<uint32_t>(child);
+    dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+    EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
+    ptrace(PTRACE_DETACH, child, nullptr, nullptr);
+  } else {
+    GTEST_LOG_(INFO) << "PTRACE_ATTACH not permitted; skipped";
+  }
+
+  daemon.close(debugger);
+  kill(child, SIGKILL);
+  int status = 0;
+  waitpid(child, &status, 0);
+}
+
 } // namespace

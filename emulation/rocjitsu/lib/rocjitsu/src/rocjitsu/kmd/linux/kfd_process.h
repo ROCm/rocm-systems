@@ -118,13 +118,16 @@ public:
     uint64_t r_debug = 0;
   };
 
-  /// @brief Per-process debugger session state.
+  /// @brief Debugger session state for one target process.
   ///
   /// @details Mirrors the debug fields the kernel keeps on kfd_process:
   /// debug_trap_enabled, runtime_info.runtime_state, exception_enable_mask,
-  /// the debugger notification fd, and the attached debugger identity. Managed
-  /// by the AMDKFD_IOC_DBG_TRAP handler (kfd_ioctl_set_debug_trap in the real
-  /// driver). @ref runtime_state holds a @c kfd_dbg_runtime_state value.
+  /// the debugger notification fd, and the attached debugger identity. The
+  /// SimulatedDriver stores these in a table keyed by the target's Linux pid
+  /// (not on KfdProcess) so a debugger can enable a session on an inferior that
+  /// has not opened /dev/kfd yet — mirroring how the kernel creates the target
+  /// kfd_process in the DBG_TRAP_ENABLE path. @ref runtime_state holds a
+  /// @c kfd_dbg_runtime_state value.
   struct DebugSession {
     bool enabled = false;               ///< debug_trap_enabled.
     uint32_t runtime_state = 0;         ///< kfd_dbg_runtime_state (see kfd_ioctl.h).
@@ -205,9 +208,6 @@ public:
   std::unordered_map<uint64_t, SvmRange> svm_ranges_;
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
-
-  std::mutex debug_mutex_;
-  DebugSession debug_session_;
 
 private:
 };

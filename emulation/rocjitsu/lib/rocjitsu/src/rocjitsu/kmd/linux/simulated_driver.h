@@ -226,6 +226,13 @@ private:
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
   uint32_t next_process_id_ = 1;
 
+  /// @brief Debugger sessions keyed by the target inferior's Linux pid.
+  /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a
+  /// session on an inferior before the inferior opens /dev/kfd, mirroring the
+  /// kernel creating the target kfd_process in the DBG_TRAP_ENABLE path.
+  mutable std::mutex debug_sessions_mutex_;
+  std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
+
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
   /// to avoid ABBA deadlocks with hw_queue_mutex_ in the CP doorbell thread.
