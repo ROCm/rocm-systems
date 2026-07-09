@@ -290,6 +290,10 @@ class TestExecutor:
         self._gpus_per_node = 0
         self._gpus_per_node_detected = False
 
+        # Distinct host count is detected lazily on first use (see nodes_available property)
+        self._nodes_available = 0
+        self._nodes_available_detected = False
+
         # Test tracking
         self.test_results = []
         self.test_names = []
@@ -501,6 +505,25 @@ class TestExecutor:
                 pass
 
         return 0
+
+    @property
+    def nodes_available(self):
+        """
+        Distinct host count available for this run (lazy, detected once).
+
+        Returns 0 when the count cannot be determined (no hostfile/SLURM
+        allocation), in which case "auto" sizing for num_nodes falls back to 1.
+        """
+        if not self._nodes_available_detected:
+            self._nodes_available = _distinct_host_count(self.mpi_hosts)
+            self._nodes_available_detected = True
+            if self._nodes_available:
+                if self.args.verbose:
+                    print(f"Detected {self._nodes_available} node(s) from hostfile/SLURM")
+            else:
+                if self.args.verbose:
+                    print("No hostfile/SLURM allocation detected; 'auto' num_nodes falls back to 1")
+        return self._nodes_available
 
     def check_environment(self):
         """
@@ -985,6 +1008,19 @@ class TestExecutor:
         return str(value).strip()
 
     @staticmethod
+    def _resolve_num_nodes(value, detected):
+        """
+        Resolve a num_nodes value into a concrete integer.
+
+        "auto" (or None) resolves to the distinct host count detected from the
+        hostfile/SLURM allocation, or 1 when detection failed (detected == 0),
+        preserving the historical default. Numeric values are returned as-is.
+        """
+        if value is None or (isinstance(value, str) and value.strip().lower() == "auto"):
+            return detected if detected else 1
+        return int(value)
+
+    @staticmethod
     def _resolve_gpu_count(value, detected):
         """
         Resolve a num_gpus value into a concrete integer.
@@ -1016,14 +1052,16 @@ class TestExecutor:
         # Use test_filter for all test types
         test_filter = test_config.get("test_filter", "*")
 
-        # num_gpus / num_ranks support the literal "auto" (and num_gpus defaults to
-        # "auto" when omitted): "auto" resolves to the detected GPUs per node so
-        # tests adapt to whatever hardware they run on. Bad/overridden values that
-        # bypass schema validation fail this single test rather than aborting the
-        # whole run.
+        # num_nodes / num_gpus / num_ranks support the literal "auto" (and num_gpus
+        # defaults to "auto" when omitted): "auto" resolves num_nodes to the distinct
+        # host count from the hostfile/SLURM allocation, and num_gpus to the detected
+        # GPUs per node, so tests adapt to whatever cluster/hardware they run on.
+        # Bad/overridden values that bypass schema validation fail this single test
+        # rather than aborting the whole run.
         detected_gpus = self.gpus_per_node
+        detected_nodes = self.nodes_available
         try:
-            num_nodes = int(test_config.get("num_nodes", 1))
+            num_nodes = self._resolve_num_nodes(test_config.get("num_nodes", "auto"), detected_nodes)
             num_gpus = self._resolve_gpu_count(test_config.get("num_gpus", "auto"), detected_gpus)
             raw_ranks = test_config.get("num_ranks", 1)
             if isinstance(raw_ranks, str) and raw_ranks.strip().lower() == "auto":

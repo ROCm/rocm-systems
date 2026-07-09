@@ -53,8 +53,8 @@
     "perf_base": {
       "is_gtest": false,
       "num_nodes": 1,
-      "num_gpus": 4,
-      "num_ranks": 4,
+      "num_gpus": "auto",
+      "num_ranks": "auto",
       "timeout": 1200,
       "command_args": "-b 1 -e 1G -f 2 -g 1 -n 100 -w 20 -N 6 -A 1",
       "env_variables": {

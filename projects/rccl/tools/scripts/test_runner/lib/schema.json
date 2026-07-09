@@ -181,9 +181,11 @@
           ]
         },
         "num_nodes": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Number of nodes across which ranks are distributed"
+          "description": "Number of nodes across which ranks are distributed. The string \"auto\" (also the default when omitted) resolves to the distinct host count detected from the hostfile/SLURM allocation, or 1 when that can't be determined.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "enum": ["auto"] }
+          ]
         },
         "num_gpus": {
           "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. The string \"auto\" (also the default when omitted) resolves to the detected GPUs per node.",

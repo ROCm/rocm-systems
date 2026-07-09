@@ -1,0 +1,92 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI455X-AllReduce-AlltoAll-Smoke",
+    "description": "Smoke config: AllReduce + AlltoAll, float only (1B-512M), 1 cycle x 1 iteration, warmup 20."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "NCCL_CUMEM_ENABLE": "1",
+    "NCCL_MNNVL_ENABLE": "1",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_MSCCL_ENABLE": "0",
+    "NCCL_DEBUG": "VERSION"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "enabled": false,
+    "_comment": "perf binaries come from rccl_tests_build_configuration / external build"
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx1250"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "smoke_base": {
+      "is_gtest": false,
+      "num_nodes": 1,
+      "num_gpus": "auto",
+      "num_ranks": "auto",
+      "timeout": 1200,
+      "command_args": "-b 1 -e 512M -f 2 -g 1 -n 1 -w 20 -N 1 -A 1",
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      }
+    },
+    "smoke_all_reduce_perf": {
+      "extends": "smoke_base",
+      "binary": "all_reduce_perf",
+      "tests": [
+        {
+          "name": "AllReduce_float",
+          "description": "AllReduce smoke, datatype float",
+          "command_args": "-d float"
+        }
+      ]
+    },
+    "smoke_alltoall_perf": {
+      "extends": "smoke_base",
+      "binary": "alltoall_perf",
+      "tests": [
+        {
+          "name": "AlltoAll_float",
+          "description": "AlltoAll smoke, datatype float",
+          "command_args": "-d float"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Smoke - AllReduce (float, 512M)",
+      "description": "rccl-tests AllReduce smoke: float only, 1B-512M, 1 cycle x 1 iteration",
+      "config": "smoke_all_reduce_perf",
+      "enabled": true
+    },
+    {
+      "name": "Smoke - AlltoAll (float, 512M)",
+      "description": "rccl-tests AlltoAll smoke: float only, 1B-512M, 1 cycle x 1 iteration",
+      "config": "smoke_alltoall_perf",
+      "enabled": true
+    }
+  ]
+}
