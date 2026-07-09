@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "hip_allocator.hpp"
+#include "log.hpp"
 #include "hip_allocator_vmm_common.hpp"
 
 #if HIP_VERSION >= 70000000
@@ -115,6 +116,28 @@ HIPAllocatorVMMFabric::HIPAllocatorVMMFabric()
             device_id);
     abort();
   }
+
+  // Cache the VMM allocation granularity for this allocator.
+  size_t granularity = VMMQueryGranularity(hipMemHandleTypeFabric);
+  mem_granularity_ = (granularity != 0) ? granularity : 1;
+}
+
+hipError_t HIPAllocatorVMMFabric::ExportToFabricHandle(
+    hipMemGenericAllocationHandle_t generic_handle, size_t size, void *handle)
+{
+  hipMemFabricHandle_t fabricHandle;
+  hipError_t err = hipMemExportToShareableHandle(&fabricHandle, generic_handle,
+                                                 hipMemHandleTypeFabric, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
+  ipc_handle->fabric_handle = fabricHandle;
+  ipc_handle->size = size;
+  ipc_handle->offset = 0;
+
+  return hipSuccess;
 }
 
 hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
@@ -129,26 +152,7 @@ hipError_t HIPAllocatorVMMFabric::GetIpcHandle(void *dev_ptr, void *handle)
     return hipErrorInvalidValue;
   }
 
-  VMMFabricAllocationInfo& info = it->second;
-  HIPIpcMemHandleFabric_t* ipc_handle = reinterpret_cast<HIPIpcMemHandleFabric_t*>(handle);
-
-  // Export the VMM handle to a fabric handle
-  hipMemFabricHandle_t fabricHandle;
-  hipError_t err = hipMemExportToShareableHandle(&fabricHandle, info.handle,
-                                                 hipMemHandleTypeFabric, 0);
-  if (err != hipSuccess) {
-    return err;
-  }
-
-  // Store the fabric handle in the IPC handle structure
-  ipc_handle->fabric_handle = fabricHandle;
-  ipc_handle->size = info.size;
-  ipc_handle->offset = 0;
-
-  // Cache the fabric_id in our allocation info for later use
-  info.fabric_id = fabricHandle;
-
-  return hipSuccess;
+  return ExportToFabricHandle(it->second.handle, it->second.size, handle);
 }
 
 hipError_t HIPAllocatorVMMFabric::OpenIpcHandle(void **dev_ptr, void *handle)
@@ -256,6 +260,37 @@ hipError_t HIPAllocatorVMMFabric::CloseIpcHandle(void *dev_ptr)
   imported_allocations_.erase(it);
 
   return hipSuccess;
+}
+
+hipError_t HIPAllocatorVMMFabric::GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle)
+{
+  if (dev_ptr == nullptr || handle == nullptr || length == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  // Retain the generic allocation handle backing this VMM pointer so we can
+  // export it without relying on this allocator's internal tracking.
+  hipMemGenericAllocationHandle_t generic_handle;
+  hipError_t err = hipMemRetainAllocationHandle(&generic_handle, dev_ptr);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  // length is already granularity-aligned (validated at registration).
+  err = ExportToFabricHandle(generic_handle, length, handle);
+
+  /*
+   * Drop our retained reference regardless of the export outcome. On success
+   * the exported handle keeps the underlying memory alive for importers; a
+   * release failure only leaks a reference, so warn rather than fail.
+   */
+  hipError_t rel_err = hipMemRelease(generic_handle);
+  if (rel_err != hipSuccess) {
+    LOG_WARN("hipMemRelease failed in GetIpcHandleFromPtr: %s",
+             hipGetErrorString(rel_err));
+  }
+
+  return err;
 }
 
 size_t HIPAllocatorVMMFabric::GetIpcHandleSize()

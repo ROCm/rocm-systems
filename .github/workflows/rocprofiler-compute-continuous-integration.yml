@@ -116,7 +116,7 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
             MODE=Nightly
             ADD_COVERAGE="--coverage"
           else
@@ -163,6 +163,7 @@ jobs:
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
         run: |
+          pip --version
           for i in 1 2 3; do
             pip install -r requirements.txt --break-system-packages --ignore-installed --timeout 60 && break
             echo "⚠️ pip install attempt $i failed, retrying..."

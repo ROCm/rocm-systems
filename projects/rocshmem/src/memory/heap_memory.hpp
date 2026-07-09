@@ -50,6 +50,11 @@ namespace rocshmem {
     virtual __host__ __device__ size_t get_size() = 0;
 
     AllocatorType type_;
+
+    /**
+     * @brief Allocation granularity (bytes) of the backing allocator.
+     */
+    size_t granularity_{1};
   };
 
 
@@ -83,6 +88,7 @@ class HeapMemoryType : public HeapMemory {
 
     // Get allocator type from the base class without unsafe casting
     type_ = allocator_.get_type();
+    granularity_ = allocator_.get_granularity();
   }
 
   /**

@@ -27,6 +27,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
+#include "constmem.hpp"
 #include "context_ipc_device.hpp"
 #include "log.hpp"
 #include "util.hpp"
@@ -75,88 +76,69 @@ __device__ void IPCContext::get_nbi(T *dest, const T *source, size_t nelems, int
 // Atomics
 template <typename T>
 __device__ void IPCContext::amo_add(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+  ipcImpl_.ipcAMOAdd(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_set(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcAMOSet(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+  ipcImpl_.ipcAMOSet(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_swap(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   return ipcImpl_.ipcAMOSwap(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_and(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   return ipcImpl_.ipcAMOFetchAnd(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_and(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcAMOAnd(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_or(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   return ipcImpl_.ipcAMOFetchOr(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_or(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcAMOOr(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_xor(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   return ipcImpl_.ipcAMOFetchXor(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_xor(void *dest, T value, int pe) {
-  uint64_t L_offset =
-      reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
   ipcImpl_.ipcAMOXor(
-      reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+      reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ void IPCContext::amo_cas(void *dest, T value, T cond, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  ipcImpl_.ipcAMOCas(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), cond, value);
+  ipcImpl_.ipcAMOCas(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), cond, value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_add(void *dest, T value, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  return ipcImpl_.ipcAMOFetchAdd(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), value);
+  return ipcImpl_.ipcAMOFetchAdd(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), value);
 }
 
 template <typename T>
 __device__ T IPCContext::amo_fetch_cas(void *dest, T value, T cond, int pe) {
-  uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[my_pe];
-  return ipcImpl_.ipcAMOFetchCas(reinterpret_cast<T *>(ipcImpl_.ipc_bases[pe] + L_offset), cond, value);
+  return ipcImpl_.ipcAMOFetchCas(reinterpret_cast<T *>(ipcImpl_.ipcPeerPtr(dest, constmem.my_pe, pe)), cond, value);
 }
 
 // Collectives
@@ -179,7 +161,7 @@ __device__ void IPCContext::internal_direct_allreduce(
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
 
   int finish = PE_start + stride * PE_size;
-  int pe = my_pe;
+  int pe = constmem.my_pe;
 
   int wg_id = get_flat_block_id();
   int wg_size = get_flat_block_size();
@@ -220,7 +202,7 @@ __device__ void IPCContext::internal_direct_allreduce(
   }
   __syncthreads();
 
-  for (int i = wg_id; i < num_pes; i += wg_size) {
+  for (int i = wg_id; i < constmem.num_pes; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -345,7 +327,7 @@ __device__ void IPCContext::internal_ring_allreduce(
     }
   }
 
-  for (int i = wg_id; i < 2 * num_pes - 2; i += wg_size) {
+  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -506,7 +488,7 @@ template <typename T>
 __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,
     int stride, int pe_size) {  // NOLINT(runtime/int)
-  if (my_pe == pe_root) {
+  if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
         put_nbi_wg(dst, src, nelems, i);
@@ -541,7 +523,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,
                                       long *p_sync) {  // NOLINT(runtime/int)
-  if (num_pes < 4) {
+  if (constmem.num_pes < 4) {
     internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
                            pe_size);
   } else {
@@ -549,7 +531,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>
@@ -594,7 +576,7 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
 
 template <typename T>
@@ -621,7 +603,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     fence(dest_pe);
-    ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[alltoall_pSync_offset + my_pe_in_team]) - wrk_sync_pool_bases_[my_pe];
+    ptrdiff_t L_offset = reinterpret_cast<char*>(&pSync[alltoall_pSync_offset + my_pe_in_team]) - wrk_sync_pool_bases_[constmem.my_pe];
     ipcImpl_.ipcAMOAdd(reinterpret_cast<long*>(wrk_sync_pool_bases_[dest_pe] + L_offset), 1L);
   }
 
@@ -671,7 +653,7 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync);
 }
 
 // Block/wave functions
