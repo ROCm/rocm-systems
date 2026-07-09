@@ -279,7 +279,7 @@ private:
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
-  int debug_query_event(pid_t target_pid, uint64_t enabled_mask,
+  int debug_query_event(pid_t target_pid, KfdProcess *target_proc, uint64_t enabled_mask,
                         kfd_ioctl_dbg_trap_query_debug_event_args &args);
   int debug_query_exception_info(pid_t target_pid,
                                  kfd_ioctl_dbg_trap_query_exception_info_args &args);
@@ -292,6 +292,12 @@ private:
   /// serialized the queue's stopped waves into its CWSR area and raised an
   /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
   bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
+
+  /// @brief True if any wave of the given queue is still executing (may yet trap
+  /// or complete). Used to defer the debugger report until all waves of a
+  /// multi-wave dispatch have stopped, so they are serialized atomically.
+  bool queue_has_running_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                               const amdgpu::Wavefront *exclude);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
@@ -329,6 +335,14 @@ private:
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);
 
+  /// @brief Stop the target's running waves and refresh their CWSR areas
+  /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
+  void suspend_debug_queues(KfdProcess *proc);
+
+  /// @brief Clear the CWSR area of any of the target's queues whose stopped waves
+  /// have completed, so rocm-dbgapi prunes them cleanly instead of reading a
+  /// stale wave against an advanced read_dispatch_id (KFD_IOC_DBG_TRAP_SUSPEND).
+  void clear_completed_debug_queues(KfdProcess *proc);
   /// @brief Record a debug exception on a queue and reflect it on the snapshot.
   void raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                          uint32_t gpu_id, uint64_t exception_mask);
@@ -413,9 +427,6 @@ private:
   mutable std::mutex runtime_handshake_mutex_;
   std::condition_variable runtime_handshake_cv_;
   std::unordered_set<pid_t> runtime_acked_;
-
-  /// @brief Monotonic source of stable debugger wave ids (TTMP4:5).
-  std::atomic<uint64_t> next_debug_wave_id_{1};
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_

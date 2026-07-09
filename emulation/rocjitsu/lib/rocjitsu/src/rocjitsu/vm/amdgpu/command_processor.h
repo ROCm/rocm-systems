@@ -71,6 +71,11 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   uint64_t queue_desc_va = 0;
+  /// CP-private monotonic fetch cursor: the next ring index to fetch. Normally
+  /// tracks read_ptr_va exactly, but stays ahead of it while the debugger holds
+  /// the queue's read_dispatch_id at a trapped dispatch (so packets are not
+  /// re-fetched). See fetch_from_queue and serialize_queue_debug_waves.
+  uint64_t fetch_cursor = 0;
 };
 
 enum class SdmaPacketDialect {
@@ -247,8 +252,9 @@ private:
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
+  /// @param aql_packet_id AQL ring packet id (queue read index) for debugger correlation.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs,
+                          uint64_t pkt_addr, HwQueueState &qs, uint64_t aql_packet_id = 0,
                           ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
