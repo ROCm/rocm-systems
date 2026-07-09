@@ -204,24 +204,22 @@ struct perfetto_policy
      *
      * @tparam DeviceVector Container type holding NIC device handles
      * @param devices Vector of NIC devices
-     * @param enabled_metrics Metrics that were enabled during collection
+     * @param enabled Metrics that were enabled during collection
      */
     template <typename DeviceVector>
-    static void post_process(
-        const DeviceVector&                                 devices,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics)
+    static void post_process(const DeviceVector&                                 devices,
+                             ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled)
     {
         for(const auto& device : devices)
         {
-            post_process_device(device->get_index(), enabled_metrics,
+            post_process_device(device->get_index(), enabled,
                                 device->get_supported_metrics());
         }
     }
 
     static void post_process_device(
-        size_t                                              device_index,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics,
-        ::rocprofsys::pmc::collectors::nic::enabled_metrics supported_metrics)
+        size_t device_index, ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled,
+        ::rocprofsys::pmc::collectors::nic::enabled_metrics supported)
     {
         auto bundle_it = perfetto_policy::bundle.find(device_index);
         if(bundle_it == perfetto_policy::bundle.end() || !bundle_it->second)
@@ -239,7 +237,7 @@ struct perfetto_policy
 
         ::rocprofsys::pmc::collectors::nic::enabled_metrics effective_metrics{};
         effective_metrics.value =
-            static_cast<std::uint32_t>(enabled_metrics.value & supported_metrics.value);
+            static_cast<std::uint32_t>(enabled.value & supported.value);
 
         if(effective_metrics.value == 0)
         {
