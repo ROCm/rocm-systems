@@ -28,12 +28,6 @@ target_link_libraries(
         asan_build_dependencies
 )
 
-set_target_properties(
-    ${target}
-    PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../../../${CMAKE_INSTALL_LIBDIR}/${CMAKE_PROJECT_NAME}"
-)
-
 if(INSTALL_TESTS)
     install(
         TARGETS ${target}
