@@ -70,11 +70,11 @@ drop `--gdb` to pass your own `rocgdb` invocation for full control.
 
 Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
 end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
-wave registers / PC / disassembly, and continues the kernel to correct
-completion. `info agents` lists the synthetic `gfx950 / MI350X` agent, and a
-breakpoint on a GPU kernel stops the trapping wave. The remaining wave-control
-features (single-step, watchpoints, faults, private memory, multi-wave) build on
-this and are tracked below.
+wave registers / PC / disassembly, single-steps instructions, and continues the
+kernel to correct completion. `info agents` lists the synthetic `gfx950 /
+MI350X` agent, and a breakpoint on a GPU kernel stops the trapping wave. The
+remaining wave-control features (watchpoints, faults, private memory, multi-wave)
+build on this and are tracked below.
 
 | Area | Status |
 |---|---|
@@ -90,7 +90,8 @@ this and are tracked below.
 | Wave stop on `s_trap` + CWSR serialization | done |
 | Debug events + register write-back (breakpoint stop end to end) | done |
 | One-command debugging (`mirage run --gdb` / `--gdb-ex`) | done |
-| Single-step / displaced stepping | pending |
+| Deterministic single-step (`stepi`) | done |
+| Displaced stepping / step-over | pending |
 | Watchpoints / illegal-instruction / memory-violation | pending |
 | Private/scratch reads / multi-wave | pending |
 
