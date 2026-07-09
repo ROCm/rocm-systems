@@ -86,6 +86,10 @@ using namespace rocjitsu;
 // Concept and trait verification (compile-time)
 // ---------------------------------------------------------------------------
 
+/*
+ * \NPI new ISA family: add GpuIsa<<isa>::Isa> plus the relevant trait \
+ * static_asserts (HasAccVgpr, HasMonolithicWaitcnt, ...) for it here.
+ */
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<gfx1250::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
