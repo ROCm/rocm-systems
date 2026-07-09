@@ -6,6 +6,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
@@ -18,12 +19,33 @@ RJ_DIAGNOSTIC_POP
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
 namespace fs = std::filesystem;
 
 namespace {
+
+std::string make_runtime_temp_dir(const char *prefix) {
+  std::error_code ec;
+  fs::path base = rpc_default_runtime_dir();
+  fs::create_directories(base, ec);
+  if (ec)
+    return {};
+
+  // Synthetic sysfs/DRM trees are process-owned and removed by Sysfs::cleanup().
+  // Place them under the rocjitsu runtime directory so crashes leave state in a
+  // known per-user location instead of scattering entries directly under /tmp.
+  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
+  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
+  tmpl_buffer.push_back('\0');
+  char *dir = mkdtemp(tmpl_buffer.data());
+  if (!dir)
+    return {};
+  return dir;
+}
 
 /// @brief Debug-related topology bits derived from a GPU's GFXIP version.
 ///
@@ -441,11 +463,10 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 }
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
-  char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_drm");
+  if (dir.empty())
     return;
-  drm_dir_ = dir;
+  drm_dir_ = std::move(dir);
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -501,12 +522,11 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
-  char tmpl[] = "/tmp/rocjitsu_topology_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_topology");
+  if (dir.empty())
     return {};
 
-  topology_dir_ = dir;
+  topology_dir_ = std::move(dir);
   if (!gpus.empty())
     gpu_info_ = gpus[0];
 

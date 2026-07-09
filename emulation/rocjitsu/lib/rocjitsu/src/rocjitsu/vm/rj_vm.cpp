@@ -266,7 +266,7 @@ rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t 
   auto *drv = dynamic_cast<SimulatedKfd *>(vm->vm->driver());
   if (!drv)
     return ROCJITSU_STATUS_ERROR;
-  // client_pid == 0 (local mode) maps to SimulatedDriver::open_process()'s
+  // client_pid == 0 (local mode) maps to SimulatedKfd::open_process()'s
   // default; a nonzero client_pid enables daemon-mode process reuse and
   // cross-process memory access. Narrow the fixed-width public type to the
   // platform pid_t at the Linux daemon boundary.

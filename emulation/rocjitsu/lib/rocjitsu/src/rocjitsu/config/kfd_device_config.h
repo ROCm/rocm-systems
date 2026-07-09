@@ -55,6 +55,9 @@ struct KfdDeviceConfig {
   uint32_t location_id = 0x0300;             ///< PCI BDF location id.
   uint64_t hive_id = 0;                      ///< XGMI hive id.
   uint32_t domain = 0;                       ///< PCI domain.
+  uint32_t capability = 0;                   ///< KFD debug capability bits, or 0 to derive.
+  uint32_t capability2 = 0;                  ///< KFD debug capability2 bits, or 0 to derive.
+  uint64_t debug_prop = 0;                   ///< KFD debug_prop bits, or 0 to derive.
   bool present = false;                      ///< True if device section existed in config.
 };
 

@@ -6,6 +6,7 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 
 #include "util/log.h"
 
@@ -18,6 +19,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -107,9 +109,19 @@ std::string set_property(std::string text, std::string_view key, uint64_t value)
 }
 
 bool make_temp_dir(const char *prefix, std::string *out) {
-  char tmpl[128];
-  std::snprintf(tmpl, sizeof(tmpl), "/tmp/%s_XXXXXX", prefix);
-  char *dir = mkdtemp(tmpl);
+  std::error_code ec;
+  fs::path base = rpc_default_runtime_dir();
+  fs::create_directories(base, ec);
+  if (ec)
+    return false;
+
+  // Keep generated overlay trees under the rocjitsu runtime directory instead
+  // of raw /tmp. That gives test/daemon callers one directory to clean and
+  // avoids process-private synthetic sysfs trees accumulating at /tmp top-level.
+  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
+  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
+  tmpl_buffer.push_back('\0');
+  char *dir = mkdtemp(tmpl_buffer.data());
   if (!dir)
     return false;
   *out = dir;
@@ -489,11 +501,15 @@ GuestKfd::~GuestKfd() {
 }
 
 void GuestKfd::reset_after_fork() {
+  // After fork() only the calling thread survives. If another parent thread was
+  // in an ioctl or close path, mutex_ may be inherited as permanently locked in
+  // the child. Reinitialize it in-place before touching ordinary members; the
+  // child is single-threaded here and the interposer destroys this copy next.
+  new (&mutex_) std::mutex();
   ready_.store(false, std::memory_order_release);
   int kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
   if (kfd_fd >= 0)
     libc_passthrough().close(kfd_fd);
-  std::lock_guard lock(mutex_);
   open_refs_ = 0;
   overlay_->release_after_fork();
   synthetic_handles_.clear();
@@ -548,8 +564,15 @@ int GuestKfd::open() {
     std::lock_guard lock(mutex_);
     int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
     if (ready_.load(std::memory_order_acquire) && kfd_fd >= 0) {
+      // Keep the real /dev/kfd fd internal to the driver. Applications receive
+      // ordinary dup fds, so close(fd) releases that fd number immediately while
+      // the hidden real fd keeps host-KFD forwarding alive until the last
+      // app-facing open/dup reference is closed.
+      int app_fd = libc_passthrough().fcntl(kfd_fd, F_DUPFD_CLOEXEC, 0);
+      if (app_fd < 0)
+        return -1;
       ++open_refs_;
-      return kfd_fd;
+      return app_fd;
     }
   }
 }
@@ -562,6 +585,8 @@ void GuestKfd::retain_local_open() {
 
 int GuestKfd::close() {
   int kfd_fd = -1;
+  std::unique_ptr<TopologyOverlay> overlay_to_cleanup;
+  auto fresh_overlay = std::make_unique<TopologyOverlay>();
   {
     std::lock_guard lock(mutex_);
     if (open_refs_ == 0)
@@ -578,8 +603,13 @@ int GuestKfd::close() {
     ready_.store(false, std::memory_order_release);
     synthetic_handles_.clear();
     next_synthetic_handle_ = kSyntheticHandleBase;
-    overlay_->cleanup();
+    // Removing copied sysfs trees can block on filesystem work. Swap the
+    // overlay object while serialized, then perform the actual remove_all after
+    // releasing mutex_ so concurrent ioctl/redirect callers are not stalled.
+    overlay_to_cleanup = std::move(overlay_);
+    overlay_ = std::move(fresh_overlay);
   }
+  overlay_to_cleanup.reset();
   if (kfd_fd >= 0)
     libc_passthrough().close(kfd_fd);
   return 0;
@@ -589,17 +619,16 @@ int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
   int kfd_fd = fd();
   if (kfd_fd < 0) {
     errno = ENODEV;
-    return -ENODEV;
+    return -1;
   }
   int ret = libc_passthrough().ioctl(kfd_fd, request, arg);
   if (ret < 0) {
-    // Driver::ioctl implementations return negative errno values internally,
-    // while the real libc ioctl reports -1 and stores the reason in errno.
-    // Preserve the specific kernel error so GuestKfd callers do not collapse
-    // every forwarded failure into a generic -1.
+    // GuestKfd forwards to the real kernel ABI here. Preserve errno and return
+    // -1 so callers that check for libc ioctl failure semantics behave the same
+    // whether an ioctl was handled locally or forwarded to /dev/kfd.
     const int saved_errno = errno != 0 ? errno : EIO;
     errno = saved_errno;
-    return -saved_errno;
+    return -1;
   }
   return ret;
 }
@@ -869,22 +898,31 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
   if (!path)
     return {};
 
-  if (!ready_.load(std::memory_order_acquire))
-    return {};
+  std::string topology_path;
+  std::string guest_drm_path;
+  {
+    std::lock_guard lock(mutex_);
+    if (!ready_.load(std::memory_order_acquire))
+      return {};
+    // Snapshot mutable overlay strings while serialized with close() teardown.
+    // The returned path must not reference buffers that cleanup() may clear.
+    topology_path = overlay_->topology_path();
+    guest_drm_path = overlay_->guest_drm_path();
+  }
 
-  auto redirected = redirect_sysfs_root_path(path, overlay_->topology_path(), {});
+  auto redirected = redirect_sysfs_root_path(path, topology_path, {});
   if (!redirected.empty())
     return redirected;
-  if (overlay_->guest_drm_path().empty())
+  if (guest_drm_path.empty())
     return {};
 
   std::string_view sv(path);
   uint32_t minor = 0;
   std::string_view suffix;
   if (parse_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
-    return overlay_->guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+    return guest_drm_path + "/renderD" + std::to_string(minor) + std::string(suffix);
   if (parse_sys_dev_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
-    return overlay_->guest_drm_path() + "/renderD" + std::to_string(minor) + std::string(suffix);
+    return guest_drm_path + "/renderD" + std::to_string(minor) + std::string(suffix);
 
   constexpr std::string_view kDevDriRenderPrefix = "/dev/dri/renderD";
   if (sv.starts_with(kDevDriRenderPrefix)) {
@@ -896,8 +934,7 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
     if (err == std::errc{} && ptr == number.data() + number.size() &&
         parsed == guest_.drm_render_minor) {
       auto dev_suffix = slash == std::string_view::npos ? std::string_view{} : rest.substr(slash);
-      return overlay_->guest_drm_path() + "/dev_dri/renderD" + std::to_string(parsed) +
-             std::string(dev_suffix);
+      return guest_drm_path + "/dev_dri/renderD" + std::to_string(parsed) + std::string(dev_suffix);
     }
   }
 
@@ -915,6 +952,7 @@ const Sysfs::GpuInfo *GuestKfd::gpu_info_for_render_minor(uint32_t minor) const 
 }
 
 std::string GuestKfd::topology_path() const {
+  std::lock_guard lock(mutex_);
   return ready_.load(std::memory_order_acquire) ? overlay_->topology_path() : std::string{};
 }
 
@@ -931,10 +969,6 @@ bool GuestKfd::request_targets_guest(unsigned long request, void *arg) const {
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_CREATE_QUEUE:
     return static_cast<kfd_ioctl_create_queue_args *>(arg)->gpu_id == guest_.gpu_id;
-  case AMDKFD_IOC_SET_MEMORY_POLICY:
-    return static_cast<kfd_ioctl_set_memory_policy_args *>(arg)->gpu_id == guest_.gpu_id;
-  case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
-    return static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg)->gpu_id == guest_.gpu_id;
   case AMDKFD_IOC_IMPORT_DMABUF:
     return static_cast<kfd_ioctl_import_dmabuf_args *>(arg)->gpu_id == guest_.gpu_id;
   case AMDKFD_IOC_SMI_EVENTS:
@@ -945,16 +979,6 @@ bool GuestKfd::request_targets_guest(unsigned long request, void *arg) const {
     return static_cast<kfd_ioctl_get_tile_config_args *>(arg)->gpu_id == guest_.gpu_id;
   case AMDKFD_IOC_SET_TRAP_HANDLER:
     return static_cast<kfd_ioctl_set_trap_handler_args *>(arg)->gpu_id == guest_.gpu_id;
-  case AMDKFD_IOC_MAP_MEMORY_TO_GPU: {
-    auto *a = static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg);
-    auto *ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(a->device_ids_array_ptr));
-    return ids && std::find(ids, ids + a->n_devices, guest_.gpu_id) != ids + a->n_devices;
-  }
-  case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
-    auto *a = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
-    auto *ids = reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(a->device_ids_array_ptr));
-    return ids && std::find(ids, ids + a->n_devices, guest_.gpu_id) != ids + a->n_devices;
-  }
   case AMDKFD_IOC_SVM: {
     auto *a = static_cast<kfd_ioctl_svm_args *>(arg);
     for (uint32_t i = 0; i < a->nattr; ++i) {

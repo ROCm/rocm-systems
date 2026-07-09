@@ -418,21 +418,34 @@ public:
     return registry;
   }
 
+  /// @brief Stable byte snapshot returned by lookup().
+  ///
+  /// @details Application-created memory readers are non-owning because ROCR's
+  /// public API requires the caller to keep those bytes valid for the reader
+  /// lifetime. Translated readers carry shared ownership so a concurrent destroy
+  /// cannot free rocjitsu-owned ELF storage while a load is in progress.
+  struct ReaderBytes {
+    const uint8_t *bytes = nullptr;
+    size_t size = 0;
+    std::shared_ptr<const std::vector<uint8_t>> owned;
+
+    [[nodiscard]] explicit operator bool() const { return bytes != nullptr; }
+  };
+
   /// @brief Record bytes backing a code-object reader.
   /// @param reader HSA reader handle used as the lookup key.
   /// @param bytes Start of the ELF image.
   /// @param size Size of the ELF image in bytes.
   /// @param owned Optional owned storage for translated ELF bytes.
   [[nodiscard]] bool store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
-                           std::vector<uint8_t> *owned) {
+                           std::shared_ptr<const std::vector<uint8_t>> owned) {
     std::unique_lock lock(mutex_);
     for (auto it = entries_.begin(); it != entries_.end(); ++it) {
       auto *entry = static_cast<Entry *>(it.node_pointer());
       if (entry->handle == reader.handle) {
-        delete entry->owned;
         entry->bytes = bytes;
         entry->size = size;
-        entry->owned = owned;
+        entry->owned = std::move(owned);
         return true;
       }
     }
@@ -446,18 +459,16 @@ public:
   }
 
   /// @brief Find bytes previously recorded for @p reader.
-  /// @returns true when @p bytes and @p size were populated.
-  bool lookup(hsa_code_object_reader_t reader, const uint8_t **bytes, size_t *size) {
+  /// @returns Snapshot with bytes populated when the reader is known.
+  ReaderBytes lookup(hsa_code_object_reader_t reader) {
     std::shared_lock lock(mutex_);
     for (auto it = entries_.begin(); it != entries_.end(); ++it) {
       auto *entry = static_cast<Entry *>(it.node_pointer());
       if (entry->handle == reader.handle) {
-        *bytes = entry->bytes;
-        *size = entry->size;
-        return true;
+        return ReaderBytes{entry->bytes, entry->size, entry->owned};
       }
     }
-    return false;
+    return {};
   }
 
   /// @brief Remove one reader entry and release owned translated bytes if any.
@@ -488,18 +499,17 @@ public:
 private:
   /// @brief One code-object reader entry tracked by reader handle.
   struct Entry : util::IListNode<Entry> {
-    Entry(uint64_t h, const uint8_t *b, size_t s, std::vector<uint8_t> *o)
-        : handle(h), bytes(b), size(s), owned(o) {}
+    Entry(uint64_t h, const uint8_t *b, size_t s, std::shared_ptr<const std::vector<uint8_t>> o)
+        : handle(h), bytes(b), size(s), owned(std::move(o)) {}
 
     uint64_t handle = 0;
     const uint8_t *bytes = nullptr;
     size_t size = 0;
-    std::vector<uint8_t> *owned = nullptr;
+    std::shared_ptr<const std::vector<uint8_t>> owned;
   };
 
   /// @brief Destroy one reader entry and release optional owned ELF storage.
   void destroy_entry(Entry *entry) {
-    delete entry->owned;
     entry->~Entry();
     entry_pool_.deallocate(entry);
   }
@@ -1495,6 +1505,7 @@ private:
       return;
 
     std::unordered_map<uint64_t, uint64_t> discovered;
+    bool mapped_any_pool = false;
     if (iterate_pools != nullptr && get_info != nullptr) {
       PoolList guest_pools;
       PoolList host_pools;
@@ -1508,11 +1519,19 @@ private:
           if (!host_pool)
             continue;
           discovered[guest_pool.pool.handle] = host_pool->pool.handle;
+          mapped_any_pool = true;
           log_message(kLogDebug, "mapped guest pool=%llu to host pool=%llu",
                       static_cast<unsigned long long>(guest_pool.pool.handle),
                       static_cast<unsigned long long>(host_pool->pool.handle));
         }
       }
+    }
+    if (!mapped_any_pool) {
+      // Pool iteration can fail transiently while the agent mapper is still
+      // converging or ROCR is initializing extension state. Do not publish an
+      // empty cache: the next mapped-pool call should retry discovery instead
+      // of forwarding guest pool handles forever.
+      return;
     }
 
     {
@@ -1593,7 +1612,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
     if (!CodeObjectReaderRegistry::instance().store(
-            *code_object_reader, static_cast<const uint8_t *>(code_object), size, nullptr)) {
+            *code_object_reader, static_cast<const uint8_t *>(code_object), size, {})) {
       if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
         (void)original_destroy(*code_object_reader);
       *code_object_reader = {};
@@ -1649,6 +1668,42 @@ std::vector<hsa_agent_t> map_agent_array(const hsa_agent_t *agents, size_t count
   return mapped;
 }
 
+/// @brief Forwardable mapped agent list with duplicate mapped handles removed.
+struct MappedAgentList {
+  std::vector<hsa_agent_t> agents;
+  bool changed = false;
+};
+
+/// @brief Map a caller-owned agent array and keep only the first mapped handle.
+MappedAgentList map_unique_agent_array(const hsa_agent_t *agents, size_t count) {
+  MappedAgentList mapped;
+  if (!agents || count == 0)
+    return mapped;
+
+  mapped.agents.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    hsa_agent_t agent = AgentMapper::instance().map(agents[i]);
+    mapped.changed = mapped.changed || agent.handle != agents[i].handle;
+
+    bool duplicate = false;
+    for (hsa_agent_t existing : mapped.agents) {
+      if (existing.handle == agent.handle) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      // Guest and host handles may both appear in "all agents" arrays. After
+      // mapping the visible guest back to the host, forwarding duplicates can
+      // make ROCR reject access setup; retain the first entry's policy.
+      mapped.changed = true;
+      continue;
+    }
+    mapped.agents.push_back(agent);
+  }
+  return mapped;
+}
+
 /// @brief Forwardable allow-access agent list plus optional per-agent flags.
 struct MappedAccessAgents {
   std::vector<hsa_agent_t> agents;
@@ -1691,6 +1746,43 @@ MappedAccessAgents map_access_agent_array(const hsa_agent_t *agents, uint32_t co
       mapped.flags.push_back(flags[i]);
   }
 
+  return mapped;
+}
+
+/// @brief Forwardable virtual-memory access descriptor list.
+struct MappedAccessDescs {
+  std::vector<hsa_amd_memory_access_desc_t> descs;
+  bool changed = false;
+};
+
+/// @brief Map vmem access descriptors and deduplicate mapped agent handles.
+MappedAccessDescs map_unique_access_descs(const hsa_amd_memory_access_desc_t *desc,
+                                          size_t desc_cnt) {
+  MappedAccessDescs mapped;
+  if (!desc || desc_cnt == 0)
+    return mapped;
+
+  mapped.descs.reserve(desc_cnt);
+  for (size_t i = 0; i < desc_cnt; ++i) {
+    hsa_amd_memory_access_desc_t entry = desc[i];
+    entry.agent_handle = mapped_agent(entry.agent_handle);
+    mapped.changed = mapped.changed || entry.agent_handle.handle != desc[i].agent_handle.handle;
+
+    bool duplicate = false;
+    for (const auto &existing : mapped.descs) {
+      if (existing.agent_handle.handle == entry.agent_handle.handle) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      // Keep the first descriptor for a mapped host agent. Supplying the same
+      // agent twice is invalid on some ROCR paths even if permissions match.
+      mapped.changed = true;
+      continue;
+    }
+    mapped.descs.push_back(entry);
+  }
   return mapped;
 }
 
@@ -1811,10 +1903,8 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
   // HIP/CLR derives the application-visible device ISA from this callback.
   // Keep the synthetic agent guest-facing so fatbin selection picks gfx950 code
   // objects; execution-facing hooks translate and map those loads to the host.
-  hsa_agent_t mapped = AgentMapper::instance().map(agent);
-  log_message(kLogDebug, "agent_iterate_isas agent=%llu mapped=%llu",
-              static_cast<unsigned long long>(agent.handle),
-              static_cast<unsigned long long>(mapped.handle));
+  log_message(kLogDebug, "agent_iterate_isas agent=%llu",
+              static_cast<unsigned long long>(agent.handle));
   return original(agent, callback, data);
 }
 
@@ -2080,6 +2170,14 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
   auto *original = layer().amd_agent_memory_pool_get_info();
   if (!original)
     return HSA_STATUS_ERROR;
+  if (value == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (memory_pool.handle == 0) {
+    // ROCR converts the AMD pool handle back to an internal region before
+    // answering agent/pool access queries. Keep null synthetic handles from
+    // crossing that ABI boundary; they are invalid AMD memory pools.
+    return HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
+  }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
   log_message(
@@ -2194,9 +2292,12 @@ hsa_status_t HSA_API rj_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t
   auto *original = layer().amd_memory_lock();
   if (!original)
     return HSA_STATUS_ERROR;
-  auto mapped = num_agent > 0 ? map_agent_array(agents, static_cast<size_t>(num_agent))
-                              : std::vector<hsa_agent_t>{};
-  return original(host_ptr, size, mapped.empty() ? agents : mapped.data(), num_agent, agent_ptr);
+  MappedAgentList mapped = num_agent > 0
+                               ? map_unique_agent_array(agents, static_cast<size_t>(num_agent))
+                               : MappedAgentList{};
+  hsa_agent_t *forwarded_agents = mapped.changed ? mapped.agents.data() : agents;
+  int forwarded_count = mapped.changed ? static_cast<int>(mapped.agents.size()) : num_agent;
+  return original(host_ptr, size, forwarded_agents, forwarded_count, agent_ptr);
 }
 
 hsa_status_t HSA_API rj_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa_agent_t *agents,
@@ -2205,10 +2306,13 @@ hsa_status_t HSA_API rj_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa
   auto *original = layer().amd_memory_lock_to_pool();
   if (!original)
     return HSA_STATUS_ERROR;
-  auto mapped = num_agent > 0 ? map_agent_array(agents, static_cast<size_t>(num_agent))
-                              : std::vector<hsa_agent_t>{};
-  return forward_amd_call(original, host_ptr, size, mapped.empty() ? agents : mapped.data(),
-                          num_agent, mapped_pool_arg(pool), flags, agent_ptr);
+  MappedAgentList mapped = num_agent > 0
+                               ? map_unique_agent_array(agents, static_cast<size_t>(num_agent))
+                               : MappedAgentList{};
+  hsa_agent_t *forwarded_agents = mapped.changed ? mapped.agents.data() : agents;
+  int forwarded_count = mapped.changed ? static_cast<int>(mapped.agents.size()) : num_agent;
+  return forward_amd_call(original, host_ptr, size, forwarded_agents, forwarded_count,
+                          mapped_pool_arg(pool), flags, agent_ptr);
 }
 
 hsa_status_t HSA_API rj_amd_memory_fill(void *ptr, uint32_t value, size_t count) {
@@ -2263,14 +2367,11 @@ hsa_status_t HSA_API rj_amd_vmem_set_access(void *va, size_t size,
   auto *original = layer().amd_vmem_set_access();
   if (!original)
     return HSA_STATUS_ERROR;
-  std::vector<hsa_amd_memory_access_desc_t> mapped;
-  if (desc && desc_cnt > 0) {
-    mapped.assign(desc, desc + desc_cnt);
-    for (auto &entry : mapped)
-      entry.agent_handle = mapped_agent(entry.agent_handle);
-  }
+  MappedAccessDescs mapped = map_unique_access_descs(desc, desc_cnt);
+  const hsa_amd_memory_access_desc_t *forwarded_desc = mapped.changed ? mapped.descs.data() : desc;
+  size_t forwarded_count = mapped.changed ? mapped.descs.size() : desc_cnt;
   log_message(kLogVerbose, "amd_vmem_set_access va=%p size=%zu desc_cnt=%zu", va, size, desc_cnt);
-  return original(va, size, mapped.empty() ? desc : mapped.data(), desc_cnt);
+  return original(va, size, forwarded_desc, forwarded_count);
 }
 
 hsa_status_t HSA_API rj_amd_vmem_get_access(void *va, hsa_access_permission_t *perms,
@@ -2341,28 +2442,25 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 /// @brief Create an HSA reader from translated ELF bytes and keep the storage alive.
 [[nodiscard]] hsa_status_t create_translated_reader(std::vector<uint8_t> translated,
                                                     hsa_code_object_reader_t *translated_reader) {
-  auto *owned = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
-  if (owned == nullptr)
+  auto *owned_storage = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
+  if (owned_storage == nullptr)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  std::shared_ptr<const std::vector<uint8_t>> owned(owned_storage);
 
   auto *original_create = layer().create_from_memory();
   if (original_create == nullptr) {
-    delete owned;
     return HSA_STATUS_ERROR;
   }
 
   const hsa_status_t status = original_create(owned->data(), owned->size(), translated_reader);
-  if (status != HSA_STATUS_SUCCESS) {
-    delete owned;
+  if (status != HSA_STATUS_SUCCESS)
     return status;
-  }
 
   if (!CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
                                                   owned)) {
     if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
       (void)original_destroy(*translated_reader);
     *translated_reader = {};
-    delete owned;
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   return HSA_STATUS_SUCCESS;
@@ -2393,15 +2491,17 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
   if (guest_load && load_agent.handle == 0)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  const uint8_t *bytes = nullptr;
-  size_t size = 0;
-  if (!CodeObjectReaderRegistry::instance().lookup(code_object_reader, &bytes, &size)) {
+  CodeObjectReaderRegistry::ReaderBytes reader_bytes =
+      CodeObjectReaderRegistry::instance().lookup(code_object_reader);
+  if (!reader_bytes) {
     log_message(kLogInfo, "no memory bytes registered for reader=%llu",
                 static_cast<unsigned long long>(code_object_reader.handle));
     if (guest_load)
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
     return original_load(executable, load_agent, code_object_reader, options, loaded_code_object);
   }
+  const uint8_t *bytes = reader_bytes.bytes;
+  size_t size = reader_bytes.size;
 
   const DetectedElfTarget detected = detect_target_from_elf(bytes, size);
   DetectedElfTarget source_target = detected;

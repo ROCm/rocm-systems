@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -47,17 +48,6 @@ struct PlannedWorkgroup {
 };
 
 uint32_t nonzero_or_one(uint32_t v) { return v == 0 ? 1 : v; }
-
-/// @brief Return a monotonic timestamp in the guest HSA system-clock domain.
-///
-/// @details The guest KFD advertises a 1 GHz synthetic system clock backed by
-/// `std::chrono::steady_clock`. Dispatch profiling timestamps stored in
-/// `amd_signal_t` use the same HSA system-clock domain, so HIP event timing can
-/// subtract them directly.
-uint64_t hsa_system_timestamp() {
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-}
 
 uint32_t checked_ext_dispatch_grid_size(uint32_t cluster_count, uint32_t cluster_size,
                                         uint32_t workgroup_size, const char *axis) {

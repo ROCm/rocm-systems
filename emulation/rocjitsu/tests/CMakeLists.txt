@@ -487,10 +487,31 @@ set(RJ_CDNA4_KMD_2GPU_CONFIG
     "${CMAKE_SOURCE_DIR}/configs/gfx950_cdna4_kmd_2gpu.json"
 )
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json")
+set(RJ_HIP_TEST_ARCH
+    "gfx950"
+    CACHE STRING
+    "GPU ISA used to build basic HIP smoke tests"
+)
+set(RJ_HIP_TEST_CONFIG
+    "${RJ_CDNA4_KMD_CONFIG}"
+    CACHE FILEPATH
+    "rocjitsu config used by basic HIP smoke tests"
+)
+set(RJ_HIP_TEST_2GPU_CONFIG
+    "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    CACHE FILEPATH
+    "rocjitsu config used by basic two-GPU HIP tests"
+)
 get_filename_component(RJ_CDNA4_KMD_CONFIG_NAME "${RJ_CDNA4_KMD_CONFIG}" NAME)
 get_filename_component(
     RJ_CDNA4_KMD_2GPU_CONFIG_NAME
     "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    NAME
+)
+get_filename_component(RJ_HIP_TEST_CONFIG_NAME "${RJ_HIP_TEST_CONFIG}" NAME)
+get_filename_component(
+    RJ_HIP_TEST_2GPU_CONFIG_NAME
+    "${RJ_HIP_TEST_2GPU_CONFIG}"
     NAME
 )
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
@@ -1208,17 +1229,25 @@ endif()
 rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
-if(HIP_RUNTIME64)
-    # These tests expose a synthetic gfx950 GPU to HIP. Recent HIP runtimes
-    # reject agents whose PCI ID/ISA are not in their device table, even when
-    # ROCR can enumerate the agent. Do not register tests that would fail before
-    # exercising rocjitsu.
-    file(STRINGS "${HIP_RUNTIME64}" _rj_hip_gfx950_strings REGEX "gfx950")
-    if(_rj_hip_gfx950_strings)
-        set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 TRUE)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
+
+function(rj_hip_runtime_supports_arch out_var arch)
+    set(_supports FALSE)
+    if(HIP_RUNTIME64)
+        # Recent HIP runtimes reject agents whose PCI ID/ISA are not in their
+        # device table, even when ROCR can enumerate the agent. Gate CTest
+        # registration by the user-space runtime's advertised architectures so
+        # unsupported targets do not fail before exercising rocjitsu.
+        file(STRINGS "${HIP_RUNTIME64}" _rj_hip_arch_strings REGEX "${arch}")
+        if(_rj_hip_arch_strings)
+            set(_supports TRUE)
+        endif()
     endif()
-endif()
+    set(${out_var} "${_supports}" PARENT_SCOPE)
+endfunction()
+
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
@@ -1228,15 +1257,18 @@ elseif(NOT HSA_RUNTIME64)
 elseif(NOT HIP_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libamdhip64 not found)")
-elseif(NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-    set(RJ_ENABLE_HIP_TESTS OFF)
-    message(
-        STATUS
-        "HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
-    )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_SANITIZER_LINK_OPTIONS)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (GNU host compiler with sanitizers)")
+endif()
+
+if(RJ_ENABLE_HIP_TESTS)
+    rj_hip_runtime_supports_arch(
+        RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH
+        "${RJ_HIP_TEST_ARCH}"
+    )
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -1259,7 +1291,7 @@ if(RJ_ENABLE_HIP_TESTS)
     function(rj_add_hip_test TEST_NAME)
         cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
         if(NOT ARG_ARCH)
-            set(ARG_ARCH gfx950)
+            set(ARG_ARCH ${RJ_HIP_TEST_ARCH})
         endif()
         if(ARG_SOURCE)
             set(HIP_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE})
@@ -1368,213 +1400,290 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test(${_test_args})
     endfunction()
 
-    rj_add_hip_test(hip_memcpy_test)
-    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.RoundTripFloat")
-    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.RoundTripInt")
-    rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.DeviceToDevice")
-    rj_add_hip_test(hip_vector_add_test)
-    rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
-    rj_add_hip_test(hip_ds_transpose_acc_test)
-
-    # --- RCCL collective test ---
-    find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
-    if(RCCL_LIB)
-        rj_add_hip_test(hip_rccl_test EXTRA_LIBS ${RCCL_LIB})
-        message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
-    else()
-        message(STATUS "RCCL collective test disabled (librccl not found)")
-    endif()
-
-    # --- Daemon RPC tests (gtest-driven) ---
-    # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
-    # SetUp, run the HIP test binary as a subprocess, tear down in TearDown.
-    _rj_path_from_installed_test_bin(
-        _rj_installed_daemon_config
-        "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
-        "${RJ_CDNA4_KMD_CONFIG_NAME}"
-    )
-    _rj_path_from_installed_test_bin(
-        _rj_installed_daemon_config_2gpu
-        "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
-        "${RJ_CDNA4_KMD_2GPU_CONFIG_NAME}"
-    )
-    _rj_path_from_installed_test_bin(
-        _rj_installed_preload_lib
-        "${CMAKE_INSTALL_LIBDIR}"
-        "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
-    )
-
-    add_executable(daemon_test daemon_test.cpp)
-    target_compile_definitions(
-        daemon_test
-        PRIVATE
-            RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
-            RJ_DAEMON_CONFIG="${RJ_CDNA4_KMD_CONFIG}"
-            RJ_DAEMON_CONFIG_2GPU="${RJ_CDNA4_KMD_2GPU_CONFIG}"
-            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
-            RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
-            RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
-            RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
-            RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
-            RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
-            RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
-            RJ_INSTALLED_PRELOAD_LIB="${_rj_installed_preload_lib}"
-            RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
-            RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
-            RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
-    )
-    target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
-    add_dependencies(
-        daemon_test
-        rocjitsu_bin
-        hip_vector_add_test_target
-        hip_memcpy_test_target
-    )
-    if(RCCL_LIB)
-        add_dependencies(daemon_test hip_rccl_test_target)
-    endif()
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(daemon_test)
-    endif()
-    set(RJ_DAEMON_TESTS
-        DaemonTest.HipVectorAdd
-        DaemonTest.HipMemcpyRoundTripFloat
-        DaemonTest.HipMemcpyRoundTripInt
-        DaemonTest.HipMemcpyDeviceToDevice
-        DaemonTest.TwoIndependentClients
-    )
-    foreach(TC IN LISTS RJ_DAEMON_TESTS)
-        rj_add_test(
-            NAME ${TC}
-            COMMAND daemon_test --gtest_filter=${TC}
-            TIMEOUT 120
-            LABELS daemon
-            INSTALL_COMMAND
-                "bin/daemon_test"
-                "--gtest_filter=${TC}"
+    if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
+        rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
+        rj_add_hip_test_case(
+            hip_memcpy_test
+            "HipMemcpyTest.RoundTripFloat"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
         )
-    endforeach()
-
-    if(RCCL_LIB)
-        set(RJ_RCCL_TESTS
-            RcclDaemonTest.AllReduce
-            RcclDaemonTest.Broadcast
-            RcclDaemonTest.AllGather
-            RcclDaemonTest.ReduceScatter
-            RcclDaemonTest.SendRecv
+        rj_add_hip_test_case(
+            hip_memcpy_test
+            "HipMemcpyTest.RoundTripInt"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
         )
-        foreach(TC IN LISTS RJ_RCCL_TESTS)
+        rj_add_hip_test_case(
+            hip_memcpy_test
+            "HipMemcpyTest.DeviceToDevice"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+        )
+        rj_add_hip_test(hip_vector_add_test ARCH ${RJ_HIP_TEST_ARCH})
+        rj_add_hip_test_case(
+            hip_vector_add_test
+            "HipVectorAddTest.CorrectResult"
+            CONFIG ${RJ_HIP_TEST_CONFIG}
+        )
+
+        # --- Daemon RPC tests (gtest-driven) ---
+        # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
+        # SetUp, run the HIP test binary as a subprocess, tear down in TearDown.
+        _rj_path_from_installed_test_bin(
+            _rj_installed_daemon_config
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_HIP_TEST_CONFIG_NAME}"
+        )
+        _rj_path_from_installed_test_bin(
+            _rj_installed_daemon_config_2gpu
+            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
+            "${RJ_HIP_TEST_2GPU_CONFIG_NAME}"
+        )
+        _rj_path_from_installed_test_bin(
+            _rj_installed_preload_lib
+            "${CMAKE_INSTALL_LIBDIR}"
+            "${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+
+        add_executable(daemon_test daemon_test.cpp)
+        target_compile_definitions(
+            daemon_test
+            PRIVATE
+                RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
+                RJ_DAEMON_CONFIG="${RJ_HIP_TEST_CONFIG}"
+                RJ_DAEMON_CONFIG_2GPU="${RJ_HIP_TEST_2GPU_CONFIG}"
+                RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
+                RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
+                RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
+                RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+                RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
+                RJ_INSTALLED_DAEMON_CONFIG="${_rj_installed_daemon_config}"
+                RJ_INSTALLED_DAEMON_CONFIG_2GPU="${_rj_installed_daemon_config_2gpu}"
+                RJ_INSTALLED_PRELOAD_LIB="${_rj_installed_preload_lib}"
+                RJ_INSTALLED_HIP_VECTOR_ADD_BIN="hip_vector_add_test"
+                RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
+                RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
+        )
+        target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
+        add_dependencies(
+            daemon_test
+            rocjitsu_bin
+            hip_vector_add_test_target
+            hip_memcpy_test_target
+        )
+        if(RJ_INSTALL_TESTS)
+            rj_install_test_target(daemon_test)
+        endif()
+        set(RJ_DAEMON_TESTS
+            DaemonTest.HipVectorAdd
+            DaemonTest.HipMemcpyRoundTripFloat
+            DaemonTest.HipMemcpyRoundTripInt
+            DaemonTest.HipMemcpyDeviceToDevice
+            DaemonTest.TwoIndependentClients
+        )
+        foreach(TC IN LISTS RJ_DAEMON_TESTS)
             rj_add_test(
                 NAME ${TC}
                 COMMAND daemon_test --gtest_filter=${TC}
-                TIMEOUT 180
-                LABELS daemon rccl
+                TIMEOUT 120
+                LABELS daemon
                 INSTALL_COMMAND
                     "bin/daemon_test"
                     "--gtest_filter=${TC}"
             )
         endforeach()
+
+        # --- RCCL collective test ---
+        find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+        if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+            rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
+            add_dependencies(daemon_test hip_rccl_test_target)
+            set(RJ_RCCL_TESTS
+                RcclDaemonTest.AllReduce
+                RcclDaemonTest.Broadcast
+                RcclDaemonTest.AllGather
+                RcclDaemonTest.ReduceScatter
+                RcclDaemonTest.SendRecv
+            )
+            foreach(TC IN LISTS RJ_RCCL_TESTS)
+                rj_add_test(
+                    NAME ${TC}
+                    COMMAND daemon_test --gtest_filter=${TC}
+                    TIMEOUT 180
+                    LABELS daemon rccl
+                    INSTALL_COMMAND
+                        "bin/daemon_test"
+                        "--gtest_filter=${TC}"
+                )
+            endforeach()
+            message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
+        elseif(RCCL_LIB)
+            message(
+                STATUS
+                "RCCL collective test disabled (libamdhip64 does not advertise gfx950 support)"
+            )
+        else()
+            message(STATUS "RCCL collective test disabled (librccl not found)")
+        endif()
+    else()
+        message(
+            STATUS
+            "HIP smoke/daemon tests disabled (libamdhip64 does not advertise ${RJ_HIP_TEST_ARCH} support)"
+        )
+    endif()
+
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        # This test exercises CDNA ACCVGPR/DS transpose instructions directly
+        # in inline assembly, so it must stay on a CDNA target even when the
+        # generic HIP smoke tests are built for a local RDNA host such as
+        # gfx1201.
+        rj_add_hip_test(hip_ds_transpose_acc_test ARCH gfx950)
+
+        rj_add_hip_test(hip_bfe_2d_test ARCH gfx950)
+        rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
+
+        # --- Logging plugin end-to-end test ---
+        rj_add_hip_test(
+            hip_logging_test
+            ARCH gfx950
+            SOURCE logging/hip_logging_test.hip
+        )
+        set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
+        set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
+        file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
+        file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+        rj_add_hip_test_case(
+            hip_logging_test "LoggingTest.dispatch_logged"
+            TIMEOUT 30
+            ENVIRONMENT
+                "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
+                "RJ_LOG=1"
+                "RJ_SINKS=file"
+                "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
+        )
+
+        # --- Profiled plugin group end-to-end test ---
+        rj_add_hip_test(
+            hip_profiled_plugin_test
+            ARCH gfx950
+            SOURCE logging/hip_profiled_plugin_test.hip
+        )
+        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
+        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
+        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
+        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+        rj_add_hip_test_case(
+            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+            TIMEOUT 30
+            ENVIRONMENT
+                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
+                "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
+                "RJ_SINKS=file"
+                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
+        )
+
+        add_subdirectory(race-detector)
+    else()
+        message(
+            STATUS
+            "CDNA4 HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
+        )
     endif()
 
     # --- rocBLAS GEMM test ---
     find_library(ROCBLAS_LIB rocblas PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
     if(ROCBLAS_LIB)
-        rj_add_hip_test(hip_gemm_test EXTRA_LIBS ${ROCBLAS_LIB})
-        rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS ${ROCBLAS_LIB})
+        if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+            rj_add_hip_test(hip_gemm_test ARCH gfx950 EXTRA_LIBS ${ROCBLAS_LIB})
 
-        foreach(
-            TC
-            IN
-            ITEMS
-                Tiny_2x2x3
-                Square_4x4
-                Square_8x8
-                Square_16x16
-                Square_32x32
-                Square_64x64
-                Rect_16x32x8
-                Rect_1x64x1
-                Rect_64x1x64
-                Rect_7x11x13
-                AlphaBeta
-                BetaZero
-                Large_2048x2048
-        )
-            if(TC STREQUAL "Large_2048x2048")
+            foreach(
+                TC
+                IN
+                ITEMS
+                    Tiny_2x2x3
+                    Square_4x4
+                    Square_8x8
+                    Square_16x16
+                    Square_32x32
+                    Square_64x64
+                    Rect_16x32x8
+                    Rect_1x64x1
+                    Rect_64x1x64
+                    Rect_7x11x13
+                    AlphaBeta
+                    BetaZero
+                    Large_2048x2048
+            )
+                if(TC STREQUAL "Large_2048x2048")
+                    rj_add_hip_test_case(
+                        hip_gemm_test
+                        "RocblasGemmTest.${TC}"
+                        TIMEOUT 300
+                    )
+                else()
+                    rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
+                endif()
+            endforeach()
+            foreach(I RANGE 0 4)
+                rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
+            endforeach()
+            message(
+                STATUS
+                "rocBLAS GEMM gfx950 tests enabled (found ${ROCBLAS_LIB})"
+            )
+        endif()
+
+        if(RJ_HIP_RUNTIME_SUPPORTS_GFX942)
+            rj_add_hip_test(
+                hip_gemm_test_cdna3
+                ARCH gfx942
+                SOURCE hip_gemm_test.cpp
+                EXTRA_LIBS ${ROCBLAS_LIB}
+            )
+
+            foreach(
+                TC
+                IN
+                ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13
+            )
                 rj_add_hip_test_case(
-                    hip_gemm_test
+                    hip_gemm_test_cdna3
                     "RocblasGemmTest.${TC}"
-                    TIMEOUT 300
+                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
+                    NAME "RocblasGemmCdna3.${TC}"
                 )
-            else()
-                rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
-            endif()
-        endforeach()
-        foreach(I RANGE 0 4)
-            rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
-        endforeach()
+            endforeach()
+            foreach(I RANGE 0 2)
+                rj_add_hip_test_case(
+                    hip_gemm_test_cdna3
+                    "RocblasGemmFuzz.Iter${I}"
+                    CONFIG ${RJ_CDNA3_KMD_CONFIG}
+                    NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
+                )
+            endforeach()
+            message(
+                STATUS
+                "rocBLAS GEMM gfx942 tests enabled (found ${ROCBLAS_LIB})"
+            )
+        endif()
 
-        foreach(TC IN ITEMS Tiny_2x2x3 Square_16x16 Square_32x32 Rect_7x11x13)
-            rj_add_hip_test_case(hip_gemm_test_cdna3 "RocblasGemmTest.${TC}"
-                CONFIG ${RJ_CDNA3_KMD_CONFIG} NAME "RocblasGemmCdna3.${TC}"
+        if(
+            NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950
+            AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX942
+        )
+            message(
+                STATUS
+                "rocBLAS GEMM test disabled (libamdhip64 does not advertise gfx950 or gfx942 support)"
             )
-        endforeach()
-        foreach(I RANGE 0 2)
-            rj_add_hip_test_case(hip_gemm_test_cdna3 "RocblasGemmFuzz.Iter${I}"
-                CONFIG ${RJ_CDNA3_KMD_CONFIG} NAME "RocblasGemmCdna3.Fuzz_Iter${I}"
-            )
-        endforeach()
-        message(STATUS "rocBLAS GEMM test enabled (found ${ROCBLAS_LIB})")
+        endif()
     else()
         message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
-
-    rj_add_hip_test(hip_bfe_2d_test)
-    rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
-
-    # --- Logging plugin end-to-end test ---
-    rj_add_hip_test(hip_logging_test SOURCE logging/hip_logging_test.hip)
-    set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
-    set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
-    file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
-    file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
-    rj_add_hip_test_case(
-        hip_logging_test "LoggingTest.dispatch_logged"
-        TIMEOUT 30
-        ENVIRONMENT
-            "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-            "RJ_LOG=1"
-            "RJ_SINKS=file"
-            "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
-    )
-
-    # --- Profiled plugin group end-to-end test ---
-    rj_add_hip_test(
-        hip_profiled_plugin_test
-        SOURCE logging/hip_profiled_plugin_test.hip
-    )
-    set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-    set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-    file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-    file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-    rj_add_hip_test_case(
-        hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-        TIMEOUT 30
-        ENVIRONMENT
-            "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-            "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
-            "RJ_SINKS=file"
-            "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
-    )
-
-    add_subdirectory(race-detector)
 
     message(STATUS "HIP tests enabled (found ${AMDCXX})")
 endif()
 
 # --- Narrow conversion HIP CTS tests ---
-# Uses the same HIP compiler path as the other HIP tests.
-if(RJ_ENABLE_HIP_TESTS)
+# Uses the same HIP compiler path as the other CDNA4 HIP tests.
+if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
     set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
     add_custom_command(
         OUTPUT ${CVT_NARROW_BIN}

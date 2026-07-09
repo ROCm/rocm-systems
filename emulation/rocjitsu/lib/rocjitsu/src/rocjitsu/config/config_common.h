@@ -99,6 +99,9 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device) {
   config.location_id = device->location_id();
   config.hive_id = device->hive_id();
   config.domain = device->domain();
+  config.capability = device->capability();
+  config.capability2 = device->capability2();
+  config.debug_prop = device->debug_prop();
   return config;
 }
 

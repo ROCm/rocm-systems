@@ -30,7 +30,9 @@ struct hsa_amd_profiling_dispatch_time_t {
 };
 
 // Public hsa_ext_amd.h enum values mirrored by name so ABI renumbering is visible.
+inline constexpr hsa_status_t HSA_STATUS_ERROR_INVALID_MEMORY_POOL = static_cast<hsa_status_t>(40);
 inline constexpr uint32_t HSA_AMD_AGENT_INFO_DRIVER_NODE_ID = 0xA004;
+inline constexpr hsa_amd_agent_memory_pool_info_t HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS = 0;
 inline constexpr hsa_amd_memory_pool_info_t HSA_AMD_MEMORY_POOL_INFO_SEGMENT = 0;
 inline constexpr hsa_amd_memory_pool_info_t HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS = 1;
 inline constexpr hsa_amd_memory_pool_info_t HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED = 5;

@@ -340,7 +340,7 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
           "unique_id": 5929628898254127105,
           "marketing_name": "AMD Instinct MI350X",
           "drm_render_minor": 191,
-          "simd_count": 1024,
+          "simd_count": 64,
           "num_shader_engines": 4,
           "num_shader_arrays_per_engine": 2,
           "num_cu_per_sh": 4,
@@ -363,8 +363,33 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
   EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
   EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
   EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
+  EXPECT_EQ(dbt.guest_device.simd_count, dbt.guest_device.num_shader_engines *
+                                             dbt.guest_device.num_cu_per_sh *
+                                             dbt.guest_device.simd_per_cu);
   EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
   EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+}
+
+TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_bad_dbt_guest_geometry_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "simd_count": 1024,
+          "num_shader_engines": 4,
+          "num_cu_per_sh": 4,
+          "simd_per_cu": 4
+        }
+      }
+    })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
@@ -390,7 +415,7 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
         "unique_id": 5929628898254127105,
         "marketing_name": "AMD Instinct MI350X",
         "drm_render_minor": 191,
-        "simd_count": 1024,
+        "simd_count": 64,
         "num_shader_engines": 4,
         "num_shader_arrays_per_engine": 2,
         "num_cu_per_sh": 4,
