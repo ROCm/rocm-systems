@@ -230,6 +230,83 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
 }
 
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": { "gfx_target_version": 90500 } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  // Not specified in JSON: 0 means "auto-compute" (see
+  // rocjitsu::default_non_debug_capability()/debug_topology_for()).
+  EXPECT_EQ(loaded.device.capability, 0u);
+  EXPECT_EQ(loaded.device.capability2, 0u);
+  EXPECT_EQ(loaded.device.debug_prop, 0u);
+}
+
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": {
+        "gfx_target_version": 90500,
+        "capability": 268468354,
+        "capability2": 3,
+        "debug_prop": 3119
+      } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.device.capability, 268468354u);
+  EXPECT_EQ(loaded.device.capability2, 3u);
+  EXPECT_EQ(loaded.device.debug_prop, 3119u);
+}
+
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   const char *json = R"({"max_ticks":1000,"num_threads":1,
     "vm":{"arch":"gfx1250"},

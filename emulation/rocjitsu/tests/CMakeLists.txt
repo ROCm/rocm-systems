@@ -295,6 +295,7 @@ add_executable(
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
+    sysfs_test.cpp
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp

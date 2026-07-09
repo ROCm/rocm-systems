@@ -100,6 +100,12 @@ table KfdDeviceInfo {
   hive_id: uint64 = 0;        // XGMI hive ID (shared by GPUs in same node).
   domain: uint32 = 0;         // PCI domain.
   vram_type: uint32 = 6;      // AMDGPU_VRAM_TYPE_* (6 = HBM, 9 = GDDR6).
+
+  // KFD debugger API (from kfd_sysfs.h HSA_CAP_*/HSA_DBG_* bits). 0 = auto-compute
+  // from gfx_target_version (see rocjitsu::default_capability_for/debug_prop_for).
+  capability: uint32 = 0;
+  capability2: uint32 = 0;
+  debug_prop: uint64 = 0;
 }
 
 /// Top-level AMDGPU configuration.
