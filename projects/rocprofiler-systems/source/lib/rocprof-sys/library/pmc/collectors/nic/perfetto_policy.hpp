@@ -81,25 +81,35 @@ struct nic_perfetto_sample
     metrics metric_values;
 };
 
-// Emit a single NIC counter sample. CategoryTp is a registered Perfetto category
-// trait (see core/categories.hpp); trait::name<CategoryTp>::value is a
-// compile-time literal, which is what TRACE_COUNTER's category argument requires
-// (a runtime string cannot be used). This replaces a former per-metric emit macro
-// with a type-checked inline function.
+// Emit a single NIC counter sample to a pre-resolved track. CategoryTp is a
+// registered Perfetto category trait (see core/categories.hpp);
+// trait::name<CategoryTp>::value is a compile-time literal, which is what
+// TRACE_COUNTER's category argument requires (a runtime string cannot be used).
+// track_index < 0 means the metric is disabled or has no track, so the emit is
+// skipped; callers resolve it once (see resolve_nic_track) instead of looking it
+// up per sample.
 template <typename CategoryTp>
 inline void
-emit_nic_counter(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
-                 size_t                                                device_index,
-                 const std::map<std::uint32_t, nic_track_description>& device_tracks,
-                 size_t ts, std::uint64_t value)
+emit_nic_counter(size_t device_index, std::int64_t track_index, size_t ts,
+                 std::uint64_t value)
 {
-    if((effective_metrics.value & bit_key) == 0) return;
+    if(track_index < 0) return;
+    TRACE_COUNTER(trait::name<CategoryTp>::value,
+                  perfetto_counter_track<metrics>::at(device_index,
+                                                      static_cast<size_t>(track_index)),
+                  ts, static_cast<double>(value));
+}
+
+// Resolve a metric's track index once (before the per-sample loop). Returns -1 if
+// the metric is not enabled or has no registered track for this device.
+inline std::int64_t
+resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
+                  const std::map<std::uint32_t, nic_track_description>& device_tracks)
+{
+    if((effective_metrics.value & bit_key) == 0) return -1;
     auto it = device_tracks.find(bit_key);
-    if(it == device_tracks.end()) return;
-    TRACE_COUNTER(
-        trait::name<CategoryTp>::value,
-        perfetto_counter_track<metrics>::at(device_index, it->second.track_index), ts,
-        static_cast<double>(value));
+    if(it == device_tracks.end()) return -1;
+    return static_cast<std::int64_t>(it->second.track_index);
 }
 
 }  // namespace
@@ -247,6 +257,29 @@ struct perfetto_policy
 
         auto& device_tracks = tracks_it->second;
 
+        // Resolve each enabled metric's track index once; device_tracks is fixed
+        // after setup, so there is no need to look it up per sample.
+        const auto rx_rdma_ucast_bytes_idx = resolve_nic_track(
+            effective_metrics, RX_RDMA_UCAST_BYTES_VALUE, device_tracks);
+        const auto tx_rdma_ucast_bytes_idx = resolve_nic_track(
+            effective_metrics, TX_RDMA_UCAST_BYTES_VALUE, device_tracks);
+        const auto rx_rdma_ucast_pkts_idx =
+            resolve_nic_track(effective_metrics, RX_RDMA_UCAST_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_ucast_pkts_idx =
+            resolve_nic_track(effective_metrics, TX_RDMA_UCAST_PKTS_VALUE, device_tracks);
+        const auto rx_rdma_cnp_pkts_idx =
+            resolve_nic_track(effective_metrics, RX_RDMA_CNP_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_cnp_pkts_idx =
+            resolve_nic_track(effective_metrics, TX_RDMA_CNP_PKTS_VALUE, device_tracks);
+        const auto tx_rdma_ack_timeout_idx = resolve_nic_track(
+            effective_metrics, TX_RDMA_ACK_TIMEOUT_VALUE, device_tracks);
+        const auto resp_tx_pkt_seq_err_idx = resolve_nic_track(
+            effective_metrics, RESP_TX_PKT_SEQ_ERR_VALUE, device_tracks);
+        const auto req_rx_pkt_seq_err_idx =
+            resolve_nic_track(effective_metrics, REQ_RX_PKT_SEQ_ERR_VALUE, device_tracks);
+        const auto req_rx_impl_nak_seq_err_idx = resolve_nic_track(
+            effective_metrics, REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, device_tracks);
+
         for(const auto& sample : samples)
         {
             const auto ts = sample.timestamp;
@@ -257,39 +290,39 @@ struct perfetto_policy
                 continue;
             }
 
-            // Emit one counter sample per enabled metric. The category travels as a
-            // registered category trait so TRACE_COUNTER still sees a compile-time
-            // literal; see emit_nic_counter above.
+            // Emit one counter sample per enabled metric, using the track indices
+            // resolved above. The category travels as a registered category trait so
+            // TRACE_COUNTER still sees a compile-time literal; see emit_nic_counter.
             emit_nic_counter<category::amd_smi_nic_rx_ucast_bytes>(
-                effective_metrics, RX_RDMA_UCAST_BYTES_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.rx_rdma_ucast_bytes);
+                device_index, rx_rdma_ucast_bytes_idx, ts,
+                sample.metric_values.rx_rdma_ucast_bytes);
             emit_nic_counter<category::amd_smi_nic_tx_ucast_bytes>(
-                effective_metrics, TX_RDMA_UCAST_BYTES_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.tx_rdma_ucast_bytes);
+                device_index, tx_rdma_ucast_bytes_idx, ts,
+                sample.metric_values.tx_rdma_ucast_bytes);
             emit_nic_counter<category::amd_smi_nic_rx_ucast_pkts>(
-                effective_metrics, RX_RDMA_UCAST_PKTS_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.rx_rdma_ucast_pkts);
+                device_index, rx_rdma_ucast_pkts_idx, ts,
+                sample.metric_values.rx_rdma_ucast_pkts);
             emit_nic_counter<category::amd_smi_nic_tx_ucast_pkts>(
-                effective_metrics, TX_RDMA_UCAST_PKTS_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.tx_rdma_ucast_pkts);
+                device_index, tx_rdma_ucast_pkts_idx, ts,
+                sample.metric_values.tx_rdma_ucast_pkts);
             emit_nic_counter<category::amd_smi_nic_rx_cnp_pkts>(
-                effective_metrics, RX_RDMA_CNP_PKTS_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.rx_rdma_cnp_pkts);
+                device_index, rx_rdma_cnp_pkts_idx, ts,
+                sample.metric_values.rx_rdma_cnp_pkts);
             emit_nic_counter<category::amd_smi_nic_tx_cnp_pkts>(
-                effective_metrics, TX_RDMA_CNP_PKTS_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.tx_rdma_cnp_pkts);
+                device_index, tx_rdma_cnp_pkts_idx, ts,
+                sample.metric_values.tx_rdma_cnp_pkts);
             emit_nic_counter<category::amd_smi_nic_tx_rdma_ack_timeout>(
-                effective_metrics, TX_RDMA_ACK_TIMEOUT_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.tx_rdma_ack_timeout);
+                device_index, tx_rdma_ack_timeout_idx, ts,
+                sample.metric_values.tx_rdma_ack_timeout);
             emit_nic_counter<category::amd_smi_nic_resp_tx_pkt_seq_err>(
-                effective_metrics, RESP_TX_PKT_SEQ_ERR_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.resp_tx_pkt_seq_err);
+                device_index, resp_tx_pkt_seq_err_idx, ts,
+                sample.metric_values.resp_tx_pkt_seq_err);
             emit_nic_counter<category::amd_smi_nic_req_rx_pkt_seq_err>(
-                effective_metrics, REQ_RX_PKT_SEQ_ERR_VALUE, device_index, device_tracks,
-                ts, sample.metric_values.req_rx_pkt_seq_err);
+                device_index, req_rx_pkt_seq_err_idx, ts,
+                sample.metric_values.req_rx_pkt_seq_err);
             emit_nic_counter<category::amd_smi_nic_req_rx_impl_nak_seq_err>(
-                effective_metrics, REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, device_index,
-                device_tracks, ts, sample.metric_values.req_rx_impl_nak_seq_err);
+                device_index, req_rx_impl_nak_seq_err_idx, ts,
+                sample.metric_values.req_rx_impl_nak_seq_err);
         }
     }
 };
