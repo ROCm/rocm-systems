@@ -56,10 +56,10 @@ inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 
 // Single source of truth for NIC track labels and units. Adding a new metric
 // requires exactly one new row here (plus the bit position above and the
 // corresponding member in the metrics/enabled_metrics structs).
-inline std::map<std::uint32_t, nic_track_description>
+inline const std::map<std::uint32_t, nic_track_description>&
 make_default_nic_tracks()
 {
-    return {
+    static const std::map<std::uint32_t, nic_track_description> tracks = {
         { RX_RDMA_UCAST_BYTES_VALUE, { "RX RDMA BYTES", "bytes", 0 } },
         { TX_RDMA_UCAST_BYTES_VALUE, { "TX RDMA BYTES", "bytes", 0 } },
         { RX_RDMA_UCAST_PKTS_VALUE, { "RX RDMA PACKETS", "packets", 0 } },
@@ -71,6 +71,7 @@ make_default_nic_tracks()
         { REQ_RX_PKT_SEQ_ERR_VALUE, { "REQ RX PKT SEQ ERR", "errors", 0 } },
         { REQ_RX_IMPL_NAK_SEQ_ERR_VALUE, { "REQ RX IMPL NAK SEQ ERR", "errors", 0 } },
     };
+    return tracks;
 }
 
 struct nic_perfetto_sample
@@ -158,9 +159,10 @@ struct perfetto_policy
 
         auto& device_tracks = perfetto_policy::tracks[device_index];
 
-        for(auto& [bit_value, description] : make_default_nic_tracks())
+        for(const auto& [bit_value, default_description] : make_default_nic_tracks())
         {
             if((enabled_metric_config.value & bit_value) == 0) continue;
+            auto description        = default_description;
             description.track_index = counter_track::emplace(
                 device_index, addendum(description.track_name), description.units);
             device_tracks[bit_value] = description;
