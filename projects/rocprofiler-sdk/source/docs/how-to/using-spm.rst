@@ -88,3 +88,4 @@ Here are the input parameters used to configure SPM
 
   rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
   rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200 -- <application_path>
+  
