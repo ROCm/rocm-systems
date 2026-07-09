@@ -297,6 +297,7 @@ add_executable(
     mtype_flags_test.cpp
     sysfs_test.cpp
     kfd_ioctl_test.cpp
+    interposer_errno_test.cpp
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     cdna3_predicate_mask_test.cpp

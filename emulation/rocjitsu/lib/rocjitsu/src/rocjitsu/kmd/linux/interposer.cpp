@@ -10,6 +10,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_result.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
@@ -952,10 +953,10 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   }
 
   if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->ioctl(request, arg);
+    return rocjitsu::kmd::kfd_ioctl_ret(remote->ioctl(request, arg));
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
-      return remote->ioctl(request, arg);
+      return rocjitsu::kmd::kfd_ioctl_ret(remote->ioctl(request, arg));
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
@@ -964,14 +965,14 @@ RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   // type-'K' ioctl is never misrouted to the remote KFD driver.
   if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE && InterposerContext::ctx.is_kfd_tracked(fd)) {
     if (auto *remote = InterposerContext::ctx.remote())
-      return remote->ioctl(request, arg);
+      return rocjitsu::kmd::kfd_ioctl_ret(remote->ioctl(request, arg));
   }
 
   auto *drv = InterposerContext::ctx.lookup(fd);
   if (!drv && InterposerContext::ctx.is_kfd_dup(fd))
     drv = InterposerContext::ctx.driver();
   if (drv)
-    return drv->ioctl(request, arg);
+    return rocjitsu::kmd::kfd_ioctl_ret(drv->ioctl(request, arg));
 
   return InterposerContext::real.ioctl(fd, request, arg);
 }
