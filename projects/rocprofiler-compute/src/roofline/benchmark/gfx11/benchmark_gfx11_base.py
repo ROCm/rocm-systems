@@ -25,9 +25,6 @@ class Bench_gfx11(benchmark_base.Bench_base):
 
         self.unsupported_data_types = [
             "HBM",
-            "I8",
-            "I32",
-            "I64",
             "WMMA-F4",
             "WMMA-F6",
             "WMMA-F6F4",
@@ -50,6 +47,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "L0": super().l0_bw_bench,
             "LDS": super().lds_bw_benchmark,
             "F16": super().fp16_benchmark,
+            "BF16": super().bf16_benchmark,
             "F32": super().fp32_benchmark,
             "F64": super().fp64_benchmark,
             "I8": super().int8_benchmark,
@@ -74,6 +72,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "L0": "L0Bw",
             "LDS": "LDSBw",
             "F16": "FP16Flops",
+            "BF16": "BF16Flops",
             "F32": "FP32Flops",
             "F64": "FP64Flops",
             "I8": "I8Ops",
@@ -107,6 +106,43 @@ class Bench_gfx11(benchmark_base.Bench_base):
         # class set_kernel_source()
         # HBM Bandwidth benchmark
         self.hbm_bw_src = """"""
+
+        # BF16 uses a separate dot-product kernel for VALU flops measurement because:
+        # -> __hip_bfloat16 is not a valid ext_vector_type element.
+        # -> dot2 and dual-issue dot2 are the only supported VOP* operations on gfx115x,
+        # therefore create a custom kernel using dot2 builtin.
+        # BF16 precision dot2 VALU ops kernel source should only be used for gfx115x.
+        self.bf16_flops_benchmark_src = f"""
+        extern "C" __global__ void bf16_dot_flops(__hip_bfloat16 *buf, int count)
+        {{
+            const int tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+            // Each thread owns 4 BF16 values = 2 v2short pairs for fdot2 operands.
+            // Memory layout matches dataset_size = 4 * sizeof(c_short) * threads.
+            using v2short = short __attribute__((ext_vector_type(2)));
+            v2short *sbuf = (v2short *)buf;
+            v2short a = sbuf[tid * 2];
+            v2short b = sbuf[tid * 2 + 1];
+
+            float acc0 = 1.0f;
+            float acc1 = 2.0f;
+            float acc2 = 3.0f;
+            float acc3 = 4.0f;
+
+            for (int i = 0; i < count; i++) {{
+                for (int j = 0; j < {benchmark_base.VALU_NFMA} / 8; j++) {{
+
+                    // 4 independent fdot2 ops (4 FLOPs each = 16 FLOPs/iteration)
+                    acc0 = __builtin_amdgcn_fdot2_f32_bf16(a, b, acc0, false);
+                    acc1 = __builtin_amdgcn_fdot2_f32_bf16(a, b, acc1, false);
+                    acc2 = __builtin_amdgcn_fdot2_f32_bf16(a, b, acc2, false);
+                    acc3 = __builtin_amdgcn_fdot2_f32_bf16(a, b, acc3, false);
+                }}
+            }}
+
+            if (acc0 != 2 * acc0) buf[tid * 4] = (__hip_bfloat16)acc0;
+        }}
+        """
 
         # Matrix operations
         # ----------------------------------------
