@@ -38,11 +38,14 @@ get a private `SimulatedDriver`, so the debugger's dbgapi would never see the
 inferior's process table. **Daemon mode is mandatory**, and `mirage run` drives
 it in one command — it starts the session daemon, runs ROCgdb under the
 interposer connected to that session, and ROCgdb launches the inferior into the
-same session:
+same session. The `--gdb` flag wraps the workload for you:
 
 ```bash
-mirage run --profile mi350x -- rocgdb --args ./my_hip_app
+mirage run --profile mi350x --gdb -- ./my_hip_app
 ```
+
+is shorthand for `-- rocgdb -ex 'set breakpoint pending on' --args ./my_hip_app`;
+drop `--gdb` to pass your own `rocgdb` invocation for full control.
 
 ## 2. Debugging your own kernel
 
@@ -51,12 +54,17 @@ mirage run --profile mi350x -- rocgdb --args ./my_hip_app
    ```bash
    hipcc --offload-arch=gfx950 -g -O0 -o app app.hip
    ```
-2. Run under `mirage run`:
+2. Run under `mirage run --gdb` — one command drops you into ROCgdb with
+   kernel breakpoints already pending:
    ```bash
-   mirage run --profile mi350x -- rocgdb --args ./app
+   mirage run --profile mi350x --gdb -- ./app
    ```
-3. In ROCgdb: `set breakpoint pending on` (the kernel symbol resolves only after
-   the code object loads at dispatch), `break <kernel>`, `run`.
+   Script the session with repeatable `--gdb-ex` commands (implies `--gdb`):
+   ```bash
+   mirage run --profile mi350x --gdb-ex 'break add_one' --gdb-ex run -- ./app
+   ```
+3. In ROCgdb: `break <kernel>`, `run`. (`--gdb` already applied
+   `set breakpoint pending on`, so the kernel symbol resolves at dispatch.)
 
 ## 3. Status
 
@@ -81,6 +89,7 @@ this and are tracked below.
 | GET_QUEUE_SNAPSHOT (real queues) | done |
 | Wave stop on `s_trap` + CWSR serialization | done |
 | Debug events + register write-back (breakpoint stop end to end) | done |
+| One-command debugging (`mirage run --gdb` / `--gdb-ex`) | done |
 | Single-step / displaced stepping | pending |
 | Watchpoints / illegal-instruction / memory-violation | pending |
 | Private/scratch reads / multi-wave | pending |
