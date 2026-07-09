@@ -13,6 +13,7 @@ The first domains are:
 - `runtime`: runtime initialization, device visibility, version, and error-state contracts
 - `device`: portable current-device property contracts
 - `device_identity`: device PCI identity, device selection, and single-device peer-query contracts
+- `device_texture_query`: image-gated device texture-width query contracts
 - `peer_query`: peer-to-peer attribute and AMD link-type query invalid-input contracts
 - `stream_event`: stream and event lifecycle, query, synchronization, and wait-event ordering contracts
 - `stream_props`: stream creation flag, priority, identity, device, and event timing contracts

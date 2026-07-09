@@ -132,6 +132,24 @@ contract:
   Contract_DeviceIdentity_CanAccessPeer_InvalidArgs_AreRejected:
     <<: *level_0
     tags: [device_identity]
+  Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForFloatChannel:
+    <<: *level_0
+    tags: [device_texture_query]
+  Contract_DeviceTextureQuery_ReturnsPositiveWidth_ForByteChannel:
+    <<: *level_0
+    tags: [device_texture_query]
+  Contract_DeviceTextureQuery_NullMaxWidth_IsRejected:
+    <<: *level_0
+    tags: [device_texture_query]
+  Contract_DeviceTextureQuery_NullDescriptor_IsRejected:
+    <<: *level_0
+    tags: [device_texture_query]
+  Contract_DeviceTextureQuery_ZeroSizedDescriptor_IsRejected:
+    <<: *level_0
+    tags: [device_texture_query]
+  Contract_DeviceTextureQuery_InvalidDevice_IsRejected:
+    <<: *level_0
+    tags: [device_texture_query]
   Contract_PeerQuery_GetP2PAttribute_SelfDevice_IsRejected:
     <<: *level_0
     tags: [peer_query]
