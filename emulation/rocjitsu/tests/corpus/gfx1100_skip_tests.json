@@ -1,12 +1,24 @@
 {
   "iree": [],
   "cts": [
-    "fpsan_wmma_gfx11_w64_test",
-    "fpsan_xlane_w64_test",
-    "fpsan_classify_w64_test",
-    "fpsan_wave_gfx11_w64_test",
-    "fpsan_xlane_test",
-    "fpsan_wave_test"
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_w64_test",
+    "cts.gfx1100.fpsan.fpsan_xlane_w64_test",
+    "cts.gfx1100.fpsan.fpsan_classify_w64_test",
+    "cts.gfx1100.fpsan.fpsan_wave_gfx11_w64_test",
+    "cts.gfx1100.fpsan.fpsan_atomic_test",
+    "cts.gfx1100.fpsan.fpsan_classify_test",
+    "cts.gfx1100.fpsan.fpsan_hip_device_test",
+    "cts.gfx1100.fpsan.fpsan_wave_test",
+    "cts.gfx1100.fpsan.fpsan_amdgcn_math_test",
+    "cts.gfx1100.fpsan.fpsan_amdgcn_ldexp_test",
+    "cts.gfx1100.fpsan.fpsan_amdgcn_math_extra_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_acc16_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_acc16_w64_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_w64_test",
+    "cts.gfx1100.fpsan.fpsan_wmma_gfx11_tied_bf16_w64_test",
+    "cts.gfx1100.fpsan.fpsan_xlane_test"
   ],
   "kernels": []
 }

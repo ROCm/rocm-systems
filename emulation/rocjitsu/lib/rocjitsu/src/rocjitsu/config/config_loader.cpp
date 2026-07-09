@@ -753,6 +753,9 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
     dev.location_id = d->location_id();
     dev.hive_id = d->hive_id();
     dev.domain = d->domain();
+    dev.capability = d->capability();
+    dev.capability2 = d->capability2();
+    dev.debug_prop = d->debug_prop();
   }
 
   if (fb_config->vm() && fb_config->vm()->gpu())
@@ -777,6 +780,7 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 } // namespace
 
 rj_code_arch_t parse_arch(const std::string &arch_str) {
+  // \NPI new ISA family: add its "arch" string here and in arch_to_string().
   if (arch_str == "cdna1")
     return ROCJITSU_CODE_ARCH_CDNA1;
   if (arch_str == "cdna2")
