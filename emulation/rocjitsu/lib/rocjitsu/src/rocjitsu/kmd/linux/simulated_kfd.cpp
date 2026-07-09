@@ -2396,6 +2396,10 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
     return false;
   wave.set_debug_single_step(false);
   wave.debug_trap(0);
+  // gfx9.4 reports completed single-step through TRAPSTS.TRAP_AFTER_INST. This
+  // is the public stop-reason bit rocm-dbgapi consumes before the next resume.
+  constexpr uint32_t kTrapAfterInstMask = 1u << 25;
+  wave.set_trapsts(wave.trapsts() | kTrapAfterInstMask);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
   return true;
 }
