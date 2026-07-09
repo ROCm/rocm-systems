@@ -45,8 +45,10 @@ struct is_ostreamable : std::false_type
 {};
 
 template <typename T>
-struct is_ostreamable<T, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<const T&>())>>
-    : std::true_type
+struct is_ostreamable<
+    T,
+    std::void_t<decltype(std::declval<std::ostream&>() << std::declval<const T&>())>>
+: std::true_type
 {};
 
 template <typename Tp>
