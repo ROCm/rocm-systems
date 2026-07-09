@@ -75,8 +75,9 @@ source-level arguments and locals from private/scratch memory (`print`,
 `info args`), and continues the kernel to correct completion. `info agents` lists
 the synthetic `gfx950 / MI350X` agent, a breakpoint on a GPU kernel stops the
 trapping wave, and a hardware `watch` on GPU memory traps the wave that accesses
-it. The remaining wave-control feature (multi-wave) builds on this and is tracked
-below.
+it. Multi-wave kernels are fully supported: `info threads` correlates every
+trapped wave to its workgroup and position, and each wave reads its own private
+memory.
 
 | Area | Status |
 |---|---|
@@ -98,7 +99,7 @@ below.
 | Illegal-instruction exception (SIGILL) | done |
 | Memory-access violation (SIGSEGV) | done |
 | Private/scratch reads (`print`, `info args`) | done |
-| Multi-wave kernels | pending |
+| Multi-wave workgroup debugging (`info threads`, per-wave scratch) | done |
 
 ## 4. Sources
 

@@ -158,6 +158,21 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
+  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
+  /// @details This is the queue read index at which the dispatch packet was
+  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
+  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
+  uint32_t aql_packet_id() const { return aql_packet_id_; }
+
+  /// @brief Set the AQL ring packet id (called at dispatch).
+  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+
+  /// @brief Return this wave's position within its workgroup (0-based).
+  uint32_t wave_in_group() const { return wave_in_group_; }
+
+  /// @brief Set this wave's position within its workgroup (called at dispatch).
+  void set_wave_in_group(uint32_t pos) { wave_in_group_ = pos; }
+
   /// @brief Return the KFD queue ID that launched this wave.
   uint32_t queue_id() const { return queue_id_; }
 
@@ -271,6 +286,14 @@ public:
 
   /// @brief Set the per-lane private scratch allocation size in bytes.
   void set_scratch_lane_size(uint32_t val) { scratch_lane_size_ = val; }
+
+  /// @brief Return this wave's scratch scoreboard id (its slot in the queue's
+  /// scratch allocation). rocm-dbgapi multiplies it by COMPUTE_TMPRING_SIZE's
+  /// per-wave size to locate each wave's private memory.
+  uint32_t scratch_scoreboard_id() const { return scratch_scoreboard_id_; }
+
+  /// @brief Set this wave's scratch scoreboard id (set at dispatch by the CP).
+  void set_scratch_scoreboard_id(uint32_t val) { scratch_scoreboard_id_ = val; }
 
   uint64_t shared_aperture_base() const { return shared_aperture_base_; }
   uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
@@ -540,6 +563,8 @@ public:
     pc = 0;
     wg_id_ = 0;
     dispatch_id_ = 0;
+    aql_packet_id_ = 0;
+    wave_in_group_ = 0;
     process_id_ = 0;
     lds_base_ = 0;
     lds_ = nullptr;
@@ -556,6 +581,7 @@ public:
     set_wave_sched_mode_raw(0);
     scratch_base_ = 0;
     scratch_lane_size_ = 0;
+    scratch_scoreboard_id_ = 0;
     shared_aperture_base_ = 0;
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
@@ -588,15 +614,17 @@ protected:
 
   ComputeUnitCore &cu_; ///< Parent CU (permanent, set at construction).
   InstructionComputeUnitView cu_view_;
-  uint32_t wf_id_ = 0;        ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;        ///< Workgroup ID (set per dispatch).
-  uint32_t dispatch_id_ = 0;  ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t process_id_ = 0;   ///< Owning process ID (PASID analog, set per dispatch).
-  uint32_t queue_id_ = 0;     ///< KFD queue ID that launched this wave (debugger correlation).
-  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
-  Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
-  uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
-  uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.
+  uint32_t wf_id_ = 0;         ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;         ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0;   ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t aql_packet_id_ = 0; ///< AQL ring packet id of the dispatch (debugger correlation).
+  uint32_t wave_in_group_ = 0; ///< Position of this wave within its workgroup (debugger).
+  uint32_t process_id_ = 0;    ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t queue_id_ = 0;      ///< KFD queue ID that launched this wave (debugger correlation).
+  uint32_t lds_base_ = 0;      ///< Per-WG LDS base offset (set per dispatch).
+  Lds *lds_ = nullptr;         ///< Placement-selected LDS backing; nullptr means CU-local LDS.
+  uint32_t cluster_rank_ = 0;  ///< Workgroup rank inside the dispatch cluster.
+  uint32_t cluster_size_ = 1;  ///< Number of workgroups in the dispatch cluster.
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
@@ -613,14 +641,15 @@ private:
 
   uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
 
-  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
-  uint32_t mode_raw_ = 0;            ///< MODE register state.
-  uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
-  uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
-  uint64_t scratch_base_ = 0;        ///< Per-wavefront scratch (private segment) base address.
-  uint32_t scratch_lane_size_ = 0;   ///< Per-lane private scratch allocation size in bytes.
+  uint64_t exec_ = ~0ULL;              ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vcc_ = 0;                   ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                    ///< M0 special register (misc addressing).
+  uint32_t mode_raw_ = 0;              ///< MODE register state.
+  uint8_t vgpr_msb_mode_ = 0;          ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
+  uint32_t wave_sched_mode_raw_ = 0;   ///< WAVE_SCHED_MODE register state.
+  uint64_t scratch_base_ = 0;          ///< Per-wavefront scratch (private segment) base address.
+  uint32_t scratch_lane_size_ = 0;     ///< Per-lane private scratch allocation size in bytes.
+  uint32_t scratch_scoreboard_id_ = 0; ///< Scratch slot index (debugger private-memory mapping).
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;

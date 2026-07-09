@@ -2274,8 +2274,10 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.trap_id = wf.trap_id();
   state.wave_id = wf.debug_wave_id();
   state.group_ids = {wf.wg_id(), 0u, 0u};
-  state.wave_in_group = 0;
-  state.queue_packet_id = wf.dispatch_id() & 0x1FFFFFFu;
+  state.wave_in_group = wf.wave_in_group();
+  state.queue_packet_id = wf.aql_packet_id() & 0x1FFFFFFu;
+  state.scratch_scoreboard_id = wf.scratch_scoreboard_id();
+  state.spi_ttmps_setup = true;
   state.num_sgprs = wf.num_sgprs();
   state.num_vgprs = wf.num_vgprs();
 
@@ -2295,16 +2297,19 @@ void SimulatedKfd::raise_debug_event(const std::shared_ptr<KfdProcess> &proc, ui
                                      uint32_t gpu_id, uint64_t exception_mask) {
   if (!proc)
     return;
+  uint64_t report_mask = exception_mask;
   {
-    std::lock_guard<std::mutex> lk(debug_events_mutex_);
-    auto &queue = debug_events_[proc->client_pid()][queue_id];
-    queue.gpu_id = gpu_id;
-    queue.mask |= exception_mask;
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue != proc->queue_snapshot_map_.end()) {
+      queue->second.exception_status |= exception_mask;
+      report_mask |= queue->second.exception_status & KFD_EC_MASK(EC_QUEUE_NEW);
+    }
   }
-  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-  auto queue = proc->queue_snapshot_map_.find(queue_id);
-  if (queue != proc->queue_snapshot_map_.end())
-    queue->second.exception_status |= exception_mask;
+  std::lock_guard<std::mutex> lk(debug_events_mutex_);
+  auto &queue = debug_events_[proc->client_pid()][queue_id];
+  queue.gpu_id = gpu_id;
+  queue.mask |= report_mask;
 }
 
 void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
@@ -2328,10 +2333,46 @@ void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   if (waves.empty())
     return;
 
+  std::sort(waves.begin(), waves.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs.queue_packet_id != rhs.queue_packet_id)
+      return lhs.queue_packet_id < rhs.queue_packet_id;
+    if (lhs.group_ids != rhs.group_ids)
+      return lhs.group_ids < rhs.group_ids;
+    return lhs.wave_in_group < rhs.wave_in_group;
+  });
+  auto same_group = [](const auto &lhs, const auto &rhs) {
+    return lhs.queue_packet_id == rhs.queue_packet_id && lhs.group_ids == rhs.group_ids;
+  };
+  for (size_t index = 0; index < waves.size(); ++index) {
+    waves[index].is_first_in_group = index == 0 || !same_group(waves[index], waves[index - 1]);
+    waves[index].is_last_in_group =
+        index + 1 == waves.size() || !same_group(waves[index], waves[index + 1]);
+  }
+
   auto *memory = gpu->soc->memory();
   kmd::serialize_queue_cwsr(ctx_base, ctx_size, waves, [&](uint64_t address, uint32_t value) {
     memory->write32(address, value, process_id);
   });
+
+  uint64_t oldest_packet = UINT64_MAX;
+  for (const auto &wave : waves)
+    oldest_packet = std::min<uint64_t>(oldest_packet, wave.queue_packet_id);
+  auto proc = find_process(process_id);
+  if (!proc)
+    return;
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue == proc->queue_snapshot_map_.end())
+      return;
+    read_pointer = queue->second.read_pointer_address;
+    write_pointer = queue->second.write_pointer_address;
+  }
+  if (read_pointer != 0 && write_pointer != 0 &&
+      oldest_packet < memory->read64(write_pointer, process_id))
+    memory->write64(read_pointer, oldest_packet, process_id);
 }
 
 bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
@@ -2364,12 +2405,30 @@ bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
   if (ctx_base == 0)
     return false;
 
-  if (wave.debug_wave_id() == 0)
-    wave.set_debug_wave_id(next_debug_wave_id_.fetch_add(1, std::memory_order_relaxed));
   wave.debug_trap(trap_id);
 
+  if (queue_has_running_waves(process_id, queue_id, gpu_id, &wave))
+    return true;
   report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
   return true;
+}
+
+bool SimulatedKfd::queue_has_running_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                                           const amdgpu::Wavefront *exclude) {
+  auto *gpu = find_gpu(gpu_id);
+  if (!gpu || !gpu->soc)
+    return false;
+  bool running = false;
+  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units())
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave != exclude && wave->process_id() == process_id && wave->queue_id() == queue_id &&
+            !wave->debug_halted() && wave->state() != amdgpu::WfState::HALTED)
+          running = true;
+      }
+  });
+  return running;
 }
 
 void SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
@@ -2635,7 +2694,72 @@ void SimulatedKfd::resume_debug_queues(KfdProcess *proc) {
   }
 }
 
-int SimulatedKfd::debug_query_event(pid_t target_pid, uint64_t enabled_mask,
+void SimulatedKfd::suspend_debug_queues(KfdProcess *proc) {
+  if (!proc)
+    return;
+  const uint32_t process_id = proc->process_id();
+  std::vector<std::pair<uint32_t, KfdProcess::QueueSnapshotInfo>> queues;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    for (const auto &[id, info] : proc->queue_snapshot_map_)
+      queues.emplace_back(id, info);
+  }
+  for (const auto &[queue_id, queue] : queues) {
+    auto *gpu = find_gpu(queue.gpu_id);
+    if (!gpu || !gpu->soc || queue.ctx_save_restore_address == 0)
+      continue;
+    uint32_t newly_halted = 0;
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          auto *wave = cu->wf(slot);
+          if (!wave->debug_halted() && wave->process_id() == process_id &&
+              wave->queue_id() == queue_id) {
+            wave->set_debug_halted(true);
+            ++newly_halted;
+          }
+        }
+    });
+    if (newly_halted > 0)
+      serialize_queue_debug_waves(process_id, queue_id, queue.gpu_id,
+                                  queue.ctx_save_restore_address, queue.ctx_save_restore_area_size);
+  }
+}
+
+void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc) {
+  if (!proc)
+    return;
+  const uint32_t process_id = proc->process_id();
+  std::vector<std::pair<uint32_t, KfdProcess::QueueSnapshotInfo>> queues;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    for (const auto &[id, info] : proc->queue_snapshot_map_)
+      queues.emplace_back(id, info);
+  }
+  for (const auto &[queue_id, queue] : queues) {
+    auto *gpu = find_gpu(queue.gpu_id);
+    if (!gpu || !gpu->soc || queue.ctx_save_restore_address == 0)
+      continue;
+    bool has_stopped_wave = false;
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+          const auto *wave = cu->wf(slot);
+          if (wave->debug_halted() && wave->process_id() == process_id &&
+              wave->queue_id() == queue_id)
+            has_stopped_wave = true;
+        }
+    });
+    if (!has_stopped_wave) {
+      auto *memory = gpu->soc->memory();
+      for (uint64_t offset = 0; offset < 40; offset += sizeof(uint32_t))
+        memory->write32(queue.ctx_save_restore_address + offset, 0, process_id);
+    }
+  }
+}
+
+int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
+                                    uint64_t enabled_mask,
                                     kfd_ioctl_dbg_trap_query_debug_event_args &args) {
   const uint64_t clear_mask = args.exception_mask;
   std::lock_guard<std::mutex> lk(debug_events_mutex_);
@@ -2650,8 +2774,15 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, uint64_t enabled_mask,
     args.queue_id = queue->first;
     args.gpu_id = queue->second.gpu_id;
     queue->second.mask &= ~clear_mask;
+    const uint32_t queue_id = queue->first;
     if (queue->second.mask == 0)
       queues.erase(queue);
+    if (target_proc != nullptr && queue_id != 0) {
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      auto snapshot = target_proc->queue_snapshot_map_.find(queue_id);
+      if (snapshot != target_proc->queue_snapshot_map_.end())
+        snapshot->second.exception_status &= ~clear_mask;
+    }
     return 0;
   }
   return -EAGAIN;
@@ -3017,11 +3148,12 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     return 0;
   }
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
-    return debug_query_event(target_pid, session_it->second.exception_enable_mask,
+    return debug_query_event(target_pid, target_proc, session_it->second.exception_enable_mask,
                              args->query_debug_event);
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
     return debug_queue_snapshot(target_proc, args->queue_snapshot);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+    clear_completed_debug_queues(target_proc);
     return static_cast<int>(args->suspend_queues.num_queues);
   case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
     resume_debug_queues(target_proc);

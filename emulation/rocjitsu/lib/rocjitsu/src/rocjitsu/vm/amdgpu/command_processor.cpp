@@ -371,7 +371,12 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    uint64_t per_wave_size = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    // Round the per-wave region to the 1 KB COMPUTE_TMPRING_SIZE.WAVESIZE granule
+    // so that each wave's base equals scratch_pool + scoreboard_id * wavesize,
+    // which is exactly what rocm-dbgapi computes to locate a wave's private
+    // memory (rocdbgapi architecture.cpp scratch_memory_region).
+    uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * cu->wf_size();
+    uint64_t per_wave_size = ((raw_per_wave + 1023) / 1024) * 1024;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
@@ -387,6 +392,9 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 
     wf->set_scratch_base(wave_scratch);
     wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
+    // The scoreboard id is this wave's slot in the queue's scratch allocation;
+    // rocm-dbgapi multiplies it by the per-wave size to find the wave's scratch.
+    wf->set_scratch_scoreboard_id(static_cast<uint32_t>(global_wave_idx));
     util::Logger::cp([&](auto &os) {
       os << std::format(
           "SCRATCH wf{} pool={:#x} wave_scratch={:#x} per_wave={} priv_size={} "
@@ -954,6 +962,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_base(lds_base);
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
+      wf->set_aql_packet_id(entry.aql_packet_id);
+      wf->set_wave_in_group(w);
       wf->set_process_id(entry.process_id);
       wf->set_queue_id(entry.queue_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, cu->wf_size()));
@@ -1207,6 +1217,7 @@ static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
 
 void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
                                           const HwQueue &queue, uint64_t pkt_addr, HwQueueState &qs,
+                                          uint64_t aql_packet_id,
                                           ClusterDispatchShape cluster_shape) {
   bool host_accessible = queue.host_accessible;
   using namespace rocr::llvm::amdhsa;
@@ -1241,6 +1252,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
+  dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
   dp.dispatched_wgs = 0;
@@ -1490,6 +1502,12 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
   }
 
   // AQL doorbell clamping (compute queues only).
+  // Use the CP-private fetch cursor as the authoritative next-packet index. It
+  // normally equals read_ptr_va (the CP is the sole writer of a compute queue's
+  // read pointer), but while the debugger holds read_ptr_va at a trapped
+  // dispatch, the cursor stays ahead so already-dispatched packets are not
+  // re-fetched.
+  read_idx = std::max(read_idx, queue.fetch_cursor);
   uint64_t process_limit = write_idx;
   if (queue.host_accessible) {
     const uint64_t doorbell = queue.last_doorbell;
@@ -1559,7 +1577,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue, pkt_addr, qs);
+      process_aql_packet(pkt, queue, pkt_addr, qs, read_idx);
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       constexpr uint32_t DEP_OFF = 8;
       constexpr uint32_t SIG_OFF = 56;
@@ -1719,7 +1737,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
         cluster_shape.size_x = ext.cluster_size_x;
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
-        process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
+        process_aql_packet(dispatch, queue, pkt_addr, qs, read_idx, cluster_shape);
       } else if (ext.amd_format == kAmdAqlFormatPm4Ib) {
         constexpr uint32_t SIG_OFF = 56;
         const uint64_t sig = read_gpu_u64(pkt_addr + SIG_OFF, queue.process_id);
@@ -1747,6 +1765,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs, simdoj
     for (uint32_t i = 0; i < sizeof(process_limit); ++i)
       memory_->write8(queue.read_ptr_va + i, src[i], queue.process_id);
   }
+  // Advance the CP-private cursor to match. read_ptr_va may subsequently be
+  // lowered by the debugger to hold a trapped dispatch; the cursor is not, so
+  // the next fetch resumes here rather than re-fetching held packets.
+  queue.fetch_cursor = process_limit;
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick now) {

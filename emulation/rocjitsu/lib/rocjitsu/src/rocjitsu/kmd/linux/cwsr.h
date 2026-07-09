@@ -50,9 +50,20 @@ struct CwsrWaveState {
   std::array<uint32_t, 3> group_ids{}; ///< Workgroup coordinates (TTMP8/9/10).
   uint32_t wave_in_group = 0;          ///< Wave index within the workgroup (TTMP11[0:5]).
   uint32_t queue_packet_id = 0;        ///< Dispatch packet id (TTMP11[6:30]).
-  uint32_t trap_id = 0;                ///< Trap id from the s_trap (TTMP6[25:28]).
-  bool wave_stopped = true;            ///< Whether the wave is stopped (TTMP6[30]).
-  bool saved_status_halt = false;      ///< Saved STATUS.HALT (TTMP6[29]).
+  /// Whether this wave is the first / last of its workgroup in the control stack.
+  /// rocm-dbgapi groups consecutive control-stack waves into a workgroup: the
+  /// first wave becomes the group leader and following waves must share its
+  /// group ids until the last wave closes the group (rocdbgapi queue.cpp
+  /// update_waves). These must therefore be set per workgroup, not per queue.
+  bool is_first_in_group = true;
+  bool is_last_in_group = true;
+  /// This wave's slot in the queue's scratch allocation (COMPUTE_RELAUNCH wave
+  /// word bits [0:8]). rocm-dbgapi multiplies it by the per-wave scratch size to
+  /// locate the wave's private memory, so it must match the wave's scratch base.
+  uint32_t scratch_scoreboard_id = 0;
+  uint32_t trap_id = 0;           ///< Trap id from the s_trap (TTMP6[25:28]).
+  bool wave_stopped = true;       ///< Whether the wave is stopped (TTMP6[30]).
+  bool saved_status_halt = false; ///< Saved STATUS.HALT (TTMP6[29]).
   /// Whether the SPI initialized the dispatch-bookkeeping TTMPs (group ids in
   /// TTMP8-10, packet id in TTMP11). Mirrors kfd_runtime_info.ttmp_setup; when
   /// false, TTMP6[31] (spi_ttmps_setup_disabled) is set and rocm-dbgapi skips

@@ -349,6 +349,66 @@ if grep -qaE 'Cannot access memory at address private_lane|flat_scratch may be c
   fail=1
 fi
 
+# --- Seventh scenario: multi-wave workgroup correlation -----------------------
+# Launch one workgroup of 128 threads (two 64-lane wavefronts) and break inside
+# the kernel. Both waves of the workgroup trap; the emulator serializes them
+# together (atomic capture once the queue quiesces) so rocm-dbgapi decodes a
+# stable control stack and correlates each wave to workgroup (0,0,0) at its
+# position (/0 and /1). Reading the scratch-resident `local` in each wave must
+# return that wave's own value (thread 0 -> 3, thread 64 -> 451), which
+# exercises the per-wave scratch scoreboard mapping. A regression shows up as a
+# dbgapi fatal ("not in the same workgroup as the group_leader" /
+# "os_queue_packet_id ... not within"), a crash, or identical/again-corrupted
+# per-wave values.
+mwapp="$workdir/multi_wave"
+if hipcc --offload-arch="$arch" -g -O0 -o "$mwapp" "$here/multi_wave.hip" 2>"$workdir/mwbuild.log"; then
+  echo "running rocgdb (multi-wave workgroup correlation) ..."
+  # Break on the store line so both waves have computed `i` and `local`.
+  mw_line="$(grep -nE 'data\[i\] = local' "$here/multi_wave.hip" | head -1 | cut -d: -f1)"
+  [[ -z "$mw_line" ]] && mw_line=18
+  outfile7="$workdir/rocgdb7.out"
+  timeout 180 "$mirage_bin" run --profile "$profile" -- \
+    rocgdb --batch \
+      -ex 'set breakpoint pending on' \
+      -ex "break multi_wave.hip:${mw_line}" \
+      -ex 'run' \
+      -ex 'info threads' \
+      -ex 'thread apply all -q print local' \
+      -ex 'delete breakpoints' \
+      -ex 'continue' \
+      "$mwapp" </dev/null >"$outfile7" 2>&1
+  status7=$?
+  out7="$(cat "$outfile7")"
+  echo "--------------------------------------------------------------------"
+  echo "$out7"
+  echo "--------------------------------------------------------------------"
+  if [[ $status7 -ne 0 ]]; then
+    echo "FAIL: multi-wave rocgdb run exited with status $status7" >&2
+    fail=1
+  fi
+  check7() { # <regex> <description>  (checks the seventh run's output)
+    if grep -qaE "$1" <<<"$out7"; then
+      echo "  ok: $2"
+    else
+      echo "  MISSING: $2 (/$1/)" >&2
+      fail=1
+    fi
+  }
+  check7 "hit Breakpoint 1, .*multi_wave .*at .*:${mw_line}" 'both waves stop at the kernel breakpoint'
+  check7 'AMDGPU Wave .*\(0,0,0\)/0' 'wave 0 correlated to workgroup (0,0,0) position 0'
+  check7 'AMDGPU Wave .*\(0,0,0\)/1' 'wave 1 correlated to workgroup (0,0,0) position 1'
+  check7 '= 3' 'wave 0 scratch read: local == 3 (global thread 0)'
+  check7 '= 451' 'wave 1 scratch read: local == 451 (global thread 64)'
+  check7 'multi_wave done: h\[0\]=3 h\[64\]=451' 'kernel produced the correct per-thread results'
+  check7 'Inferior 1 .*exited normally' 'inferior exited normally after multi-wave debug'
+  if grep -qaE 'not in the same workgroup as the group_leader|os_queue_packet_id .* is not within|Segmentation fault' <<<"$out7"; then
+    echo "  FAIL: multi-wave correlation aborted (dbgapi grouping/packet-id fault or crash)" >&2
+    fail=1
+  fi
+else
+  echo "  SKIP: could not build multi_wave.hip for $arch"
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1

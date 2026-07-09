@@ -397,8 +397,14 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x2000), make_wave(0xAA02, 0x2040),
                                            make_wave(0xAA03, 0x2080)};
   waves[0].wave_in_group = 0;
+  waves[0].is_first_in_group = true;
+  waves[0].is_last_in_group = false;
   waves[1].wave_in_group = 1;
+  waves[1].is_first_in_group = false;
+  waves[1].is_last_in_group = true;
   waves[2].group_ids[0] = 2;
+  waves[2].is_first_in_group = true;
+  waves[2].is_last_in_group = true;
 
   kmd::CwsrLayout layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32);
   ASSERT_TRUE(layout.ok);
