@@ -25,7 +25,6 @@ struct nic_track_description
 {
     const char* track_name;
     const char* units;
-    size_t      track_index = 0;
 };
 
 // Helper function to create enabled_metrics value from bit positions
@@ -104,12 +103,12 @@ emit_nic_counter(size_t device_index, std::int64_t track_index, size_t ts,
 // the metric is not enabled or has no registered track for this device.
 inline std::int64_t
 resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_key,
-                  const std::map<std::uint32_t, nic_track_description>& device_tracks)
+                  const std::map<std::uint32_t, size_t>& device_tracks)
 {
     if((effective_metrics.value & bit_key) == 0) return -1;
     auto it = device_tracks.find(bit_key);
     if(it == device_tracks.end()) return -1;
-    return static_cast<std::int64_t>(it->second.track_index);
+    return static_cast<std::int64_t>(it->second);
 }
 
 }  // namespace
@@ -126,9 +125,9 @@ struct perfetto_policy
 {
     using counter_track = perfetto_counter_track<metrics>;
 
-    // Static storage for Perfetto tracks and sample buffering (C++17 inline static)
-    static inline std::map<size_t, std::map<std::uint32_t, nic_track_description>>
-        tracks{};
+    // Static storage for Perfetto tracks and sample buffering (C++17 inline static).
+    // Per device: metric bit value -> resolved counter-track index.
+    static inline std::map<size_t, std::map<std::uint32_t, size_t>> tracks{};
     static inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>
         bundle{};
 
@@ -170,13 +169,11 @@ struct perfetto_policy
 
         auto& device_tracks = perfetto_policy::tracks[device_index];
 
-        for(const auto& [bit_value, default_description] : make_default_nic_tracks())
+        for(const auto& [bit_value, description] : make_default_nic_tracks())
         {
             if((enabled_metric_config.value & bit_value) == 0) continue;
-            auto description        = default_description;
-            description.track_index = counter_track::emplace(
+            device_tracks[bit_value] = counter_track::emplace(
                 device_index, addendum(description.track_name), description.units);
-            device_tracks[bit_value] = description;
         }
     }
 
