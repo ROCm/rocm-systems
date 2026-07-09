@@ -282,7 +282,7 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
         captured = capsys.readouterr()
         error_output = captured.err + captured.out
         assert code != 0
-        assert "Invalid --block value 100" in error_output
+        assert "Invalid --block value '100'" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -947,7 +947,7 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, ca
             captured = capsys.readouterr()
             error_output = captured.err + captured.out
             assert code != 0
-            assert "Invalid --block value SQ" in error_output
+            assert "Invalid --block value 'SQ'" in error_output
 
             common.clean_output_dir(config["cleanup"], workload_dir)
             break

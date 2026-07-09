@@ -32,6 +32,7 @@ namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
+// \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -123,6 +124,40 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_FALSE(rdna3.soc()->xcd(0)->command_processor()->packed_tid());
   EXPECT_EQ(rdna3.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
+
+  auto rdna35 = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(rdna35.device.gpu_id, 5510u);
+  EXPECT_EQ(rdna35.device.device_id, 0x1586u);
+  EXPECT_EQ(rdna35.device.family_id, 0x91u);
+  EXPECT_EQ(rdna35.device.gfx_target_version, 110501u);
+  EXPECT_EQ(rdna35.device.revision_id, 0u);
+  EXPECT_EQ(rdna35.device.pci_revision_id, 0u);
+  EXPECT_EQ(rdna35.device.simd_count, 64u);
+  EXPECT_EQ(rdna35.device.num_shader_engines, 4u);
+  EXPECT_EQ(rdna35.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(rdna35.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(rdna35.device.simd_per_cu, 2u);
+  EXPECT_EQ(rdna35.device.vram_type, kmd::kAmdgpuVramTypeGddr6);
+  EXPECT_EQ(rdna35.device.simd_count, rdna35.device.num_shader_engines *
+                                          rdna35.device.num_cu_per_sh * rdna35.device.simd_per_cu);
+  EXPECT_EQ(kmd::drm_shader_engine_count(rdna35.device.num_shader_engines,
+                                         rdna35.device.num_shader_arrays_per_engine),
+            2u);
+  EXPECT_EQ(
+      kmd::drm_cu_active_number(rdna35.device.num_shader_engines, rdna35.device.num_cu_per_sh),
+      32u);
+  EXPECT_EQ(kmd::external_rev_id_for_gfx_target_version(rdna35.device.gfx_target_version,
+                                                        rdna35.device.revision_id),
+            0xc1u);
+  EXPECT_EQ(kmd::gfx_target_name(rdna35.device.gfx_target_version), "gfx1151");
+  EXPECT_EQ(kmd::num_hw_gfx_contexts_for_gfx_target_version(rdna35.device.gfx_target_version), 8u);
+  EXPECT_EQ(rdna35.soc()->num_xcds(), 1u);
+  EXPECT_EQ(rdna35.soc()->xcd(0)->num_shader_engines(), 2u);
+  EXPECT_EQ(rdna35.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
+  EXPECT_FALSE(rdna35.soc()->xcd(0)->command_processor()->packed_tid());
+  EXPECT_EQ(rdna35.soc()->xcd(0)->command_processor()->sdma_packet_dialect(),
+            amdgpu::SdmaPacketDialect::Gfx11Plus);
 }
 
 TEST(ConfigLoaderTest, BuildFromJsonString) {
@@ -193,6 +228,83 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->num_shader_engines(), 2u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 3u);
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
+}
+
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": { "gfx_target_version": 90500 } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  // Not specified in JSON: 0 means "auto-compute" (see
+  // rocjitsu::default_non_debug_capability()/debug_topology_for()).
+  EXPECT_EQ(loaded.device.capability, 0u);
+  EXPECT_EQ(loaded.device.capability2, 0u);
+  EXPECT_EQ(loaded.device.debug_prop, 0u);
+}
+
+TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
+  const char *json = R"({
+    "max_ticks": 5000,
+    "num_threads": 1,
+    "vm": {
+      "arch": "cdna3",
+      "gpu": { "device": {
+        "gfx_target_version": 90500,
+        "capability": 268468354,
+        "capability2": 3,
+        "debug_prop": 3119
+      } }
+    },
+    "topology": {
+      "root": {
+        "name": "soc", "type": "soc",
+        "children": [
+          { "name": "vram", "type": "gpu_memory" },
+          {
+            "name": "xcd0", "type": "xcd",
+            "children": [
+              { "name": "l2", "type": "l2_cache" },
+              { "name": "cp", "type": "command_processor" },
+              { "name": "se0", "type": "shader_engine",
+                "children": [{ "name": "cu0", "type": "compute_unit" }] }
+            ]
+          }
+        ]
+      },
+      "links": []
+    }
+  })";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.device.capability, 268468354u);
+  EXPECT_EQ(loaded.device.capability2, 3u);
+  EXPECT_EQ(loaded.device.debug_prop, 3119u);
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {

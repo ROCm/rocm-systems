@@ -720,6 +720,10 @@ void Buffer::destroy() {
     if (memFlags & ROCCLR_MEM_PHYMEM) {
       // If this is physical memory, dont call hsa free function, since device mem was never created
       dev().deviceVmemRelease(owner()->getUserData().hsa_handle);
+      // Free what we counted on alloc. Imported memory was never counted.
+      if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+        const_cast<Device&>(dev()).updateFreeMemory(size(), true);
+      }
       return;
     }
 
@@ -756,7 +760,9 @@ void Buffer::destroy() {
       }
     }
 
-    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain)) {
+    // Not counted on alloc (e.g. arena and VA ranges), so don't add it back on free.
+    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), true);
     }
 
@@ -854,6 +860,16 @@ bool Buffer::create(bool alloc_local) {
                        owner()->getSvmPtr());
         return false;
       }
+    } else if (memFlags & ROCCLR_MEM_HOST_NUMA) {
+      // Host-resident NUMA VMM: decode the packed node selector. Stored value is
+      // (node + 1); 0 means "resolve current node" (HostNumaCurrent) -> pass -1.
+      const uint64_t stored =
+          (memFlags & ROCCLR_MEM_HOST_NUMA_NODE_MASK) >> ROCCLR_MEM_HOST_NUMA_NODE_SHIFT;
+      const int numaNode = (stored == 0) ? -1 : static_cast<int>(stored - 1);
+      owner()->getUserData().hsa_handle = dev().hostVmemAlloc(owner()->getSize(),
+                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
+                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,
+                                          numaNode);
     } else {
       owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
                                           memFlags & ROCCLR_MEM_HSA_UNCACHED
@@ -866,6 +882,11 @@ bool Buffer::create(bool alloc_local) {
     }
 
     owner()->setSvmPtr(reinterpret_cast<void*>(owner()->getUserData().hsa_handle));
+
+    // Real device memory, so count it. Imported memory isn't ours, so skip it.
+    if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+      const_cast<Device&>(dev()).updateFreeMemory(size(), false);
+    }
 
     return (success = true);
   }
@@ -958,8 +979,9 @@ bool Buffer::create(bool alloc_local) {
       }
     }
 
+    // VA ranges only reserve addresses, not real memory, so don't count them.
     if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
-        (kind_ != MEMORY_KIND_ARENA)) {
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 

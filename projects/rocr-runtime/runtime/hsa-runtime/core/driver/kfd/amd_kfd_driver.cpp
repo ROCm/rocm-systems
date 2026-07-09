@@ -454,15 +454,23 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                           core::ShareType type, uint32_t flags, void* export_handle,
-                                           uint64_t* export_offset) {
+hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent,
+                                           const core::DriverMemoryHandle& handle,
+                                           core::ShareType type, void* export_handle) {
+  return ExportMemoryHandleImpl(agent, handle, type, EXPORT_MEMORY_FLAGS_NONE, export_handle,
+                                nullptr);
+}
+
+hsa_status_t KfdDriver::ExportMemoryHandleImpl(const core::Agent& agent,
+                                               const core::DriverMemoryHandle& handle,
+                                               core::ShareType type, uint32_t flags,
+                                               void* export_handle, uint64_t* export_offset) {
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
     auto* dmabuf_fd = static_cast<int*>(export_handle);
-    if (flags & core::EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
+    if (flags & EXPORT_MEMORY_FLAGS_KFD_DMABUF) {
       if (export_offset == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       void* mem = reinterpret_cast<void*>(handle.handle);
       if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, handle.size, dmabuf_fd, export_offset)) !=
@@ -477,7 +485,6 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
       return HSA_STATUS_SUCCESS;
     }
 #endif
-    (void)export_offset;
     const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
 
     HsaHandleExportDesc desc = {};
@@ -496,7 +503,6 @@ hsa_status_t KfdDriver::ExportMemoryHandle(const core::Agent& agent, const core:
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE: {
-    (void)export_offset;
 #if !defined(__linux__)
     assert(!"Unimplemented!");
     return HSA_STATUS_ERROR;
@@ -573,7 +579,7 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
     handle->handle = reinterpret_cast<uint64_t>(res.buf_handle);
-    rocr::os::DmaBufClose(res.dmabuf_fd);
+    if (rocr::os::DmaBufClose(&res.dmabuf_fd) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
     handle->size = res.alloc_size;
     return HSA_STATUS_SUCCESS;
   }
@@ -624,9 +630,9 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   core::DriverMemoryHandle kfd_alloc = {};
   kfd_alloc.handle = reinterpret_cast<uint64_t>(mem);
   kfd_alloc.size = size;
-  if (ExportMemoryHandle(agent, kfd_alloc, core::ShareType::DMABUF_FD,
-                         core::EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd, offset) !=
-      HSA_STATUS_SUCCESS) {
+  if (ExportMemoryHandleImpl(agent, kfd_alloc, core::ShareType::DMABUF_FD,
+                             EXPORT_MEMORY_FLAGS_KFD_DMABUF, &source_fd,
+                             offset) != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
 
@@ -637,7 +643,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   hsa_status_t ret = ImportMemoryHandle(agent, &targetHandle, core::ShareType::DMABUF_FD,
                                         &source_handle, mem);
 #if defined(__linux__)
-  rocr::os::DmaBufClose(source_fd);
+  rocr::os::DmaBufClose(&source_fd);
 #endif
   if (ret != HSA_STATUS_SUCCESS)
     return ret;
@@ -672,11 +678,7 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
-  if (handle->dmabuf_fd >= 0) {
-    hsa_status_t status = rocr::os::DmaBufClose(handle->dmabuf_fd);
-    handle->dmabuf_fd = -1;
-    if (status != HSA_STATUS_SUCCESS) return status;
-  }
+  hsa_status_t ret = rocr::os::DmaBufClose(&handle->dmabuf_fd);
 
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   if (memhandle != nullptr) {
@@ -686,7 +688,7 @@ hsa_status_t KfdDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
     }
   }
   *handle = {};
-  return HSA_STATUS_SUCCESS;
+  return ret;
 }
 
 hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {

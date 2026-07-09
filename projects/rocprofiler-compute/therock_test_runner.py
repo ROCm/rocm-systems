@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Copyright Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 """Run the rocprofiler-compute project's installed CTest suite.
 
 This runner is installed with the rocprofiler-compute test payload and executes
@@ -25,7 +25,6 @@ EXCLUDED_TESTS = [
 ]
 
 QUICK_TESTS = [
-    "test_autogen_config",
     "test_utils",
     "test_num_xcds_cli_output",
     "test_num_xcds_spec_class",
