@@ -395,6 +395,8 @@ int SimulatedDriver::open() {
                                           bool is_write, bool is_atomic) {
           return on_wave_watchpoint(wf, addr, bytes, is_write, is_atomic);
         });
+        cu->set_illegal_inst_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
       }
     });
     g.cps_initialized = true;
@@ -507,6 +509,8 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
                                           bool is_write, bool is_atomic) {
           return on_wave_watchpoint(wf, addr, bytes, is_write, is_atomic);
         });
+        cu->set_illegal_inst_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
       }
     });
     g.cps_initialized = true;
@@ -2086,12 +2090,15 @@ bool SimulatedDriver::on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id) {
 
 void SimulatedDriver::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc,
                                           uint32_t queue_id, uint32_t gpu_id, uint64_t ctx_base,
-                                          uint32_t ctx_size) {
+                                          uint32_t ctx_size, uint64_t exception_mask) {
   const pid_t target_pid = proc->client_pid();
-  // Serialize this queue's stopped waves, raise the wave-trap exception, and
-  // wake the debugger. Shared by the s_trap path and single-step completion.
+  // Serialize this queue's stopped waves, raise the wave exception, and wake the
+  // debugger. Shared by the s_trap, single-step, watchpoint and illegal-
+  // instruction paths; the default exception (0) is a wave trap.
+  if (exception_mask == 0)
+    exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size);
-  raise_debug_event(proc, queue_id, gpu_id, KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+  raise_debug_event(proc, queue_id, gpu_id, exception_mask);
 
   int dbg_fd = -1;
   {
@@ -2241,6 +2248,50 @@ bool SimulatedDriver::on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, u
   // the addr_watch bits, not TTMP6's trap id).
   wf.debug_trap(0);
   report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
+  return true;
+}
+
+bool SimulatedDriver::on_wave_illegal_instruction(amdgpu::Wavefront &wf) {
+  // A wave fetched an undecodable instruction. Under a debugger, report it as an
+  // illegal-instruction exception instead of silently retiring the wave.
+  // rocm-dbgapi maps TRAPSTS.illegal_inst to WAVE_STOP_REASON_ILLEGAL_INSTRUCTION
+  // (architecture.cpp signaled_exceptions) and the queue's
+  // EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION exception drives next_pending_event. The PC
+  // is left at the faulting instruction (the caller does not advance it) so the
+  // debugger reports the illegal instruction's own address.
+  const uint32_t process_id = wf.process_id();
+  const uint32_t queue_id = wf.queue_id();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  const pid_t target_pid = proc->client_pid();
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto sit = debug_sessions_.find(target_pid);
+    if (sit == debug_sessions_.end() || !sit->second.enabled)
+      return false;
+  }
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto qit = proc->queue_snapshot_map_.find(queue_id);
+    if (qit == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = qit->second.ctx_save_restore_address;
+    ctx_size = qit->second.ctx_save_restore_area_size;
+    gpu_id = qit->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+  // gfx9 TRAPSTS.ILLEGAL_INST is bit 11 (rocdbgapi architecture.cpp
+  // sq_wave_trapsts_illegal_inst_mask = 1 << 11).
+  constexpr uint32_t kSqWaveTrapstsIllegalInstMask = 1u << 11;
+  wf.set_trapsts(wf.trapsts() | kSqWaveTrapstsIllegalInstMask);
+  wf.debug_trap(0); // halt at the faulting PC; not an s_trap breakpoint
+  report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size,
+                      KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION));
   return true;
 }
 

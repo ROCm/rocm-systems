@@ -233,6 +233,44 @@ check3 'Old value = 0' 'watchpoint captured the pre-write value'
 check3 'New value = 1' 'watchpoint captured the post-write value'
 check3 'add_one .*at .*:15' 'stopped at the store that wrote the watched address'
 
+# --- Fourth scenario: illegal instruction -------------------------------------
+# Single-step once past the entry breakpoint to a clean instruction boundary,
+# overwrite that instruction with an undecodable opcode, and continue. The wave
+# fetching it must raise an illegal-instruction exception (SIGILL) reported at
+# that PC, exercising the CU's illegal-instruction path + EC_QUEUE_WAVE_ILLEGAL_
+# INSTRUCTION + TRAPSTS.illegal_inst.
+echo "running rocgdb (illegal instruction) ..."
+outfile4="$workdir/rocgdb4.out"
+timeout 180 "$mirage_bin" run --profile "$profile" -- \
+  rocgdb --batch \
+    -ex 'set breakpoint pending on' \
+    -ex 'break add_one' \
+    -ex 'run' \
+    -ex 'stepi' \
+    -ex 'set {unsigned int}$pc = 0xffffffff' \
+    -ex 'continue' \
+    -ex 'info registers pc' \
+    "$app" </dev/null >"$outfile4" 2>&1
+status4=$?
+out4="$(cat "$outfile4")"
+echo "--------------------------------------------------------------------"
+echo "$out4"
+echo "--------------------------------------------------------------------"
+check4() { # <regex> <description>  (checks the fourth run's output)
+  if grep -qaE "$1" <<<"$out4"; then
+    echo "  ok: $2"
+  else
+    echo "  MISSING: $2 (/$1/)" >&2
+    fail=1
+  fi
+}
+check4 'SIGILL, Illegal instruction' 'the illegal instruction raised SIGILL'
+check4 '^pc +0x[0-9a-f]+ +0x[0-9a-f]+ <.*add_one' 'stopped at the faulting GPU instruction'
+if grep -qaE 'misaligned pc|corrupted state' <<<"$out4"; then
+  echo "  FAIL: the reported wave state was corrupted" >&2
+  fail=1
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1

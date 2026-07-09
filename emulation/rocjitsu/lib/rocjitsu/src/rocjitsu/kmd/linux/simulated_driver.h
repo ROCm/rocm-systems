@@ -253,14 +253,25 @@ private:
   bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
                           bool is_atomic);
 
+  /// @brief Illegal-instruction handler installed on every compute unit.
+  /// @details Runs on the engine thread when a wave fetches an undecodable
+  /// instruction. If the wave's process is being debugged, sets
+  /// TRAPSTS.illegal_inst, stops the wave at the faulting PC, and reports an
+  /// EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION exception; returns true. Returns false
+  /// when no debugger is attached (the wave then halts as before).
+  bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
+
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);
 
-  /// @brief Serialize a queue's stopped waves, raise EC_QUEUE_WAVE_TRAP and wake
-  /// the debugger. Shared by the s_trap and single-step-completion paths.
+  /// @brief Serialize a queue's stopped waves, raise a wave exception and wake
+  /// the debugger. Shared by the s_trap, single-step, watchpoint and
+  /// illegal-instruction paths. @param exception_mask the KFD_EC_MASK bit(s) to
+  /// raise (defaults to EC_QUEUE_WAVE_TRAP).
   void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size);
+                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
+                           uint64_t exception_mask = 0);
 
   /// @brief Reload the target's stopped waves from their CWSR areas and unhalt
   /// them (KFD_IOC_DBG_TRAP_RESUME_QUEUES).

@@ -159,6 +159,42 @@ TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
   EXPECT_TRUE(wf->is_halted());
 }
 
+// A wave that fetches an undecodable instruction under a debugger is handed to
+// the illegal-instruction handler and stopped at the faulting PC (not advanced),
+// so the debugger can report an illegal-instruction exception there.
+TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu); // undecodable opcode
+
+  uint32_t illegal_count = 0;
+  fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &w) {
+    ++illegal_count;
+    w.set_debug_halted(true); // the debugger stops the wave, as the driver does
+    return true;
+  });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+
+  fx.cu->step();
+  EXPECT_EQ(illegal_count, 1u);
+  EXPECT_TRUE(wf->debug_halted());
+  EXPECT_EQ(wf->pc, kKernelAddr) << "PC stays at the faulting instruction";
+}
+
+// Without a debugger (no handler), an undecodable instruction halts the wave as
+// before, so the emulator does not abort on stray bad code.
+TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+
+  fx.cu->step(); // no handler -> wave halts and retires
+  EXPECT_TRUE(wf->is_halted());
+}
+
 // The trap temporary registers and trap status register round-trip, and reset()
 // (slot reuse) clears all debugger state.
 TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {

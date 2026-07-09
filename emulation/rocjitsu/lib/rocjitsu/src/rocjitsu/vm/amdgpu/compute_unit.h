@@ -190,6 +190,16 @@ public:
   /// @brief Install the address-watchpoint handler (see @ref WatchpointHandler).
   void set_watchpoint_handler(WatchpointHandler cb) { watchpoint_handler_ = std::move(cb); }
 
+  /// @brief Callback invoked when a wavefront fetches an undecodable
+  /// instruction. Returns true if the debugger stopped the wave (it becomes
+  /// debug-halted at the faulting PC), false if there is no attached debugger
+  /// (the wave then halts and retires as before). The command processor wires
+  /// this to the KFD debug controller. @param wf The faulting wavefront.
+  using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
+
+  /// @brief Install the illegal-instruction handler (see @ref IllegalInstHandler).
+  void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
+
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
@@ -578,6 +588,8 @@ protected:
       single_step_handler_; ///< single-step completion handler; see set_single_step_handler.
   WatchpointHandler
       watchpoint_handler_; ///< address-watchpoint handler; see set_watchpoint_handler.
+  IllegalInstHandler
+      illegal_inst_handler_; ///< illegal-instruction handler; see set_illegal_inst_handler.
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
