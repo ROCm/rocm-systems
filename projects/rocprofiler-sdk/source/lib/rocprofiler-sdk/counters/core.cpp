@@ -25,15 +25,18 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
@@ -144,6 +147,28 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
+namespace
+{
+// Best-effort enable/disable of the power-throttling lock (PTL) on all GPUs,
+// toggled symmetrically around counter-collection start/stop.
+void
+set_dispatch_ptl(bool enable)
+{
+    if(!counters::ptl_control_supported()) return;
+
+    for(const auto& agent : agent::get_agents())
+    {
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        const auto* rocp_agent = rocprofiler::agent::get_agent(agent->id);
+        if(enable)
+            counters::counter_collection_ptl_enable(rocp_agent);
+        else
+            counters::counter_collection_ptl_disable(rocp_agent);
+    }
+}
+}  // namespace
+
 void
 start_context(const context::context* ctx)
 {
@@ -161,6 +186,8 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
+        set_dispatch_ptl(false);
+
         callback_thread_start();
 
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
@@ -213,10 +240,14 @@ stop_context(const context::context* ctx)
 
     auto* controller = hsa::get_queue_controller();
 
+    bool was_enabled = false;
     ctx->dispatch_counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled = false;
+        was_enabled = true;
+        enabled     = false;
     });
+
+    if(was_enabled) set_dispatch_ptl(true);
 
     if(controller)
     {

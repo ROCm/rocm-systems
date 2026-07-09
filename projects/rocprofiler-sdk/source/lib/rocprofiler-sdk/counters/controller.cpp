@@ -151,19 +151,7 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
     if(!ctx.dispatch_counter_collection)
     {
-        // Disable PTL for all GPUs for dispatch counter collection
-        for(const auto& agent : agent::get_agents())
-        {
-            if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            {
-                if(counters::ptl_control_supported())
-                {
-                    counters::counter_collection_ptl_disable(
-                        rocprofiler::agent::get_agent(agent->id));
-                }
-            }
-        }
-
+        // PTL is toggled symmetrically in counters::start_context/stop_context.
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     }
