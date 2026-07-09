@@ -142,7 +142,7 @@ class cli_analysis(OmniAnalyze_Base):
                 None,
             )
             if list_backend is not None:
-                kernel_top_df, _ = self._update_kernel_top_stats(
+                kernel_top_df, _ = self._build_and_store_kernel_top_stats(
                     workload=workload,
                     workload_path=path_info[0],
                     args=args,
@@ -160,18 +160,19 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
             # Resolve the -k selection. Index-based selections need the full Top
-            # Stats table, so build it once for that case.
-            base_top_stats_built = False
+            # Stats table, but the workload should only store the final table.
             if workload.kernel_selection is not None:
-                base_kernel_top_df, _ = self._update_kernel_top_stats(
-                    workload=workload,
-                    workload_path=path_info[0],
-                    args=args,
+                base_kernel_top_df, _ = file_io.create_df_kernel_top_stats(
+                    df_in=workload.raw_pmc,
+                    raw_data_dir=path_info[0],
+                    filter_gpu_ids=workload.filter_gpu_ids,
+                    filter_dispatch_ids=workload.filter_dispatch_ids,
+                    time_unit=args.time_unit,
+                    kernel_verbose=args.kernel_verbose,
                 )
                 workload.kernel_filter = resolve_kernel_filter(
                     workload.kernel_selection, base_kernel_top_df
                 )
-                base_top_stats_built = True
 
             if operator_backend is not None:
                 # Operator filter narrows the selection and scopes Top Stats to
@@ -179,19 +180,13 @@ class cli_analysis(OmniAnalyze_Base):
                 self.apply_operator_filter(
                     args, workload, path_info[0], operator_backend
                 )
-                self._update_kernel_top_stats(
-                    workload=workload,
-                    workload_path=path_info[0],
-                    args=args,
-                    filter_kernel_names=sorted(workload.kernel_filter.names) or None,
-                )
-            elif not base_top_stats_built:
-                # No -k and no operator filter: build the full Top Stats once.
-                self._update_kernel_top_stats(
-                    workload=workload,
-                    workload_path=path_info[0],
-                    args=args,
-                )
+
+            self._build_and_store_kernel_top_stats(
+                workload=workload,
+                workload_path=path_info[0],
+                args=args,
+                filter_kernel_names=sorted(workload.kernel_filter.names) or None,
+            )
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -345,7 +340,7 @@ class cli_analysis(OmniAnalyze_Base):
         tty.list_ml_operators(workload_path, call_trees, framework_label=label)
 
     @staticmethod
-    def _update_kernel_top_stats(
+    def _build_and_store_kernel_top_stats(
         workload: schema.Workload,
         workload_path: str,
         args: argparse.Namespace,
