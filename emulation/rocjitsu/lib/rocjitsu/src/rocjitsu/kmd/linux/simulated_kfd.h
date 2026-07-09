@@ -312,6 +312,19 @@ private:
                           bool is_atomic);
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
 
+  /// @brief Memory-violation handler installed on every compute unit.
+  /// @details Runs on the engine thread for a global-memory access to an
+  /// unmapped address. If the wave's process is being debugged, sets
+  /// TRAPSTS.xnack_error, stops the wave, and reports an
+  /// EC_QUEUE_WAVE_MEMORY_VIOLATION exception (rocm-dbgapi
+  /// WAVE_STOP_REASON_MEMORY_VIOLATION); returns true, else false.
+  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write);
+
+  /// @brief Toggle the per-access debugger checks on every compute unit. Set
+  /// true while any debug session is active so undebugged runs pay no
+  /// per-access cost (ComputeUnitCore::set_debug_active).
+  void set_debug_active_on_all_cus(bool active);
+
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);

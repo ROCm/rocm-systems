@@ -271,6 +271,41 @@ if grep -qaE 'misaligned pc|corrupted state' <<<"$out4"; then
   fail=1
 fi
 
+# --- Fifth scenario: memory violation -----------------------------------------
+# Run a kernel that stores through a wild (never-mapped) device pointer. The
+# emulator must report the fault to the debugger as a memory violation (SIGSEGV),
+# exercising the CU's unmapped-access detection + EC_QUEUE_WAVE_MEMORY_VIOLATION +
+# TRAPSTS.xnack_error. Uses a second demo kernel (bad_access.hip).
+badapp="$workdir/bad_access"
+if hipcc --offload-arch="$arch" -g -O0 -o "$badapp" "$here/bad_access.hip" 2>"$workdir/badbuild.log"; then
+  echo "running rocgdb (memory violation) ..."
+  outfile5="$workdir/rocgdb5.out"
+  timeout 180 "$mirage_bin" run --profile "$profile" -- \
+    rocgdb --batch \
+      -ex 'set breakpoint pending on' \
+      -ex 'break bad_access' \
+      -ex 'run' \
+      -ex 'continue' \
+      "$badapp" </dev/null >"$outfile5" 2>&1
+  out5="$(cat "$outfile5")"
+  echo "--------------------------------------------------------------------"
+  echo "$out5"
+  echo "--------------------------------------------------------------------"
+  check5() { # <regex> <description>  (checks the fifth run's output)
+    if grep -qaE "$1" <<<"$out5"; then
+      echo "  ok: $2"
+    else
+      echo "  MISSING: $2 (/$1/)" >&2
+      fail=1
+    fi
+  }
+  check5 'SIGSEGV, Segmentation fault|MEMORY_VIOLATION|memory violation' \
+    'the wild store raised a memory violation'
+  check5 'bad_access .*at .*:[0-9]+' 'stopped in the faulting kernel'
+else
+  echo "  SKIP: could not build bad_access.hip for $arch"
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1
