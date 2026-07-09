@@ -59,7 +59,6 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import (
-    PER_KERNEL_DENOM_COL,
     extract_counters_and_variables,
     get_build_in_vars,
 )
@@ -346,15 +345,16 @@ class db_analysis(OmniAnalyze_Base):
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
 
+            # per_kernel denom; before imputation so nullified kernels drop
+            # from the denominator too (matches create_df_pmc).
+            utils_analysis.add_per_kernel_denom_column(pmc_df)
+
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
                     pmc_df,
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
-
-            # Per-dispatch column of 1s for per_kernel normalization (SUM == N).
-            pmc_df[PER_KERNEL_DENOM_COL] = 1
 
             pmc_df_per_workload[workload_path] = pmc_df
 

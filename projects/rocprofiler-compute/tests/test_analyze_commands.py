@@ -1154,6 +1154,47 @@ class TestMetricEvaluatorDivisionByZero:
         )
 
 
+@pytest.mark.division_by_zero
+class TestPerKernelNormalization:
+    """per_kernel $denom must sum to N dispatches, not the scalar 1.
+
+    Guards the Avg-vs-Max bug: with $denom == "1", SUM(1) == 1 so Avg was the
+    total, not the mean per dispatch.
+    """
+
+    def test_denom_expands_to_dispatch_unit_column(self):
+        from utils.metrics.expression import update_denominator_string
+        from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
+
+        assert update_denominator_string("SUM($denom)", "per_kernel") == (
+            f"SUM({PER_KERNEL_DENOM_COL})"
+        )
+
+    def test_helper_adds_denominator_column_of_ones(self):
+        from utils.utils_analysis import add_per_kernel_denom_column
+        from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
+
+        df = pd.DataFrame({"COUNTER": [10.0, 20.0, 30.0]})
+        add_per_kernel_denom_column(df)
+        assert (df[PER_KERNEL_DENOM_COL] == 1).all()
+        assert len(df[PER_KERNEL_DENOM_COL]) == 3
+
+    def test_per_kernel_avg_is_mean_per_dispatch(self):
+        """SUM(x) / SUM($denom) is the per-dispatch mean, not the total."""
+        from utils.metrics.expression import update_denominator_string
+        from utils.utils_analysis import add_per_kernel_denom_column
+
+        raw_pmc_df = pd.DataFrame({"COUNTER": [10.0, 20.0, 30.0]})
+        add_per_kernel_denom_column(raw_pmc_df)
+        evaluator = MetricEvaluator(raw_pmc_df, {}, {})
+        equation = update_denominator_string("SUM(COUNTER) / SUM($denom)", "per_kernel")
+        result = evaluator.eval_expression(build_eval_string(equation))
+        # 60 / 3 dispatches == 20.0, not the total 60.0
+        assert result == pytest.approx(20.0, abs=1e-9), (
+            f"per_kernel Avg should be the mean per dispatch (20.0), got {result}"
+        )
+
+
 @pytest.fixture
 def sample_time_data():
     return pd.DataFrame({
