@@ -6,9 +6,11 @@ Unit tests for GPU-specific test counter selection.
 """
 
 from __future__ import annotations
+from pathlib import Path
+
 import pytest
-from conftest import RocprofsysTest
-from rocprofsys import GPUInfo, TestResult
+from conftest import RocprofsysTest, _validate_rocpd_candidates
+from rocprofsys import GPUInfo, TestResult, ValidationResult
 
 pytestmark = [pytest.mark.pytest_impl]
 
@@ -94,3 +96,69 @@ class TestTestResult(RocprofsysTest):
 
         assert result.rocpd_files == [lower_pid_db, higher_pid_db]
         assert result.rocpd_file == lower_pid_db
+
+    def test_rocpd_candidates_accepts_later_valid_candidate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        invalid_db = tmp_path / "rocpd-66606-0.db"
+        valid_db = tmp_path / "rocpd-66607-0.db"
+        invalid_db.touch()
+        valid_db.touch()
+        calls: list[Path] = []
+
+        def validate_rocpd_database(db_path: Path) -> ValidationResult:
+            calls.append(db_path)
+            if db_path == valid_db:
+                return ValidationResult(
+                    True,
+                    "valid candidate",
+                    stdout="rocpd validated",
+                    command=f"validate {db_path.name}",
+                )
+            return ValidationResult(
+                False,
+                "missing GPU counter rows",
+                stdout="validation failed",
+                command=f"validate {db_path.name}",
+            )
+
+        passing_output, failures = _validate_rocpd_candidates(
+            [invalid_db, valid_db],
+            validate_rocpd_database,
+            pass_regex=[r"rocpd validated"],
+        )
+
+        assert calls == [invalid_db, valid_db]
+        assert passing_output == f"Command: validate {valid_db.name}\n\nvalid candidate"
+        assert failures == [
+            f"Command: validate {invalid_db.name}\n\nmissing GPU counter rows"
+        ]
+
+    def test_rocpd_candidates_reports_all_candidate_failures(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        first_db = tmp_path / "rocpd-66606-0.db"
+        second_db = tmp_path / "rocpd-7-0.db"
+        first_db.touch()
+        second_db.touch()
+
+        def validate_rocpd_database(db_path: Path) -> ValidationResult:
+            return ValidationResult(
+                False,
+                f"{db_path.name} is missing GPU counter rows",
+                stdout="validation failed",
+                command=f"validate {db_path.name}",
+            )
+
+        passing_output, failures = _validate_rocpd_candidates(
+            [first_db, second_db],
+            validate_rocpd_database,
+        )
+
+        assert passing_output is None
+        message = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
+        assert "rocpd-66606-0.db is missing GPU counter rows" in message
+        assert "rocpd-7-0.db is missing GPU counter rows" in message
+        assert "--- Next ROCpd candidate ---" in message

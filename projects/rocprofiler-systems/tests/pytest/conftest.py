@@ -38,6 +38,7 @@ from rocprofsys import (
     get_target_gpu_arch,
     get_xnack_support,
     TestResult,
+    ValidationResult,
     validate_regex,
     validate_file_regex,
     validate_perfetto_trace,
@@ -2431,38 +2432,21 @@ def assert_rocpd(subtests, tests_dir, request):
                 if not existing_rules:
                     pytest.fail("No validation rules found")
 
-            failures = []
-            passing_output = None
-            for rocpd_file in rocpd_files:
-                validation = validate_rocpd_database(
+            def validate_candidate(rocpd_file: Path) -> ValidationResult:
+                return validate_rocpd_database(
                     rocpd_file,
                     tests_dir=tests_dir,
                     rules_files=existing_rules,
                     timeout=timeout,
                     gpu_category_to_skip=gpu_category_to_skip,
                 )
-                output = f"Command: {validation.command}\n\n{validation.message}"
-                if not validation.is_valid:
-                    failures.append(output)
-                    continue
 
-                regex_failure = None
-                if pass_regex:
-                    for pattern in pass_regex:
-                        if not re.search(pattern, validation.stdout):
-                            regex_failure = f"Pass regex not found: {pattern}"
-                            break
-                if regex_failure is None and fail_regex:
-                    for pattern in fail_regex:
-                        if re.search(pattern, validation.stdout):
-                            regex_failure = f"Fail regex found: {pattern}"
-                            break
-                if regex_failure is not None:
-                    failures.append(f"{regex_failure}\n{output}")
-                    continue
-
-                passing_output = output
-                break
+            passing_output, failures = _validate_rocpd_candidates(
+                rocpd_files,
+                validate_candidate,
+                pass_regex=pass_regex,
+                fail_regex=fail_regex,
+            )
 
             if passing_output is None:
                 output = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
@@ -2470,11 +2454,51 @@ def assert_rocpd(subtests, tests_dir, request):
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    pytest.fail(msg)
-            output = passing_output
-            _print_subtest_output(request, subtest_name, output)
+                    pytest.fail(msg, pytrace=False)
+            _print_subtest_output(request, subtest_name, passing_output)
 
     return _assert_rocpd
+
+
+def _validate_rocpd_candidates(
+    rocpd_files: list[Path],
+    validate_candidate: Callable[[Path], ValidationResult],
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+) -> tuple[Optional[str], list[str]]:
+    """Validate ROCpd candidates and return the first passing output.
+
+    Multi-process runs can emit multiple ROCpd databases. Some rank-local
+    databases may not contain the GPU rows required by a rule set, so the
+    validation succeeds if any emitted candidate fully validates.
+    """
+    failures: list[str] = []
+
+    for rocpd_file in rocpd_files:
+        validation = validate_candidate(rocpd_file)
+        output = f"Command: {validation.command}\n\n{validation.message}"
+        if not validation.is_valid:
+            failures.append(output)
+            continue
+
+        regex_failure = None
+        if pass_regex:
+            for pattern in pass_regex:
+                if not re.search(pattern, validation.stdout):
+                    regex_failure = f"Pass regex not found: {pattern}"
+                    break
+        if regex_failure is None and fail_regex:
+            for pattern in fail_regex:
+                if re.search(pattern, validation.stdout):
+                    regex_failure = f"Fail regex found: {pattern}"
+                    break
+        if regex_failure is not None:
+            failures.append(f"{regex_failure}\n{output}")
+            continue
+
+        return output, failures
+
+    return None, failures
 
 
 @pytest.fixture
