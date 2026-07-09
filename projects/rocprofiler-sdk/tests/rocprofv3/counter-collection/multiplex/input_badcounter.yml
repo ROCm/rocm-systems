@@ -1,0 +1,4 @@
+jobs:
+  -
+    pmc_groups: [["NOT_A_REAL_COUNTER"], [], ["SQ_WAVES", "GRBM_COUNT"]]
+    pmc_group_interval: 1

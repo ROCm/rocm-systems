@@ -1,0 +1,11 @@
+{
+    "jobs": [
+        {
+            "pmc_groups": [
+                ["SQ_WAVES", "SQ_BUSY_CYCLES", "SQ_CYCLES", "SQ_INSTS", "SQ_INSTS_VALU", "SQ_INSTS_SALU"],
+                ["SQ_INSTS_SMEM", "SQ_INSTS_FLAT", "SQ_INSTS_LDS", "SQ_INSTS_BRANCH", "SQ_ACTIVE_INST_VALU", "SQ_IFETCH"]
+            ],
+            "pmc_group_interval": 1
+        }
+    ]
+}
