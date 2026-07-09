@@ -50,7 +50,8 @@ concurrency:
 
 env:
   RCCL_CI_ROOT: /it-share/rccl-ci
-  SLURM_RESERVATION: rccl_ci
+  SLURM_RESERVATION: rccl_dev
+  NODELIST: mia1-p01-g[22,26,28,32]
 
 jobs:
   perf-gate:
