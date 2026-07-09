@@ -30,6 +30,31 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
         PARENT_SCOPE)
 endfunction(generate_hsaco)
 
+# GPU_TARGETS is normally populated by tests/common/CMakeLists.txt, which is only pulled
+# in when building the integration test tree (add_subdirectory(tests) from the top-level
+# CMakeLists.txt). When this unit test directory is configured on its own (e.g. building
+# only the library + unit tests, without the integration tests), GPU_TARGETS may be unset,
+# silently skipping generation/installation of the *_agent_kernels.hsaco files that these
+# tests require at runtime. Fall back to the same defaults used by the integration test
+# tree so the required code objects are always built.
+if(NOT GPU_TARGETS)
+    set(GPU_TARGETS
+        "gfx900"
+        "gfx906"
+        "gfx908"
+        "gfx90a"
+        "gfx942"
+        "gfx950"
+        "gfx1030"
+        "gfx1010"
+        "gfx1100"
+        "gfx1101"
+        "gfx1102"
+        "gfx1151"
+        "gfx1152"
+        "gfx1250")
+endif()
+
 foreach(target_id ${GPU_TARGETS})
     # generate kernel bitcodes
     generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/agent_kernels.cl
