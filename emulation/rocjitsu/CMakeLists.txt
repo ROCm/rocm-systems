@@ -164,6 +164,7 @@ if(_rj_sanitizer_count GREATER 0)
     list(JOIN _rj_sanitizer_kinds "," _rj_sanitizer_arg)
     set(RJ_SANITIZER_COMPILE_OPTIONS)
     set(RJ_SANITIZER_LINK_OPTIONS)
+    list(APPEND RJ_SANITIZER_COMPILE_OPTIONS "-fno-sanitize-recover=all")
     message(STATUS "Sanitizer enabled: ${_rj_sanitizer_arg}")
     if(MSVC)
         # MSVC only supports AddressSanitizer; ubsan/tsan/msan are GCC/Clang-only.
