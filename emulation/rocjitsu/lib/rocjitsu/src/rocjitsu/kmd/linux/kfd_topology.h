@@ -125,7 +125,9 @@ inline DebugTopology debug_topology_for(uint32_t gfx_target_version) {
   // Every debug-capable ASIC the simulator models carries the four hardware
   // address-watch registers, so advertise them here rather than alongside the
   // generic non-debug bits: rocdbgapi reads this out of the device snapshot to
-  // decide how many data watchpoints it may insert.
+  // decide how many data watchpoints it may insert. Without the bits it reports
+  // zero watch registers and refuses to insert one ("too many hardware
+  // watchpoints").
   topo.capability |= HSA_CAP_WATCH_POINTS_SUPPORTED |
                      ((kWatchPointsTotalBits << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) &
                       HSA_CAP_WATCH_POINTS_TOTALBITS_MASK);

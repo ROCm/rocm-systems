@@ -299,6 +299,17 @@ private:
   void resume_debug_queues(KfdProcess *proc);
   void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 
+  /// @brief Address-watchpoint handler installed on every compute unit.
+  /// @details Runs on the engine thread for each active-lane global-memory
+  /// access. If the address matches one of the debugger's address watchpoints
+  /// (compared under its mask, with a matching access mode), stops the wave with
+  /// the corresponding TRAPSTS.addr_watch bit set and reports it. Returns true
+  /// if the wave was stopped. @param addr post-translation global address;
+  /// @param bytes access width; @param is_write store/atomic; @param is_atomic
+  /// atomic read-modify-write.
+  bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
+                          bool is_atomic);
+
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);

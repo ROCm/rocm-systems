@@ -72,9 +72,10 @@ Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
 end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
 wave registers / PC / disassembly, single-steps instructions, and continues the
 kernel to correct completion. `info agents` lists the synthetic `gfx950 /
-MI350X` agent, and a breakpoint on a GPU kernel stops the trapping wave. The
-remaining wave-control features (watchpoints, faults, private memory, multi-wave)
-build on this and are tracked below.
+MI350X` agent, a breakpoint on a GPU kernel stops the trapping wave, and a
+hardware `watch` on GPU memory traps the wave that accesses it. The remaining
+wave-control features (faults, private memory, multi-wave) build on this and are
+tracked below.
 
 | Area | Status |
 |---|---|
@@ -92,7 +93,8 @@ build on this and are tracked below.
 | One-command debugging (`mirage run --gdb` / `--gdb-ex`) | done |
 | Deterministic single-step (`stepi`) | done |
 | Displaced stepping / step-over (debugger memory reserved) | done |
-| Watchpoints / illegal-instruction / memory-violation | pending |
+| GPU address watchpoints (`watch`/`rwatch`/`awatch`) | done |
+| Illegal-instruction / memory-violation faults | pending |
 | Private/scratch reads / multi-wave | pending |
 
 ## 4. Sources

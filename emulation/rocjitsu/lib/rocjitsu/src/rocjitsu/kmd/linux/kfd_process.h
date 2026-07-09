@@ -13,9 +13,11 @@
 #define ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
 
 #include "rocjitsu/kmd/linux/events.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -197,6 +199,18 @@ public:
     /// @details Mirrors the kernel's debugger-process notifier: the session is
     /// disabled when the debugger task exits, even if the target remains alive.
     util::UniqueHandle debugger_pidfd;
+
+    /// @brief One programmed hardware address-watch register (TCP_WATCH0..3).
+    struct AddressWatch {
+      bool active = false;
+      uint64_t address = 0;
+      uint64_t mask = 0;
+      uint32_t mode = 0;
+    };
+    /// The register file the topology advertises, so a debugger can never hold
+    /// more watchpoints than the device snapshot told it exist.
+    static constexpr uint32_t kMaxAddressWatches = kmd::kNumWatchPoints;
+    std::array<AddressWatch, kMaxAddressWatches> address_watches;
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.
