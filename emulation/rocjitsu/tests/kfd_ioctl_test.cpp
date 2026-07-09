@@ -487,6 +487,76 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
 }
 
+// rocm-dbgapi enumerates the target's compute queues to locate each queue's
+// CWSR area (from which it walks wave save state). GET_QUEUE_SNAPSHOT must
+// report the ctx_save_restore address/size captured at CREATE_QUEUE.
+TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // No queues yet: the count call reports zero.
+  kfd_ioctl_dbg_trap_args count0{};
+  count0.pid = static_cast<uint32_t>(getpid());
+  count0.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count0.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count0), 0);
+  EXPECT_EQ(count0.queue_snapshot.num_queues, 0u);
+
+  // Create one compute (AQL) queue with a known context-save-restore area.
+  std::vector<uint8_t> ring(4096, 0), rw(4096, 0);
+  constexpr uint64_t kCwsrVa = 0x123400000ULL;
+  constexpr uint32_t kCwsrSize = 0x8000;
+  kfd_ioctl_create_queue_args cq{};
+  cq.gpu_id = kGpuId;
+  cq.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  cq.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  cq.ring_size = static_cast<uint32_t>(ring.size());
+  cq.read_pointer_address = reinterpret_cast<uint64_t>(rw.data());
+  cq.write_pointer_address = reinterpret_cast<uint64_t>(rw.data() + 64);
+  cq.ctx_save_restore_address = kCwsrVa;
+  cq.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &cq), 0);
+
+  // Count now reports one queue.
+  kfd_ioctl_dbg_trap_args count1{};
+  count1.pid = static_cast<uint32_t>(getpid());
+  count1.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count1.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count1), 0);
+  ASSERT_EQ(count1.queue_snapshot.num_queues, 1u);
+  EXPECT_EQ(count1.queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+
+  // Fill reports the CWSR geometry rocm-dbgapi needs to find waves.
+  kfd_queue_snapshot_entry entry{};
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = static_cast<uint32_t>(getpid());
+  snap.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snap.queue_snapshot.entry_size = sizeof(entry);
+  snap.queue_snapshot.num_queues = 1;
+  snap.queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(&entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_EQ(entry.queue_id, cq.queue_id);
+  EXPECT_EQ(entry.gpu_id, kGpuId);
+  EXPECT_EQ(entry.ctx_save_restore_address, kCwsrVa);
+  EXPECT_EQ(entry.ctx_save_restore_area_size, kCwsrSize);
+  EXPECT_EQ(entry.ring_base_address, reinterpret_cast<uint64_t>(ring.data()));
+  EXPECT_EQ(entry.queue_type, static_cast<uint32_t>(KFD_IOC_QUEUE_TYPE_COMPUTE_AQL));
+
+  // Destroying the queue removes it from the snapshot.
+  kfd_ioctl_destroy_queue_args dq{};
+  dq.queue_id = cq.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &dq), 0);
+  kfd_ioctl_dbg_trap_args count2{};
+  count2.pid = static_cast<uint32_t>(getpid());
+  count2.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  count2.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &count2), 0);
+  EXPECT_EQ(count2.queue_snapshot.num_queues, 0u);
+}
+
 // Cross-process authorization: a debugger may only act on a process it has
 // ptrace-attached. Uses a real forked child and real ptrace so the check
 // exercises the live /proc TracerPid relationship, matching how rocgdb

@@ -203,6 +203,26 @@ public:
   };
   std::unordered_map<uint32_t, QueueDoorbellInfo> queue_doorbell_map_;
 
+  /// @brief Debug-relevant per-queue info reported by GET_QUEUE_SNAPSHOT.
+  ///
+  /// @details Captured at CREATE_QUEUE time. rocm-dbgapi consumes the
+  /// context-save-restore address/size to locate each queue's CWSR area (from
+  /// which it walks the wave save state), plus the ring pointers to correlate
+  /// dispatches. Mirrors the fields the kernel fills in
+  /// @c kfd_queue_snapshot_entry (kfd_debug.c: kfd_dbg_trap_get_queue_snapshot).
+  struct QueueSnapshotInfo {
+    uint64_t ring_base_address = 0;
+    uint64_t write_pointer_address = 0;
+    uint64_t read_pointer_address = 0;
+    uint64_t ctx_save_restore_address = 0;
+    uint32_t ctx_save_restore_area_size = 0;
+    uint32_t ring_size = 0;
+    uint32_t queue_type = 0;
+    uint32_t gpu_id = 0;
+    uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+  };
+  std::unordered_map<uint32_t, QueueSnapshotInfo> queue_snapshot_map_;
+
   EventState event_state_;
 
   std::unordered_map<uint32_t, MemoryPolicy> memory_policies_;

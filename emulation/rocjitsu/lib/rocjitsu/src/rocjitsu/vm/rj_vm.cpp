@@ -128,6 +128,8 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
       args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
     else if (args->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
       args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+    else if (args->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+      args->queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
   default:

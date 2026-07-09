@@ -1441,6 +1441,20 @@ int SimulatedDriver::create_queue_ioctl(KfdProcess &proc, void *arg) {
   args->doorbell_offset = KFD_MMAP_TYPE_DOORBELL | kfd_mmap_gpu_id(gpu->gpu_id) | db_offset;
   proc.active_queue_ids_.push_back(queue_id);
   proc.queue_doorbell_map_[queue_id] = {ord, db_offset};
+
+  // Record debug-relevant queue geometry for GET_QUEUE_SNAPSHOT. rocm-dbgapi
+  // reads ctx_save_restore_address/size to locate the queue's CWSR area and the
+  // ring pointers to correlate dispatches (kfd_debug.c: get_queue_snapshot).
+  KfdProcess::QueueSnapshotInfo qinfo{};
+  qinfo.ring_base_address = args->ring_base_address;
+  qinfo.write_pointer_address = args->write_pointer_address;
+  qinfo.read_pointer_address = args->read_pointer_address;
+  qinfo.ctx_save_restore_address = args->ctx_save_restore_address;
+  qinfo.ctx_save_restore_area_size = args->ctx_save_restore_size;
+  qinfo.ring_size = args->ring_size;
+  qinfo.queue_type = args->queue_type;
+  qinfo.gpu_id = args->gpu_id;
+  proc.queue_snapshot_map_[queue_id] = qinfo;
   return 0;
 }
 
@@ -1465,6 +1479,7 @@ int SimulatedDriver::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
     std::erase(proc.active_queue_ids_, args->queue_id);
+    proc.queue_snapshot_map_.erase(args->queue_id);
     auto it = proc.queue_doorbell_map_.find(args->queue_id);
     if (it != proc.queue_doorbell_map_.end()) {
       auto &gs = proc.gpu(it->second.gpu_ordinal);
@@ -2044,13 +2059,9 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // that raises wave exceptions is wired up with the wave-level trap handler.
     return -EAGAIN;
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
-    // No queues are exposed to the debugger yet; report an empty snapshot so
-    // attach/detach enumerate cleanly. Wave/queue visibility is wired up with
-    // the wave-level stack.
-    args->queue_snapshot.entry_size =
-        std::min<uint32_t>(args->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
-    args->queue_snapshot.num_queues = 0;
-    return 0;
+    // Enumerate the target's compute queues so rocm-dbgapi can locate each
+    // queue's CWSR area and walk its waves (kfd_debug.c: get_queue_snapshot).
+    return debug_queue_snapshot(target_proc, args->queue_snapshot);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
     // With no queues exposed there is nothing to suspend; the number "handled"
     // is the count the debugger passed (their ids are left unmodified, so
@@ -2120,6 +2131,56 @@ int SimulatedDriver::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_ar
 
     std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
   }
+  return 0;
+}
+
+int SimulatedDriver::debug_queue_snapshot(KfdProcess *target,
+                                          kfd_ioctl_dbg_trap_queue_snapshot_args &args) {
+  // Mirrors kfd_dbg_trap_get_queue_snapshot() (amd/amdkfd/kfd_debug.c). The
+  // two-call protocol: pass num_queues=0 to learn the count, then a buffer
+  // sized for that many entries. entry_size is clamped to what we populate.
+  const uint32_t in_num = args.num_queues;
+  const uint32_t in_entry_size = args.entry_size;
+
+  std::vector<kfd_queue_snapshot_entry> entries;
+  if (target != nullptr) {
+    std::lock_guard<std::mutex> lk(target->alloc_mutex_);
+    entries.reserve(target->active_queue_ids_.size());
+    // Preserve creation order (active_queue_ids_) so the debugger sees a stable
+    // enumeration across calls.
+    for (uint32_t qid : target->active_queue_ids_) {
+      auto it = target->queue_snapshot_map_.find(qid);
+      if (it == target->queue_snapshot_map_.end())
+        continue;
+      const KfdProcess::QueueSnapshotInfo &q = it->second;
+      kfd_queue_snapshot_entry e{};
+      e.exception_status = q.exception_status;
+      e.ring_base_address = q.ring_base_address;
+      e.write_pointer_address = q.write_pointer_address;
+      e.read_pointer_address = q.read_pointer_address;
+      e.ctx_save_restore_address = q.ctx_save_restore_address;
+      e.queue_id = qid;
+      e.gpu_id = q.gpu_id;
+      e.ring_size = q.ring_size;
+      e.queue_type = q.queue_type;
+      e.ctx_save_restore_area_size = q.ctx_save_restore_area_size;
+      entries.push_back(e);
+    }
+  }
+
+  const uint32_t total = static_cast<uint32_t>(entries.size());
+  args.num_queues = total;
+  args.entry_size = std::min<uint32_t>(in_entry_size, sizeof(kfd_queue_snapshot_entry));
+
+  const uint32_t fill = std::min<uint32_t>(in_num, total);
+  if (fill == 0)
+    return 0;
+  if (args.snapshot_buf_ptr == 0 || in_entry_size == 0)
+    return -EFAULT;
+
+  auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
+  for (uint32_t i = 0; i < fill; ++i)
+    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &entries[i], args.entry_size);
   return 0;
 }
 

@@ -360,6 +360,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
       else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+        saved_dbg_snapshot_ptr = dbg->queue_snapshot.snapshot_buf_ptr;
       break;
     }
     default:
@@ -407,6 +409,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
         inline_size =
             static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+        inline_size =
+            static_cast<size_t>(dbg->queue_snapshot.num_queues) * dbg->queue_snapshot.entry_size;
       // Output-only buffer: reserve zeroed space the daemon fills in place.
       if (inline_size > 0)
         buf.resize(buf.size() + inline_size);
@@ -471,6 +476,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           dbg->enable.rinfo_ptr = saved_dbg_rinfo_ptr;
         else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
           dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+        else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+          dbg->queue_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
         break;
       }
       default:
@@ -502,6 +509,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
           dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
         else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
+          dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+        else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
           dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
         if (dst != nullptr)
           std::memcpy(dst, payload.data() + arg_size, extra);
