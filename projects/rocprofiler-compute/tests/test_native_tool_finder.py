@@ -29,15 +29,13 @@ class TestNativeToolFinder:
         def mock_build_collector(_: Path) -> None:
             self.__create_file(built_lib_path)
 
-        with (
-            patch.object(NativeToolFinder, "_generate_cmake", return_value=None),
-            patch.object(
+        with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
+            with patch.object(
                 NativeToolFinder,
                 "_build_cmake",
                 side_effect=mock_build_collector,
-            ),
-        ):
-            lib_path = NativeToolFinder(root_path).get_collector_library_path()
+            ):
+                lib_path = NativeToolFinder(root_path).get_collector_library_path()
         assert lib_path == built_lib_path
 
     def test_when_run_from_source_dir_and_collector_not_found_after_build__throws(
@@ -45,12 +43,10 @@ class TestNativeToolFinder:
     ):
         root_path, built_lib_path = sources_dir
         built_lib_path.unlink()
-        with (
-            patch.object(NativeToolFinder, "_generate_cmake", return_value=None),
-            patch.object(NativeToolFinder, "_build_cmake", return_value=None),
-        ):
-            with pytest.raises(RuntimeError):
-                NativeToolFinder(root_path).get_collector_library_path()
+        with patch.object(NativeToolFinder, "_generate_cmake", return_value=None):
+            with patch.object(NativeToolFinder, "_build_cmake", return_value=None):
+                with pytest.raises(RuntimeError):
+                    NativeToolFinder(root_path).get_collector_library_path()
 
     def test_when_run_from_source_dir_and_generation_fails__throws(
         self, sources_dir: tuple[Path, Path]

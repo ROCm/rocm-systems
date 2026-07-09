@@ -871,11 +871,26 @@ size_t PageSize() {
 bool UnmapMemory(void* va, size_t size) { return ::munmap(va, size) == 0; }
 
 bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) {
+  if (fd < 0)  return false;
+
   void* mapped_ptr = ::mmap(va, size, MemProtToOsProt(perms), 
                             MAP_SHARED | MAP_FIXED, fd, cpu_addr);
   if (mapped_ptr != va)
       return false;
   return true;
+}
+
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (*dmabuf < 0) return HSA_STATUS_SUCCESS;
+  if (::close(*dmabuf) != 0) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO, "close dmabuf failed: %s", strerror(errno));
+    *dmabuf = -1;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+  }
+  /* Set to -1 even on close failure: the fd is no longer valid regardless of errno. */
+  *dmabuf = -1;
+  return HSA_STATUS_SUCCESS;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
@@ -981,7 +996,7 @@ static inline IPCSocket FdToIPCSock(int fd) {
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;
@@ -1009,7 +1024,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
 
 IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
                              std::chrono::milliseconds retryInterval) {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;

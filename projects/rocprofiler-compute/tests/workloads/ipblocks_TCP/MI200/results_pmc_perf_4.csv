@@ -1,0 +1,13 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727354610,8496320727374450,0,TCP_TCC_RW_ATOMIC_REQ_sum,0.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727354610,8496320727374450,0,TCP_TCC_RW_READ_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727354610,8496320727374450,0,TCP_TCC_RW_WRITE_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727354610,8496320727374450,0,TCP_TCC_UC_ATOMIC_REQ_sum,0.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727820854,8496320727837654,0,TCP_TCC_RW_ATOMIC_REQ_sum,0.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727820854,8496320727837654,0,TCP_TCC_RW_READ_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727820854,8496320727837654,0,TCP_TCC_RW_WRITE_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320727820854,8496320727837654,0,TCP_TCC_UC_ATOMIC_REQ_sum,0.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320728096217,8496320728112857,0,TCP_TCC_RW_ATOMIC_REQ_sum,0.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320728096217,8496320728112857,0,TCP_TCC_RW_READ_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320728096217,8496320728112857,0,TCP_TCC_RW_WRITE_REQ_sum,131072.0
+2,0001fa6b-8f13-7f13-9f98-52caa81fa87b,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496320728096217,8496320728112857,0,TCP_TCC_UC_ATOMIC_REQ_sum,0.0

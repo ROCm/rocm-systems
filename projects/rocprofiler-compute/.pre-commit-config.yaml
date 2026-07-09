@@ -30,12 +30,13 @@ repos:
       - id: gersemi
         files: ^projects/rocprofiler-compute/.*(CMakeLists\.txt|\.cmake)$
 
-  # C/C++ formatting
+  # C/C++ formatting (matches rocprofiler-compute-formatting.yml workflow)
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v22.1.0
     hooks:
       - id: clang-format
         files: ^projects/rocprofiler-compute/src/.*\.(h|hpp|hh|c|cc|cpp)(\.in)?$
+        exclude: ^projects/rocprofiler-compute/src/(lib/external|vendored)/
 
   # Reject committed Python bytecode
   - repo: local

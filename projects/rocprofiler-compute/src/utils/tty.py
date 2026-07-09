@@ -17,6 +17,7 @@ from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
 from utils.logger import console_error, console_log, console_warning
+from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
     CallTreeNode,
@@ -24,11 +25,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import (
-    METRIC_ID_RE,
-    convert_metric_id_to_panel_info,
-    get_arch_alias_to_panel_id,
-)
+from utils.utils_common import convert_filter_blocks_to_panel_ids, is_gfx115x
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
@@ -44,38 +41,10 @@ def wrap_kernel_name(name: str) -> str:
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
 
 
-def _recalculate_pct_of_peak(
-    df: pd.DataFrame,
-    idx: Any,  # noqa: ANN401
-    value_col: str,
-    peak_col: str,
-    pct_cols: list[str],
-    decimal: int,
-) -> None:
-    """Recalculate Pct of Peak = (value / peak) * 100 after BW scaling."""
-    for pct_col in pct_cols:
-        if pct_col not in df.columns:
-            continue
-        try:
-            val = df.loc[idx, value_col]
-            peak = df.loc[idx, peak_col]
-            if (
-                pd.notna(val)
-                and pd.notna(peak)
-                and val != "N/A"
-                and peak != "N/A"
-                and float(peak) != 0
-            ):
-                pct = (float(val) / float(peak)) * 100
-                df.loc[idx, pct_col] = round(pct, decimal)
-        except (ValueError, TypeError, ZeroDivisionError):
-            pass
-
-
 def scale_bw_columns(
     df: pd.DataFrame, value_columns: list[str], decimal: int = 2
 ) -> pd.DataFrame:
-    """Scale Bytes/s rows to human-readable units; recalculate Pct of Peak."""
+    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
     if "Unit" not in df.columns:
         return df
 
@@ -85,7 +54,7 @@ def scale_bw_columns(
     if not bw_rows.any():
         return df_copy
 
-    pct_cols = ["Pct of Peak", "PoP"]
+    pct_cols = ["Percent of Peak"]
     value_col = "Value" if "Value" in df_copy.columns else "Avg"
     peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df_copy.columns else "Peak"
 
@@ -118,7 +87,13 @@ def scale_bw_columns(
             except (ValueError, TypeError):
                 pass
 
-        _recalculate_pct_of_peak(df_copy, idx, value_col, peak_col, pct_cols, decimal)
+        for pct_col in pct_cols:
+            if pct_col in df_copy.columns:
+                pct = calc_pct_of_peak(
+                    df_copy.loc[idx, value_col], df_copy.loc[idx, peak_col]
+                )
+                if pct is not None:
+                    df_copy.loc[idx, pct_col] = round(pct, decimal)
 
         df_copy.loc[idx, "Unit"] = unit
 
@@ -324,18 +299,23 @@ def is_roofline_shown(
     return True
 
 
-def list_torch_operators(
+def list_ml_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
+    framework_label: str = "PyTorch",
 ) -> None:
-    """Display PyTorch operators as a unified call tree grouped by source location."""
+    """Display operators as a unified call tree grouped by source location.
+
+    ``framework_label`` sets the heading text (for example "PyTorch" or
+    "Triton").
+    """
     if not call_trees:
-        print(f"\nPyTorch Operators in: {workload_path}")
+        print(f"\n{framework_label} Operators in: {workload_path}")
         print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print(f"{framework_label} Operator Call Tree: {workload_path}")
     print("Grouped by source location, sorted by total GPU kernel duration.")
     print(f"{'=' * 80}")
     show_call_tree(call_trees)
@@ -679,6 +659,9 @@ def process_table_data(
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
 
+                if header not in cur_df.columns:
+                    continue
+
                 if (table_type == "raw_csv_table") or (
                     table_type == "metric_table" and header not in hidden_cols
                 ):
@@ -775,8 +758,9 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty
-    if is_empty_columns_exist:
+    # Do not print the table if any column is empty. PC sampling table 21.1 is
+    # exempt: its source column is all N/A when the workload lacks debug info.
+    if is_empty_columns_exist and table_id_str != "21.1":
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
@@ -808,9 +792,8 @@ def format_table_output(
     # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
-    is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
 
-    if is_single_run and is_gfx115x and "Unit" in df.columns:
+    if is_single_run and is_gfx115x(gpu_arch) and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
@@ -836,7 +819,7 @@ def format_table_output(
                 .to_dict()["Value"]
             )
 
-        if gpu_arch and gpu_arch.startswith("gfx115"):
+        if is_gfx115x(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     args.normal_unit,
@@ -867,37 +850,16 @@ def show_all(
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
-    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
 
-    # Get gpu_arch from the first run's sys_info
     first_run = next(iter(runs.values()))
     gpu_arch = (
         first_run.sys_info.iloc[0]["gpu_arch"]
         if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
         else None
     )
-
-    if isinstance(raw_filter_panel_ids, dict):
-        # For backward compatibility
-        raw_filter_panel_ids = [
-            name
-            for name, table_type in raw_filter_panel_ids.items()
-            if table_type == "metric_id"
-        ]
-
-    panel_alias = get_arch_alias_to_panel_id(gpu_arch) if gpu_arch else {}
-    filter_panel_ids: set[int] = set()
-    for bid in raw_filter_panel_ids:
-        bid_s = str(bid)
-
-        if not METRIC_ID_RE.match(bid_s):
-            if bid_s not in panel_alias:
-                raise KeyError(f"Unknown panel alias: {bid_s!r}")
-            bid_s = str(panel_alias[bid_s])
-
-        file_id, _, _ = convert_metric_id_to_panel_info(bid_s)
-        if file_id is not None:
-            filter_panel_ids.add(int(file_id))
+    filter_panel_ids = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), gpu_arch
+    )
 
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
@@ -939,6 +901,13 @@ def show_all(
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
+                # Skip tables that were filtered out at build_dfs time
+                # (e.g. analyze-mode -b dropped this block). In baseline mode
+                # require the table in every run so per-run dfs[id] lookups
+                # downstream stay safe.
+                if not all(table_config["id"] in run.dfs for run in runs.values()):
+                    continue
+
                 # Emit warnings for roofline tables (401, 402)
                 # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
@@ -1016,9 +985,8 @@ def show_all(
                 is_mem_chart = table_config.get(
                     "cli_style"
                 ) == "mem_chart" and not _tty_view_is_table(args)
-                is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
 
-                if is_mem_chart and is_gfx115x and len(runs) == 1:
+                if is_mem_chart and is_gfx115x(gpu_arch) and len(runs) == 1:
                     has_cols = (
                         "Metric" in processed_df.columns
                         and "Value" in processed_df.columns
@@ -1093,6 +1061,8 @@ def show_kernel_stats(
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
                 for run, data in runs.items():
+                    if table_config["id"] not in data.dfs:
+                        continue
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not

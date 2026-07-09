@@ -69,10 +69,28 @@ enum class DriverType {
 };
 
 /// @brief Handle for exported / imported memory.
-struct ShareableHandle {
+struct DriverMemoryHandle {
   uint64_t handle{};
+  int dmabuf_fd{-1};
+  uint64_t mmap_offset{0};
+  size_t size{0};
+  hsa_fabric_handle_t fabric_handle{};
 
   bool IsValid() const { return handle != 0; }
+
+  bool operator<(const DriverMemoryHandle& b) const { return handle < b.handle; }
+  bool operator==(const DriverMemoryHandle& b) const { return handle == b.handle; }
+};
+
+/// @brief Format of a shareable memory handle for export and import.
+///
+/// Selects how @ref ExportMemoryHandle and @ref ImportMemoryHandle encode the
+/// external reference to a driver memory allocation.
+enum ShareType {
+  /// @brief POSIX file descriptor for a DMA-BUF object (local or same-machine sharing).
+  DMABUF_FD,
+  /// @brief Globally unique fabric handle for multi-node / cross-domain sharing.
+  FABRIC_HANDLE,
 };
 
 /// @brief Kernel driver interface.
@@ -198,30 +216,32 @@ public:
   virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
                                      uint32_t* first_gws) const = 0;
 
-  /// @brief Exports a memory object via dma-buf.
+  /// @brief Exports a memory object.
   ///
-  /// @param[in] mem virtual address
-  /// @param[in] size memory size in bytes
-  /// @param[out] dmabuf_fd dma-buf file descriptor
-  /// @param[out] offset memory offset in bytes
-  virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                                    size_t *offset) = 0;
+  /// @param[in] agent agent that owns the memory
+  /// @param[in] handle driver memory handle to export
+  /// @param[in] type @ref ShareType to export
+  /// @param[out] export_handle output handle; @p int* for @p DMABUF_FD,
+  ///             @p hsa_fabric_handle_t* for @p FABRIC_HANDLE
+  virtual hsa_status_t ExportMemoryHandle(const core::Agent& agent,
+                                          const DriverMemoryHandle& handle, ShareType type,
+                                          void* export_handle) = 0;
 
-  /// @brief Imports a memory object via dma-buf.
+  /// @brief Imports a memory object from a shareable handle.
   ///
-  /// @note The handle must be destroyed with @ref DestroyImportedShareableHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
-  /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
-  /// @param[out] handle handle to the imported memory
+  /// @param[out] handle handle to the imported memory; @p handle->size is set to the
+  ///             imported allocation size in bytes
+  /// @param[in] type @ref ShareType to import
+  /// @param[in] import_handle input handle; @p DriverMemoryHandle* whose
+  ///             @p dmabuf_fd field is read for @p DMABUF_FD and whose
+  ///             @p fabric_handle field is read for @p FABRIC_HANDLE
   /// @param[in] mem address of existing buffer, used to bypass import
-  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                    core::ShareableHandle* handle, void* mem = nullptr) = 0;
-
-  /// @brief Destroys the handle created during @ref ImportDMABuf.
-  ///
-  /// @param[in] handle handle of the object to release
-  virtual hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) = 0;
+  virtual hsa_status_t ImportMemoryHandle(const core::Agent& agent, DriverMemoryHandle* handle,
+                                          ShareType type, void* import_handle,
+                                          void* mem = nullptr) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -230,9 +250,10 @@ public:
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
   /// @param[out] perms new permissions
-  virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
+  /// @param[in] node_id driver node id of the target GPU
+  virtual hsa_status_t Map(const core::DriverMemoryHandle& handle, void *mem,
                            size_t offset, size_t size,
-                           hsa_access_permission_t perms) = 0;
+                           hsa_access_permission_t perms, uint32_t node_id) = 0;
 
   /// @brief Unmaps the memory associated with the handle.
   ///
@@ -240,13 +261,14 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
-                             size_t offset, size_t size) = 0;
+  /// @param[in] node_id driver node id of the target GPU
+  virtual hsa_status_t Unmap(const core::DriverMemoryHandle& handle, void *mem,
+                             size_t offset, size_t size, uint32_t node_id) = 0;
 
   /// @brief Maps the virtual address to the physical address and creates a handle to share this
   /// mapping.
   ///
-  /// @note The handle must be destroyed with @ref DestroyShareableHandle.
+  /// @note The handle must be destroyed with @ref DestroyMemoryHandle.
   ///
   /// @param[in] va virtual address
   /// @param[in] mem physical memory handle
@@ -254,17 +276,15 @@ public:
   /// @param[in] agent agent associated with @p mem
   /// @param[out] handle handle of the memory object
   /// @param[out] offset memory offset in bytes
-  /// @param[out] drm_fd file descriptor
-  /// @param[out] drm_fd_offset offset in @p drm_fd
   virtual hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size,
                                              const core::Agent& agent,
-                                             core::ShareableHandle* handle, uint64_t* offset,
-                                             int* drm_fd, uint64_t* drm_fd_offset) = 0;
+                                             core::DriverMemoryHandle* handle,
+                                             uint64_t* offset) = 0;
 
   /// @brief Destroys the handle created during @ref CreateShareableHandle.
   ///
   /// @param[in] handle handle of the object to destroy
-  virtual hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) = 0;
+  virtual hsa_status_t DestroyMemoryHandle(core::DriverMemoryHandle* handle) = 0;
 
   /// @brief Acquire a streaming performance monitor on an agent.
   /// @param[in] preferred_node_id Node ID of the preferred agent.
@@ -318,6 +338,32 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Submits a GPU-side signal of an imported external semaphore on
+  /// the given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the signal is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t SignalExternalSemaphore(uint64_t queue_id,
+                                               hsa_amd_external_semaphore_t sem,
+                                               uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
+  /// @brief Submits a GPU-side wait on an imported external semaphore on the
+  /// given KMD queue.
+  /// @param[in] queue_id KMD queue id (HSA_QUEUEID) the wait is appended to.
+  /// @param[in] sem Semaphore from @ref ImportExternalSemaphore.
+  /// @param[in] value Payload for timeline semaphores (ignored for binary).
+  /// @retval HSA_STATUS_ERROR_NOT_SUPPORTED if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t WaitExternalSemaphore(uint64_t queue_id,
+                                             hsa_amd_external_semaphore_t sem,
+                                             uint64_t value) const {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+  }
+
   /// @brief Sets trap handler and trap buffer to be used for all queues associated
   /// with the specified NodeId within this process context
   /// @param[in] node_id Node ID of the agent
@@ -344,6 +390,11 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the device
   virtual hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const = 0;
 
+  /// @brief Gets the device file descriptor for a specific node.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] fd
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the file descriptor
+  virtual hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const = 0;
 
   /// @brief Gets clock counters for particular Node
   /// @param[in] node_id Node ID of the agent

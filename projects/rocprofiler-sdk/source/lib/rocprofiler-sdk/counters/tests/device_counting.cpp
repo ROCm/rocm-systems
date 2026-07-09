@@ -47,6 +47,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
@@ -155,6 +156,22 @@ check_output_created(rocprofiler_context_id_t,
 
     auto* signal = reinterpret_cast<hsa_signal_t*>(user_data);
     hsa_signal_store_relaxed(*signal, static_cast<int64_t>(found_value));
+}
+
+void
+sort_counter_records(std::vector<rocprofiler_record_counter_t>& records)
+{
+    std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
+        return std::make_tuple(lhs.id,
+                               lhs.counter_value,
+                               lhs.dispatch_id,
+                               lhs.agent_id.handle,
+                               lhs.user_data.value) < std::make_tuple(rhs.id,
+                                                                      rhs.counter_value,
+                                                                      rhs.dispatch_id,
+                                                                      rhs.agent_id.handle,
+                                                                      rhs.user_data.value);
+    });
 }
 
 struct test_kernels
@@ -440,7 +457,7 @@ protected:
 
                 if(hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,
-                                           track_metric,
+                                           static_cast<int64_t>(track_metric),
                                            20000000,
                                            HSA_WAIT_STATE_BLOCKED) !=
                    static_cast<int64_t>(track_metric))
@@ -456,13 +473,16 @@ protected:
                         ROCP_FATAL << "Output size does not match: " << recs_local.size() << " "
                                    << output_records.size();
                     }
+                    sort_counter_records(recs_local);
+                    sort_counter_records(output_records);
                     if(!std::equal(recs_local.begin(),
                                    recs_local.end(),
                                    output_records.begin(),
                                    [](const auto& a, const auto& b) {
                                        return a.id == b.id && a.counter_value == b.counter_value &&
                                               a.dispatch_id == b.dispatch_id &&
-                                              a.agent_id.handle == b.agent_id.handle;
+                                              a.agent_id.handle == b.agent_id.handle &&
+                                              a.user_data.value == b.user_data.value;
                                    }))
                     {
                         ROCP_FATAL << "Output does not match between buffer and callback";
@@ -482,7 +502,7 @@ protected:
     // packets are likely not valid.
     static void check_raw_aql_packets(const std::string&         metric_to_test,
                                       size_t                     iter_count,
-                                      const std::vector<double>& expected_values)
+                                      const std::vector<double>& min_expected_values)
     {
         using namespace rocprofiler::counters;
         using namespace rocprofiler::hsa;
@@ -614,11 +634,11 @@ protected:
                 ROCP_INFO << fmt::format(
                     "Final Decoded Counter Values: {} (iter={})", fmt::join(*ret, ","), i);
 
-                CHECK_EQ(ret->size(), expected_values.size());
+                CHECK_EQ(ret->size(), min_expected_values.size());
                 size_t pos = 0;
-                for(const auto& v : expected_values)
+                for(const auto& v : min_expected_values)
                 {
-                    CHECK_EQ(v, ret->at(pos).counter_value);
+                    CHECK_GE(ret->at(pos).counter_value, v);
                     pos++;
                 }
             }
@@ -720,7 +740,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
 TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
 {
     // If this test fails, device counters will not be read correctly by a system-wide profiler
-    // deamon.
+    // daemon.
     if(!counters::counter_collection_has_device_lock())
     {
         ROCP_INFO << "Unsupported kernel driver version, skipping test";

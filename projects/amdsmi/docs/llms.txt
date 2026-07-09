@@ -1,0 +1,47 @@
+# AMD SMI
+
+> The AMD System Management Interface (AMD SMI) library is a unified tool for managing and monitoring AMD GPUs and AMD EPYC CPUs, particularly in high-performance computing environments. It provides a user-space interface to control GPU operations, monitor performance, and retrieve driver and system information. AMD SMI ships a core C++ library (`libamd_smi.so`) with Python, Go, and Rust bindings and an `amd-smi` command-line tool.
+
+This is a curated index of the AMD SMI documentation following the [llms.txt standard](https://llmstxt.org/). Links point to the published documentation at <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>. The source lives at <https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi>.
+
+- AMD SMI supports Linux bare metal and Linux virtual machine guest environments. For SR-IOV virtualization hosts, see the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
+- AMD SMI is the successor to ROCm SMI and the esmi_ib_library.
+- The `amdgpu` driver must be loaded for `amdsmi_init()` to work.
+
+## Install
+
+- [Install the AMD SMI library and CLI tool](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html): Install prebuilt packages and the Python interface and CLI tool.
+- [Build AMD SMI from source](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/build.html): Build the library, bindings, CLI, and tests with CMake.
+
+## How to
+
+- [C++ library usage and examples](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cpp-lib.html): Initialize AMD SMI and query GPUs from C/C++.
+- [Python library usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html): Use the `amdsmi` Python interface.
+- [Go library usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-go-lib.html): Use the AMD SMI Go interface.
+- [CLI tool usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-cli-tool.html): Reference for the `amd-smi` command-line tool and its subcommands.
+- [AI NIC integration](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-nic-integration.html): Monitor AMD AI NIC devices through AMD SMI.
+- [Use AMD SMI in a Docker container](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html): Run AMD SMI inside a container.
+
+## Reference
+
+- [C/C++ API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api/index.html): Overview of the public C/C++ API.
+- [C/C++ functions](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api/functions.html): All `amdsmi_*` functions.
+- [C/C++ types](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api/types.html): Structs, enums, and typedefs.
+- [C/C++ defines](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-cpp-api/defines.html): Preprocessor defines and constants.
+- [Python API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-api.html): Python interface functions and exceptions.
+- [Go API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-api.html): Go interface functions.
+- [Changelog](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/changelog.html): Release notes and version history.
+
+## Conceptual
+
+- [GPU partitioning](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/partition.html): Compute and memory partitioning concepts.
+- [GPU violations](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/gpu-violations.html): Throttling and violation status reporting.
+- [Performance levels and performance determinism](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/perf-determinism.html): Performance level control and determinism.
+- [Reliability, availability, serviceability (RAS)](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/ras.html): RAS features and error reporting.
+- [GPU reset behavior](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/gpu-reset-behavior.html): GPU reset behavior details.
+
+## Optional
+
+- [AMD SMI examples (GitHub)](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example): Runnable C++ and Python example programs.
+- [AMD SMI CLI walkthrough (ROCm blog)](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html): Tutorial-style overview of the CLI.
+- [Contributing to ROCm Systems](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md): Contribution workflow and guidelines.

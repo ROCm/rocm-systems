@@ -65,7 +65,8 @@ public:
 ///
 /// @details Inherits all defaults from `amdgpu::RdnaIsaBase` including
 /// `WAITCNT_LGKMCNT_MASK = 0` — RDNA4 uses split S_WAIT_LOADCNT /
-/// S_WAIT_DSCNT / S_WAIT_KMCNT instructions; there is no monolithic S_WAITCNT.
+/// S_WAIT_DSCNT / S_WAIT_KMCNT instructions, while the decoder also accepts
+/// LLVM's monolithic S_WAITCNT compatibility encoding.
 struct Isa : amdgpu::RdnaIsaBase {
   using Decoder = rdna4::Decoder;
   using MachineInst = rdna4::MachineInst;

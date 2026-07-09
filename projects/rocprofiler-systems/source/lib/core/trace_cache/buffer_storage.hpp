@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
 
 #include <atomic>
 #include <cassert>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -31,22 +31,14 @@ namespace trace_cache
 using ofs_t             = std::basic_ostream<char>;
 using worker_function_t = std::function<void(ofs_t& ofs, bool force)>;
 
+// Status flags exposed for observers (cache_manager, tests). The actual
+// thread synchronization is done via std::stop_token inside flush_worker_t;
+// these flags are mirrors maintained by the worker for external visibility.
 struct worker_synchronization_t
 {
-    // std::condition_variable::wait_for requires a std::mutex — that is a
-    // C++17 API constraint, not a guard on the atomic values themselves.
-    // Both mutexes must live here (not as stack-locals in the thread lambda)
-    // so they are never destroyed during thread TLS teardown, which would
-    // trigger a TSan DTLS_Destroy deadlock.
-    std::mutex              is_running_mutex;
-    std::condition_variable is_running_condition;
-    std::atomic_bool        is_running{ false };
-
-    std::mutex              exit_finished_mutex;
-    std::condition_variable exit_finished_condition;
-    std::atomic_bool        exit_finished{ false };
-
-    pid_t origin_pid;
+    std::atomic_bool is_running{ false };
+    std::atomic_bool exit_finished{ false };
+    pid_t            origin_pid{};
 };
 using worker_synchronization_ptr_t = std::shared_ptr<worker_synchronization_t>;
 
@@ -65,7 +57,7 @@ private:
     worker_synchronization_ptr_t m_worker_synchronization;
     std::string                  m_filepath;
     std::ofstream                m_ofs;
-    std::unique_ptr<std::thread> m_flushing_thread;
+    std::jthread                 m_flushing_thread;
 };
 
 struct flush_worker_factory_t
@@ -136,6 +128,7 @@ public:
     }
 
     template <typename Type>
+        requires type_traits::cacheable<Type, TypeIdentifierEnum>
     auto store(const Type& value)
     {
         if(m_worker == nullptr || !is_running())
@@ -143,8 +136,6 @@ public:
             throw std::runtime_error(
                 "Trying to use buffered storage while it is not running");
         }
-
-        type_traits::check_type<Type, TypeIdentifierEnum>();
 
         using TypeIdentifierEnumUderlayingType =
             std::underlying_type_t<TypeIdentifierEnum>;

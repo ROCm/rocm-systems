@@ -50,9 +50,18 @@ void ReportActivity(const amd::Command& command) {
   assert(command.profilingInfo().enabled_ && "Profiling must be enabled for this command");
   activity_op_t operation_id = OperationId(command.type());
   if (operation_id >= OP_ID_NUMBER) {
-    // This command does not translate into a profiler activity (dispatch, memcopy, etc...), there
-    // is nothing to report to the profiler.
-    return;
+    // hipEventRecord enqueues an EventMarker with command type 0 (internal marker) rather than
+    // CL_COMMAND_MARKER, so OperationId() can't classify it. It still dispatches a real barrier
+    // packet carrying a GPU timestamp (marker_ts_), so report it as a barrier to surface
+    // event-record sync points on the GPU timeline. Generic internal markers (batch-flush) have
+    // marker_ts_ == false and stay unreported.
+    if (command.type() == 0 && command.profilingInfo().marker_ts_) {
+      operation_id = OP_ID_BARRIER;
+    } else {
+      // This command does not translate into a profiler activity (dispatch, memcopy, etc...),
+      // there is nothing to report to the profiler.
+      return;
+    }
   }
 
   auto function = report_activity.load(std::memory_order_acquire);
@@ -98,6 +107,26 @@ void ReportActivity(const amd::Command& command) {
       const auto& ops = static_cast<const amd::BatchCopyMemoryCommand&>(command).copyOps();
       size_t total = 0;
       for (const auto& op : ops) total += op.size;
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_WRITE_BUFFER: {
+      const std::vector<amd::BatchWriteMemoryOp>& ops =
+          static_cast<const amd::BatchWriteMemoryCommand&>(command).WriteOps();
+      size_t total = 0;
+      for (const amd::BatchWriteMemoryOp& op : ops) {
+        total += op.size;
+      }
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_READ_BUFFER: {
+      const std::vector<amd::BatchReadMemoryOp>& ops =
+          static_cast<const amd::BatchReadMemoryCommand&>(command).ReadOps();
+      size_t total = 0;
+      for (const amd::BatchReadMemoryOp& op : ops) {
+        total += op.size;
+      }
       record.bytes = total;
       break;
     }
@@ -171,6 +200,8 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
     CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
     CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:
       break;
   };

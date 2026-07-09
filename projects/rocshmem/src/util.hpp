@@ -35,6 +35,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "assembly.hpp"
+#include "atomic.hpp"
 #include "bit.hpp"
 #include "constants.hpp"
 #include "log.hpp"
@@ -400,97 +401,204 @@ constexpr bool is_blocking(MemcpyKind k) {
   return k == MemcpyKind::PutBlocking || k == MemcpyKind::GetBlocking;
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src, size_t size) {
-  uint8_t* dst_bytes{static_cast<uint8_t*>(dst)};
-  uint8_t* src_bytes{static_cast<uint8_t*>(src)};
+template <int ChunkSize, CachePolicy LoadPolicy, CachePolicy StorePolicy, int Unroll>
+__device__ __forceinline__ void copy_bulk(void* dst, void* src,
+                                          int n_chunks, int tid, int stride) {
+  using Acc = AsmAccess<ChunkSize, LoadPolicy, StorePolicy>;
+  using T = typename Acc::type;
 
-  for (size_t i = 16; i >= 1; i >>= 1) {
-    while (size >= i) {
-      if constexpr (is_put(Kind)) {
-        put_asm(src_bytes, dst_bytes, i);
-      } else {
-        get_asm(src_bytes, dst_bytes, i);
-      }
-      src_bytes += i;
-      dst_bytes += i;
-      size -= i;
+  const uint32_t buf_bytes = static_cast<uint32_t>(n_chunks * ChunkSize);
+  int chunk_batch = stride * Unroll;
+  int offset = 0;
+  T regs[Unroll] = {};
+
+  // Unrolled block copy: issue all Unroll loads first to fill the memory pipeline,
+  // then drain with stores. Hardware RAW tracking ensures load→store ordering per reg.
+  for (; offset + chunk_batch <= n_chunks; offset += chunk_batch) {
+    #pragma unroll
+    for (int u = 0; u < Unroll; ++u) {
+      regs[u] = Acc::load_buffer(src, buf_bytes,
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize));
     }
+    #pragma unroll
+    for (int u = 0; u < Unroll; ++u) {
+      Acc::store_buffer(dst, buf_bytes,
+          static_cast<uint32_t>((offset + tid + u * stride) * ChunkSize), regs[u]);
+    }
+  }
+
+  // Tail: remaining chunks that don't fill a full unrolled batch
+  for (int i = offset + tid; i < n_chunks; i += stride) {
+    T val = Acc::load(static_cast<uint8_t*>(src) + i * ChunkSize);
+    if constexpr (LoadPolicy != CachePolicy::Standard) {
+      wait_on_vmem_and_lds(0);
+    }
+    Acc::store(static_cast<uint8_t*>(dst) + i * ChunkSize, val);
+  }
+}
+
+// ==============================================================================
+// REMAINDER COPY (< 16 Bytes Fast Path)
+// ==============================================================================
+template <CachePolicy LP, CachePolicy SP>
+__device__ __forceinline__ void copy_remainder(uint8_t* dst,
+                                               uint8_t* src,
+                                               int remainder) {
+  if (remainder == 0) return;
+
+  if (remainder & 1) {
+    auto val = AsmAccess<1, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      wait_on_vmem_and_lds(0);
+    }
+    AsmAccess<1, LP, SP>::store(dst, val);
+    if (remainder == 1) {
+      return;
+    }
+    dst += 1;
+    src += 1;
+  }
+  if (remainder & 2) {
+    auto val = AsmAccess<2, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      wait_on_vmem_and_lds(0);
+    }
+    AsmAccess<2, LP, SP>::store(dst, val);
+    if (remainder == 2) {
+      return;
+    }
+    dst += 2;
+    src += 2;
+  }
+  if (remainder & 4) {
+    auto val = AsmAccess<4, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      wait_on_vmem_and_lds(0);
+    }
+    AsmAccess<4, LP, SP>::store(dst, val);
+    if (remainder == 4) {
+      return;
+    }
+    dst += 4;
+    src += 4;
+  }
+  if (remainder & 8) {
+    auto val = AsmAccess<8, LP, SP>::load(src);
+    if constexpr (LP != CachePolicy::Standard) {
+      wait_on_vmem_and_lds(0);
+    }
+    AsmAccess<8, LP, SP>::store(dst, val);
+  }
+}
+
+// ==============================================================================
+// LANE, WAVE, AND WG IMPLEMENTATIONS
+// ==============================================================================
+
+// Blocking variants additionally drain all in-flight VMEM ops before returning.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_lane(void* dst, void* src,
+                                                             size_t size) {
+  if (size == 0) return;
+
+  constexpr int ChunkSize = 16;
+  constexpr int Unroll    = 16;
+  // Compile-time bypass policy: cache-bypass in the direction of the remote side.
+  constexpr CachePolicy LP = is_put(Kind) ? CachePolicy::Standard    : CachePolicy::SystemScope;
+  constexpr CachePolicy SP = is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+
+  int n_chunks  = static_cast<int>(size / ChunkSize);
+  int remainder = static_cast<int>(size % ChunkSize);
+
+  if (size >= 16 && get_flat_block_size() > 4) {
+    // Many threads, large transfer: use cached Standard policy.
+    // Fences are direction-specific to maintain system-scope coherence.
+    if constexpr (!is_put(Kind)) {
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                  detail::atomic::memory_order_acquire>();
+    }
+
+    if (n_chunks > 0) {
+      copy_bulk<ChunkSize, CachePolicy::Standard, CachePolicy::Standard, 8>(
+          dst, src, n_chunks, 0, 1);
+    }
+    copy_remainder<CachePolicy::Standard, CachePolicy::Standard>(
+        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
+
+    if constexpr (is_put(Kind)) {
+      detail::atomic::threadfence<detail::atomic::memory_scope_system,
+                                  detail::atomic::memory_order_release>();
+    }
+  } else {
+    // Small transfer or single-lane: cache-bypass policy provides direct
+    // remote visibility without explicit fences.
+    if (n_chunks > 0) {
+      copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, 0, 1);
+    }
+    copy_remainder<LP, SP>(
+        static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+        static_cast<uint8_t*>(src) + n_chunks * ChunkSize, remainder);
   }
 }
 
 template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
-  int thread_id{get_flat_block_id()};
-  int block_size{get_flat_block_size()};
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
+                                                             size_t size) {
+  if (size == 0) return;
 
-  int cpy_size{};
-  uint8_t* dst_bytes{nullptr};
-  uint8_t* dst_def{nullptr};
-  uint8_t* src_bytes{nullptr};
-  uint8_t* src_def{nullptr};
+  constexpr int ChunkSize = 16;
+  constexpr int Unroll    = 16;
 
-  dst_def = reinterpret_cast<uint8_t*>(dst);
-  src_def = reinterpret_cast<uint8_t*>(src);
-  dst_bytes = dst_def;
-  src_bytes = src_def;
+  constexpr CachePolicy LP =
+      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
 
-  
-  for (int j = 16; j >= 1; j >>= 1) {
-    cpy_size = size / j;
-    for (int i = thread_id; i < cpy_size; i += block_size) {
-      dst_bytes = dst_def;
-      src_bytes = src_def;
-
-      src_bytes += i * j;
-      dst_bytes += i * j;
-
-      if constexpr (is_put(Kind)) {
-        put_asm(src_bytes, dst_bytes, j);
-      } else {
-        get_asm(src_bytes, dst_bytes, j);
-      }
-    }
-    size -= cpy_size * j;
-    dst_def += cpy_size * j;
-    src_def += cpy_size * j;
-  }
-}
-
-template <MemcpyKind Kind = MemcpyKind::Put>
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   int wave_tid = get_flat_block_id() % WF_SIZE;
   int wave_size{wave_SZ()};
+  int n_chunks = size / ChunkSize;
+  int remainder = size % ChunkSize;
 
-  int cpy_size{};
-  uint8_t* dst_bytes{nullptr};
-  uint8_t* dst_def{nullptr};
-  uint8_t* src_bytes{nullptr};
-  uint8_t* src_def{nullptr};
+  if (n_chunks > 0) {
+    copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, wave_tid, wave_size);
+  }
 
-  dst_def = reinterpret_cast<uint8_t*>(dst);
-  src_def = reinterpret_cast<uint8_t*>(src);
-  dst_bytes = dst_def;
-  src_bytes = src_def;
+  // Remainder handled uniquely by the first thread in the wave
+  if (wave_tid == 0) {
+    copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize, 
+                           remainder);
+  }
+}
 
-  for (int j = 16; j >= 1; j >>= 1) {
-    cpy_size = size / j;
-    for (int i = wave_tid; i < cpy_size; i += wave_size) {
-      dst_bytes = dst_def;
-      src_bytes = src_def;
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
+                                                           size_t size) {
+  if (size == 0) return;
 
-      src_bytes += i * j;
-      dst_bytes += i * j;
+  constexpr int ChunkSize = 16;
+  constexpr int Unroll    = 16;
 
-      if constexpr (is_put(Kind)) {
-        put_asm(src_bytes, dst_bytes, j);
-      } else {
-        get_asm(src_bytes, dst_bytes, j);
-      }
-    }
-    size -= cpy_size * j;
-    dst_def += cpy_size * j;
-    src_def += cpy_size * j;
+  constexpr CachePolicy LP =
+      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+
+  int thread_id = get_flat_block_id();
+  int block_size = get_flat_block_size();
+  int n_chunks = size / ChunkSize;
+  int remainder = size % ChunkSize;
+
+  if (n_chunks > 0) {
+    copy_bulk<ChunkSize, LP, SP, Unroll>(dst, src, n_chunks, thread_id, block_size);
+  }
+
+  // Remainder handled uniquely by the first thread in the workgroup
+  if (thread_id == 0) {
+    copy_remainder<LP, SP>(static_cast<uint8_t*>(dst) + n_chunks * ChunkSize,
+                           static_cast<uint8_t*>(src) + n_chunks * ChunkSize,
+                           remainder);
   }
 }
 

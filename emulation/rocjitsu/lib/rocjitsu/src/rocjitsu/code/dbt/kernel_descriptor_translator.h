@@ -32,7 +32,35 @@ struct KernelDescriptorTranslationOptions {
 /// ELF/kernel descriptor bytes.
 struct KdTranslation {
   uint64_t descriptor_file_offset = 0;
+  /// @brief Original .text-relative kernel entry decoded from the source descriptor.
   uint64_t entry_text_offset = 0;
+
+  /// @brief True when the source descriptor requests CP kernarg preloading.
+  ///
+  /// @details AMDHSA uses kernarg_preload_spec_length != 0 to request that
+  /// compatible CP firmware copy dwords from the kernarg segment into User SGPRs
+  /// before entering the kernel. When this is enabled, compatible firmware starts
+  /// execution at KERNEL_CODE_ENTRY_BYTE_OFFSET + 256 while older/incompatible
+  /// firmware starts at KERNEL_CODE_ENTRY_BYTE_OFFSET. DBT must therefore treat
+  /// both source addresses as legal hardware entries for this kernel.
+  bool has_kernarg_preload = false;
+
+  /// @brief Source .text-relative entry used by compatible kernarg-preload firmware.
+  uint64_t kernarg_preload_entry_text_offset = 0;
+
+  /// @brief New .text-relative kernel entry after DBT rewrites .text.
+  ///
+  /// @details This is the final launch address written into
+  /// KERNEL_CODE_ENTRY_BYTE_OFFSET. It may point at descriptor ABI prologue code
+  /// emitted before the relocated original kernel body.
+  uint64_t target_entry_text_offset = 0;
+
+  /// @brief New .text-relative offset of the original kernel entry block.
+  ///
+  /// @details Descriptor ABI prologues may make @c target_entry_text_offset
+  /// point before this address. Branches and diagnostics that refer to the
+  /// relocated original guest entry should use this field.
+  uint64_t target_body_entry_text_offset = 0;
 
   /// @brief Ordinary architectural VGPRs required by translated code.
   ///
@@ -90,27 +118,30 @@ struct KdTranslation {
   std::vector<uint32_t> user_sgpr_shuffle;
 
   /// All kernel-entry instructions required by descriptor ABI translation.
-  /// CodeObjectPatcher places these words in a cave and redirects the KD entry.
+  /// BinaryTranslator places these words in the kernel-local .text cave and
+  /// records the final descriptor entry offset.
   std::vector<uint32_t> prologue_words;
 
   uint8_t guest_wavefront_size = 64;
   uint8_t host_wavefront_size = 64;
 
-  /// @brief Ordinary guest VGPR count decoded from the source descriptor.
+  /// @brief Ordinary guest VGPR floor decoded from the source descriptor.
   ///
-  /// @details This excludes any source AccVGPR window. It is the right source
-  /// floor for ordinary VGPR liveness and scratch reasoning.
+  /// @details On CDNA, COMPUTE_PGM_RSRC1 describes the unified VGPR allocation
+  /// endpoint and ACCUM_OFFSET carves the trailing AccVGPR window out of that
+  /// allocation. Liveness and semantic scratch allocation need only the
+  /// ordinary portion so they can reuse registers that are dead at a lowering
+  /// site without forcing unnecessary descriptor growth.
   uint32_t guest_vgpr_count = 0;
 
-  /// @brief Source descriptor's unified VGPR allocation count.
+  /// @brief Source descriptor unified VGPR allocation after rounding.
   ///
   /// @details This is decoded from COMPUTE_PGM_RSRC1 and may include the
-  /// AccVGPR window on CDNA descriptors. Use it when preserving or re-encoding
-  /// descriptor allocation size, not when asking how many ordinary VGPRs the
-  /// guest program used.
+  /// AccVGPR window on CDNA. Use it for descriptor encoding/reporting; use
+  /// @c guest_vgpr_count when asking how many ordinary VGPRs the guest used.
   uint32_t guest_vgpr_allocation_count = 0;
 
-  /// @brief Source AccVGPR count derived from allocation count and ACCUM_OFFSET.
+  /// @brief Conservative source AccVGPR window size derived from rounded count and ACCUM_OFFSET.
   uint32_t guest_agpr_count = 0;
 
   /// @brief Ordinary host VGPR count after translation requirements are applied.

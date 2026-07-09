@@ -2,8 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import glob
-import os
+from pathlib import Path
 
 if __name__ == "__main__":
     my_parser = argparse.ArgumentParser(description="create test_analyze_workloads.py")
@@ -13,13 +12,12 @@ if __name__ == "__main__":
     )
 
     args = my_parser.parse_args()
-    workloads_path = args.path
-    workloads = glob.glob(workloads_path + "/*")
+    workloads_path = Path(args.path)
 
     with open("test_analyze_workloads.py", "a") as f:
-        for workload in workloads:
-            workload_name = workload[workload.rfind("/") + 1 :]
-            archs = os.listdir(workload)
+        for workload in sorted(workloads_path.iterdir()):
+            workload_name = workload.name
+            archs = [p.name for p in workload.iterdir()]
             for arch in archs:
                 test = (
                     "\n\ndef test_analyze_"
@@ -35,7 +33,7 @@ if __name__ == "__main__":
                         "'rocprof-compute', "
                         "'analyze', "
                         "'--path', "
-                        "'" + workload + "/" + arch + "']"
+                        "'" + str(workload / arch) + "']"
                         "):\n\t\t\trocprof_compute.main()"
                     )
                     + "\n\tassert e.value.code == 0"

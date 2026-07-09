@@ -74,6 +74,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
     break
 
   switch (config.arch) {
+    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
     ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
@@ -165,6 +166,7 @@ size_t ComputeUnitCore::num_wfs() const {
 }
 
 void ComputeUnitCore::reset_all_wf() {
+  lds_pinned_clusters_.clear();
   for (auto &w : wfs_) {
     if (w->sgpr_alloc().count > 0) {
       sgpr_file_.free(w->sgpr_alloc().base);
@@ -194,7 +196,7 @@ void ComputeUnitCore::retire_halted_wfs() {
       w->reset();
     }
   }
-  if (!has_active_wfs()) {
+  if (!has_active_wfs() && !lds_allocation_pinned()) {
     reset_lds_alloc();
   }
 }

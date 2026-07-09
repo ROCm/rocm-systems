@@ -273,8 +273,7 @@ static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cs
 template <class T>
 static __forceinline void BasicCheck(const T* ptr) {
 #if defined(__linux__)
-  using U = std::remove_volatile_t<T>;
-  constexpr bool value = __atomic_always_lock_free(sizeof(U), 0);
+  constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
 #endif
 }

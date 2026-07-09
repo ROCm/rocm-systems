@@ -9,6 +9,9 @@
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
 #include "net_ib_fault_inject.h"
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_ops_fault.h"
+#endif
 
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
@@ -98,13 +101,9 @@ static ncclResult_t IbCastPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched, bool useWriteOp) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
-  int nreqs = slots[0].nreqs;
+  int nreqs = comm->useCtsOffload ? 1 : slots[0].nreqs;
   uint64_t nowNs = 0;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
-
-  if (comm->useCtsOffload) {
-    nreqs = 1;
-  }
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs);
 
@@ -355,7 +354,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
 
 ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
-  bool useWriteOp = (IbCastOffloadEnabled &&(*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
+  bool useWriteOp = (comm->useCtsOffload &&(*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION)) ? true : false;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbCastIsend() called when comm->base.ready == 0");
     *request = NULL;
@@ -372,7 +371,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   if (!comm->useCtsOffload) {
     slots = comm->ctsFifo[slot];
-    uint64_t idx = comm->base.fifoHead+1;
+    uint32_t idx = (uint32_t)(comm->base.fifoHead+1);
     if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
     nreqs = slots[0].nreqs;
     // Wait until all data has arrived
@@ -530,11 +529,11 @@ ncclResult_t IbCastPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
   //
   // slot == devIndex - When writing to CTS FIFO slot N, and this QP lives on device index N, it should send signalled.
   // This works out that each CTS posting QP gets drained
-  if (IbCastOffloadEnabled && (slot == ctsQp->ctsQpSlot)) {
+  if (comm->useCtsOffload && (slot == ctsQp->ctsQpSlot)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = (req - req->base->reqs);
     IbCastAddEvent(req, ctsQp->devIndex);
-  } else if (!IbCastOffloadEnabled && (slot == ctsQp->devIndex || comm->base.resiliency)) {
+  } else if (!comm->useCtsOffload && (slot == ctsQp->devIndex || comm->base.resiliency)) {
     wr.send_flags |= IBV_SEND_SIGNALED;
     wr.wr_id = slot;
     IbCastAddEventCTS(req, ctsQp->devIndex);
@@ -562,7 +561,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
   NCCLCHECK(IbCastStatsCheckFatalCount(&comm->base.stats,__func__));
-  if (IbCastOffloadEnabled) {
+  if (comm->useCtsOffload) {
     if (*request == (void *)NCCL_NET_OPTIONAL_RECV_COMPLETION) {
       netOptRecvCompletionEnabled = true;
     }
@@ -656,7 +655,7 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       localElem[i].nreqs = n;
       localElem[i].size = sizes[i]; // Sanity/Debugging
       localElem[i].tag = tags[i];
-      localElem[i].idx = comm->base.fifoHead+1;
+      localElem[i].idx = (uint32_t)(comm->base.fifoHead+1);
       localElem[i].rxReqIndex = rxReqIndex;
     }
   }
@@ -1182,6 +1181,62 @@ ncclResult_t ncclIbCastFaultCheckErrorFatal(void* sendComm, int wcStatus, bool* 
       break;
   }
   *isFatal = fatal;
+  return ncclSuccess;
+}
+
+/* ── Ops-overload fault API (bridges comm → ibv_context + qp_num) ─────────── */
+
+// The synthesized idle-completion wr_id must stay outside the receiver's
+// recv-slot range [0, NET_IB_MAX_REQUESTS] and flush range
+// [NCCL_IB_FLUSH_REQ_WR_ID_OFFSET, +NET_IB_MAX_REQUESTS); else the receiver
+// would treat it as a real slot. Fail the build if the ranges ever overlap it.
+static_assert(NCCL_IB_OPS_FAULT_SYNTH_WR_ID > NET_IB_MAX_REQUESTS &&
+              (NCCL_IB_OPS_FAULT_SYNTH_WR_ID < NCCL_IB_FLUSH_REQ_WR_ID_OFFSET ||
+               NCCL_IB_OPS_FAULT_SYNTH_WR_ID >= NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + NET_IB_MAX_REQUESTS),
+              "synthesized fault wr_id collides with a receiver wr_id range");
+
+ncclResult_t ncclIbCastFaultOpsSetPostSendError(void* sendComm, int qpIdx, int errnoVal) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = comm->base.activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPostSend(qp->context, qp->qp_num, errnoVal);
+}
+
+ncclResult_t ncclIbCastFaultOpsSetPostRecvError(void* recvComm, int qpIdx, int errnoVal) {
+  if (!recvComm) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = comm->base.activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPostRecv(qp->context, qp->qp_num, errnoVal);
+}
+
+ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatus,
+                                              int injectCount, bool injectWhenIdle) {
+  if (!comm) return ncclInvalidArgument;
+  // Both send and recv comms share ncclIbNetCommBase as their first member.
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  if (qpIdx < 0 || qpIdx >= base->nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = base->activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPollCq(qp->context, qp->qp_num, wcStatus, injectCount, injectWhenIdle);
+}
+
+ncclResult_t ncclIbCastFaultOpsClear(void* comm) {
+  if (!comm) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  // Clear by per-device PD context, not QP: a QP can be NULL during recovery
+  // while its context stays alive and armed. The PD context survives teardown.
+  for (int devIndex = 0; devIndex < base->vProps.ndevs; devIndex++) {
+    struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(base, devIndex);
+    if (devBase && devBase->pd && devBase->pd->context)
+      NCCLCHECK(ncclIbOpsFaultClear(devBase->pd->context));
+  }
   return ncclSuccess;
 }
 

@@ -1,0 +1,190 @@
+# =============================================================================
+# RDNA3.5 (gfx115x) - RDNA3.5 GL0 Cache (TCP) Performance Metrics
+# =============================================================================
+# GL0 (TCP - Texture Cache Per-pipe) is the per-WGP vector cache in RDNA3.5
+# Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache
+# =============================================================================
+
+Panel Config:
+  id: 900
+  title: GL0 Cache (TCP Cache)
+  data source:
+  # =========================================================================
+  # GL0 Utilization
+  # =========================================================================
+  - metric_table:
+      id: 901
+      title: "GL0 Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        # tcp_perf_sel_gate_en2 / TCP_GATE_EN2: TCP core clocks on (counter_defs: not windowed).
+        # Use aggregate TCP_GATE_EN2 (not TCP_GATE_EN2_sum) when pmc_perf merges instances.
+        # Denominator: GRBM_GUI_ACTIVE × NUM_TCP with NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋)
+        # (one TCP per WGP, 2 CUs per WGP on RDNA3.x). AVG/MIN/MAX apply per sample.
+        GL0 Busy (TCP):
+          avg: 100 * SUM(TCP_GATE_EN2) / SUM(GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))
+          min: 100 * MIN(TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
+          max: 100 * MAX(TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
+          unit: Percent
+
+  # =========================================================================
+  # GL0 Request Statistics
+  # =========================================================================
+  - metric_table:
+      id: 902
+      title: "GL0 Request Statistics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(TCP_REQ_sum) / SUM($denom)
+          min: MIN(TCP_REQ_sum / $denom)
+          max: MAX(TCP_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Read Requests:
+          avg: SUM(TCP_REQ_READ_sum) / SUM($denom)
+          min: MIN(TCP_REQ_READ_sum / $denom)
+          max: MAX(TCP_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Requests:
+          avg: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(TCP_REQ_WRITE_sum / $denom)
+          max: MAX(TCP_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+        Miss Requests:
+          avg: SUM(TCP_REQ_MISS_sum) / SUM($denom)
+          min: MIN(TCP_REQ_MISS_sum / $denom)
+          max: MAX(TCP_REQ_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GL0 Cache Performance
+  # =========================================================================
+  - metric_table:
+      id: 903
+      title: "GL0 Cache Performance"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Hit Rate:
+          avg: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+          min: 100 * MIN((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          max: 100 * MAX((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          unit: Percent
+
+  # =========================================================================
+  # GL0-GL1 Interface
+  # =========================================================================
+  - metric_table:
+      id: 904
+      title: "GL0-GL1 Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL1 Read Requests:
+          avg: SUM(TCP_GL1_REQ_READ_sum) / SUM($denom)
+          min: MIN(TCP_GL1_REQ_READ_sum / $denom)
+          max: MAX(TCP_GL1_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        GL1 Read 128B Requests:
+          avg: SUM(TCP_GL1_REQ_READ_128B_sum) / SUM($denom)
+          min: MIN(TCP_GL1_REQ_READ_128B_sum / $denom)
+          max: MAX(TCP_GL1_REQ_READ_128B_sum / $denom)
+          unit: (Count + $normUnit)
+        GL1 Write Requests:
+          avg: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(TCP_GL1_REQ_WRITE_sum / $denom)
+          max: MAX(TCP_GL1_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GL0 Stalls
+  # =========================================================================
+  - metric_table:
+      id: 905
+      title: "GL0 Stalls"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TA Req Stall:
+          avg: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
+          min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          unit: (Cycles + $normUnit)
+        GL1 Back Pressure:
+          avg: SUM(TCP_GL1_TCP_BACK_PRESSURE_sum) / SUM($denom)
+          min: MIN(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          max: MAX(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          unit: (Cycles + $normUnit)
+        Data FIFO Stall:
+          avg: SUM(TCP_DATA_FIFO_STALL_sum) / SUM($denom)
+          min: MIN(TCP_DATA_FIFO_STALL_sum / $denom)
+          max: MAX(TCP_DATA_FIFO_STALL_sum / $denom)
+          unit: (Cycles + $normUnit)
+
+  metrics_description:
+    GL0 Busy (TCP): >-
+      Percentage of cycles the GL0 vector cache (TCP) is actively processing requests.
+      Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate
+      compute-bound workloads with minimal memory traffic or idle shader engines.
+    Total Requests: >-
+      Total number of requests to the GL0 vector cache, including reads, writes, and
+      atomics. This represents the overall memory traffic generated by vector memory
+      instructions from the shader cores.
+    Read Requests: >-
+      Number of read requests to the GL0 vector cache. High read counts indicate
+      memory-intensive load operations. Compare with hit rate to assess cache
+      effectiveness for read traffic.
+    Write Requests: >-
+      Number of write requests to the GL0 vector cache. Write traffic may include
+      global memory stores and cache writebacks. High write counts indicate
+      write-intensive workloads.
+    Miss Requests: >-
+      Number of GL0 cache requests that missed and required fetching from the GL1 cache.
+      High miss counts increase memory access latency. Consider improving data locality
+      or access patterns to reduce misses.
+    Hit Rate: >-
+      Percentage of GL0 cache requests serviced from cache without accessing GL1 cache.
+      Higher hit rates indicate better data locality and lower memory access latency. Low
+      hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    GL1 Read Requests: >-
+      Number of read requests forwarded from GL0 (TCP) to GL1 cache due to misses.
+      This represents GL0 miss traffic that must be serviced by higher cache levels.
+    GL1 Read 128B Requests: >-
+      Number of 128-byte read requests forwarded from GL0 (TCP) to GL1 cache.
+      This represents large cache line fetches for memory-intensive workloads.
+    GL1 Write Requests: >-
+      Number of write requests forwarded from GL0 (TCP) to GL1 cache. This includes
+      writebacks and stores that missed in GL0.
+    TA Req Stall: >-
+      Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept
+      requests. High stall counts indicate GL0 cache backpressure limiting memory
+      request throughput.
+    GL1 Back Pressure: >-
+      Cycles the GL0 cache was stalled due to backpressure from the GL1 cache. High
+      values indicate GL1 cache contention or bandwidth limitations impacting GL0
+      throughput.
+    Data FIFO Stall: >-
+      Cycles the GL0 cache data FIFO was stalled. High stall counts may indicate
+      data path congestion or insufficient buffering for high-throughput workloads.
