@@ -3,6 +3,7 @@
 
 rj_add_object_library(rocjitsu_kmd
     events.cpp
+    cwsr.cpp
     remote_driver.cpp
     simulated_driver.cpp
     sysfs.cpp

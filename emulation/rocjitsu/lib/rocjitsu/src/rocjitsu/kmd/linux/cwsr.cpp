@@ -1,0 +1,218 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/// @file cwsr.cpp
+/// @brief CWSR (context-save-restore) area serialization for rocm-dbgapi.
+
+#include "rocjitsu/kmd/linux/cwsr.h"
+
+#include <algorithm>
+
+namespace rocjitsu {
+namespace kmd {
+
+namespace {
+
+// Layout constants, matching projects/rocdbgapi/src/architecture.cpp for the
+// gfx9 family (gfx9/gfx90a/mi cwsr_record_t).
+constexpr uint32_t kHwregCount = 32; // hwreg_count()
+constexpr uint32_t kTtmpCount = 16;  // ttmps saved at the top of the hwreg block
+constexpr uint32_t kVgprLaneBytes = 64 * sizeof(uint32_t); // one VGPR = 64 lanes * 4 bytes
+// gfx9: scalar_register_count() (102) + scalar_alias_count() (6). Determines
+// where VCC/FLAT_SCRATCH alias into the saved SGPR block.
+constexpr uint32_t kArchScalars = 108;
+
+// COMPUTE_RELAUNCH classification bits (control_stack_iterate): a word with bit
+// 30 set is an event (skipped) and a word with bit 31 set is a state word; a
+// wave word has both clear.
+constexpr uint32_t kRelaunchStateBit = 1u << 31;
+
+// Round @v up to the next multiple of @m.
+constexpr uint32_t round_up(uint32_t v, uint32_t m) { return ((v + m - 1) / m) * m; }
+
+// Encode the COMPUTE_RELAUNCH "state" word so rocm-dbgapi decodes exactly
+// @vgpr_count / @sgpr_count with zero accumulation (ACC) VGPRs and no LDS:
+//   vgpr_count      = (accum_offset[24:29] + 1) * 4
+//   acc_vgpr_count  = (vgprs[0:5]      + 1) * 8 - vgpr_count   (== 0 here)
+//   sgpr_count      = (sgprs[6:8]      + 1) * 16 - 16
+//   lds_size        = lds[9:16] * ...   (== 0 here)
+uint32_t encode_state_word(uint32_t vgpr_count, uint32_t sgpr_count) {
+  uint32_t vgprs_field = (vgpr_count / 8) - 1;  // acc == 0  =>  vgpr_count = (vgprs+1)*8
+  uint32_t accum_offset = (vgpr_count / 4) - 1; // vgpr_count = (accum_offset+1)*4
+  uint32_t sgprs_field = sgpr_count / 16;       // sgpr_count = sgprs_field*16
+  uint32_t w = 0;
+  w |= (vgprs_field & 0x3Fu);
+  w |= (sgprs_field & 0x7u) << 6;
+  // lds field [9:16] left 0.
+  w |= (accum_offset & 0x3Fu) << 24;
+  w |= kRelaunchStateBit;
+  return w;
+}
+
+// Encode the COMPUTE_RELAUNCH "wave" word (bits 30/31 clear so it is neither an
+// event nor a state word).
+uint32_t encode_wave_word(bool first_wave, bool last_wave) {
+  uint32_t w = 0;
+  // se_id[9:11] = 0, scratch_en[15] = 0, scratch_scoreboard[0:8] = 0.
+  if (last_wave)
+    w |= 1u << 16;
+  if (first_wave)
+    w |= 1u << 17;
+  return w;
+}
+
+uint32_t encode_ttmp6(const CwsrWaveState &w) {
+  uint32_t v = 0;
+  if (w.wave_stopped)
+    v |= 1u << 30;
+  if (w.saved_status_halt)
+    v |= 1u << 29;
+  v |= (w.trap_id & 0xFu) << 25;
+  // bit 31 (spi_ttmps_setup_disabled) stays clear: TTMPs are set up.
+  return v;
+}
+
+uint32_t encode_ttmp11(const CwsrWaveState &w) {
+  uint32_t v = 0;
+  v |= (w.wave_in_group & 0x3Fu);
+  v |= (w.queue_packet_id & 0x1FFFFFFu) << 6; // [6:30]
+  v |= 1u << 31;                              // trap_handler_ttmps_setup
+  return v;
+}
+
+} // namespace
+
+CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
+                                const std::vector<CwsrWaveState> &waves,
+                                const std::function<void(uint64_t, uint32_t)> &write32) {
+  CwsrLayout layout{};
+  if (waves.empty())
+    return layout;
+
+  // Uniform per-dispatch register geometry. ACC-VGPRs and LDS are not modeled
+  // in the save area (state word encodes zero of each), which keeps the layout
+  // to [TTMP|HWREG]/[SGPR]/[VGPR] per wave.
+  uint32_t max_vgprs = 0, max_sgprs = 0;
+  for (const auto &w : waves) {
+    max_vgprs = std::max(max_vgprs, w.num_vgprs);
+    max_sgprs = std::max(max_sgprs, w.num_sgprs);
+  }
+  const uint32_t vgpr_count = std::max<uint32_t>(round_up(max_vgprs, 8), 8);
+  // Fixed 112 SGPR slots so VCC lands at its aliased slot (arch_scalars-2).
+  const uint32_t sgpr_count = 112;
+  (void)max_sgprs;
+
+  const uint32_t vcc_lo_slot = std::min(kArchScalars, sgpr_count) - 2;
+
+  // Per-wave footprint below its save_area_addr:
+  //   64 (gap) + hwreg block (32*4) + sgprs + vgprs.
+  const uint32_t hwreg_bytes = kHwregCount * sizeof(uint32_t);
+  const uint32_t sgpr_bytes = sgpr_count * sizeof(uint32_t);
+  const uint32_t vgpr_bytes = vgpr_count * kVgprLaneBytes;
+  const uint32_t per_wave = 64u + hwreg_bytes + sgpr_bytes + vgpr_bytes;
+
+  const uint32_t num_waves = static_cast<uint32_t>(waves.size());
+  const uint32_t wave_state_size = per_wave * num_waves;
+
+  // Control stack: 2 skipped PM4 words + 1 state word + 1 wave word per wave.
+  const uint32_t control_stack_words = 2u + 1u + num_waves;
+  const uint32_t control_stack_size = control_stack_words * sizeof(uint32_t);
+  const uint32_t control_stack_offset = 0x100u; // past the 40-byte header
+
+  // The wave save area is contiguous with (and above) the control stack; dbgapi
+  // requires control_stack_end == wave_area_begin.
+  const uint32_t wave_area_begin = control_stack_offset + control_stack_size;
+  const uint32_t wave_state_offset = wave_area_begin + wave_state_size;
+  if (wave_state_offset > area_size)
+    return layout; // does not fit
+
+  // --- Header (kfd_context_save_area_header) at the ctx-save base. ---
+  write32(ctx_base + 0, control_stack_offset);
+  write32(ctx_base + 4, control_stack_size);
+  write32(ctx_base + 8, wave_state_offset);
+  write32(ctx_base + 12, wave_state_size);
+  write32(ctx_base + 16, 0); // debug_offset
+  write32(ctx_base + 20, 0); // debug_size
+  write32(ctx_base + 24, 0); // err_payload_addr lo
+  write32(ctx_base + 28, 0); // err_payload_addr hi
+  write32(ctx_base + 32, 0); // err_event_id
+  write32(ctx_base + 36, 0); // reserved1
+
+  // --- Control stack. ---
+  const uint64_t cs_base = ctx_base + control_stack_offset;
+  write32(cs_base + 0, 0); // PM4 (skipped)
+  write32(cs_base + 4, 0); // PM4 (skipped)
+  write32(cs_base + 8, encode_state_word(vgpr_count, sgpr_count));
+  for (uint32_t i = 0; i < num_waves; ++i) {
+    bool first = (i == 0);
+    bool last = (i == num_waves - 1);
+    write32(cs_base + 12 + i * 4, encode_wave_word(first, last));
+  }
+
+  // --- Per-wave register blocks, laid out high-to-low from wave_state_offset,
+  // reproducing gfx9_architecture_t::cwsr_record_t::register_address. ---
+  uint64_t last_wave_area = ctx_base + wave_state_offset;
+  for (uint32_t i = 0; i < num_waves; ++i) {
+    const CwsrWaveState &w = waves[i];
+    const uint64_t save_area_addr = last_wave_area - 64;
+    const uint64_t hwregs_addr = save_area_addr - hwreg_bytes;
+    const uint64_t ttmps_addr = save_area_addr - kTtmpCount * sizeof(uint32_t);
+    const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
+    const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
+
+    // HWREG block (32 dwords). The top 16 dwords are the TTMPs.
+    write32(hwregs_addr + 0 * 4, w.m0);
+    write32(hwregs_addr + 1 * 4, static_cast<uint32_t>(w.pc & 0xFFFFFFFF));
+    write32(hwregs_addr + 2 * 4, static_cast<uint32_t>(w.pc >> 32));
+    write32(hwregs_addr + 3 * 4, static_cast<uint32_t>(w.exec & 0xFFFFFFFF));
+    write32(hwregs_addr + 4 * 4, static_cast<uint32_t>(w.exec >> 32));
+    write32(hwregs_addr + 5 * 4, w.status);
+    write32(hwregs_addr + 6 * 4, w.trapsts);
+    write32(hwregs_addr + 7 * 4, 0); // xnack_mask_lo
+    write32(hwregs_addr + 8 * 4, 0); // xnack_mask_hi
+    write32(hwregs_addr + 9 * 4, w.mode);
+    for (uint32_t h = 10; h < 16; ++h)
+      write32(hwregs_addr + h * 4, 0);
+
+    // TTMP0-15 occupy hwreg[16..31] (== ttmps_addr).
+    uint32_t ttmp[kTtmpCount] = {};
+    ttmp[4] = static_cast<uint32_t>(w.wave_id & 0xFFFFFFFF);
+    ttmp[5] = static_cast<uint32_t>(w.wave_id >> 32);
+    ttmp[6] = encode_ttmp6(w);
+    ttmp[8] = w.group_ids[0];
+    ttmp[9] = w.group_ids[1];
+    ttmp[10] = w.group_ids[2];
+    ttmp[11] = encode_ttmp11(w);
+    for (uint32_t t = 0; t < kTtmpCount; ++t)
+      write32(ttmps_addr + t * 4, ttmp[t]);
+
+    // SGPR block. Fill meaningful scalars, then place VCC at its aliased slot.
+    for (uint32_t s = 0; s < sgpr_count; ++s) {
+      uint32_t val = (s < w.num_sgprs && s < w.sgprs.size()) ? w.sgprs[s] : 0u;
+      write32(sgprs_addr + s * 4, val);
+    }
+    write32(sgprs_addr + vcc_lo_slot * 4, static_cast<uint32_t>(w.vcc & 0xFFFFFFFF));
+    write32(sgprs_addr + (vcc_lo_slot + 1) * 4, static_cast<uint32_t>(w.vcc >> 32));
+
+    // VGPR block: each VGPR is 64 lanes * 4 bytes; lane l of vgpr r at +r*256+l*4.
+    for (uint32_t r = 0; r < vgpr_count; ++r) {
+      for (uint32_t lane = 0; lane < 64; ++lane) {
+        uint32_t idx = r * 64 + lane;
+        uint32_t val = (r < w.num_vgprs && idx < w.vgprs.size()) ? w.vgprs[idx] : 0u;
+        write32(vgprs_addr + r * kVgprLaneBytes + lane * 4, val);
+      }
+    }
+
+    last_wave_area = vgprs_addr; // == register_address(v0_64)
+  }
+
+  layout.control_stack_offset = control_stack_offset;
+  layout.control_stack_size = control_stack_size;
+  layout.wave_state_offset = wave_state_offset;
+  layout.wave_state_size = wave_state_size;
+  layout.ok = true;
+  return layout;
+}
+
+} // namespace kmd
+} // namespace rocjitsu
