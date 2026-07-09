@@ -422,6 +422,44 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   EXPECT_EQ(mem, original_mem);
 }
 
+// rocm-dbgapi carves 32-byte instruction buffers out of a per-queue "debugger
+// memory" region declared in the context-save header (debug_offset/size at byte
+// 16/20). It aborts displaced stepping if that region is absent, so the
+// serializer must reserve a non-zero, in-bounds, non-overlapping region.
+TEST(WaveDebugTest, CwsrReservesDebuggerMemoryForDisplacedStepping) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000; // 256 KiB
+
+  std::map<uint64_t, uint32_t> mem;
+  auto write32 = [&](uint64_t va, uint32_t val) { mem[va] = val; };
+  auto rd = [&](uint64_t va) -> uint32_t {
+    auto it = mem.find(va);
+    return it == mem.end() ? 0u : it->second;
+  };
+
+  std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x2000)};
+  kmd::CwsrLayout layout = kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32);
+  ASSERT_TRUE(layout.ok);
+
+  // The header advertises the region dbgapi reads (kfd_context_save_area_header
+  // debug_offset/size).
+  EXPECT_EQ(rd(kCtxBase + 16), layout.debug_offset);
+  EXPECT_EQ(rd(kCtxBase + 20), layout.debug_size);
+
+  // Non-zero, or dbgapi aborts with "reserved memory is missing".
+  EXPECT_NE(layout.debug_offset, 0u);
+  EXPECT_NE(layout.debug_size, 0u);
+  // 64-byte aligned (DEBUGGER_BYTES_ALIGN) so each 32-byte chunk is aligned.
+  EXPECT_EQ(layout.debug_offset % 64u, 0u);
+  EXPECT_EQ(layout.debug_size % 64u, 0u);
+  // Sits above the wave area (no overlap) and inside the save area.
+  EXPECT_GE(layout.debug_offset, layout.wave_state_offset);
+  EXPECT_LE(layout.debug_offset + layout.debug_size, kAreaSize);
+  // Holds enough 32-byte chunks for dbgapi's park + terminating buffers plus a
+  // per-wave displaced-step buffer.
+  EXPECT_GE(layout.debug_size / 32u, waves.size() + 2);
+}
+
 TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
   // serialize_queue_cwsr followed by deserialize_queue_cwsr must round-trip the
   // register state the resume path reads back (the debugger writes its edits
