@@ -681,6 +681,52 @@ print_see_also(std::string_view topic, std::ostream& out)
         out << "    --help=" << related << "\n";
 }
 
+namespace
+{
+// A topic is listed when it targets no specific tool (empty => all tools)
+// or explicitly names the current tool.
+bool
+shown_for_tool(const std::vector<std::string_view>& tools, std::string_view tool_name)
+{
+    return tools.empty() ||
+           std::find(tools.begin(), tools.end(), tool_name) != tools.end();
+}
+}  // namespace
+
+void
+print_topic_listing(std::string_view tool_name, std::ostream& out)
+{
+    // Grow the name column if any topic name would otherwise touch its blurb.
+    // "all" is synthetic (emitted below) but still participates in alignment.
+    const int name_width = [] {
+        std::size_t longest = std::string_view{ "all" }.size();
+        for(const auto& topic : group_topic_table())
+            longest = std::max(longest, std::string_view{ topic.name }.size());
+        for(const auto& domain : domain_topic_table())
+            longest = std::max(longest, std::string_view{ domain.name }.size());
+        return std::max<int>(k_topic_col_width, static_cast<int>(longest) + 2);
+    }();
+
+    const auto saved_flags = out.flags();
+    out << std::left;
+
+    out << "  Group topics:\n";
+    // "all" is a synthetic entry (dumps the full parser help) rather than a
+    // registered topic, so it is emitted here rather than living in the table.
+    out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
+    for(const auto& topic : group_topic_table())
+    {
+        if(!shown_for_tool(topic.tools, tool_name)) continue;
+        out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
+    }
+    out << "\n  Domain topics:\n";
+    for(const auto& domain : domain_topic_table())
+        out << "    " << std::setw(name_width) << domain.name << domain.info.description
+            << "\n";
+
+    out.flags(saved_flags);
+}
+
 void
 print_compact_help(std::string_view tool_name, std::ostream& out)
 {
@@ -706,44 +752,10 @@ print_compact_help(std::string_view tool_name, std::ostream& out)
         << "  -v, --verbose          Increase verbosity\n"
         << "\n"
         << "HELP TOPICS (use --help=<topic> for details)\n"
-        << "\n"
-        << "  Group topics:\n";
+        << "\n";
 
-    // Grow the name column if any topic name would otherwise touch its blurb.
-    // "all" is synthetic (emitted below) but still participates in alignment.
-    const int name_width = [] {
-        std::size_t longest = std::string_view{ "all" }.size();
-        for(const auto& topic : group_topic_table())
-            longest = std::max(longest, std::string_view{ topic.name }.size());
-        for(const auto& domain : domain_topic_table())
-            longest = std::max(longest, std::string_view{ domain.name }.size());
-        return std::max<int>(k_topic_col_width, static_cast<int>(longest) + 2);
-    }();
+    print_topic_listing(tool_name, out);
 
-    // A topic is listed when it targets no specific tool (empty => all tools)
-    // or explicitly names the current tool
-    auto shown_for_tool = [&](const std::vector<std::string_view>& tools) {
-        return tools.empty() ||
-               std::find(tools.begin(), tools.end(), tool_name) != tools.end();
-    };
-
-    const auto saved_flags = out.flags();
-    out << std::left;
-
-    // "all" is a synthetic entry (dumps the full parser help) rather than a
-    // registered topic, so it is emitted here rather than living in the table.
-    out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
-    for(const auto& topic : group_topic_table())
-    {
-        if(!shown_for_tool(topic.tools)) continue;
-        out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
-    }
-    out << "\n  Domain topics:\n";
-    for(const auto& domain : domain_topic_table())
-        out << "    " << std::setw(name_width) << domain.name << domain.info.description
-            << "\n";
-
-    out.flags(saved_flags);
     out << "\n"
         << "EXAMPLES\n"
         << "  rocprof-sys-" << tool_name << " --preset=balanced -- ./myapp\n"
