@@ -135,6 +135,13 @@ public:
     scratch_allocator_ = std::move(cb);
   }
 
+  /// @brief Number of shader engines per XCC (array_count / simd_arrays_per_engine).
+  /// Used as the divisor when publishing COMPUTE_TMPRING_SIZE.WAVES so that
+  /// rocm-dbgapi's scratch_memory_region does not disable private access.
+  void set_scratch_wave_divisor(uint32_t se_per_xcc) {
+    scratch_wave_divisor_ = se_per_xcc == 0 ? 1 : se_per_xcc;
+  }
+
   void register_queue(HwQueue queue);
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
   void update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
@@ -364,6 +371,7 @@ private:
   InterruptCallback interrupt_cb_;
   ScratchBackingResolver scratch_resolver_;
   ScratchBackingAllocator scratch_allocator_;
+  uint32_t scratch_wave_divisor_ = 1;
   std::unique_ptr<CompletionTracker> completion_;
 
   std::atomic<bool> invalid_pending_{false};

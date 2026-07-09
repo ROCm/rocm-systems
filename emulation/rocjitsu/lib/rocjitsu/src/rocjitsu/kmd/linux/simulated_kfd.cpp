@@ -421,6 +421,14 @@ void SimulatedKfd::init_command_processors_locked() {
       continue;
     if (!g.soc)
       continue;
+    const uint32_t scratch_wave_divisor =
+        i < gpu_infos_.size() && gpu_infos_[i].num_shader_arrays_per_engine != 0
+            ? std::max(1u, gpu_infos_[i].num_shader_engines /
+                               gpu_infos_[i].num_shader_arrays_per_engine)
+            : 1u;
+    g.soc->for_each_cp([scratch_wave_divisor](amdgpu::CommandProcessor *cp) {
+      cp->set_scratch_wave_divisor(scratch_wave_divisor);
+    });
     uint64_t lds_base = 0x1000000000000ULL + i * 0x10000000000ULL;
     uint64_t scratch_base = 0x2000000000000ULL + i * 0x10000000000ULL;
     g.soc->set_apertures(lds_base, lds_base + 0xFFFFFFFFULL, scratch_base,
@@ -2256,6 +2264,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.pc = wf.pc;
   state.exec = wf.exec();
   state.vcc = wf.vcc();
+  state.flat_scratch = wf.scratch_base();
   state.m0 = wf.m0();
   state.mode = wf.mode_raw();
   state.trapsts = wf.trapsts();

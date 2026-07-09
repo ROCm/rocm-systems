@@ -2864,12 +2864,13 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   constexpr uint64_t SCRATCH_BASE = 0x1'0000'0000ULL;
   wf->set_scratch_base(SCRATCH_BASE);
 
-  // Write a 32-bit offset into VGPR[0] lane 0.
+  // Write the same per-lane private byte offset into VGPR[0] for lanes 0 and 1.
   uint32_t vbase = wf->vgpr_alloc().base;
   cu->write_vgpr(vbase, 0, 0x100); // lane 0: offset 0x100
+  cu->write_vgpr(vbase, 1, 0x100); // lane 1: offset 0x100
 
-  // Set EXEC so only lane 0 is active.
-  wf->set_exec(1ULL);
+  // Set EXEC so lanes 0 and 1 are active.
+  wf->set_exec(0x3ULL);
 
   // Build a FlatScratchMachineInst with seg=1 (SCRATCH), sve=1 (VADDR enabled),
   // saddr=0x7F (no SADDR), offset=0x10.
@@ -2883,9 +2884,17 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
   amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);
 
-  EXPECT_EQ(d.lane_mask, 1ULL);
-  // scratch_base (0x1_0000_0000) + VGPR (0x100) + offset (0x10) = 0x1_0000_0110
-  EXPECT_EQ(d.per_lane_addr[0], SCRATCH_BASE + 0x100 + 0x10);
+  EXPECT_EQ(d.lane_mask, 0x3ULL);
+  // Scratch is stored in the hardware dword-interleaved ("swizzled") layout that
+  // rocm-dbgapi reads (rocdbgapi memory.cpp private_swizzled):
+  //   addr = scratch_base + (off/4)*lane_count*4 + lane*4 + off%4
+  // with off = VGPR + offset = 0x100 + 0x10 = 0x110 and lane_count = 64:
+  //   (0x110/4)*64*4 = 0x44 * 256 = 0x4400; lane 0 -> +0, lane 1 -> +4.
+  constexpr uint64_t kSwizzledBase = SCRATCH_BASE + 0x4400;
+  EXPECT_EQ(d.per_lane_addr[0], kSwizzledBase + 0);
+  EXPECT_EQ(d.per_lane_addr[1], kSwizzledBase + 4);
+  EXPECT_TRUE(d.scratch_swizzle);
+  EXPECT_EQ(d.scratch_addr_stride, 64u * sizeof(uint32_t));
 }
 
 TEST(ScratchAddrCalcTest, FlatGlobalDoesNotUseScratchBase) {

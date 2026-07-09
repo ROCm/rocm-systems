@@ -494,10 +494,12 @@ void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   if (d.is_load) {
     d.response_data.resize(d.wf_size * d.num_elems * d.elem_size);
     l1_->load(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.response_data.data(),
-              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id());
+              d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(),
+              d.scratch_swizzle ? d.scratch_addr_stride : 0);
   } else {
     l1_->store(d.per_lane_addr.data(), d.lane_mask, d.elem_size, d.num_elems, d.store_data.data(),
-               d.mtype, d.non_temporal, d.wf_size, wf.process_id());
+               d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
+               d.scratch_swizzle ? d.scratch_addr_stride : 0);
   }
 }
 

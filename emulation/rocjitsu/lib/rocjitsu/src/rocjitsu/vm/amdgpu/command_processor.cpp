@@ -1293,6 +1293,32 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
       dp.scratch_backing_addr = read_gpu_u64(scratch_loc_va, queue.process_id);
       if (dp.scratch_backing_addr == 0 && scratch_resolver_)
         dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
+
+      // Publish the scratch backing location and COMPUTE_TMPRING_SIZE into the
+      // ABI-stable part of amd_queue_t so rocm-dbgapi can compute each wave's
+      // private (scratch) memory region, letting ROCgdb read scratch-resident
+      // variables. Real CP firmware populates these when it assigns scratch to
+      // the queue; the emulator's ROCr instead sets the backing via
+      // SET_SCRATCH_BACKING_VA and leaves these fields zero, so the CP fills
+      // them here. Field layout per rocdbgapi architecture.cpp
+      // gfx9_architecture_t::scratch_memory_region: waves = tmpring[0:11],
+      // wavesize = tmpring[12:24] * 1024 bytes.
+      if (dp.scratch_backing_addr != 0 && !cus_.empty()) {
+        uint64_t per_wave_bytes =
+            static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
+        uint32_t wavesize_kb = static_cast<uint32_t>((per_wave_bytes + 1023) / 1024);
+        // The WAVES field must be a nonzero multiple of the shader-engine-per-XCC
+        // count, or rocm-dbgapi disables private access (scratch_memory_region
+        // warns and returns size 0). Round the dispatch's wave count up to it.
+        uint32_t se = std::max(1u, scratch_wave_divisor_);
+        uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
+        uint32_t waves_field =
+            static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
+        uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_kb & 0x1FFFu) << 12);
+        memory_->write64(scratch_loc_va, dp.scratch_backing_addr, queue.process_id);
+        memory_->write32(dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), tmpring,
+                         queue.process_id);
+      }
     }
   }
 

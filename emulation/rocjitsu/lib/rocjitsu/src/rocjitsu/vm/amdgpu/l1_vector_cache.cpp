@@ -175,28 +175,62 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid,
+                         uint32_t addr_stride) {
   uint32_t stride = num_elems * elem_size;
-  for_each_coalesced_lane_run(
-      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
-                   non_temporal, request_l1_bypass, vmid);
-      });
+  if (addr_stride == 0) {
+    for_each_coalesced_lane_run(
+        addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+          read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
+                     non_temporal, request_l1_bypass, vmid);
+        });
+    return;
+  }
+  // Per-element address stride: contiguous (elem_size) by default, or the
+  // scratch swizzle stride (lane_count * sizeof(uint32_t)) so consecutive
+  // dwords land in the hardware dword-interleaved layout rocm-dbgapi reads.
+  uint32_t astride = addr_stride ? addr_stride : elem_size;
+  uint64_t remaining = lane_mask;
+  while (remaining) {
+    uint32_t lane = std::countr_zero(remaining);
+    remaining &= remaining - 1;
+    uint64_t base = addrs[lane];
+    for (uint32_t e = 0; e < num_elems; ++e) {
+      uint64_t ea = base + e * astride;
+      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal,
+                 request_l1_bypass, vmid);
+    }
+  }
 }
 
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
-                          uint32_t wf_size, uint32_t vmid) {
+                          uint32_t wf_size, uint32_t vmid, uint32_t addr_stride) {
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
-  store_l2_writes_ += for_each_coalesced_lane_run(
-      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
-        write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
-                    non_temporal, vmid);
-      });
+  if (addr_stride == 0) {
+    store_l2_writes_ += for_each_coalesced_lane_run(
+        addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+          write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
+                      non_temporal, vmid);
+        });
+    return;
+  }
+  const uint32_t astride = addr_stride;
+  store_l2_writes_ += active_lanes * num_elems;
+  uint64_t remaining = lane_mask;
+  while (remaining) {
+    uint32_t lane = std::countr_zero(remaining);
+    remaining &= remaining - 1;
+    uint64_t base = addrs[lane];
+    for (uint32_t e = 0; e < num_elems; ++e) {
+      uint64_t ea = base + e * astride;
+      write_bytes(ea, src + lane * stride + e * elem_size, elem_size, mtype, non_temporal, vmid);
+    }
+  }
 }
 
 void L1VectorCache::flush_all() { cache_.invalidate_all(); }

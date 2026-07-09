@@ -33,9 +33,14 @@ namespace kmd {
 /// at the CWSR offsets rocm-dbgapi expects and synthesizes the trap-temporary
 /// registers (TTMP4-11) that carry the wave's debugger metadata.
 struct CwsrWaveState {
-  uint64_t pc = 0;      ///< Program counter (past the s_trap on a breakpoint).
-  uint64_t exec = 0;    ///< EXEC mask.
-  uint64_t vcc = 0;     ///< VCC (placed into its aliased SGPR slot).
+  uint64_t pc = 0;   ///< Program counter (past the s_trap on a breakpoint).
+  uint64_t exec = 0; ///< EXEC mask.
+  uint64_t vcc = 0;  ///< VCC (placed into its aliased SGPR slot).
+  /// FLAT_SCRATCH base register (gfx9_4 architected flat scratch), placed into
+  /// its aliased SGPR slot. rocm-dbgapi validates the scratch base it computes
+  /// from COMPUTE_TMPRING_SIZE against this register (wave.cpp
+  /// scratch_memory_region); a mismatch disables private-memory access.
+  uint64_t flat_scratch = 0;
   uint32_t status = 0;  ///< STATUS register.
   uint32_t trapsts = 0; ///< TRAPSTS register.
   uint32_t mode = 0;    ///< MODE register.
