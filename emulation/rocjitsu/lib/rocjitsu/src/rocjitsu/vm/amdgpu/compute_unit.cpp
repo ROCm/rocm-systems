@@ -296,7 +296,8 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
     }
   }
 
-  switch (inst->data()->tag()) {
+  const uint8_t route_tag = inst->data()->tag();
+  switch (route_tag) {
   case SCALAR_MEM:
     scalar_mem_pipeline_.issue(inst, wf);
     break;
@@ -476,6 +477,27 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
+  // Capture address-watchpoint probe info before the pipeline consumes the
+  // instruction. The match test runs after the PC advances (below) so that a
+  // wave stopped on a watchpoint resumes past the watched access instead of
+  // re-executing it (and re-triggering the watch).
+  const bool watch_probe = watchpoint_handler_ && inst->is_memory_op() && inst->data() &&
+                           inst->data()->tag() == GLOBAL_MEM;
+  std::vector<uint64_t> watch_addrs;
+  uint32_t watch_bytes = 0;
+  bool watch_is_write = false;
+  bool watch_is_atomic = false;
+  if (watch_probe) {
+    auto &d = *inst->data_as<VectorMemState>();
+    watch_is_atomic = (d.atomic_op != AtomicOp::NONE);
+    watch_is_write = !d.is_load || watch_is_atomic;
+    watch_bytes = watch_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
+    watch_addrs.reserve(d.wf_size);
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+      if (d.lane_mask & (1ULL << lane))
+        watch_addrs.push_back(d.per_lane_addr[lane]);
+  }
+
   if (inst->is_memory_op()) {
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
@@ -486,6 +508,15 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     delete inst;
 
   active->pc += inst_size;
+
+  // Address watchpoints: after the access completed and the PC advanced, stop
+  // the wave (with the matching TRAPSTS.addr_watch bit) if any accessed address
+  // fell in a debugger watchpoint. Done here, post-advance, so the serialized
+  // wave resumes at the next instruction.
+  if (watch_probe && !active->debug_halted())
+    for (uint64_t addr : watch_addrs)
+      if (watchpoint_handler_(*active, addr, watch_bytes, watch_is_write, watch_is_atomic))
+        break;
 }
 
 bool ComputeUnitCore::step() {

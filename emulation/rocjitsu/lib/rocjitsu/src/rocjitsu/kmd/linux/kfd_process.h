@@ -233,6 +233,15 @@ public:
     /// @details Mirrors the kernel's debugger-process notifier: the session is
     /// disabled when the debugger task exits, even if the target remains alive.
     UniqueFd debugger_pidfd;
+
+    struct AddressWatch {
+      bool active = false;
+      uint64_t address = 0;
+      uint64_t mask = 0;
+      uint32_t mode = 0;
+    };
+    static constexpr uint32_t kMaxAddressWatches = 4;
+    AddressWatch address_watches[kMaxAddressWatches];
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.

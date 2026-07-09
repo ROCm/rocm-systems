@@ -459,6 +459,10 @@ void SimulatedKfd::init_command_processors_locked() {
             [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
         cu->set_single_step_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_single_step_complete(wf); });
+        cu->set_watchpoint_handler([this](amdgpu::Wavefront &wf, uint64_t address, uint32_t bytes,
+                                          bool is_write, bool is_atomic) {
+          return on_wave_watchpoint(wf, address, bytes, is_write, is_atomic);
+        });
       }
     });
     g.cps_initialized = true;
@@ -2404,6 +2408,67 @@ bool SimulatedKfd::on_wave_single_step_complete(amdgpu::Wavefront &wave) {
   return true;
 }
 
+bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address, uint32_t bytes,
+                                      bool is_write, bool is_atomic) {
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+  int matched_slot = -1;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(proc->client_pid());
+    if (session == debug_sessions_.end() || !session->second.enabled)
+      return false;
+    for (uint32_t slot = 0; slot < KfdProcess::DebugSession::kMaxAddressWatches; ++slot) {
+      const auto &watch = session->second.address_watches[slot];
+      if (!watch.active)
+        continue;
+      const bool mode_matches =
+          watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL ||
+          (is_atomic && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC) ||
+          (!is_atomic && is_write && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD) ||
+          (!is_atomic && !is_write && watch.mode == KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ);
+      if (!mode_matches)
+        continue;
+      const uint64_t block_base = watch.address & watch.mask;
+      const uint64_t block_size = ~watch.mask + 1;
+      const uint64_t access_end = address > UINT64_MAX - bytes ? UINT64_MAX : address + bytes;
+      const uint64_t block_end = block_size == 0 || block_base > UINT64_MAX - block_size
+                                     ? UINT64_MAX
+                                     : block_base + block_size;
+      if (block_size == 0 || (address < block_end && block_base < access_end)) {
+        matched_slot = static_cast<int>(slot);
+        break;
+      }
+    }
+  }
+  if (matched_slot < 0)
+    return false;
+
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = queue->second.ctx_save_restore_address;
+    ctx_size = queue->second.ctx_save_restore_area_size;
+    gpu_id = queue->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+
+  static constexpr uint32_t kTrapstsBits[] = {1u << 7, 1u << 12, 1u << 13, 1u << 14};
+  constexpr uint32_t kModeExcpEnAddrWatch = 1u << 19;
+  wave.set_trapsts(wave.trapsts() | kTrapstsBits[matched_slot]);
+  wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
+  wave.debug_trap(0);
+  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
+  return true;
+}
+
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   wave.pc = state.pc;
@@ -2837,11 +2902,27 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     args->launch_override.support_request_mask = kGfx94SupportedTrapMask;
     return 0;
   }
-  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
-    args->set_node_address_watch.id = 0;
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH: {
+    auto &watches = session_it->second.address_watches;
+    uint32_t slot = 0;
+    while (slot < KfdProcess::DebugSession::kMaxAddressWatches && watches[slot].active)
+      ++slot;
+    if (slot == KfdProcess::DebugSession::kMaxAddressWatches)
+      return -ENOMEM;
+    watches[slot].active = true;
+    watches[slot].address = args->set_node_address_watch.address;
+    watches[slot].mask = args->set_node_address_watch.mask;
+    watches[slot].mode = args->set_node_address_watch.mode;
+    args->set_node_address_watch.id = slot;
     return 0;
-  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  }
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH: {
+    const uint32_t slot = args->clear_node_address_watch.id;
+    if (slot >= KfdProcess::DebugSession::kMaxAddressWatches)
+      return -EINVAL;
+    session_it->second.address_watches[slot] = {};
     return 0;
+  }
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
     return debug_query_event(target_pid, session_it->second.exception_enable_mask,
                              args->query_debug_event);

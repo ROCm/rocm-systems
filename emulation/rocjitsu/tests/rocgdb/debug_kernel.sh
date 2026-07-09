@@ -187,6 +187,52 @@ if grep -qaE 'Per-queue memory reserved for the debugger is missing' <<<"$out2";
   fail=1
 fi
 
+# --- Third scenario: GPU address watchpoint -----------------------------------
+# Capture the device buffer address at a host breakpoint on the launch line,
+# then set a hardware watchpoint on it from GPU context (at the kernel
+# breakpoint) and continue. The kernel's `data[i] += 1` store must trip the
+# watchpoint, which exercises SET_NODE_ADDRESS_WATCH + the memory-pipeline watch
+# check + the addr_watch TRAPSTS reporting. Both breakpoints are set before
+# `run` so the pending kernel breakpoint resolves as the code object loads and
+# the host breakpoint (on the launch line, before the launch executes) lets us
+# read the device pointer `d` — no hard-coded VA.
+launch_line="$(grep -nE 'add_one<<<' "$here/add_one.hip" | head -1 | cut -d: -f1)"
+[[ -z "$launch_line" ]] && launch_line=27
+echo "running rocgdb (GPU address watchpoint, launch line $launch_line) ..."
+outfile3="$workdir/rocgdb3.out"
+timeout 180 "$mirage_bin" run --profile "$profile" -- \
+  rocgdb --batch \
+    -ex 'set breakpoint pending on' \
+    -ex "break add_one.hip:${launch_line}" \
+    -ex 'break add_one' \
+    -ex 'run' \
+    -ex 'set $waddr = (unsigned long)d' \
+    -ex 'continue' \
+    -ex 'watch *(int*)$waddr' \
+    -ex 'continue' \
+    "$app" </dev/null >"$outfile3" 2>&1
+status3=$?
+out3="$(cat "$outfile3")"
+echo "--------------------------------------------------------------------"
+echo "$out3"
+echo "--------------------------------------------------------------------"
+if [[ $status3 -ne 0 ]]; then
+  echo "FAIL: watchpoint rocgdb run exited with status $status3" >&2
+  fail=1
+fi
+check3() { # <regex> <description>  (checks the third run's output)
+  if grep -qaE "$1" <<<"$out3"; then
+    echo "  ok: $2"
+  else
+    echo "  MISSING: $2 (/$1/)" >&2
+    fail=1
+  fi
+}
+check3 'hit (Hardware )?watchpoint [0-9]+' 'the GPU address watchpoint triggered'
+check3 'Old value = 0' 'watchpoint captured the pre-write value'
+check3 'New value = 1' 'watchpoint captured the post-write value'
+check3 'add_one .*at .*:15' 'stopped at the store that wrote the watched address'
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1

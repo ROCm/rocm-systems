@@ -744,6 +744,50 @@ TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
             static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
 }
 
+TEST_F(KfdIoctlTest, DbgTrapNodeAddressWatchAllocatesAndFreesSlots) {
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::array<uint32_t, 4> slots{};
+  for (uint32_t index = 0; index < slots.size(); ++index) {
+    kfd_ioctl_dbg_trap_args watch{};
+    watch.pid = static_cast<uint32_t>(getpid());
+    watch.op = KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH;
+    watch.set_node_address_watch.gpu_id = kGpuId;
+    watch.set_node_address_watch.address = 0x1000 + index * 0x100;
+    watch.set_node_address_watch.mask = ~0xFFu;
+    watch.set_node_address_watch.mode = KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &watch), 0);
+    slots[index] = watch.set_node_address_watch.id;
+  }
+  EXPECT_EQ(slots, (std::array<uint32_t, 4>{0, 1, 2, 3}));
+
+  kfd_ioctl_dbg_trap_args exhausted{};
+  exhausted.pid = static_cast<uint32_t>(getpid());
+  exhausted.op = KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH;
+  exhausted.set_node_address_watch.gpu_id = kGpuId;
+  exhausted.set_node_address_watch.mode = KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exhausted), -ENOMEM);
+
+  kfd_ioctl_dbg_trap_args clear{};
+  clear.pid = static_cast<uint32_t>(getpid());
+  clear.op = KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH;
+  clear.clear_node_address_watch.gpu_id = kGpuId;
+  clear.clear_node_address_watch.id = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &clear), 0);
+  exhausted.set_node_address_watch.address = 0x9000;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &exhausted), 0);
+  EXPECT_EQ(exhausted.set_node_address_watch.id, 1u);
+  clear.clear_node_address_watch.id = 4;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &clear), -EINVAL);
+}
+
 // Local mode borrows the debugger's own fd (the session does not own it), so
 // DISABLE must leave it open for the debugger to close. Only daemon mode, which
 // dup'd the fd via SCM_RIGHTS, releases it on teardown.
