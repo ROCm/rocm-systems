@@ -15,6 +15,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_tui_components
       - test_analysis_db
+      - test_analysis_orm
       - test_torch_trace_analysis
       - test_torch_trace_coverage
       - test_L1_cache_counters
@@ -85,6 +86,7 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
@@ -148,6 +150,7 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
@@ -211,6 +214,7 @@ test_categories:
       - test_import_guard
       - test_profile_multi_rank
       - test_analysis_db
+      - test_analysis_orm
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_inject_roctx_package
