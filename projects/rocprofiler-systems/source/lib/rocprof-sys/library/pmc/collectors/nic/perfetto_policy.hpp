@@ -53,9 +53,10 @@ inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 
 inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
 inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
 
-// Single source of truth for NIC track labels and units. Adding a new metric
-// requires exactly one new row here (plus the bit position above and the
-// corresponding member in the metrics/enabled_metrics structs).
+// Default track labels and units, keyed by metric bit value. Adding a metric
+// touches several ordered lists that must stay in sync: the *_VALUE bit constant
+// above, a row here, the enabled_metrics/metrics members in types.hpp, and an
+// emit_nic_counter<> call in post_process_device.
 inline const std::map<std::uint32_t, nic_track_description>&
 make_default_nic_tracks()
 {
