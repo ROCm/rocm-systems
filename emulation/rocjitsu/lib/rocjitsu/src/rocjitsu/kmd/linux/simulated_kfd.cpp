@@ -2423,25 +2423,55 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   // implemented") so a debugger can tell a stubbed-but-valid op apart from a
   // genuinely unknown one (EINVAL below). Each case graduates out of this group
   // as its handler lands.
-  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-    return debug_device_snapshot(args->device_snapshot);
   case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
-  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
-  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
-  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
-  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
-  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
-  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
-  case KFD_IOC_DBG_TRAP_SET_FLAGS:
-  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
   case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
-  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
     return -ENOSYS;
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
     // debugger wants forwarded. Delivery is wired up with the event channel.
     session_it->second.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
     return 0;
+  case KFD_IOC_DBG_TRAP_SET_FLAGS: {
+    const uint32_t previous = session_it->second.flags;
+    session_it->second.flags = args->set_flags.flags;
+    args->set_flags.flags = previous;
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+    if (args->launch_mode.launch_mode != KFD_DBG_TRAP_WAVE_LAUNCH_MODE_NORMAL &&
+        args->launch_mode.launch_mode != KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT &&
+        args->launch_mode.launch_mode != KFD_DBG_TRAP_WAVE_LAUNCH_MODE_DEBUG)
+      return -EINVAL;
+    session_it->second.launch_mode = args->launch_mode.launch_mode;
+    return 0;
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE: {
+    if (args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_OR &&
+        args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_REPLACE)
+      return -EINVAL;
+    const uint32_t previous = session_it->second.launch_override_enable;
+    session_it->second.launch_override_enable = args->launch_override.enable_mask;
+    args->launch_override.enable_mask = previous;
+    args->launch_override.support_request_mask = UINT32_MAX;
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+    args->set_node_address_watch.id = 0;
+    return 0;
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+    return 0;
+  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
+    return -EAGAIN;
+  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+    args->queue_snapshot.entry_size =
+        std::min<uint32_t>(args->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+    args->queue_snapshot.num_queues = 0;
+    return 0;
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+    return 0;
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+    return 0;
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return debug_device_snapshot(args->device_snapshot);
   default:
     return -EINVAL;
   }

@@ -572,19 +572,110 @@ TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &watch), -ENODEV);
 }
 
-TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
+TEST_F(KfdIoctlTest, DbgTrapQueryDebugEventReportsIdle) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
-  // QUERY_DEBUG_EVENT is not a HW-op, so the gate ladder admits it; the handler
-  // itself is added by a later change and currently reports not-implemented.
+  // QUERY_DEBUG_EVENT is not a HW-op, so it is available before runtime enable.
+  // EAGAIN is the kernel contract when no exception is pending.
   kfd_ioctl_dbg_trap_args q{};
   q.pid = static_cast<uint32_t>(getpid());
   q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -ENOSYS);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -EAGAIN);
+
+  // SEND_RUNTIME_EVENT remains intentionally unwired in this stack.
+  kfd_ioctl_dbg_trap_args event{};
+  event.pid = static_cast<uint32_t>(getpid());
+  event.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &event), -ENOSYS);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  const auto pid = static_cast<uint32_t>(getpid());
+  auto enable = [&] {
+    kfd_ioctl_dbg_trap_args en{};
+    en.pid = pid;
+    en.op = KFD_IOC_DBG_TRAP_ENABLE;
+    en.enable.dbg_fd = make_debug_fd();
+    return driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en);
+  };
+  ASSERT_EQ(enable(), 0);
+
+  kfd_ioctl_dbg_trap_args flags{};
+  flags.pid = pid;
+  flags.op = KFD_IOC_DBG_TRAP_SET_FLAGS;
+  flags.set_flags.flags = KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &flags), 0);
+  EXPECT_EQ(flags.set_flags.flags, 0u);
+  flags.set_flags.flags = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &flags), 0);
+  EXPECT_EQ(flags.set_flags.flags, static_cast<uint32_t>(KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP));
+
+  kfd_ioctl_dbg_trap_args mode{};
+  mode.pid = pid;
+  mode.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE;
+  mode.launch_mode.launch_mode = 2;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &mode), -EINVAL);
+  mode.launch_mode.launch_mode = KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &mode), 0);
+
+  kfd_ioctl_dbg_trap_args override_args{};
+  override_args.pid = pid;
+  override_args.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  override_args.launch_override.enable_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  override_args.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), 0);
+  EXPECT_EQ(override_args.launch_override.enable_mask, 0u);
+  EXPECT_EQ(override_args.launch_override.support_request_mask, UINT32_MAX);
+
+  override_args.launch_override.override_mode = 99;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), -EINVAL);
+
+  kfd_ioctl_dbg_trap_args snapshot{};
+  snapshot.pid = pid;
+  snapshot.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  snapshot.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &snapshot), 0);
+  EXPECT_EQ(snapshot.queue_snapshot.num_queues, 0u);
+  EXPECT_EQ(snapshot.queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+
+  kfd_ioctl_dbg_trap_args queues{};
+  queues.pid = pid;
+  queues.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
+  std::array<uint32_t, 2> queue_ids{17, 23};
+  queues.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(queue_ids.data());
+  queues.suspend_queues.num_queues = queue_ids.size();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 0);
+  EXPECT_EQ(queue_ids, (std::array<uint32_t, 2>{17, 23}));
+  queues.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
+  queues.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(queue_ids.data());
+  queues.resume_queues.num_queues = queue_ids.size();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 0);
+  EXPECT_EQ(queue_ids, (std::array<uint32_t, 2>{17, 23}));
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = pid;
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+  ASSERT_EQ(enable(), 0);
+
+  flags.set_flags.flags = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &flags), 0);
+  EXPECT_EQ(flags.set_flags.flags, 0u);
+  override_args.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  override_args.launch_override.enable_mask = 0;
+  override_args.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &override_args), 0);
+  EXPECT_EQ(override_args.launch_override.enable_mask, 0u);
+  EXPECT_EQ(override_args.launch_override.support_request_mask, UINT32_MAX);
 }
 
 // Local mode borrows the debugger's own fd (the session does not own it), so

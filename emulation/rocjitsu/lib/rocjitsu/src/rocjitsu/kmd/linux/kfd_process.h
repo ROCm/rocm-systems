@@ -193,6 +193,15 @@ public:
     /// Bitmask of exception classes that are forwarded to the debugger.
     uint64_t exception_enable_mask = 0;
 
+    /// @brief Previously configured process debug flags.
+    uint32_t flags = 0;
+
+    /// @brief Current wave launch mode.
+    uint32_t launch_mode = 0;
+
+    /// @brief Current wave-launch trap override mask.
+    uint32_t launch_override_enable = 0;
+
     /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
     /// File descriptor used as the debugger notification / poll target.
     /// -1 when no debugger is attached.
