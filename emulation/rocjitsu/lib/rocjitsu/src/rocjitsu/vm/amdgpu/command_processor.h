@@ -20,26 +20,32 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "rocjitsu/base/rj_compiler.h"
+#ifndef HSA_LARGE_MODEL
 #define HSA_LARGE_MODEL 1
+#endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
@@ -68,6 +74,7 @@ struct HwQueue {
 
 enum class SdmaPacketDialect {
   Legacy,
+  Gfx11Plus,
   Gfx1250,
 };
 
@@ -88,10 +95,17 @@ public:
   ~CommandProcessor() override { stop_doorbell_monitor(); }
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
-  void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
+  void add_l2_cache(L2Cache *l2) {
+    // Idempotent: the config-driven builder and the Xcd full constructor may
+    // both attempt to register the same L2. Avoid duplicate entries so cache
+    // maintenance does not flush the same L2 twice.
+    if (std::find(l2_caches_.begin(), l2_caches_.end(), l2) == l2_caches_.end())
+      l2_caches_.push_back(l2);
+  }
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
   uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
+  bool packed_tid() const { return packed_tid_; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
@@ -154,6 +168,10 @@ public:
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
+  /// @brief Return LDS targets selected by a cluster multicast mask.
+  std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
+                                                    uint32_t mcast_mask);
+
 private:
   /// @brief Initialize a wavefront's registers per the AMDHSA ABI.
   void init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf, const DispatchEntry &entry,
@@ -170,14 +188,43 @@ private:
   /// @brief Process SDMA packets from an SDMA queue's ring buffer.
   void process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint64_t write_idx);
 
+  /// @brief Coarse invalidate of the GPU data caches (L1 V$ + L2/GL2).
+  /// @details Emulated SDMA and CP writes land directly in the backing store,
+  /// bypassing the cache hierarchy. Real SDMA does not snoop GL2, so stale
+  /// cached copies are knocked out the way HW cache-maintenance does it: coarse
+  /// and indiscriminate, not per-range. This is the simulator's stand-in for a
+  /// GL2 invalidate; the consuming kernel's acquire fence at dispatch flushes
+  /// the remaining per-CU caches (including the scalar K$).
+  ///
+  /// @warning Drops dirty L2 lines without writeback. Only use after a direct
+  /// backing write whose destination is the only stale region; otherwise use
+  /// flush_gpu_caches() so K$-writeback dirty lines are published, not lost.
+  void invalidate_gpu_caches();
+
+  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @details Like invalidate_gpu_caches(), but publishes dirty data instead of
+  /// dropping it. Ordering is load-bearing: dirty scalar L1 (K$) lines are
+  /// written back into L2 first, then L2 is flushed to backing, so a dirty K$ or
+  /// L2 line overlapping an SDMA destination reaches backing before the direct
+  /// SDMA write (which runs after this returns) rather than being written out
+  /// over it by a later K$/L2 flush. Each line is written back under its own
+  /// owning vmid. Vector L1 (V$) is write-through, so it only needs invalidation.
+  void flush_gpu_caches();
+
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
   void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
-                          uint64_t pkt_addr, HwQueueState &qs);
+                          uint64_t pkt_addr, HwQueueState &qs,
+                          ClusterDispatchShape cluster_shape = {});
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
+
+  void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
+                                  uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
+  void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
+  void erase_cluster_workgroups(uint32_t dispatch_id);
 
   /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
   /// active queues to SPIs and run CUs to completion.
@@ -211,7 +258,13 @@ private:
     return false;
   }
 
-  bool uses_gfx1250_sdma_packets() const {
+  bool uses_gfx11_plus_sdma_packets() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx11Plus ||
+           sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  // gfx1250 widens the GCR packet to 6 dwords; gfx11/12 keep the 5-dword layout.
+  bool uses_gfx1250_gcr_packet() const {
     return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
@@ -229,11 +282,22 @@ private:
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
-  // Gfx1250 SDMA GCR keeps the same opcode but changes packet size/layout, so
+  // GFX11+ SDMA GCR keeps the same opcode but changes packet size/layout, so
   // the decoder cannot infer this dialect from the packet header alone.
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+
+  struct ClusterWorkgroupPlacement {
+    ComputeUnitCore *cu = nullptr;
+    uint32_t lds_base = 0;
+    uint64_t cluster_key = 0;
+    uint32_t cluster_rank = 0;
+    uint32_t cluster_size = 1;
+    bool completed = false;
+    std::vector<uint32_t> peer_wg_ids;
+  };
+  std::unordered_map<uint64_t, ClusterWorkgroupPlacement> cluster_wg_placements_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;

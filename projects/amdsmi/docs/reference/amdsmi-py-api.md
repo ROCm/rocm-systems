@@ -167,15 +167,14 @@ finally:
 
 ### amdsmi_get_processor_info
 
-**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
-
-Description: Return processor name. Available regardless of whether the library
-was built with ESMI support.
+Description: Return a string identifier for the processor: its index as a decimal
+string (for example `"0"`, `"1"`, `"2"`), which is its zero-based position in the
+library's processor list, the same order used by `amdsmi_get_processor_handles`.
 
 Input parameters:
 `processor_handle` processor handle
 
-Output: Processor name
+Output: Processor index as a string
 
 Exceptions that can be thrown by `amdsmi_get_processor_info` function:
 
@@ -680,6 +679,13 @@ Field | Description | Units
 `default_power_cap` |  default power capability | uW
 `min_power_cap` | min power capability | uW
 `max_power_cap` | max power capability | uW
+
+**Note:** The `power_cap` reported here is the active, *settable* power limit — adjust it
+with `amdsmi_set_power_cap()`. It is distinct from the read-only `power_limit` field
+returned by `amdsmi_get_power_info()`, which cannot be set. Power capping is enforced at
+two Package Power Tracking (PPT) points: PPT0 (the lower limit, applied to filtered input)
+and PPT1 (the higher limit, applied to raw input). See `amdsmi_get_supported_power_cap`
+for the supported PPT sensor indices.
 
 Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 
@@ -1277,6 +1283,13 @@ Field | Description
 `active_low_utilization` | 2D array with Low Utilization Violation Active per XCP/XCC
 `active_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation Active (Total) per XCP/XCC
 
+**Note:** `amdsmi_get_violation_status()` reports time-based throttling metrics (PVIOL/TVIOL
+percentages) and is available only on Instinct MI300 Series and newer GPUs (gpu_metrics
+v1.6+). On Radeon (Navi) and Instinct MI100/MI200 Series GPUs it returns N/A; use the
+`throttle_status` / `indep_throttle_status` bit flags from `amdsmi_get_gpu_metrics_info()`
+instead, which report whether throttling is happening now rather than how much over time.
+See [GPU violations](../conceptual/gpu-violations.md) for details.
+
 Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 
 * `AmdSmiLibraryException`
@@ -1448,6 +1461,12 @@ Field | Description
 `page_address` | Address of bad page
 `page_size` | Size of bad page
 `status` | Status of bad page
+
+**Note:** "Bad pages" are retired/reserved VRAM pages and are the same set returned by
+`amdsmi_get_gpu_memory_reserved_pages()`. The `status` field reflects the page state
+(pending, reserved, or unreservable). The error class that triggered retirement
+(correctable vs uncorrectable) is **not** reported here — use `amdsmi_get_gpu_ecc_count()`
+for CE/UE counts. See [RAS](../conceptual/ras.md) for more information.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
 
@@ -1640,6 +1659,50 @@ try:
             else:
                 for process in processes:
                     print(process)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_process_list_by_pid
+
+Description: Returns the list of processes running across one or more GPUs, grouped by PID. Each entry aggregates the per-GPU usage for every GPU the process is active on; the calling process is omitted. Requires root level access to display root process names; otherwise the name is reported as "N/A".
+
+Input parameters:
+
+* `processor_handles` list of device handles to query
+
+Output: List of Dictionaries with the corresponding fields; empty list if no running process are detected
+
+Field | Description
+---|---
+`pid` | Process ID
+`name` | Name of process. If user does not have permission this will be "N/A"
+`container_name` | Container name, when the process runs inside a container
+`gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        processes = amdsmi.amdsmi_get_gpu_process_list_by_pid(devices)
+        if len(processes) == 0:
+            print("No processes running on these GPUs")
+        else:
+            for process in processes:
+                print(process)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -3607,6 +3670,9 @@ Output: Dictionary with fields
 `pcie_nak_sent_count_acc` | PCIe NAC sent count accumulated |
 `pcie_nak_rcvd_count_acc` | PCIe NAC received count accumulated |
 `jpeg_activity` | List of JPEG engine activity | %
+`is_apu` | `True` when the device exposes APU metrics (the `apu_metrics.*` fields below are populated) | bool
+
+On APU devices (for example gfx1151 / Strix), the returned dictionary additionally contains `apu_metrics.*` fields — for example `apu_metrics.temperature_gfx`, `apu_metrics.average_socket_power`, `apu_metrics.average_gfxclk_frequency`, and the `apu_metrics.throttle_residency_*` group. Temperatures are in C, power in W, clocks in MHz, voltages in mV, currents in mA, and activities in %. These fields are populated only when `is_apu` is `True`; otherwise they report `N/A`. See the **Added APU metrics support** entry in the [CHANGELOG](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md) for the complete field list.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 
@@ -4998,6 +5064,11 @@ Input parameters:
 
 Output: device id
 
+**Note:** This device id is a device-*type* identifier; it is identical across all cards
+of the same SKU and is **not** a per-card identity. It is also distinct from the CLI "ID"
+shown by `amd-smi list` / `--gpu`, which is an enumeration index (0, 1, 2, …) assigned in
+discovery order. To uniquely identify a specific GPU, use its BDF or UUID.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
 
 * `AmdSmiLibraryException`
@@ -6131,6 +6202,13 @@ Field | Description
 `memory_caps` | List of compatible NPS modes (e.g. `["NPS1", "NPS4"]`)
 `num_resources` | Number of resource entries for this profile
 
+**About accelerator partitions:** An accelerator partition is an umbrella *profile* that
+bundles a compute-partition mode (SPX/DPX/TPX/QPX/CPX), the compatible memory-partition
+(NPS) modes, and the resource layout into a single configuration. Compute partitioning
+(XCC grouping) and memory partitioning (NPS HBM interleaving) are orthogonal sub-dimensions
+selected together by the chosen profile. See `amdsmi_get_gpu_compute_partition()` and
+`amdsmi_get_gpu_memory_partition()` for the individual axes.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
 
 * `AmdSmiLibraryException`
@@ -6307,6 +6385,10 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 ### amdsmi_get_xgmi_info
 
 Description: Returns XGMI information for the GPU.
+
+**Note:** Here "fabric" / XGMI refers to the GPU-to-GPU scale-up interconnect. This is
+distinct from the on-chip Data Fabric clock (FCLK, `AMDSMI_CLK_TYPE_DF`), which is a
+separate clock domain rather than the interconnect.
 
 Input parameters:
 
@@ -6495,6 +6577,97 @@ try:
         for device in devices:
             bitmask = amdsmi.amdsmi_get_cpu_affinity_with_scope(device, scope)
             print(bitmask['size'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_fabric_info
+
+Description: Returns IFoE/UALoE fabric device configuration for the target GPU, read from sysfs. Fields whose sysfs source is unavailable keep their sentinel/default values. Available only on platforms with IFoE/UALoE fabric hardware; other devices return not supported.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with the corresponding fields
+
+Field | Description
+---|---
+`bdf` | BDF of the fabric device
+`version` | Fabric info structure version
+`accelerator_id` | Accelerator identifier (range 0 to 1023)
+`fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
+`bandwidth` | Station bandwidth share in Mb/s
+`latency` | Latency in nanoseconds
+`ppod_id` | Physical PoD identifier as a list of 16 bytes
+`ppod_size` | Physical PoD size
+`vpod_id` | Virtual PoD identifier
+`vpod_size` | Virtual PoD size
+`local_accelerators` | List of local accelerator IDs
+`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
+`accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+
+Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+* `AmdSmiRetryException`
+* `AmdSmiTimeoutException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    for device in devices:
+        info = amdsmi.amdsmi_get_gpu_fabric_info(device)
+        print(info)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_fabric_telemetry_data
+
+Description: Returns IFoE/UALoE fabric telemetry for the target GPU. The `category_mask` selects which telemetry categories to retrieve and is built from the `AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_*` bit values. Available only on platforms with IFoE/UALoE fabric hardware; other devices return not supported.
+
+Input parameters:
+
+* `processor_handle` device which to query
+* `category_mask` integer bitmask of the telemetry categories to retrieve
+
+Output: List of Dictionaries, one per populated category
+
+Field | Description
+---|---
+`category` | Category name: `UALOE`, `SWITCH`, `CRYPTO`, `PFC`, `NETPORT`, `DERIVED_UALOE`, or `DERIVED_NETPORT`
+`generation_count` | Sequence number incremented each time the telemetry is written
+`timestamp` | Dictionary with `tv_sec` and `tv_nsec`
+`instances` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`name`</td><td>Instance name</td></tr><tr><td>`logical_idx`</td><td>Logical index of the instance</td></tr><tr><td>`items`</td><td>List of `{id, name, value}` telemetry items</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_fabric_telemetry_data` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+from amdsmi import amdsmi_interface
+try:
+    amdsmi.amdsmi_init()
+    category_mask = amdsmi_interface.amdsmi_wrapper.AMDSMI_FABRIC_TELEMETRY_CATEGORY_MASK_ALL_KNOWN
+    devices = amdsmi.amdsmi_get_processor_handles()
+    for device in devices:
+        for category in amdsmi.amdsmi_get_fabric_telemetry_data(device, category_mask):
+            print(category)
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

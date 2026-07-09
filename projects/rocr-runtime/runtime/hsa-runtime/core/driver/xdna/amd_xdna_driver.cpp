@@ -816,23 +816,21 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent, const core::DriverMemoryHandle& handle,
-                                            core::ShareType type, uint32_t flags, void* export_handle,
-                                            uint64_t* export_offset) {
+hsa_status_t XdnaDriver::ExportMemoryHandle(const core::Agent& agent,
+                                            const core::DriverMemoryHandle& handle,
+                                            core::ShareType type, void* export_handle) {
   (void)agent;
-  (void)flags;
-  (void)export_offset;
   if (export_handle == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    auto bo_handle = FindBOHandle(const_cast<void*>(reinterpret_cast<const void*>(&handle)));
-    if (!bo_handle.IsValid()) {
+    // handle.handle is the kernel BO handle populated by CreateShareableHandle.
+    if (!handle.IsValid()) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
 
     drm_prime_handle export_params = {};
-    export_params.handle = bo_handle.handle;
+    export_params.handle = handle.handle;
     export_params.flags = DRM_RDWR;
     export_params.fd = -1;
     hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params);
@@ -860,7 +858,7 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
 
   switch (type) {
   case core::ShareType::DMABUF_FD: {
-    const int dmabuf_fd = *static_cast<int*>(import_handle);
+    const int dmabuf_fd = static_cast<const core::DriverMemoryHandle*>(import_handle)->dmabuf_fd;
 
     drm_prime_handle import_params = {};
     import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
@@ -881,14 +879,10 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
   }
 }
 
-hsa_status_t XdnaDriver::DestroyImportedMemoryHandle(core::DriverMemoryHandle* handle) {
-  // Nothing to do for XDNA since we have a single, non-ref counted handle.
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
                              size_t offset, size_t size,
-                             hsa_access_permission_t perms) {
+                             hsa_access_permission_t perms, uint32_t node_id) {
+  (void)node_id;
   // Get fd associated with the handle.
   drm_prime_handle params = {};
   params.handle = handle.handle;
@@ -910,7 +904,8 @@ hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void *mem,
 }
 
 hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem,
-                               size_t offset, size_t size) {
+                               size_t offset, size_t size, uint32_t node_id) {
+  (void)node_id;
   if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
   }
@@ -921,6 +916,9 @@ hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void *mem
 hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
                                                const core::Agent& agent,
                                                core::DriverMemoryHandle* handle, uint64_t* offset) {
+  (void)va;
+  (void)agent;
+
   // Find BO handle; mem is the BO handle; see AllocateMemory.
   auto bo_handle = FindBOHandle(mem);
   if (!bo_handle.IsValid()) {
@@ -945,17 +943,9 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
     return err;
   }
 
-  // Map memory to the virtual address.
-  void* mapped_ptr = mmap(va, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED, fd_,
-                          get_bo_info_args.map_offset);
-  if (mapped_ptr == MAP_FAILED) {
-    close(params.fd);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-
   handle->handle = bo_handle.handle;
   handle->dmabuf_fd = params.fd;
-  handle->mmap_offset = 0;
+  handle->mmap_offset = get_bo_info_args.map_offset;
   handle->size = size;
   *offset = 0;
 
@@ -963,6 +953,12 @@ hsa_status_t XdnaDriver::CreateShareableHandle(void* va, void* mem, size_t size,
 }
 
 hsa_status_t XdnaDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
+  // Close the dmabuf_fd.
+  if (handle->dmabuf_fd >= 0) {
+    close(handle->dmabuf_fd);
+  }
+
+  // Close the BO handle.
   drm_gem_close close_params = {};
   close_params.handle = handle->handle;
   hsa_status_t err = xdna_ioctl(fd_, DRM_IOCTL_GEM_CLOSE, &close_params);

@@ -103,6 +103,11 @@ ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclSignal_fn, 48)
 ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclWaitSignal_fn, 49)
 #endif
 
+#if RCCL_API_TRACE_VERSION_PATCH >= 7
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommGetUniqueId_fn, 50)
+ROCP_SDK_ENFORCE_ABI(::rcclApiFuncTable, ncclCommGrow_fn, 51)
+#endif
+
 #if RCCL_API_TRACE_VERSION_PATCH == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 37)
 #elif RCCL_API_TRACE_VERSION_PATCH == 1
@@ -117,6 +122,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 44)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 47)
 #elif RCCL_API_TRACE_VERSION_PATCH == 6
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 50)
+#elif RCCL_API_TRACE_VERSION_PATCH == 7
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 52)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::rcclApiFuncTable, 0)
 #endif

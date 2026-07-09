@@ -30,307 +30,7 @@ indirs = [
     "tests/workloads/vcopy/RDNA35_HALO",
 ]
 
-roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
-
 time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
-
-
-# =============================================================================
-# Roofline analyze tests
-# =============================================================================
-
-_, roofline_soc = common.gpu_soc()
-
-
-def test_analyze_generates_roofline_html(
-    binary_handler_analyze_rocprof_compute,
-):
-    """
-    Analyze generates roofline HTML from existing workload data.
-    Uses MI200 workload with roofline.csv.
-    """
-    if roofline_soc is None:
-        pytest.skip("No supported GPU detected")
-    if roofline_soc in ("MI100"):
-        pytest.skip("Roofline not supported on MI100")
-
-    workload_dir = common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP32",
-    ])
-    assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_roofline_multiple_datatypes(
-    binary_handler_analyze_rocprof_compute,
-):
-    """
-    Analyze with multiple data types.
-    Verifies each datatype can be requested independently.
-    """
-    if roofline_soc is None:
-        pytest.skip("No supported GPU detected")
-    if roofline_soc in ("MI100"):
-        pytest.skip("Roofline not supported on MI100")
-
-    workload_dir = common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    for dtype in ["FP32"]:
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--roofline-data-type",
-            dtype,
-        ])
-        assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_missing_roofline_csv_graceful(
-    binary_handler_analyze_rocprof_compute,
-):
-    """
-    Analyze without roofline.csv should not crash.
-    Uses a workload directory that has sysinfo.csv but no roofline.csv.
-    """
-    workload_dir = common.setup_workload_dir(roofline_dir)
-    roofline_csv = Path(workload_dir) / "roofline.csv"
-    if roofline_csv.exists():
-        roofline_csv.unlink()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-    ])
-    assert code == 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_roofline_idempotent(
-    binary_handler_analyze_rocprof_compute,
-):
-    """
-    Running analyze twice on the same profiling output should produce
-    consistent results without errors.
-    """
-    if roofline_soc is None:
-        pytest.skip("No supported GPU detected")
-    if roofline_soc in ("MI100"):
-        pytest.skip("Roofline not supported on MI100")
-
-    workload_dir = common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    analyze_args = [
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP32",
-    ]
-
-    code1 = binary_handler_analyze_rocprof_compute(analyze_args)
-    assert code1 == 0
-
-    code2 = binary_handler_analyze_rocprof_compute(analyze_args)
-    assert code2 == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_corrupted_roofline_csv_graceful(
-    binary_handler_analyze_rocprof_compute,
-):
-    """
-    Analyze with a corrupted roofline.csv should handle gracefully.
-    """
-    import tempfile
-
-    if os.path.exists(roofline_dir):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workload_dir = os.path.join(temp_dir, "corrupted_workload")
-            shutil.copytree(roofline_dir, workload_dir)
-
-            roofline_csv = Path(workload_dir) / "roofline.csv"
-            roofline_csv.write_text("this,is,bad,csv")
-
-            code = binary_handler_analyze_rocprof_compute([
-                "analyze",
-                "-b 4",
-                "--path",
-                workload_dir,
-            ])
-            assert code == 0
-
-
-def test_roof_invalid_data_type(binary_handler_analyze_rocprof_compute):
-    """Invalid --roofline-data-type should be caught by analyze argparser."""
-    workload_dir = common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "INVALID_TYPE",
-    ])
-    assert code != 0, "Invalid datatype should be rejected by argparser"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_roofline_ceiling_data_validation(binary_handler_analyze_rocprof_compute):
-    """Invalid --mem-level should be caught during analyze."""
-    workload_dir = common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        "INVALID_LEVEL",
-    ])
-    assert code >= 0
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-roofline_mem_level_dirs = {
-    "vL1D": "tests/workloads/mem_levels_vL1D/MI200",
-    "LDS": "tests/workloads/mem_levels_LDS/MI200",
-}
-
-
-@pytest.mark.parametrize(
-    "mem_level",
-    ["vL1D", "LDS"],
-    ids=["vL1D", "LDS"],
-)
-def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
-    """Analyze with --mem-level generates roofline HTML output."""
-    workload_src = roofline_mem_level_dirs[mem_level]
-    if not os.path.exists(workload_src):
-        pytest.skip(f"Workload directory {workload_src} not found")
-
-    workload_dir = common.setup_workload_dir(workload_src, param_id=mem_level)
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        mem_level,
-    ])
-    assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_roofline_missing_file_handling():
-    """cli_generate_plot with empty ai_data returns None."""
-
-    import pandas as pd
-
-    from roofline.roofline_main import Roofline
-    from utils.specs import generate_machine_specs
-
-    class MockArgs:
-        def __init__(self):
-            self.roof_only = True
-            self.mem_level = "ALL"
-            self.sort = "ALL"
-            self.roofline_data_type = ["FP32"]
-
-    args = MockArgs()
-    workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
-    sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
-    mspec = generate_machine_specs(args, sys_info_dict)
-
-    run_parameters = {
-        "workload_dir": workload_dir,
-        "device_id": 0,
-        "sort_type": "kernels",
-        "mem_level": "ALL",
-        "is_standalone": True,
-        "roofline_data_type": ["FP32"],
-    }
-
-    roofline_instance = Roofline(args, mspec, run_parameters)
-    result = roofline_instance.cli_generate_plot("FP32", ai_data={})
-    assert result is None
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_roofline_invalid_datatype_cli():
-    """cli_generate_plot with invalid datatype returns None."""
-
-    import pandas as pd
-
-    from roofline.roofline_main import Roofline
-    from utils.specs import generate_machine_specs
-
-    class MockArgs:
-        def __init__(self):
-            self.roof_only = True
-            self.mem_level = "ALL"
-            self.sort = "ALL"
-            self.roofline_data_type = ["FP32"]
-
-    args = MockArgs()
-
-    workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
-    sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
-    mspec = generate_machine_specs(args, sys_info_dict)
-
-    run_parameters = {
-        "workload_dir": workload_dir,
-        "device_id": 0,
-        "sort_type": "kernels",
-        "mem_level": "ALL",
-        "is_standalone": True,
-        "roofline_data_type": ["FP32"],
-    }
-
-    roofline_instance = Roofline(args, mspec, run_parameters)
-    result = roofline_instance.cli_generate_plot("INVALID_DATATYPE", ai_data={})
-    assert result is None
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -1272,10 +972,8 @@ def test_apply_filters_direct():
                     "vecMul",
                 ],
                 "Dispatch_ID": [0, 1, 2, 3],
-                "Node": ["node0", "node0", "node1", "node1"],
             })
 
-        filter_nodes = None
         filter_gpu_ids = None
         filter_kernel_ids = None
         filter_dispatch_ids = None
@@ -1295,12 +993,6 @@ def test_apply_filters_direct():
     workload.filter_dispatch_ids = ["0", "1"]
     result = apply_filters(workload, "/tmp", False, False)
     assert len(result) == 2
-
-    # Test node filter with list of strings
-    workload = MockWorkload()
-    workload.filter_nodes = ["node0", "node1"]
-    result = apply_filters(workload, "/tmp", False, False)
-    assert len(result) == 4
 
     # Test GPU filter with list of integers
     workload = MockWorkload()
@@ -1837,7 +1529,6 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="sum",
@@ -1887,7 +1578,6 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="sum",
@@ -1908,7 +1598,6 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
             sortby="kernel",
@@ -1922,16 +1611,14 @@ def test_create_df_kernel_top_stats_grouping_and_aggregation(
 @pytest.mark.misc
 def test_create_df_kernel_top_stats_filters():
     """Test GPU ID, dispatch ID (including '> n' syntax),
-    node filters, and empty input handling."""
+    and empty input handling."""
     import tempfile
 
     from utils.file_io import create_df_kernel_top_stats
 
-    # Create test data with Node column for node filtering
     raw_pmc_with_node = pd.DataFrame({
         "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
         "GPU_ID": [0, 0, 1, 0],
-        "Node": ["node0", "node0", "node1", "node0"],
         "Dispatch_ID": [1, 2, 3, 4],
         "Start_Timestamp": [1000, 2000, 3000, 4000],
         "End_Timestamp": [1500, 2800, 3400, 4200],
@@ -1944,7 +1631,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids="0",
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -1957,7 +1643,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=["> 2"],
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -1971,24 +1656,10 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=["1", "2"],
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
         assert len(dispatch_df) == 2
-
-        # Test node filter
-        kernel_top_df, dispatch_df = create_df_kernel_top_stats(
-            df_in=raw_pmc_with_node,
-            raw_data_dir=temp_dir,
-            filter_gpu_ids=None,
-            filter_dispatch_ids=None,
-            filter_nodes="node1",
-            time_unit="ns",
-            kernel_verbose=0,
-        )
-        assert len(dispatch_df) == 1
-        assert dispatch_df.iloc[0]["Kernel_Name"] == "kernel_a"
 
         # Test empty input handling
         empty_raw_pmc = pd.DataFrame({
@@ -2003,7 +1674,6 @@ def test_create_df_kernel_top_stats_filters():
             raw_data_dir=temp_dir,
             filter_gpu_ids=None,
             filter_dispatch_ids=None,
-            filter_nodes=None,
             time_unit="ns",
             kernel_verbose=0,
         )
@@ -2171,8 +1841,6 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     inst = cli_analysis.__new__(cli_analysis)
     args = Namespace(
         path=[[str(tmp_path)]],
-        nodes=None,
-        spatial_multiplexing=False,
         join_type="kernel",
         kokkos_trace=False,
     )

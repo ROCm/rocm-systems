@@ -352,6 +352,8 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& output = config["output"];
         resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
+        resolve_value(result, output, "unified_memory_output_path",
+                      env_vars::UNIFIED_MEMORY_OUTPUT_PATH);
         if(output.contains("time_output"))
             resolve_enabled(result, output["time_output"], "enabled",
                             env_vars::TIME_OUTPUT);
@@ -880,6 +882,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     export_domain_parallel(config, env_map);
 
     export_string_value(config, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_string_value(config, env_map, env_vars::UNIFIED_MEMORY_OUTPUT_PATH, "output",
+                        "unified_memory_output_path");
     export_enabled(config, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
     export_enabled(config, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
     export_enabled(config, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");

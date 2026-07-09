@@ -29,6 +29,15 @@
 #include <mutex>
 #include <condition_variable>
 
+/* Optional fields for ncclProfileProxyDiag (proxy-trace profiler plugin) */
+struct ncclProxyProfilerExtras {
+  int32_t funcIdx;
+  int32_t protocol;
+  int32_t pattern;
+  uint32_t totalBytes;
+  uint32_t chunkSize;
+};
+
 typedef enum : uint8_t {
   ncclPatternRing,
   ncclPatternRingTwice,
@@ -130,9 +139,8 @@ struct ncclProxyOp {
 
   // Used to track total real bytes of this op
   uint32_t totalBytes;
-  // Used to fetch/update the proxyOp in ProxyTrace map
-  facebook_rccl::ProxyTraceRecordKey traceKey;
-  facebook_rccl::ProxyTraceExtraInfo traceInfo;
+  uint64_t commHash;
+  struct ncclProxyProfilerExtras profExtras;
 };
 
 struct ncclProxySubArgs;
@@ -186,9 +194,8 @@ struct ncclProxySubArgs {
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
 
-  // Used to fetch/update the proxyOp in ProxyTrace map
-  facebook_rccl::ProxyTraceRecordKey traceKey;
-  facebook_rccl::ProxyTraceExtraInfo traceInfo;
+  uint64_t commHash;
+  struct ncclProxyProfilerExtras profExtras;
 };
 
 struct ncclProxyArgs {
@@ -403,9 +410,6 @@ struct ncclProxyState {
 
   // Queue of expected responses from the proxy
   struct ncclExpectedProxyResponse* expectedResponses;
-
-  // A handle to the proxy traces
-  facebook_rccl::ProxyTrace* proxyTrace;
 
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;

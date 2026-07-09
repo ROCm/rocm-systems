@@ -249,6 +249,28 @@ constexpr inline T align_up(T val, T alignment) {
   return (val + alignment - 1) & ~(alignment - 1);
 }
 
+/// @brief Divide @p numerator by @p divisor, rounding up.
+/// @details Asserts that @p divisor is non-zero; this is the strict,
+/// general-purpose form. Call sites that must tolerate a zero divisor from
+/// untrusted guest input should use ceil_div_or_one() instead.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div(T numerator, T divisor) {
+  assert(divisor != 0);
+  return numerator / divisor + (numerator % divisor != 0 ? T{1} : T{0});
+}
+
+/// @brief Divide @p numerator by @p divisor, rounding up, returning 1 when
+/// @p divisor is 0.
+/// @details Tolerant variant for paths that parse malformed guest input (e.g.
+/// a dispatch packet with a zero workgroup dimension): the emulator must not
+/// abort on bad guest data, so a zero divisor yields 1 rather than asserting.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline T ceil_div_or_one(T numerator, T divisor) {
+  return divisor == 0 ? T{1} : ceil_div(numerator, divisor);
+}
+
 /// @brief Return true when @p val is aligned to @p alignment.
 /// @param alignment Must be a power of 2.
 template <typename T>

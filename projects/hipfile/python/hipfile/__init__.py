@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
 """Python bindings for the hipFile GPU-accelerated file I/O library."""
 
 from hipfile._hipfile import (  # pylint: disable=E0401,E0611

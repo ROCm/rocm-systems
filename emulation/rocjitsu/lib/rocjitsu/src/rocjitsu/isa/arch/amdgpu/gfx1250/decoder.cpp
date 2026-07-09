@@ -15,20 +15,22 @@ namespace gfx1250 {
 
 namespace {
 
-bool isWmmaScaleF32F8f6f4Vop3px2(const MachineInst *opcode) {
-  const auto *low = reinterpret_cast<const Vop3pMachineInst *>(opcode);
-  if (low->encoding != 0xcc || low->op != 0x35)
+bool isVop3pOp(const MachineInst opcode, uint32_t op) {
+  return (opcode >> 24) == 0xcc && ((opcode >> 16) & 0xff) == op;
+}
+
+bool isWmmaScaleF32Vop3px2(const MachineInst *opcode) {
+  if (!isVop3pOp(opcode[0], 0x35) && !isVop3pOp(opcode[0], 0x3a))
     return false;
 
-  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(opcode + 2);
-  return high->encoding == 0xcc && high->op == 0x33;
+  return isVop3pOp(opcode[2], 0x33) || isVop3pOp(opcode[2], 0x88);
 }
 
 } // namespace
 
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
-  if (isWmmaScaleF32F8f6f4Vop3px2(opcode))
-    return std::make_unique<VWmmaScaleF3216x16x128F8f6f4Vop3px2>(opcode);
+  if (isWmmaScaleF32Vop3px2(opcode))
+    return std::make_unique<VWmmaScaleF32Vop3px2>(opcode);
   if (Vopd::is_vopd(opcode))
     return std::make_unique<Vopd>(opcode);
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);

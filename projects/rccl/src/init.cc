@@ -78,6 +78,9 @@
 #include "dda_all_reduce_ipc.h"
 #include "ipc_init.h"
 #include  <cpuid.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "kernel_config.h"
 
 #ifndef STR2
   #define STR2(v) #v
@@ -183,11 +186,11 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// Turn off cheap fence for gfx942/gfx950
-RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
+// RCCL_GFX9_CHEAP_FENCE_OFF: 0 = arch-tuned, non-zero = force cheap fence off (__threadfence_system)
+RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
 /**
- * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
+ * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
 RCCL_PARAM( InitChannels, "INIT_CHANNELS", -1) ;
 
@@ -290,15 +293,18 @@ static ncclResult_t ncclInit() {
       NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
       // Check BIOS string and hypervisor presence on ecx bit 31
       if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
-        FILE* file;
-        if ((file = fopen("/proc/cmdline", "r")) != NULL) {
-          if (feof(file) == 0 && ferror(file) == 0) {
-            int len = fread(strValue, 1, 2047, file);
-            strValue[len] = '\0';
+        char cmdline[2048] = {0};
+        const char* cmdlinePtr = NULL;
+        FILE* file = fopen("/proc/cmdline", "r");
+        if (file != NULL) {
+          size_t len = fread(cmdline, 1, sizeof(cmdline) - 1, file);
+          if (len > 0 && ferror(file) == 0) {
+            cmdline[len] = '\0';
+            cmdlinePtr = cmdline;
           }
           fclose(file);
         }
-        if (strstr(strValue, "iommu=pt") == NULL)
+        if (!ncclIommuPassthroughOk(cmdlinePtr))
           WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
       }
 #ifndef HIP_UNCACHED_MEMORY
@@ -455,8 +461,9 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
-    NCCLCHECK(ncclDevrFinalize(comm));
   }
+  // RCCL: !symmetricSupport comms still init devrState via the non-sym window-register path (dev_runtime.cc), so finalize unconditionally to free lsaRankList.
+  NCCLCHECK(ncclDevrFinalize(comm));
   NCCLCHECK(ncclRasCommFini(comm));
 
   /* in commReclaim, we have guaranteed only last rank which calls ncclCommDestroy() will
@@ -487,12 +494,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->connectSend);
   free(comm->connectRecv);
 
-  if (rcclParamEnableProxyTrace()) {
-    WARN("commFree() ProxyTrace:");
-    if (comm->proxyState && comm->proxyState->proxyTrace){
-      WARN("%s", comm->proxyState->proxyTrace->dump().c_str());
-    }
-  }
+  ncclProfilerProxyTraceDumpIfAny(comm->profilerContext);
 
   free(comm->peerInfo);
   if (comm->topo)
@@ -656,13 +658,13 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   ncclMemoryStackConstruct(&comm->memPermanent);
   ncclMemoryStackConstruct(&comm->memScoped);
   comm->destructorHead = nullptr;
-  
+
   comm->ddaIpcMemHandler = nullptr;
   comm->ddaIpcScratch = nullptr;
   comm->ddaIpcScratchBytes = 0;
   comm->ddaIpcPeerPtrsDev = nullptr;
   comm->ddaIpcBarrierState = nullptr;
-  
+
   comm->rank = rank;
   comm->nRanks = ndev;
   comm->pxnDisable = RCCL_VALUE_UNSET;
@@ -835,6 +837,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.abortFlag = comm->abortFlagDev;
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
+  tmpCommAndChans.comm.gfx9CheapFenceOff = comm->gfx9CheapFenceOff;
   for (int p=0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1578,11 +1581,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
      * GFX1151 (1 GPU/node): Uses Walecki + Greedy construction to generate 'nChannels'
      * edge-disjoint Hamiltonian rings. For N nodes, N/2 perfect rings are guaranteed;
      * additional channels are balanced via greedy heuristics to saturate Fat-Tree/Clos fabrics.
-     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels 
-     * is required during Preset. Therefore, nChannels cannot be auto-calculated 
+     * Note: nNodes is only known AFTER bootstrapAllGather (Postset), but nChannels
+     * is required during Preset. Therefore, nChannels cannot be auto-calculated
      * based on nNodes at this stage.
-     * Recommended: Set nChannels via environment variable (e.g., 6 channels for 
-     * optimal 4-node load balancing). Missing channel data is backfilled 
+     * Recommended: Set nChannels via environment variable (e.g., 6 channels for
+     * optimal 4-node load balancing). Missing channel data is backfilled
      * by repairMissingChannels() during Postset.
      * */
     int numChannels = rcclParamInitChannels() > 0 ? rcclParamInitChannels() : 6 /* 2 X (comm->nNodes - 1)  */;
@@ -1698,18 +1701,18 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4/ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS/2)
     allGather3Data[rank].nc = 1;
-  comm -> gfx9CheapFenceOff = 1;
+  comm->gfx9CheapFenceOff = 1;
   #ifdef HIP_UNCACHED_MEMORY
+  // cheap fence is only safe with cache bypassing load/store availability in kernel
+  // only enabled on gfx942, gfx950 and gfx1250
   if(!rcclParamGfx9CheapFenceOff()){
-    if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")){
-      comm -> gfx9CheapFenceOff = 0;
-    }
-    else if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
-      comm -> gfx9CheapFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
-    }
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250"))
+      comm->gfx9CheapFenceOff = 0;
   }
-  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm -> gfx9CheapFenceOff ? "OFF" : "ON");
   #endif
+  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm->gfx9CheapFenceOff ? "OFF" : "ON");
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
     comm->rcclUseOneSlice = nNodes == 1;
@@ -1732,7 +1735,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 #ifdef ENABLE_WARP_SPEED
-  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || (!parent && rcclCanUseWarpSpeedAuto(comm, nNodes)));
+  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || ((!parent || comm->isGrow) && rcclCanUseWarpSpeedAuto(comm, nNodes)));
 #endif
 
   // For single node communicators that do not uses the full xgmi links per gpu, i.e., nranks < 8
@@ -1753,7 +1756,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
-  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
+  // Default-enable LL128 on gfx1250 so NCCL_PROTO=LL128 is honored without
+  // also requiring RCCL_LL128_FORCE_ENABLE=1.
+  comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable()
+    || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
 
   if (comm->ncclNet && comm->ncclNet->devices) {
@@ -1899,7 +1905,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_GRAPH, "CPUs with mixed vendors were detected.");
     }
   }
-  
+
   // Now that we know nNodes, alloc nodeRanks and compute localRanks for each node
   NCCLCHECKGOTO(ncclCalloc(&comm->nodeRanks, comm->nNodes), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&comm->rankToLocalRank, comm->nRanks), ret, fail);
@@ -2540,10 +2546,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     } else if (rocshmemHeapSize > (size_t)(2147483648)) {
 	    rocshmemHeapSize = (size_t)(1024*1024*1024); //increase symmetric allocation size for heap size > 2GB
     }
-    
+
     comm->sourceRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
     comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
-    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
+    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize);
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
@@ -2599,7 +2605,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         // honor user input if user explicitly disables PAT
         const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
         bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
-        comm->forcePatEnable = !userDisabledPat;
+        comm->forcePatEnable = !userDisabledPat && !rcclUseAinic();
         NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
         comm->forcePatEnable = false;
         size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
@@ -3539,7 +3545,7 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
     rocshmem::rocshmem_free(comm->sourceRshmem);
-    rocshmem::rocshmem_free(comm->destRshmem);	 
+    rocshmem::rocshmem_free(comm->destRshmem);
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {
@@ -3854,7 +3860,7 @@ exit:
 }
 
 NCCL_API(ncclResult_t, ncclCommGetUniqueId, ncclComm_t comm, ncclUniqueId* uniqueId);
-ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) {
+ncclResult_t ncclCommGetUniqueId_impl(ncclComm_t comm, ncclUniqueId* uniqueId) {
   NCCLCHECK(CommCheck(comm, __func__, "comm"));
   NCCLCHECK(ncclCommEnsureReady(comm));
   NCCLCHECK(PtrCheck(uniqueId, "CommGetUniqueId", "uniqueId"));
@@ -3871,7 +3877,7 @@ ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId) {
 }
 
 NCCL_API(ncclResult_t, ncclCommGrow, ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
-ncclResult_t ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) {
+ncclResult_t ncclCommGrow_impl(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config) {
   NVTX3_RANGE(NcclNvtxParamsCommGrow)
 
   if (newcomm == NULL) return ncclInvalidArgument;

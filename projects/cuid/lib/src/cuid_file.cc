@@ -21,6 +21,7 @@
  */
 
 #include "src/cuid_file.h"
+#include "smbios_util.h"
 #include "src/cuid_cpu.h"
 #include "src/cuid_device.h"
 #include "src/cuid_gpu.h"
@@ -449,6 +450,8 @@ amdcuid_status_t CuidFile::load() {
 
         if (key == "primary_cuid") {
           current_entry.primary_cuid = string_to_cuid(value);
+        } else if (key == "is_temporary") {
+          current_entry.is_temporary = (value == "true");
         } else if (key == "derived_cuid") {
           current_entry.derived_cuid = string_to_cuid(value);
         } else if (key == "device_node") {
@@ -771,6 +774,16 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
     entry.last_update = now;
 
     amdcuid_status_t status;
+    // Check if the CUID is temporary
+    bool is_temporary = false;
+    status = device->is_temporary_cuid(&is_temporary);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      std::cerr
+          << "Warning: Failed to get temporary CUID status for device type "
+          << entry.device_type << " status: " << status << std::endl;
+    }
+    entry.is_temporary = is_temporary;
+
     if (is_privileged) {
       // Get primary CUID
       amdcuid_primary_id primary_id = {};
@@ -784,11 +797,10 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
       // get hardware fingerprint
       uint64_t fingerprint = 0;
       status = device->get_hardware_fingerprint(fingerprint);
-      if (status != AMDCUID_STATUS_SUCCESS) {
+      if (status != AMDCUID_STATUS_SUCCESS && !is_temporary) {
         std::cerr
             << "Warning: Failed to get hardware fingerprint for device type "
             << entry.device_type << " status: " << status << std::endl;
-        entry.hardware_fingerprint = 0;
       } else {
         entry.hardware_fingerprint = fingerprint;
       }
@@ -801,16 +813,6 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
                 << entry.device_type << " status: " << status << std::endl;
     }
     entry.derived_cuid = derived_id.UUIDv8_representation;
-
-    // Check if the CUID is temporary
-    bool is_temporary = false;
-    status = device->is_temporary_cuid(&is_temporary);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      std::cerr
-          << "Warning: Failed to get temporary CUID status for device type "
-          << entry.device_type << " status: " << status << std::endl;
-    }
-    entry.is_temporary = is_temporary;
 
     // Fill in device-specific information
     switch (entry.device_type) {
@@ -825,6 +827,13 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
         entry.unit_id = info.header.fields.gpu.unit_id;
         entry.device_node = info.render_node;
         entry.bdf = info.bdf;
+
+        // if temp CUID, make the fallback fingerprint based on the GPU's PCIe
+        // BDF
+        if (is_temporary) {
+          CuidUtilities::make_fallback_fingerprint(info.bdf,
+                                                   entry.hardware_fingerprint);
+        }
       }
       break;
     }
@@ -847,6 +856,12 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
         if (cpu->get_device_path(cpu_device_path) == AMDCUID_STATUS_SUCCESS) {
           entry.device_node = cpu_device_path;
         }
+        // if temp CUID, make the fallback fingerprint based on the CPU's
+        // package:core
+        if (is_temporary) {
+          CuidUtilities::make_fallback_fingerprint(entry.package_core_id,
+                                                   entry.hardware_fingerprint);
+        }
       }
       break;
     }
@@ -864,6 +879,13 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
           entry.mac_address = mac_address;
         }
         entry.bdf = info.bdf;
+
+        // if temp CUID, make the fallback fingerprint based on the NIC's PCIe
+        // BDF
+        if (is_temporary) {
+          CuidUtilities::make_fallback_fingerprint(info.bdf,
+                                                   entry.hardware_fingerprint);
+        }
       }
       break;
     }
@@ -877,6 +899,12 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
         entry.pci_class = info.header.fields.npu.pci_class;
         entry.device_node = info.accel_node;
         entry.bdf = info.bdf;
+        // if temp CUID, make the fallback fingerprint based on the NPU's PCIe
+        // BDF
+        if (is_temporary) {
+          CuidUtilities::make_fallback_fingerprint(info.bdf,
+                                                   entry.hardware_fingerprint);
+        }
       }
       break;
     }
@@ -886,6 +914,16 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
       if (platform) {
         const auto &info = platform->get_info();
         entry.vendor_id = info.header.fields.platform.vendor_id;
+
+        // if temp CUID, make the fallback fingerprint based on the platform
+        // product name
+        if (is_temporary) {
+          std::string name = "";
+          std::string family_dummy = "";
+          SmbiosUtil::get_product_info(name, family_dummy);
+          CuidUtilities::make_fallback_fingerprint(name,
+                                                   entry.hardware_fingerprint);
+        }
       }
       break;
     }
