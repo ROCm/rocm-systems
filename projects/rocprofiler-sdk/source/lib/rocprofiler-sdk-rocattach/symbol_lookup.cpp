@@ -36,6 +36,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -49,6 +50,10 @@ namespace rocattach
 {
 namespace
 {
+constexpr auto MAX_TARGET_ELF_SIZE      = uint64_t{512} * 1024 * 1024;
+constexpr auto MAX_DYNAMIC_SYMBOLS      = size_t{1} << 24;
+constexpr auto MAX_GNU_HASH_CHAIN_STEPS = size_t{1} << 24;
+
 struct memory_mapping
 {
     uintptr_t   start        = 0;
@@ -76,6 +81,27 @@ struct target_elf
     std::vector<uint8_t>    data          = {};
     std::vector<Elf64_Phdr> load_segments = {};
 };
+
+std::optional<uint64_t>
+checked_add(uint64_t lhs, uint64_t rhs)
+{
+    if(lhs > std::numeric_limits<uint64_t>::max() - rhs) return std::nullopt;
+    return lhs + rhs;
+}
+
+std::optional<uint64_t>
+checked_sub(uint64_t lhs, uint64_t rhs)
+{
+    if(lhs < rhs) return std::nullopt;
+    return lhs - rhs;
+}
+
+std::optional<uint64_t>
+checked_mul(uint64_t lhs, uint64_t rhs)
+{
+    if(lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) return std::nullopt;
+    return lhs * rhs;
+}
 
 uint64_t
 align_down(uint64_t value, uint64_t alignment)
@@ -141,6 +167,19 @@ library_name_matches(const memory_mapping& mapping, const std::string& library)
     auto map_base = basename(clean_path);
     auto lib_base = basename(library);
     return map_base == lib_base || map_base.rfind(fmt::format("{}.", lib_base), 0) == 0;
+}
+
+bool
+library_path_matches_exactly(const mapped_object& object, const std::string& library)
+{
+    if(library.find('/') == std::string::npos) return false;
+
+    auto clean_library = strip_deleted_suffix(library);
+    for(const auto& mapping : object.mappings)
+    {
+        if(strip_deleted_suffix(mapping.path) == clean_library) return true;
+    }
+    return false;
 }
 
 std::optional<memory_mapping>
@@ -249,6 +288,12 @@ read_file(const std::string& path)
     input.seekg(0, std::ios::end);
     auto size = input.tellg();
     if(size < 0) return std::nullopt;
+    if(static_cast<uint64_t>(size) > MAX_TARGET_ELF_SIZE)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Refusing to read unusually large target ELF "
+                   << path << " (" << size << " bytes)";
+        return std::nullopt;
+    }
     input.seekg(0, std::ios::beg);
 
     auto data = std::vector<uint8_t>(static_cast<size_t>(size));
@@ -329,9 +374,9 @@ parse_elf_headers(target_elf& elf)
         return false;
     }
 
-    if(ehdr->e_phnum == 0 || !has_range(elf.data.size(),
-                                        ehdr->e_phoff,
-                                        static_cast<uint64_t>(ehdr->e_phnum) * sizeof(Elf64_Phdr)))
+    auto phdr_table_size = checked_mul(ehdr->e_phnum, sizeof(Elf64_Phdr));
+    if(ehdr->e_phnum == 0 || !phdr_table_size ||
+       !has_range(elf.data.size(), ehdr->e_phoff, *phdr_table_size))
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid program header table in " << elf.path;
         return false;
@@ -358,8 +403,11 @@ parse_elf_headers(target_elf& elf)
 std::optional<uint64_t>
 calculate_load_bias(const target_elf& elf, const mapped_object& object)
 {
-    auto page_size = static_cast<uint64_t>(::sysconf(_SC_PAGESIZE));
-    if(page_size == 0) page_size = 4096;
+    auto page_size_value = ::sysconf(_SC_PAGESIZE);
+    auto page_size =
+        (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
+
+    auto load_bias = std::optional<uint64_t>{};
 
     for(const auto& mapping : object.mappings)
     {
@@ -369,11 +417,32 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
             auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
             if(mapping.file_offset != segment_file_page) continue;
 
-            auto load_bias = static_cast<uint64_t>(mapping.start) - segment_virtual_page;
-            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for "
-                       << object.path << " as 0x" << std::hex << load_bias << std::dec;
-            return load_bias;
+            auto candidate =
+                checked_sub(static_cast<uint64_t>(mapping.start), segment_virtual_page);
+            if(!candidate)
+            {
+                ROCP_ERROR << "[rocprofiler-sdk-rocattach] Invalid target mapping/segment pair for "
+                           << object.path << ": mapping start is below segment virtual page";
+                return std::nullopt;
+            }
+
+            if(load_bias && *load_bias != *candidate)
+            {
+                ROCP_ERROR << "[rocprofiler-sdk-rocattach] Inconsistent target load-bias "
+                              "candidates for "
+                           << object.path << ": 0x" << std::hex << *load_bias << " and 0x"
+                           << *candidate << std::dec;
+                return std::nullopt;
+            }
+            load_bias = candidate;
         }
+    }
+
+    if(load_bias)
+    {
+        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
+                   << " as 0x" << std::hex << *load_bias << std::dec;
+        return load_bias;
     }
 
     ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not match target mappings for " << object.path
@@ -390,7 +459,7 @@ vaddr_to_offset(const target_elf& elf, uint64_t vaddr, uint64_t size)
         if(vaddr < segment.p_vaddr) continue;
         auto delta = vaddr - segment.p_vaddr;
         if(delta > segment.p_filesz || size > segment.p_filesz - delta) continue;
-        return segment.p_offset + delta;
+        return checked_add(segment.p_offset, delta);
     }
     return std::nullopt;
 }
@@ -410,12 +479,11 @@ symbol_is_supported_function(const Elf64_Sym& sym)
 std::optional<Elf64_Sym>
 lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
 {
-    auto ehdr = read_as<Elf64_Ehdr>(elf.data, 0);
+    auto ehdr            = read_as<Elf64_Ehdr>(elf.data, 0);
+    auto shdr_table_size = ehdr ? checked_mul(ehdr->e_shnum, sizeof(Elf64_Shdr)) : std::nullopt;
     if(!ehdr || ehdr->e_shoff == 0 || ehdr->e_shnum == 0 ||
-       ehdr->e_shentsize != sizeof(Elf64_Shdr) ||
-       !has_range(elf.data.size(),
-                  ehdr->e_shoff,
-                  static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr)))
+       ehdr->e_shentsize != sizeof(Elf64_Shdr) || !shdr_table_size ||
+       !has_range(elf.data.size(), ehdr->e_shoff, *shdr_table_size))
     {
         return std::nullopt;
     }
@@ -438,14 +506,22 @@ lookup_symbol_from_sections(const target_elf& elf, std::string_view symbol_name)
         }
 
         auto symbol_count = shdr->sh_size / shdr->sh_entsize;
+        if(symbol_count > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
         for(size_t idx = 0; idx < symbol_count; ++idx)
         {
-            auto sym = read_as<Elf64_Sym>(elf.data, shdr->sh_offset + idx * shdr->sh_entsize);
+            auto sym_delta  = checked_mul(idx, shdr->sh_entsize);
+            auto sym_offset = sym_delta ? checked_add(shdr->sh_offset, *sym_delta) : std::nullopt;
+            if(!sym_offset) return std::nullopt;
+            auto sym = read_as<Elf64_Sym>(elf.data, *sym_offset);
             if(!sym || sym->st_name >= strtab->sh_size) continue;
             const auto* name =
                 reinterpret_cast<const char*>(elf.data.data() + strtab->sh_offset + sym->st_name);
             auto max_name_len = strtab->sh_size - sym->st_name;
-            if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name) return sym;
+            if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name &&
+               symbol_is_supported_function(*sym))
+            {
+                return sym;
+            }
         }
     }
 
@@ -458,8 +534,11 @@ symbol_count_from_sysv_hash(const target_elf& elf, uint64_t hash_vaddr)
     auto hash_offset = vaddr_to_offset(elf, hash_vaddr, 2 * sizeof(uint32_t));
     if(!hash_offset) return std::nullopt;
 
-    auto nchain = read_as<uint32_t>(elf.data, *hash_offset + sizeof(uint32_t));
+    auto nchain_offset = checked_add(*hash_offset, sizeof(uint32_t));
+    if(!nchain_offset) return std::nullopt;
+    auto nchain = read_as<uint32_t>(elf.data, *nchain_offset);
     if(!nchain) return std::nullopt;
+    if(*nchain > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
     return static_cast<size_t>(*nchain);
 }
 
@@ -469,15 +548,21 @@ symbol_count_from_gnu_hash(const target_elf& elf, uint64_t hash_vaddr)
     auto hash_offset = vaddr_to_offset(elf, hash_vaddr, 4 * sizeof(uint32_t));
     if(!hash_offset) return std::nullopt;
 
-    auto nbuckets  = read_as<uint32_t>(elf.data, *hash_offset);
-    auto symndx    = read_as<uint32_t>(elf.data, *hash_offset + sizeof(uint32_t));
-    auto maskwords = read_as<uint32_t>(elf.data, *hash_offset + 2 * sizeof(uint32_t));
+    auto nbuckets      = read_as<uint32_t>(elf.data, *hash_offset);
+    auto symndx_offset = checked_add(*hash_offset, sizeof(uint32_t));
+    auto mask_offset   = checked_add(*hash_offset, 2 * sizeof(uint32_t));
+    if(!symndx_offset || !mask_offset) return std::nullopt;
+    auto symndx    = read_as<uint32_t>(elf.data, *symndx_offset);
+    auto maskwords = read_as<uint32_t>(elf.data, *mask_offset);
     if(!nbuckets || !symndx || !maskwords) return std::nullopt;
 
+    auto bloom_size = checked_mul(*maskwords, sizeof(uint64_t));
+    auto bloom_base = checked_add(*hash_offset, 4 * sizeof(uint32_t));
     auto buckets_offset =
-        *hash_offset + 4 * sizeof(uint32_t) + static_cast<uint64_t>(*maskwords) * sizeof(uint64_t);
-    if(!has_range(
-           elf.data.size(), buckets_offset, static_cast<uint64_t>(*nbuckets) * sizeof(uint32_t)))
+        (bloom_base && bloom_size) ? checked_add(*bloom_base, *bloom_size) : std::nullopt;
+    auto buckets_size = checked_mul(*nbuckets, sizeof(uint32_t));
+    if(!buckets_offset || !buckets_size ||
+       !has_range(elf.data.size(), *buckets_offset, *buckets_size))
     {
         return std::nullopt;
     }
@@ -485,17 +570,27 @@ symbol_count_from_gnu_hash(const target_elf& elf, uint64_t hash_vaddr)
     auto max_bucket = uint32_t{0};
     for(uint32_t i = 0; i < *nbuckets; ++i)
     {
-        auto bucket = read_as<uint32_t>(elf.data, buckets_offset + i * sizeof(uint32_t));
+        auto bucket_delta = checked_mul(i, sizeof(uint32_t));
+        auto bucket_offset =
+            bucket_delta ? checked_add(*buckets_offset, *bucket_delta) : std::nullopt;
+        if(!bucket_offset) return std::nullopt;
+        auto bucket = read_as<uint32_t>(elf.data, *bucket_offset);
         if(bucket) max_bucket = std::max(max_bucket, *bucket);
     }
     if(max_bucket < *symndx) return *symndx;
 
-    auto chains_offset = buckets_offset + static_cast<uint64_t>(*nbuckets) * sizeof(uint32_t);
-    auto chain_index   = static_cast<uint64_t>(max_bucket - *symndx);
-    while(has_range(
-        elf.data.size(), chains_offset + chain_index * sizeof(uint32_t), sizeof(uint32_t)))
+    auto chains_offset = checked_add(*buckets_offset, *buckets_size);
+    if(!chains_offset) return std::nullopt;
+    auto chain_index = static_cast<uint64_t>(max_bucket - *symndx);
+    for(size_t steps = 0; steps < MAX_GNU_HASH_CHAIN_STEPS; ++steps)
     {
-        auto chain = read_as<uint32_t>(elf.data, chains_offset + chain_index * sizeof(uint32_t));
+        auto chain_delta  = checked_mul(chain_index, sizeof(uint32_t));
+        auto chain_offset = chain_delta ? checked_add(*chains_offset, *chain_delta) : std::nullopt;
+        if(!chain_offset || !has_range(elf.data.size(), *chain_offset, sizeof(uint32_t)))
+        {
+            return std::nullopt;
+        }
+        auto chain = read_as<uint32_t>(elf.data, *chain_offset);
         if(!chain) return std::nullopt;
         if((*chain & 1U) != 0) return static_cast<size_t>(*symndx + chain_index + 1);
         ++chain_index;
@@ -535,7 +630,11 @@ lookup_symbol_from_dynamic(const target_elf& elf, std::string_view symbol_name)
     auto entries = dynamic_segment->p_filesz / sizeof(Elf64_Dyn);
     for(size_t i = 0; i < entries; ++i)
     {
-        auto dyn = read_as<Elf64_Dyn>(elf.data, dynamic_segment->p_offset + i * sizeof(Elf64_Dyn));
+        auto dyn_delta = checked_mul(i, sizeof(Elf64_Dyn));
+        auto dyn_offset =
+            dyn_delta ? checked_add(dynamic_segment->p_offset, *dyn_delta) : std::nullopt;
+        if(!dyn_offset) return std::nullopt;
+        auto dyn = read_as<Elf64_Dyn>(elf.data, *dyn_offset);
         if(!dyn) return std::nullopt;
         if(dyn->d_tag == DT_NULL) break;
         if(dyn->d_tag == DT_SYMTAB) symtab_vaddr = dyn->d_un.d_ptr;
@@ -555,19 +654,29 @@ lookup_symbol_from_dynamic(const target_elf& elf, std::string_view symbol_name)
         symbol_count = symbol_count_from_gnu_hash(elf, *gnu_hash_vaddr);
     }
     if(!symbol_count) return std::nullopt;
+    if(*symbol_count > MAX_DYNAMIC_SYMBOLS) return std::nullopt;
 
-    auto symtab_offset = vaddr_to_offset(elf, *symtab_vaddr, *symbol_count * syment);
+    auto symtab_size = checked_mul(*symbol_count, syment);
+    if(!symtab_size) return std::nullopt;
+    auto symtab_offset = vaddr_to_offset(elf, *symtab_vaddr, *symtab_size);
     auto strtab_offset = vaddr_to_offset(elf, *strtab_vaddr, *strsz);
     if(!symtab_offset || !strtab_offset) return std::nullopt;
 
     for(size_t idx = 0; idx < *symbol_count; ++idx)
     {
-        auto sym = read_as<Elf64_Sym>(elf.data, *symtab_offset + idx * syment);
+        auto sym_delta  = checked_mul(idx, syment);
+        auto sym_offset = sym_delta ? checked_add(*symtab_offset, *sym_delta) : std::nullopt;
+        if(!sym_offset) return std::nullopt;
+        auto sym = read_as<Elf64_Sym>(elf.data, *sym_offset);
         if(!sym || sym->st_name >= *strsz) continue;
         const auto* name =
             reinterpret_cast<const char*>(elf.data.data() + *strtab_offset + sym->st_name);
         auto max_name_len = *strsz - sym->st_name;
-        if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name) return sym;
+        if(std::string_view{name, strnlen(name, max_name_len)} == symbol_name &&
+           symbol_is_supported_function(*sym))
+        {
+            return sym;
+        }
     }
 
     return std::nullopt;
@@ -615,10 +724,16 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
         return std::nullopt;
     }
 
-    auto address = *load_bias + sym->st_value;
-    if(!address_in_executable_mapping(object, address))
+    auto address = checked_add(*load_bias, sym->st_value);
+    if(!address)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Resolved address 0x" << std::hex << address
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Resolved address for " << symbol << " in "
+                   << elf->path << " overflowed";
+        return std::nullopt;
+    }
+    if(!address_in_executable_mapping(object, *address))
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Resolved address 0x" << std::hex << *address
                    << std::dec << " for " << symbol << " is not inside an executable mapping for "
                    << object.path;
         return std::nullopt;
@@ -627,7 +742,7 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
     ROCP_INFO << "[rocprofiler-sdk-rocattach] Resolved " << symbol << " in target pid " << pid
               << " from " << elf->path << " (mapped as " << object.path << ", dev "
               << object.device_major << ":" << object.device_minor << ", inode " << object.inode
-              << ") at 0x" << std::hex << address << std::dec;
+              << ") at 0x" << std::hex << *address << std::dec;
     return address;
 }
 }  // namespace
@@ -635,7 +750,33 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
 bool
 find_library(void*& addr, int inpid, const std::string& library)
 {
-    for(const auto& object : find_mapped_objects(inpid, library))
+    auto objects = find_mapped_objects(inpid, library);
+    if(library.find('/') != std::string::npos)
+    {
+        objects.erase(std::remove_if(objects.begin(),
+                                     objects.end(),
+                                     [&](const auto& object) {
+                                         return !library_path_matches_exactly(object, library);
+                                     }),
+                      objects.end());
+    }
+
+    if(objects.size() > 1)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Found multiple mapped target libraries matching "
+                   << library << " in /proc/" << inpid
+                   << "/maps; refusing to choose one implicitly";
+        for(const auto& object : objects)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Candidate mapped object: " << object.path
+                       << " dev " << object.device_major << ":" << object.device_minor << " inode "
+                       << object.inode << " load address 0x" << std::hex
+                       << object.mappings.front().start << std::dec;
+        }
+        return false;
+    }
+
+    for(const auto& object : objects)
     {
         for(const auto& mapping : object.mappings)
         {
@@ -657,10 +798,33 @@ find_symbol(int target_pid, void*& addr, const std::string& library, const std::
     addr = nullptr;
 
     auto objects = find_mapped_objects(target_pid, library);
+    if(library.find('/') != std::string::npos)
+    {
+        objects.erase(std::remove_if(objects.begin(),
+                                     objects.end(),
+                                     [&](const auto& object) {
+                                         return !library_path_matches_exactly(object, library);
+                                     }),
+                      objects.end());
+    }
     if(objects.empty())
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find mapped target library " << library
                    << " in /proc/" << target_pid << "/maps";
+        return false;
+    }
+    if(objects.size() > 1)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Found multiple mapped target libraries matching "
+                   << library << " in /proc/" << target_pid
+                   << "/maps; refusing to choose one implicitly";
+        for(const auto& object : objects)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Candidate mapped object: " << object.path
+                       << " dev " << object.device_major << ":" << object.device_minor << " inode "
+                       << object.inode << " load address 0x" << std::hex
+                       << object.mappings.front().start << std::dec;
+        }
         return false;
     }
 
