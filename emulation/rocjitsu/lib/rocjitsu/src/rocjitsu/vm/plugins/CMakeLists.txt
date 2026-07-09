@@ -25,7 +25,16 @@ rj_add_object_library(
     plugin_loader.cpp
     plugin_config_resolver.cpp
 )
-target_link_libraries(rocjitsu_plugin_loader PRIVATE flatbuffers)
+# plugin_loader.cpp resolves plugins with dlopen/dlsym/dlclose/dlerror (via
+# util/dynamic_loader.h). On glibc < 2.34 those symbols live in a separate
+# libdl, so every target that links this object library must link it too;
+# PUBLIC propagates the dependency to all consumers. ${CMAKE_DL_LIBS} is `dl`
+# there and empty on newer glibc (where dl* moved into libc), so it is portable.
+target_link_libraries(
+    rocjitsu_plugin_loader
+    PRIVATE flatbuffers
+    PUBLIC ${CMAKE_DL_LIBS}
+)
 
 # Runtime plugin shared objects are only meaningful on Linux (the interposer
 # platform). Each plugin is a `librocjitsu_plugin_<name>.so` that carries only
