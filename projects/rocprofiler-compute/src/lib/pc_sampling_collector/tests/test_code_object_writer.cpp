@@ -11,6 +11,18 @@ TEST_F(test_code_object_writer_t, ProvidedNoData_ReturnsMinimalJson)
     EXPECT_TRUE(nlohmann::json::accept(result));
 }
 
+TEST_F(test_code_object_writer_t, ProvidedNoCodeObjects_IsEmpty)
+{
+    EXPECT_TRUE(m_writer.empty());
+}
+
+TEST_F(test_code_object_writer_t, ProvidedCodeObject_IsNotEmpty)
+{
+    m_writer.start_code_obj(0);
+    m_writer.end_code_obj();
+    EXPECT_FALSE(m_writer.empty());
+}
+
 TEST_F(test_code_object_writer_t, ProvidedStartCodeObjWithoutEnd_Throws)
 {
     m_writer.start_code_obj(0);

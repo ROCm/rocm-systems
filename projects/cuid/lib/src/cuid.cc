@@ -475,6 +475,9 @@ amdcuid_status_t amdcuid_refresh() {
 amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
                                                amdcuid_query_t query,
                                                void *data, uint32_t *length) {
+  if (!length) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
   auto device = mgr.lookup_by_handle(handle);
   if (!device) {
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
@@ -490,8 +493,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
     }
     amdcuid_primary_id id = {};
     status = device->get_primary_cuid(id);
-    if (data != nullptr)
-      *(amdcuid_id_t *)data = id.UUIDv8_representation;
+    if (data != nullptr) {
+      std::memcpy(data, &id.UUIDv8_representation, sizeof(amdcuid_id_t));
+    }
     *length = sizeof(amdcuid_id_t);
   } break;
   case AMDCUID_QUERY_DERIVED_CUID: {
@@ -506,8 +510,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       // if not elevated, only get existing derived cuid
       status = device->get_derived_cuid(sec_id);
     }
-    if (data != nullptr)
-      *(amdcuid_id_t *)data = sec_id.UUIDv8_representation;
+    if (data != nullptr) {
+      std::memcpy(data, &sec_id.UUIDv8_representation, sizeof(amdcuid_id_t));
+    }
     *length = sizeof(amdcuid_id_t);
   } break;
   case AMDCUID_QUERY_HARDWARE_FINGERPRINT: {
@@ -518,10 +523,8 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
+      std::memset(data, 0, sizeof(uint64_t));
       status = device->get_hardware_fingerprint(*(uint64_t *)data);
-    } else {
-      uint64_t dummy;
-      status = device->get_hardware_fingerprint(dummy);
     }
     *length = sizeof(uint64_t);
   } break;
@@ -537,16 +540,19 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       *length = required_length;
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
-    if (data != nullptr)
+    if (data != nullptr) {
       std::memcpy(data, path.c_str(), required_length);
+    }
     *length = required_length;
   } break;
   case AMDCUID_QUERY_DEVICE_TYPE: {
     if (*length < sizeof(amdcuid_device_type_t)) {
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
-    if (data != nullptr)
-      *(amdcuid_device_type_t *)data = device->type();
+    if (data != nullptr) {
+      amdcuid_device_type_t device_type = device->type();
+      std::memcpy(data, &device_type, sizeof(amdcuid_device_type_t));
+    }
     *length = sizeof(amdcuid_device_type_t);
     status = AMDCUID_STATUS_SUCCESS;
   } break;
@@ -555,10 +561,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_vendor_id(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_vendor_id(dummy);
+      uint16_t vendor_id = 0;
+      status = device->get_vendor_id(vendor_id);
+      std::memcpy(data, &vendor_id, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -567,10 +572,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_device_id(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_device_id(dummy);
+      uint16_t device_id = 0;
+      status = device->get_device_id(device_id);
+      std::memcpy(data, &device_id, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -579,10 +583,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_revision_id(*(uint8_t *)data);
-    } else {
-      uint8_t dummy;
-      status = device->get_revision_id(dummy);
+      uint8_t revision_id = 0;
+      status = device->get_revision_id(revision_id);
+      std::memcpy(data, &revision_id, sizeof(uint8_t));
     }
     *length = sizeof(uint8_t);
   } break;
@@ -591,10 +594,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_unit_id(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_unit_id(dummy);
+      uint16_t unit_id = 0;
+      status = device->get_unit_id(unit_id);
+      std::memcpy(data, &unit_id, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -604,10 +606,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_family(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_family(dummy);
+      uint16_t family = 0;
+      status = device->get_family(family);
+      std::memcpy(data, &family, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -617,10 +618,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_model(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_model(dummy);
+      uint16_t model = 0;
+      status = device->get_model(model);
+      std::memcpy(data, &model, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -630,10 +630,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_core(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_core(dummy);
+      uint16_t core = 0;
+      status = device->get_core(core);
+      std::memcpy(data, &core, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -643,10 +642,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_physical_id(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_physical_id(dummy);
+      uint16_t physical_id = 0;
+      status = device->get_physical_id(physical_id);
+      std::memcpy(data, &physical_id, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -656,10 +654,9 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
     if (data != nullptr) {
-      status = device->get_pci_class(*(uint16_t *)data);
-    } else {
-      uint16_t dummy;
-      status = device->get_pci_class(dummy);
+      uint16_t pci_class = 0;
+      status = device->get_pci_class(pci_class);
+      std::memcpy(data, &pci_class, sizeof(uint16_t));
     }
     *length = sizeof(uint16_t);
   } break;
@@ -676,29 +673,28 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       *length = required_length;
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
-    if (data != nullptr)
+    if (data != nullptr) {
       std::memcpy(data, bdf.c_str(), required_length);
+    }
     *length = required_length;
   } break;
   case AMDCUID_QUERY_TEMPORARY_CUID: {
     if (*length < sizeof(bool)) {
       return AMDCUID_STATUS_INSUFFICIENT_SIZE;
     }
-    bool is_temporary = false;
-    status = device->is_temporary_cuid(&is_temporary);
-    if (data != nullptr)
+    if (data != nullptr) {
+      bool is_temporary = false;
+      status = device->is_temporary_cuid(&is_temporary);
       *(bool *)data = is_temporary;
+    }
     *length = sizeof(bool);
   } break;
   default:
     status = AMDCUID_STATUS_INVALID_ARGUMENT;
     break;
   }
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
 
-  return AMDCUID_STATUS_SUCCESS;
+  return status;
 }
 
 amdcuid_status_t amdcuid_set_hash_key(const uint8_t key[32]) {

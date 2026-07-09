@@ -1,6 +1,6 @@
 # Memory Bandwidth Analysis Test Suite
 
-HIP workloads targeting MI350 (gfx950) L1 and L2 cache/memory metrics for validation with `rocprof-compute --membw-analysis --experimental`.
+HIP workloads targeting MI350 (gfx950) L1 and L2 cache/memory metrics for validation with `rocprof-compute --experimental --membw-analysis`.
 
 ## L1 Workloads (tables 3001-3003)
 
@@ -64,42 +64,45 @@ done
 ## Profiling
 
 ```bash
+# Note: --no-roof is optional and skips the
+# benchmarking that is unrelated to the our purpose
+
 # Profile baseline
-rocprof-compute profile -n <name>_baseline --membw-analysis --experimental --no-roof -- ./<workload>
+rocprof-compute profile -n <name>_baseline --experimental --membw-analysis --no-roof -- ./<workload>
 
 # Profile optimized
-rocprof-compute profile -n <name>_optimized --membw-analysis --experimental --no-roof -- ./<workload> opt
+rocprof-compute profile -n <name>_optimized --experimental --membw-analysis --no-roof -- ./<workload> opt
 ```
 
 ### Examples
 
 ```bash
 # HBM read stress
-rocprof-compute profile -n hbm_read_baseline --membw-analysis --experimental --no-roof -- ./l2_hbm_read_bw_stress
-rocprof-compute profile -n hbm_read_optimized --membw-analysis --experimental --no-roof -- ./l2_hbm_read_bw_stress opt
+rocprof-compute profile -n hbm_read_baseline --experimental --membw-analysis --no-roof -- ./l2_hbm_read_bw_stress
+rocprof-compute profile -n hbm_read_optimized --experimental --membw-analysis --no-roof -- ./l2_hbm_read_bw_stress opt
 
 # Cache thrash
-rocprof-compute profile -n thrash_baseline --membw-analysis --experimental --no-roof -- ./l2_cache_thrash
-rocprof-compute profile -n thrash_optimized --membw-analysis --experimental --no-roof -- ./l2_cache_thrash opt
+rocprof-compute profile -n thrash_baseline --experimental --membw-analysis --no-roof -- ./l2_cache_thrash
+rocprof-compute profile -n thrash_optimized --experimental --membw-analysis --no-roof -- ./l2_cache_thrash opt
 
 # Coherence (fine-grained mode)
-rocprof-compute profile -n coherence_fg --membw-analysis --experimental --no-roof -- ./l2_coherence_traffic
-rocprof-compute profile -n coherence_nc --membw-analysis --experimental --no-roof -- ./l2_coherence_traffic nc
-rocprof-compute profile -n coherence_opt --membw-analysis --experimental --no-roof -- ./l2_coherence_traffic opt
+rocprof-compute profile -n coherence_fg --experimental --membw-analysis --no-roof -- ./l2_coherence_traffic
+rocprof-compute profile -n coherence_nc --experimental --membw-analysis --no-roof -- ./l2_coherence_traffic nc
+rocprof-compute profile -n coherence_opt --experimental --membw-analysis --no-roof -- ./l2_coherence_traffic opt
 
 # IO stress (host-pinned vs device-local)
-rocprof-compute profile -n io_baseline --membw-analysis --experimental --no-roof -- ./l2_io_stress
-rocprof-compute profile -n io_optimized --membw-analysis --experimental --no-roof -- ./l2_io_stress opt
+rocprof-compute profile -n io_baseline --experimental --membw-analysis --no-roof -- ./l2_io_stress
+rocprof-compute profile -n io_optimized --experimental --membw-analysis --no-roof -- ./l2_io_stress opt
 
 # Multi-GPU (requires 2 GPUs)
-rocprof-compute profile -n fabric_read --membw-analysis --experimental --no-roof -- ./l2_multigpu_fabric read
-rocprof-compute profile -n fabric_write --membw-analysis --experimental --no-roof -- ./l2_multigpu_fabric write
+rocprof-compute profile -n fabric_read --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric read
+rocprof-compute profile -n fabric_write --experimental --membw-analysis --no-roof -- ./l2_multigpu_fabric write
 ```
 
 ## Analyzing
 
 ```bash
-rocprof-compute analyze -p <path to profiled result> --membw-analysis --experimental
+rocprof-compute analyze -p <path to profiled result> --experimental --membw-analysis
 ```
 
 ## Hardware Requirements

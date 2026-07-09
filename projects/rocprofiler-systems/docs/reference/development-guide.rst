@@ -49,10 +49,9 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``rocprof-sys-instrument <options> -- <command> <command-args>``
-* Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or
-  attach to process
-* Either opens the instrumentation target (for binary rewrite), launches the target and stops it
-  before it starts executing ``main``, or attaches to a running executable and pauses it
+* Allows the user to provide options specifying whether to perform runtime instrumentation, or use binary rewrite
+* Either opens the instrumentation target (for binary rewrite), or launches the target and stops it
+  before it starts executing ``main``
 * Finds all functions in the targets
 * Finds ``librocprof-sys-dl`` and locates the functions
 * Iterates over and instruments all the functions, provided they satisfy the
@@ -64,8 +63,8 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
   but it diverges after instrumentation is complete:
 
   * For a binary rewrite: it produces a new instrumented binary and exits
-  * For runtime instrumentation or attaching to a process: it instructs the application
-    to resume and then waits for it to exit
+  * For runtime instrumentation: it instructs the application to resume and
+    then waits for it to exit
 
 Libraries
 ========================================

@@ -2180,13 +2180,6 @@ get_mode()
 }
 
 bool&
-is_attached()
-{
-    static bool _v = false;
-    return _v;
-}
-
-bool&
 is_binary_rewrite()
 {
     static bool _v = false;

@@ -15,7 +15,6 @@ from utils import schema, utils_analysis
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
-    console_error,
     console_log,
     console_warning,
     demarcate,
@@ -71,7 +70,6 @@ def create_df_kernel_top_stats(
     raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
-    filter_nodes: Optional[str],
     time_unit: str,
     kernel_verbose: int,
     sortby: str = "sum",
@@ -87,11 +85,6 @@ def create_df_kernel_top_stats(
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
-
-    if filter_nodes:
-        df = df.loc[
-            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
-        ]
 
     if filter_gpu_ids:
         df = df.loc[
@@ -116,8 +109,6 @@ def create_df_kernel_top_stats(
     dispatch_columns = ["Kernel_Name", "GPU_ID"]
     if "Dispatch_ID" in df.columns:
         dispatch_columns.insert(0, "Dispatch_ID")
-    if "Node" in df.columns:
-        dispatch_columns.insert(0, "Node")
 
     dispatch_info = df[dispatch_columns]
     dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
@@ -295,9 +286,7 @@ def process_pc_sampling_kernel_trace(
 
 @demarcate
 def create_df_pmc(
-    raw_data_root_dir: str,
-    nodes: Optional[list[str]],
-    spatial_multiplexing: bool,
+    raw_data_dir: str,
     kernel_verbose: int,
     verbose: int,
     config_dict: dict[str, Any],
@@ -305,73 +294,23 @@ def create_df_pmc(
     """
     Load all raw pmc counters and join into one df.
     """
+    pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    if not pmc_perf_path.is_file():
+        return pd.DataFrame()
 
-    def create_single_df_pmc(
-        raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
-    ) -> pd.DataFrame:
-        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-        if not pmc_perf_path.is_file():
-            return pd.DataFrame()
+    df = pd.read_csv(pmc_perf_path)
 
-        df = pd.read_csv(pmc_perf_path)
+    if config_dict.get("format_rocprof_output") == "rocpd":
+        df = utils_analysis.process_rocpd_csv(df)
 
-        if config_dict.get("format_rocprof_output") == "rocpd":
-            df = utils_analysis.process_rocpd_csv(df)
+    # Demangle original KernelNames
+    # Skip for Standalone Roofline with -1 to keep full kernel names
+    if kernel_verbose >= 0:
+        kernel_name_shortener(df, kernel_verbose)
 
-        # Demangle original KernelNames
-        # Skip for Standalone Roofline with -1 to keep full kernel names
-        if kernel_verbose >= 0:
-            kernel_name_shortener(df, kernel_verbose)
-
-        if node_name is not None:
-            df.insert(0, "Node", node_name)
-
-        if verbose >= 2:
-            console_debug(f"pmc_raw_data final_single_df {df.info}")
-        return df
-
-    root_path = Path(raw_data_root_dir)
-
-    # 1. spatial multiplexing case
-    if spatial_multiplexing:
-        dfs: list[pd.DataFrame] = []
-
-        for subdir in root_path.iterdir():
-            if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
-                )
-                if not new_df.empty:
-                    dfs.append(new_df)
-        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
-    # 2. regular single node case (nodes=None)
-    if nodes is None:
-        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
-
-    # 3. all nodes case (nodes=[])
-    if not nodes:
-        dfs: list[pd.DataFrame] = []
-
-        for subdir in root_path.iterdir():
-            if subdir.is_dir():
-                new_df = create_single_df_pmc(
-                    str(subdir), str(subdir.name), kernel_verbose, verbose
-                )
-                if not new_df.empty:
-                    dfs.append(new_df)
-        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-
-    # 4. specified node list case (nodes=[...])
-    dfs: list[pd.DataFrame] = []
-
-    for node in nodes:
-        node_path = root_path / node
-        if node_path.exists():
-            new_df = create_single_df_pmc(str(node_path), node, kernel_verbose, verbose)
-            if not new_df.empty:
-                dfs.append(new_df)
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    if verbose >= 2:
+        console_debug(f"pmc_raw_data final_single_df {df.info}")
+    return df
 
 
 def collect_wave_occu_per_cu(in_dir: str, out_dir: str, num_se: int) -> None:
@@ -435,30 +374,3 @@ def is_single_panel_config(
         console_warning(
             "Found multiple panel config sets but incomplete for all archs."
         )
-
-
-def find_1st_sub_dir(directory: str) -> Optional[str]:
-    """
-    Find the first sub dir in a directory
-    """
-    dir_path = Path(directory)
-    try:
-        # Iterate over entries in the directory
-        for entry in dir_path.iterdir():
-            if entry.is_dir():  # Check if it's a directory
-                return str(entry)
-        return None
-    except FileNotFoundError:
-        console_error(f'The directory "{directory}" does not exist.', exit=False)
-
-
-def get_valid_nodes(directory: str) -> list[str]:
-    """Return subdirectory names that contain sysinfo.csv"""
-    dir_path = Path(directory)
-    if not dir_path.is_dir():
-        return []
-    return [
-        entry.name
-        for entry in dir_path.iterdir()
-        if entry.is_dir() and (entry / "sysinfo.csv").exists()
-    ]

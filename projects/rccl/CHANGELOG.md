@@ -67,7 +67,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 * Added CAST network transport (`ncclNetCast` / `net_ib_cast`) for AMD AINIC hardware.
 * Added built-in CSV tuner for runtime algorithm/protocol/channel selection without rebuilds.
-* Added multi-node hierarchical AllGather algorithm.
+* Added multi-node hierarchical AllGather algorithm for MI350. Hierarchical AllGather is enabled by default for 8 or more nodes. The message size threshold is 64MB on 8 nodes and 128MB for more than 8 nodes. Set `RCCL_HIERARCHICAL_ALLGATHER=0` to disable.
 * Initial support for symmetric memory kernels on gfx942 and gfx950.
 * Added `RCCL_IB_SPLIT_DATA_THRESHOLD` to split payload across multiple QPs/NICs in `ncclIbMultiSend`.
 * Round-robin single-QP payload and fifo-head-based QP selection in `ncclIbMultiSend`.

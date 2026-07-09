@@ -899,7 +899,8 @@ inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
     __half2_raw h2r;
     vec_fp162 fp16;
   } u{static_cast<__half2_raw>(value)};
-  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16))
+    u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
   return static_cast<__half2>(u.h2r);
 #else
   static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
