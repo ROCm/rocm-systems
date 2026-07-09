@@ -15,6 +15,14 @@ functions.
 
 # Plugin architecture
 
+## RCCL proxy-trace plugin (`plugins/profiler/proxytrace`)
+
+The historical **ProxyTrace** implementation (FIFO-style proxy counters and `ncclCommDump` text)
+is shipped as **`librccl-profiler-proxytrace.so`**, a **profiler v6** plugin (`ncclProfiler_v6`; RCCL extends
+`ncclProfilerEventDescr_v6_t` for proxy trace). RCCL core records a
+single hot path via `ncclProfileProxyDiag` and `ncclProfilerProxyDiagUpdate`. See
+`plugins/profiler/proxytrace/README.md` for build and `RCCL_ENABLE_PROXY_TRACE` auto-load behavior.
+
 ## Plugin name and supporting multiple profiler plugins
 
 When NCCL is initialized, it will look for a `librccl-profiler.so` library and dynamically load

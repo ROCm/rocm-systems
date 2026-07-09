@@ -23,6 +23,7 @@
 #include "include/amd_cuid.h"
 #include "src/cuid_util.h"
 #include "src/pci_util.h"
+#include "src/smbios_util.h"
 #include <cstring>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -34,13 +35,14 @@
 
 // Helper: strip UUIDv8 overhead from a primary CUID to recover the 122 raw data
 // bits. Raw bit layout (after stripping):
-//   [0..7]  serial number (uint64_t, little-endian)
-//   [8]     unit_id lower 8 bits
-//   [9]     revision_id (uint8_t)
-//   [10..11] device_id (uint16_t, little-endian)
-//   [12..13] vendor_id (uint16_t, little-endian)
-//   [14]    (unit_id upper 6 bits << 2) | (device_type upper 2 bits)
-//   [15]    (device_type lower 2 bits << 6) | padding
+//   [0..7]   serial number (uint64_t, little-endian)
+//   [8]      unit_id lower 8 bits (raw bits 64:71)
+//   [9]      revision_id (uint8_t) (raw bits 72:79)
+//   [10..11] device_id (uint16_t, little-endian) (raw bits 80:95)
+//   [12..13] vendor_id (uint16_t, little-endian) (raw bits 96:111)
+//   [14]     bits[4:0]=unit_id upper 5 bits | bit[5]=aux_indicator |
+//   bits[7:6]=device_type[1:0] [15]     bits[7:6]=device_type[3:2] |
+//   bits[5:0]=padding
 static void extract_primary_raw_bits(const amdcuid_id_t &uuid,
                                      uint8_t raw_bits[16]) {
   amdcuid_id_t mutable_uuid = uuid;
@@ -70,8 +72,62 @@ void test_cuid_reverse_serial_number() {
     status = amdcuid_query_device_property(handles[i],
                                            AMDCUID_QUERY_HARDWARE_FINGERPRINT,
                                            &serial_number, &length);
-    EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
-    EXPECT_NE(serial_number, 0); // Assuming valid serial numbers are non-zero
+    if (status == AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) {
+      // expect temporary fingerprint and create fallback fingerprint to check
+      // against primary CUID
+      bool is_temporary = false;
+      length = sizeof(is_temporary);
+      status = amdcuid_query_device_property(
+          handles[i], AMDCUID_QUERY_TEMPORARY_CUID, &is_temporary, &length);
+      EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+      EXPECT_TRUE(is_temporary);
+
+      amdcuid_device_type_t device_type;
+      length = sizeof(device_type);
+      status = amdcuid_query_device_property(
+          handles[i], AMDCUID_QUERY_DEVICE_TYPE, &device_type, &length);
+
+      switch (device_type) {
+      case AMDCUID_DEVICE_TYPE_PLATFORM: {
+        std::string name = "";
+        std::string family_dummy = "";
+        status = SmbiosUtil::get_product_info(name, family_dummy);
+        EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+        CuidUtilities::make_fallback_fingerprint(name, serial_number);
+      } break;
+      case AMDCUID_DEVICE_TYPE_CPU: {
+        uint16_t physical_id = 0;
+        uint16_t core_id = 0;
+        length = sizeof(physical_id);
+        status = amdcuid_query_device_property(
+            handles[i], AMDCUID_QUERY_PHYSICAL_ID, &physical_id, &length);
+        EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+        length = sizeof(core_id);
+        status = amdcuid_query_device_property(
+            handles[i], AMDCUID_QUERY_CORE_ID, &core_id, &length);
+        EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+        std::string physical_core_id =
+            std::to_string(physical_id) + ":" + std::to_string(core_id);
+        CuidUtilities::make_fallback_fingerprint(physical_core_id,
+                                                 serial_number);
+      } break;
+      case AMDCUID_DEVICE_TYPE_GPU:
+      case AMDCUID_DEVICE_TYPE_NIC:
+      case AMDCUID_DEVICE_TYPE_NPU: {
+        char bdf[32] = {0};
+        length = sizeof(bdf);
+        status = amdcuid_query_device_property(handles[i], AMDCUID_QUERY_BDF,
+                                               bdf, &length);
+        EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+        CuidUtilities::make_fallback_fingerprint(bdf, serial_number);
+      } break;
+      default:
+        FAIL() << "Unsupported device type for fallback fingerprint";
+      }
+    } else {
+      EXPECT_EQ(status, AMDCUID_STATUS_SUCCESS);
+      EXPECT_NE(serial_number, 0); // Assuming valid serial numbers are non-zero
+    }
 
     // get the primary CUID to reverse it
     amdcuid_id_t primary_id = {};
@@ -233,12 +289,12 @@ void test_cuid_reverse_unit_id() {
 
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
-    // unit_id is 14 bits split across two bytes:
-    //   lower 8 bits: raw_bits[8]
-    //   upper 6 bits: bits [7:2] of raw_bits[14]
+    // unit_id is 13 bits split across two bytes:
+    //   lower 8 bits: raw_bits[8] (raw bits 64:71)
+    //   upper 5 bits: bits [4:0] of raw_bits[14] (raw bits 112:116)
     uint16_t extracted_unit_id =
         static_cast<uint16_t>(raw_bits[8]) |
-        (static_cast<uint16_t>((raw_bits[14] >> 2) & 0x3F) << 8);
+        (static_cast<uint16_t>(raw_bits[14] & 0x1F) << 8);
 
     uint16_t queried_unit_id = 0;
     length = sizeof(queried_unit_id);
@@ -278,10 +334,11 @@ void test_cuid_reverse_device_type() {
     uint8_t raw_bits[16] = {0};
     extract_primary_raw_bits(primary_id, raw_bits);
     // device_type is 4 bits split across two bytes:
-    //   upper 2 bits: bits [1:0] of raw_bits[14]
-    //   lower 2 bits: bits [7:6] of raw_bits[15]
-    uint8_t extracted_type = static_cast<uint8_t>(((raw_bits[14] & 0x3) << 2) |
-                                                  ((raw_bits[15] >> 6) & 0x3));
+    //   bits [1:0] of device_type (MSB pair): bits [7:6] of raw_bits[14] (raw
+    //   bits 119:118) bits [3:2] of device_type (LSB pair): bits [7:6] of
+    //   raw_bits[15] (raw bits 121:120)
+    uint8_t extracted_type = static_cast<uint8_t>(((raw_bits[14] >> 6) & 0x3) |
+                                                  ((raw_bits[15] >> 4) & 0xC));
 
     amdcuid_device_type_t queried_type = AMDCUID_DEVICE_TYPE_NONE;
     length = sizeof(queried_type);

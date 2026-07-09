@@ -9,6 +9,8 @@ split pipeline.
 import hashlib
 import os
 import shutil
+import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -29,8 +31,8 @@ from rocm_kpack.wheel_splitter import (
     generate_record,
     generate_wheel_file,
     parse_wheel_identity,
+    zip_wheel,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -244,6 +246,19 @@ class TestGenerateDeviceMetadata:
         # gfx12_0 becomes gfx12-0 in dist name (underscore to hyphen)
         assert "Name: amd-torch-device-gfx12-0" in metadata
 
+    def test_gfx11_sub_family_level(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(identity, "gfx110x", "amd-torch-device", [])
+        assert "Name: amd-torch-device-gfx110x" in metadata
+        assert "Summary: AMD device kernels (RDNA3)" in metadata
+
     def test_with_device_requires_dist(self):
         identity = WheelIdentity(
             name="torch",
@@ -344,7 +359,13 @@ class TestBundleKeyToDistName:
         )
 
     def test_sub_family_level(self):
-        # Underscore in bundle key becomes hyphen in dist name
+        assert (
+            _bundle_key_to_dist_name("amd-torch-device", "gfx110x")
+            == "amd-torch-device-gfx110x"
+        )
+
+    def test_structural_sub_family_level(self):
+        # Underscore in bundle key becomes hyphen in dist name.
         assert (
             _bundle_key_to_dist_name("amd-torch-device", "gfx12_0")
             == "amd-torch-device-gfx12-0"
@@ -448,7 +469,7 @@ class TestRewriteHostMetadata:
     def test_chain_with_family_wheel(self, tmp_path: Path):
         staging, identity = self._make_host_staging(tmp_path)
         splitter = self._make_splitter()
-        # gfx1100 chain: gfx1100 -> gfx11_0 -> gfx11
+        # gfx1100 chain: gfx1100 -> gfx110x -> gfx11
         # If gfx11 and gfx1100 both have device wheels:
         splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx11"})
 
@@ -469,6 +490,25 @@ class TestRewriteHostMetadata:
         )
         assert (
             'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-all"'
+            in metadata
+        )
+
+    def test_chain_with_gfx110x_wheel(self, tmp_path: Path):
+        staging, identity = self._make_host_staging(tmp_path)
+        splitter = self._make_splitter()
+        splitter._rewrite_host_metadata(staging, identity, {"gfx1100", "gfx110x"})
+
+        metadata = (staging / identity.dist_info_name / "METADATA").read_text()
+        assert (
+            'Requires-Dist: amd-torch-device-gfx1100 == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-gfx1100"'
+            in metadata
+        )
+        assert (
+            'Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1; extra == "device-all"'
             in metadata
         )
 
@@ -668,6 +708,73 @@ class TestGenerateRecord:
         test_line = [l for l in lines if "test.py" in l][0]
         assert f"sha256={expected_hash}" in test_line
         assert f",{len(test_content)}" in test_line
+
+
+class TestWheelArchivePermissions:
+    def test_extract_and_repack_preserves_exact_executable_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from rocm_kpack.binutils import Toolchain
+
+        input_wheel = tmp_path / "input.whl"
+        executable_path = "torch/bin/torch_shm_manager"
+        plain_path = "torch/__init__.py"
+        extracted_root = input_wheel.parent / (input_wheel.stem + ".tmp_extract")
+        chmod_calls: dict[str, int] = {}
+        path_type = type(tmp_path)
+        original_chmod = path_type.chmod
+
+        def recording_chmod(self: Path, mode: int) -> None:
+            chmod_calls[self.relative_to(extracted_root).as_posix()] = mode
+            if os.name != "nt":
+                original_chmod(self, mode)
+
+        with zipfile.ZipFile(input_wheel, "w") as zf:
+            executable_info = zipfile.ZipInfo(executable_path)
+            executable_info.external_attr = (stat.S_IFREG | 0o751) << 16
+            zf.writestr(executable_info, b"#!/bin/sh\n")
+
+            plain_info = zipfile.ZipInfo(plain_path)
+            plain_info.external_attr = (stat.S_IFREG | 0o640) << 16
+            zf.writestr(plain_info, b"# torch\n")
+
+        monkeypatch.setattr(path_type, "chmod", recording_chmod)
+
+        splitter = WheelSplitter(
+            device_package_prefix="amd-torch-device",
+            overlay_root="torch/",
+            toolchain=Toolchain(),
+        )
+        extracted_dir, is_temporary = splitter._resolve_input(input_wheel)
+        assert is_temporary
+
+        try:
+            extracted_executable = extracted_dir / executable_path
+            if os.name != "nt":
+                assert stat.S_IMODE(extracted_executable.stat().st_mode) == 0o751
+                assert (
+                    stat.S_IMODE((extracted_dir / plain_path).stat().st_mode) == 0o640
+                )
+
+            output_wheel = tmp_path / "output.whl"
+            zip_wheel(extracted_dir, output_wheel)
+        finally:
+            shutil.rmtree(extracted_dir)
+
+        assert chmod_calls[executable_path] == 0o751
+        assert chmod_calls[plain_path] == 0o640
+
+        if os.name == "nt":
+            return
+
+        with zipfile.ZipFile(output_wheel, "r") as zf:
+            output_executable_mode = stat.S_IMODE(
+                zf.getinfo(executable_path).external_attr >> 16
+            )
+            output_plain_mode = stat.S_IMODE(zf.getinfo(plain_path).external_attr >> 16)
+
+        assert output_executable_mode == 0o751
+        assert output_plain_mode == 0o640
 
 
 class TestKpackSearchPattern:

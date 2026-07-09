@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include "rocshmem/rocshmem.hpp"
+#include "constmem.hpp"
 #include "context_incl.hpp"
 #include "context_ipc_tmpl_device.hpp"
 #include "util.hpp"
@@ -157,15 +158,15 @@ __device__ void IPCContext::sync_wg(rocshmem_team_t team) {
 }
 
 __device__ void IPCContext::sync_all() {
-  internal_sync(my_pe, 0, 1, num_pes, barrier_sync);
+  internal_sync(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync);
 }
 
 __device__ void IPCContext::sync_all_wave() {
-  internal_sync_wave(my_pe, 0, 1, num_pes, barrier_sync);
+  internal_sync_wave(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync);
 }
 
 __device__ void IPCContext::sync_all_wg() {
-  internal_sync_wg(my_pe, 0, 1, num_pes, barrier_sync);
+  internal_sync_wg(constmem.my_pe, 0, 1, constmem.num_pes, barrier_sync);
 }
 
 __device__ void IPCContext::barrier_all() {

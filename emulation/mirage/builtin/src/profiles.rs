@@ -2,13 +2,11 @@
 //!
 //! These are the ready-to-use presets mirage preloads into
 //! `<MIRAGE_CONFIG>/profile/` so a fresh install can `mirage run
-//! --profile <emulator>-<gpu>` without first hand-building a profile.
+//! --profile <gpu>` without first hand-building a profile.
 //!
-//! Each profile pins a single GPU agent (the GPU name is part of the
-//! profile name) and runs every node inside the standard ROCm
-//! development container. rocjitsu is a software emulator and works on
-//! every builtin agent; HotSwap only supports `MI450X`, so it ships a
-//! single profile.
+//! Each profile pins a single GPU agent and is named after that GPU in
+//! lowercase (e.g. `mi450x`). Every builtin profile targets the
+//! rocjitsu software emulator, which works on every builtin agent.
 
 use mirage_core::common::{MaybeRef, SimpleMap};
 use mirage_core::emulator::{EmulatorDef, EmulatorKind, ExecMode};
@@ -17,37 +15,24 @@ use mirage_core::topology::TopologyDef;
 
 /// All builtin profiles, keyed by the name written to disk.
 ///
-/// Names follow `<emulator>-<gpu>` so the GPU each profile targets is
-/// visible at a glance in `mirage profile list`.
+/// Names are the target GPU in lowercase (e.g. `mi450x`) so the GPU
+/// each profile targets is visible at a glance in `mirage profile
+/// list`. Every builtin targets the rocjitsu emulator.
 pub fn profiles() -> Vec<(&'static str, ProfileDef)> {
     vec![
-        (
-            "rocjitsu-MI300X",
-            profile("rocjitsu-MI300X", EmulatorKind::Rocjitsu, "MI300X"),
-        ),
-        (
-            "rocjitsu-MI350X",
-            profile("rocjitsu-MI350X", EmulatorKind::Rocjitsu, "MI350X"),
-        ),
-        (
-            "rocjitsu-MI450X",
-            profile("rocjitsu-MI450X", EmulatorKind::Rocjitsu, "MI450X"),
-        ),
-        // HotSwap only supports MI450X.
-        (
-            "hotswap-MI450X",
-            profile("hotswap-MI450X", EmulatorKind::Hotswap, "MI450X"),
-        ),
+        ("mi300x", profile("mi300x", "rocjitsu", "MI300X")),
+        ("mi350x", profile("mi350x", "rocjitsu", "MI350X")),
+        ("mi450x", profile("mi450x", "rocjitsu", "MI450X")),
     ]
 }
 
-/// Build a single-GPU, containerised builtin profile pinning `agent`.
-fn profile(name: &str, emulator: EmulatorKind, agent: &str) -> ProfileDef {
+/// Build a single-GPU builtin profile pinning `agent`.
+fn profile(name: &str, emulator: &str, agent: &str) -> ProfileDef {
     ProfileDef {
         name: name.to_string(),
         description: None,
         emulator: EmulatorDef {
-            emulator,
+            emulator: EmulatorKind::from(emulator),
             plugins: Default::default(),
             exec_mode: ExecMode::default(),
             options: SimpleMap::default(),
@@ -68,32 +53,41 @@ mod tests {
     #[test]
     fn ships_expected_profiles() {
         let names: Vec<&str> = profiles().iter().map(|(n, _)| *n).collect();
-        assert_eq!(
-            names,
-            vec![
-                "rocjitsu-MI300X",
-                "rocjitsu-MI350X",
-                "rocjitsu-MI450X",
-                "hotswap-MI450X",
-            ]
-        );
+        assert_eq!(names, vec!["mi300x", "mi350x", "mi450x"]);
     }
 
     #[test]
-    fn hotswap_only_targets_mi450x() {
-        let hotswap: Vec<&str> = profiles()
-            .iter()
-            .filter(|(_, p)| p.emulator.emulator == EmulatorKind::Hotswap)
-            .map(|(n, _)| *n)
-            .collect();
-        assert_eq!(hotswap, vec!["hotswap-MI450X"]);
+    fn every_builtin_targets_rocjitsu() {
+        for (name, p) in profiles() {
+            assert_eq!(
+                p.emulator.emulator, "rocjitsu",
+                "builtin profile {name} must target rocjitsu"
+            );
+        }
     }
 
     #[test]
-    fn every_profile_is_containerised_with_default_image() {
+    fn names_are_lowercase() {
+        for (name, _) in profiles() {
+            assert_eq!(
+                name,
+                name.to_lowercase(),
+                "builtin profile {name} must be lowercase"
+            );
+        }
+    }
+
+    #[test]
+    fn no_profile_is_containerised() {
+        // Builtin profiles are plain (non-containerised); container
+        // settings are layered on at session-create time via CLI flags,
+        // not baked into the builtin definitions.
         for (_, p) in profiles() {
-            let c = p.containerize.expect("builtin profiles are containerised");
-            assert_eq!(c.image, DEFAULT_IMAGE);
+            assert!(
+                p.containerize.is_none(),
+                "builtin profile {} must not be containerised",
+                p.name
+            );
         }
     }
 }

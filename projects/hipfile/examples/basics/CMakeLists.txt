@@ -2,10 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-# These examples use the hipFile C API directly from C++ (matching the
-# style of the standalone aiscp/offsetcp/read-write-check programs).
-# They deliberately bypass ais_add_executable and wire the dependencies
-# in by hand.
+# These examples use the hipFile C API directly from C++. They build with the
+# AIS infrastructure (ais_add_executable) and link the shared helpers from the
+# examples_common target defined in examples/common; the parent CMakeLists adds
+# examples/common before examples/basics, so the target is in scope here.
+# examples_common is PUBLIC-linked against hipfile and exports its own include
+# dir, so DEPS examples_common transitively supplies the library and headers.
+
+include(AISAddExecutable)
 
 set(BASICS_EXAMPLES
     bufregister-write
@@ -19,27 +23,12 @@ set(BASICS_EXAMPLES
 )
 
 foreach(example ${BASICS_EXAMPLES})
-    add_executable(${example} "${example}.cpp")
-    target_compile_features(${example} PRIVATE cxx_std_17)
-    set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${example} PRIVATE -Wall -Wextra -fno-sanitize=all)
-
-    if(CMAKE_HIP_PLATFORM STREQUAL "amd")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_AMD__)
-    elseif(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_NVIDIA__)
-        target_include_directories(${example} SYSTEM PRIVATE ${HIP_INCLUDE_DIRS})
-        target_include_directories(
-            ${example}
-            SYSTEM
-            BEFORE
-            PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
-        )
-        target_link_libraries(${example} PRIVATE CUDA::cuda_driver CUDA::cudart)
-    endif()
-
-    target_include_directories(${example} SYSTEM PRIVATE ${HIPFILE_INCLUDE_PATH})
-    target_link_libraries(${example} PRIVATE examples_common)
+    ais_add_executable(
+        NAME ${example}
+        DEPS examples_common
+        SRCS "${example}.cpp"
+        SYSINCLS ${HIPFILE_INCLUDE_PATH}
+    )
 endforeach()
 
 # CTest wrappers: run each example as a hipFile system test.
