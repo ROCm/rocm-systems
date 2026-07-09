@@ -68,6 +68,7 @@ The first domains are:
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
+- `driver_copy3d`: driver-style 3D copy contracts
 - `array3d`: 3D array allocation and 3D copy-to/from-array contracts
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `driver_texture_object`: driver-style texture object creation and descriptor-introspection contracts
