@@ -486,6 +486,11 @@ hsa_status_t DmaBufClose(int* dmabuf) {
   return HSA_STATUS_SUCCESS;
 }
 
+int DmaBufDup(int dmabuf) {
+  (void)dmabuf;
+  return -1;
+}
+
 bool ProtectMemory(void* va, size_t size, MemProt perms) {
   if (perms == MEM_PROT_NONE) {
     return UncommitMemory(va, size);
