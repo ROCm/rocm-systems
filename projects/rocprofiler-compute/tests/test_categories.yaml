@@ -30,7 +30,6 @@ test_categories:
       - test_utils_profile_csv
       - test_inject_roctx_package
       - test_torch_cpp_loader
-      - test_autogen_config
       - test_import_guard
       - test_mem_chart
       - test_native_tool_finder
@@ -70,7 +69,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -134,7 +132,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
@@ -198,7 +195,6 @@ test_categories:
       - test_metric_utils
       - test_parser
       - test_argparser
-      - test_autogen_config
       - test_analyze_commands
       - test_analyze_workloads
       - test_num_xcds_cli_output
