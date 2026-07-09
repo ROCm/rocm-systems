@@ -237,26 +237,52 @@ resolve_attach_tid(pid_t pid)
     return -1;
 }
 
-void
+rocattach_status_t
 validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
 {
     auto tool_path = std::filesystem::path{tool_lib_path};
-    if(tool_path.empty()) return;
+    if(tool_path.empty()) return ROCATTACH_STATUS_SUCCESS;
 
-    if(!tool_path.is_absolute()) return;
+    if(!tool_path.is_absolute()) return ROCATTACH_STATUS_SUCCESS;
 
-    auto target_path = std::filesystem::path{fmt::format("/proc/{}/root", pid)};
-    target_path += tool_path;
+    auto target_path =
+        std::filesystem::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
     std::error_code ec;
     if(!std::filesystem::exists(target_path, ec))
     {
+        if(ec)
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_lib_path << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
         ROCP_WARNING << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
                      << "' is absolute but is not visible at " << target_path.string()
                      << " from the target process mount namespace. Attachment requires "
                         "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
                         "dlopen can resolve.";
-        return;
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
     }
+
+    if(!std::filesystem::is_regular_file(target_path, ec))
+    {
+        if(ec)
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_lib_path << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
+        ROCP_WARNING << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_lib_path
+                     << "' is absolute but does not refer to a regular file at "
+                     << target_path.string() << " from the target process mount namespace.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    return ROCATTACH_STATUS_SUCCESS;
 }
 
 rocattach_status_t
@@ -328,7 +354,11 @@ setup(int pid)
                                                                 "librocprofiler-sdk-tool.so");
     const char* tool_lib_path     = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
-    validate_target_tool_path(pid, tool_lib_path_env);
+    status = validate_target_tool_path(pid, tool_lib_path_env);
+    if(status != ROCATTACH_STATUS_SUCCESS)
+    {
+        return status;
+    }
 
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
