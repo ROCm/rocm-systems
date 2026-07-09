@@ -2592,12 +2592,31 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     session_it->second.launch_mode = args->launch_mode.launch_mode;
     return 0;
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE: {
-    // OUT enable_mask = previously enabled; OUT support_request_mask echoes the
-    // request (the emulator honours the requested trap-override bits). Actual
-    // trap-on-exception is wired up with the wave-level trap handler.
+    // kfd_dbg_trap_set_wave_launch_override(): validate the request against the
+    // device-supported trap-override mask, then record the enabled bits.
+    //
+    // For gfx9.4 (MI300/MI350) the only overridable exception trap is the
+    // address-watch trap: amdgpu kgd_gfx_v9_validate_trap_override_request
+    // (amdgpu_amdkfd_gfx_v9.c) masks trap_mask_supported down to
+    // KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH and rejects any override mode other
+    // than OR (the SPI_GDBG_TRAP_MASK register is global, so REPLACE could
+    // disturb other processes). kfd_dbg_validate_trap_override_request then
+    // returns -EACCES if the requested support mask is not a subset of the
+    // supported mask. Mirror that contract so rocm-dbgapi reads back an
+    // accurate supported mask (process.cpp update_agents fatal-errors if its
+    // desired wave-trap mask is not a subset of what we report here).
+    constexpr uint32_t kSupportedTrapMask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+    if (args->launch_override.override_mode != KFD_DBG_TRAP_OVERRIDE_OR)
+      return -EINVAL;
+    if (args->launch_override.support_request_mask & ~kSupportedTrapMask)
+      return -EACCES;
+    // OUT enable_mask = previously enabled bits; OUT support_request_mask = the
+    // actually-supported mask. Only supported bits are recorded as enabled.
     const uint32_t previous = session_it->second.launch_override_enable;
-    session_it->second.launch_override_enable = args->launch_override.enable_mask;
+    session_it->second.launch_override_enable =
+        args->launch_override.enable_mask & kSupportedTrapMask;
     args->launch_override.enable_mask = previous;
+    args->launch_override.support_request_mask = kSupportedTrapMask;
     return 0;
   }
   case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:

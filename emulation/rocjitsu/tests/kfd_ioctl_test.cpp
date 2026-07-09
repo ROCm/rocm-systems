@@ -645,6 +645,9 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOps) {
   ov.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ov), 0);
   EXPECT_EQ(ov.launch_override.enable_mask, 0u); // previously enabled = none
+  // OUT support_request_mask reports the gfx9.4-supported override mask.
+  EXPECT_EQ(ov.launch_override.support_request_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
 
   // GET_QUEUE_SNAPSHOT reports an empty snapshot for now.
   kfd_ioctl_dbg_trap_args qs{};
@@ -653,6 +656,61 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOps) {
   qs.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &qs), 0);
   EXPECT_EQ(qs.queue_snapshot.num_queues, 0u);
+}
+
+// SET_WAVE_LAUNCH_OVERRIDE validates the request the way the real KFD does for
+// gfx9.4: only OR mode is allowed (EINVAL otherwise) and only the address-watch
+// trap is overridable (EACCES if unsupported bits are requested). rocm-dbgapi
+// reads back the supported mask to decide which traps it may enable.
+TEST_F(KfdIoctlTest, DbgTrapWaveLaunchOverrideValidatesRequest) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // REPLACE mode is rejected (the SPI trap-mask register is global).
+  kfd_ioctl_dbg_trap_args rep{};
+  rep.pid = static_cast<uint32_t>(getpid());
+  rep.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  rep.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_REPLACE;
+  rep.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &rep), -EINVAL);
+
+  // Requesting an unsupported trap (e.g. FP invalid) is rejected with EACCES.
+  kfd_ioctl_dbg_trap_args bad{};
+  bad.pid = static_cast<uint32_t>(getpid());
+  bad.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  bad.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
+  bad.launch_override.support_request_mask =
+      KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH | KFD_DBG_TRAP_MASK_FP_INVALID;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &bad), -EACCES);
+
+  // A supported request succeeds and reports the enabled + supported masks.
+  kfd_ioctl_dbg_trap_args ok{};
+  ok.pid = static_cast<uint32_t>(getpid());
+  ok.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  ok.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
+  ok.launch_override.enable_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  ok.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ok), 0);
+  EXPECT_EQ(ok.launch_override.enable_mask, 0u); // nothing was enabled before
+  EXPECT_EQ(ok.launch_override.support_request_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
+
+  // A second call now sees the address-watch trap as previously enabled.
+  kfd_ioctl_dbg_trap_args again{};
+  again.pid = static_cast<uint32_t>(getpid());
+  again.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  again.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
+  again.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &again), 0);
+  EXPECT_EQ(again.launch_override.enable_mask,
+            static_cast<uint32_t>(KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH));
 }
 
 // DISABLE must clean up the session even after the inferior has exited (rocgdb
