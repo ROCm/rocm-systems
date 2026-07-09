@@ -910,7 +910,6 @@ class GpuAgent : public GpuAgentInt {
 
   ScratchCache scratch_cache_;
 
-
   /// @brief System memory allocator in the nearest NUMA node.
   std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
@@ -1097,7 +1096,7 @@ class GpuAgent : public GpuAgentInt {
 
   size_t max_wave_scratch_;
 
-  bool accelerator_ready_;
+  std::atomic<bool> accelerator_ready_{false};
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };

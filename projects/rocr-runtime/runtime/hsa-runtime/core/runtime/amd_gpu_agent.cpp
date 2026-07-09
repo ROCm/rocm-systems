@@ -129,8 +129,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }),
-      accelerator_ready_(false) {
+      cluster_max_dim_({ 1, 1, 1 }) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -5094,7 +5093,7 @@ hsa_status_t GpuAgent::CheckAcceleratorReadiness() {
    * later, so re-check until ready. If the accelerator never becomes ready, or faults
    * after cross-domain imports are used, accesses can VM-fault the process.
    */
-  if (accelerator_ready_) {
+  if (accelerator_ready_.load(std::memory_order_relaxed)) {
     return HSA_STATUS_SUCCESS;
   }
 
@@ -5103,7 +5102,7 @@ hsa_status_t GpuAgent::CheckAcceleratorReadiness() {
     return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_NOT_READY);
   }
 
-  accelerator_ready_ = true;
+  accelerator_ready_.store(true, std::memory_order_relaxed);
   return HSA_STATUS_SUCCESS;
 }
 

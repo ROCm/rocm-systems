@@ -1005,7 +1005,10 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
     return HSA_STATUS_ERROR;
   }
   char status[10];
-  fscanf(file, "%s", status);
+  if (fscanf(file, "%9s", status) != 1) {
+    fclose(file);
+    return HSA_STATUS_ERROR;
+  }
   fclose(file);
   if (!strcmp(status, "ready") || !strcmp(status, "active")) {
     *ready = true;

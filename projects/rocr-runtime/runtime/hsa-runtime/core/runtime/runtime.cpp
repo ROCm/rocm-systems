@@ -4532,7 +4532,7 @@ hsa_status_t Runtime::VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_hand
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  hsa_status_t status = reinterpret_cast<AMD::GpuAgent*>(agentOwner)->CheckAcceleratorReadiness();
+  hsa_status_t status = static_cast<AMD::GpuAgent*>(agentOwner)->CheckAcceleratorReadiness();
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
