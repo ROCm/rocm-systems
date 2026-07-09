@@ -1272,6 +1272,24 @@ contract:
   Contract_ModuleExec_LaunchCooperativeKernel_NullFunction_IsRejected:
     <<: *level_0
     tags: [module_exec]
+  Contract_JitLink_Create_NullState_IsRejected:
+    <<: *level_0
+    tags: [jit_link]
+  Contract_JitLink_CreateDestroy_RoundTrips:
+    <<: *level_0
+    tags: [jit_link]
+  Contract_JitLink_Destroy_InvalidHandle_IsRejected:
+    <<: *level_0
+    tags: [jit_link]
+  Contract_JitLink_Complete_NullOutputs_AreRejected:
+    <<: *level_0
+    tags: [jit_link]
+  Contract_JitLink_AddData_InvalidImage_IsRejected:
+    <<: *level_0
+    tags: [jit_link]
+  Contract_JitLink_AddFile_InvalidInputType_IsRejected:
+    <<: *level_0
+    tags: [jit_link]
   Contract_Library_LoadData_FromRtc_Succeeds:
     <<: *level_0
     tags: [library]
