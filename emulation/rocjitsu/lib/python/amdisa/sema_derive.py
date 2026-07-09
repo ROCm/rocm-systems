@@ -1206,6 +1206,22 @@ class _VectorTernary(_ScalarDeriver):
             body = _assign(_cast(_dst(0), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op == 'mad' and dtype == 'u16':
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=ty,
+                call_name='mad_lo_u16',
+                children=(
+                    _id('mad_lo_u16'),
+                    _src(0),
+                    _src(1),
+                    _src(2),
+                ),
+            )
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
         if op in ('add_min', 'add_max') and dtype in ('i32', 'u32'):
             call_name = f'{op}_{dtype}'
             result = SemaNode(

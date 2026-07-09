@@ -1179,6 +1179,14 @@ class TestDeriveVectorTernary:
         assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
         assert 'a * b' not in cpp
 
+    def test_u16_mad_widens_before_multiply(self):
+        sem = _FakeSem('V_MAD_LEGACY_U16', 'vector_ternary', 'mad', 'u16')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'static_cast<uint32_t>(static_cast<uint16_t>' in cpp
+        assert 'static_cast<uint16_t>(' in cpp
+        assert 'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *' not in cpp
+
     def test_signed_bfe_keeps_braced_one_literal(self):
         sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
         block = derive_sema_block(sem)
