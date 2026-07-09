@@ -191,6 +191,9 @@ public:
 
   void set_watchpoint_handler(WatchpointHandler cb) { watchpoint_handler_ = std::move(cb); }
 
+  using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
+  void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
+
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
@@ -626,6 +629,7 @@ protected:
   TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
+  IllegalInstHandler illegal_inst_handler_;
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;

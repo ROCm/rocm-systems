@@ -463,6 +463,8 @@ void SimulatedKfd::init_command_processors_locked() {
                                           bool is_write, bool is_atomic) {
           return on_wave_watchpoint(wf, address, bytes, is_write, is_atomic);
         });
+        cu->set_illegal_inst_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
       }
     });
     g.cps_initialized = true;
@@ -2358,10 +2360,10 @@ bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
 }
 
 void SimulatedKfd::report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                                       uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size) {
+                                       uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
+                                       uint64_t exception_mask) {
   const pid_t target_pid = proc->client_pid();
   serialize_queue_debug_waves(proc->process_id(), queue_id, gpu_id, ctx_base, ctx_size);
-  constexpr uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
   raise_debug_event(proc, queue_id, gpu_id, exception_mask);
 
   // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
@@ -2466,6 +2468,38 @@ bool SimulatedKfd::on_wave_watchpoint(amdgpu::Wavefront &wave, uint64_t address,
   wave.set_mode_raw(wave.mode_raw() | kModeExcpEnAddrWatch);
   wave.debug_trap(0);
   report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size);
+  return true;
+}
+
+bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(proc->client_pid());
+    if (session == debug_sessions_.end() || !session->second.enabled)
+      return false;
+  }
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = queue->second.ctx_save_restore_address;
+    ctx_size = queue->second.ctx_save_restore_area_size;
+    gpu_id = queue->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+  constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
+  wave.set_trapsts(wave.trapsts() | kTrapstsIllegalInst);
+  wave.debug_trap(0);
+  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                      KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION));
   return true;
 }
 

@@ -367,6 +367,11 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec, " what=", e.what());
+    // Under a debugger, surface the undecodable instruction as an illegal-
+    // instruction exception (stops the wave at this PC) instead of silently
+    // retiring it. Without a debugger this halts as before.
+    if (illegal_inst_handler_ && illegal_inst_handler_(*active))
+      return;
     active->halt();
     return;
   }
@@ -374,6 +379,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec);
+    if (illegal_inst_handler_ && illegal_inst_handler_(*active))
+      return;
     active->halt();
     return;
   }
