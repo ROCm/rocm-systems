@@ -1110,6 +1110,21 @@ contract:
   Contract_Extension_ExtGetLastError_TracksErrorState:
     <<: *level_0
     tags: [extension]
+  Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable:
+    <<: *level_0
+    tags: [driver_entry_point]
+  Contract_DriverEntryPoint_UnknownSymbol_ReportsNotFound:
+    <<: *level_0
+    tags: [driver_entry_point]
+  Contract_DriverEntryPoint_EmptySymbol_IsRejected:
+    <<: *level_0
+    tags: [driver_entry_point]
+  Contract_DriverEntryPoint_NullFuncPtr_IsRejected:
+    <<: *level_0
+    tags: [driver_entry_point]
+  Contract_DriverEntryPoint_InvalidFlag_IsRejected:
+    <<: *level_0
+    tags: [driver_entry_point]
   Contract_Ipc_GetMemHandle_SucceedsForDeviceAllocation:
     <<: *level_0
     tags: [ipc]
