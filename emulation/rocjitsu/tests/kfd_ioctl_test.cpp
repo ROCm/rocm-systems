@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -31,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -54,6 +56,8 @@ public:
 
   ChildProcessGuard(const ChildProcessGuard &) = delete;
   ChildProcessGuard &operator=(const ChildProcessGuard &) = delete;
+
+  void release() { pid_ = -1; }
 
 private:
   pid_t pid_;
@@ -394,6 +398,13 @@ TEST_F(KfdIoctlTest, DbgTrapUnknownPidReturnsESRCH) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -ESRCH);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapInvalidPidReturnsESRCH) {
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = UINT32_MAX;
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -ESRCH);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapOpBeforeEnableReturnsEINVAL) {
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(getpid());
@@ -450,11 +461,11 @@ TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
 }
 
 // Hammers ENABLE/DISABLE on one session from many threads to exercise
-// debug_mutex_ under ThreadSanitizer. Races are legitimate: a losing ENABLE
+// debug_sessions_mutex_ under ThreadSanitizer. Races are legitimate: a losing ENABLE
 // sees EALREADY and a losing DISABLE sees EINVAL. The invariant is that the
 // driver serializes them without a data race or torn session state — every call
 // returns one of the well-defined codes, never a crash or a bogus errno. Uses
-// self-debug (target pid == getpid()) so the whole cycle stays on debug_mutex_
+// self-debug (target pid == getpid()) so the whole cycle stays on debug_sessions_mutex_
 // and runtime_mutex_. In local mode the session never owns dbg_fd, so a single
 // shared eventfd can back every ENABLE.
 TEST_F(KfdIoctlTest, DbgTrapConcurrentEnableDisableIsRaceFree) {
@@ -637,7 +648,7 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   ASSERT_NE(soc_, nullptr);
 
   rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
-  constexpr pid_t kClientPid = 4242;
+  const pid_t kClientPid = getpid();
   uint32_t process_id = daemon_driver.open_process(kClientPid);
   ASSERT_NE(process_id, 0u);
 
@@ -804,7 +815,7 @@ protected:
     return execute(AMDKFD_IOC_DBG_TRAP, &dis, sizeof(dis), -1, nullptr);
   }
 
-  static constexpr rj_client_pid_t kClientPid = 4242;
+  const rj_client_pid_t kClientPid = getpid();
   rj_vm_t *vm_ = nullptr;
   uint32_t process_id_ = 0;
 };
@@ -1412,6 +1423,336 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
 
   daemon.close(debugger);
   daemon.close(inferior);
+}
+
+// A session can be enabled before the inferior opens /dev/kfd. Once that
+// inferior exits, DISABLE must release the stale session/notifier but still
+// return ESRCH, matching the kernel's target-liveness check.
+TEST_F(KfdIoctlTest, DbgTrapExitedTargetDisableReturnsESRCHAndReleasesSession) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+    _exit(0);
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+  // Deliberately do NOT open_process(child): the inferior has not connected to
+  // /dev/kfd, so it has no KfdProcess.
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFSTOPPED(status));
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  ASSERT_EQ(kill(child, SIGKILL), 0);
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  // A pidfd distinguishes this exited target from a future process that reuses
+  // its numeric pid. DISABLE reaps the stale session and owned notifier.
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), -ESRCH);
+  EXPECT_EQ(fcntl(dbg_fd, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapIdentityChangeDuringAuthorizationReturnsESRCH) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard child_guard(child);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFSTOPPED(status));
+
+  bool hook_ran = false;
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true, [&] {
+    hook_ran = true;
+    ASSERT_EQ(kill(child, SIGKILL), 0);
+    ASSERT_EQ(waitpid(child, &status, 0), child);
+  });
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), -ESRCH);
+  EXPECT_TRUE(hook_ran);
+  EXPECT_NE(fcntl(dbg_fd, F_GETFD), -1) << "failed ENABLE must not adopt the notifier";
+  ::close(dbg_fd);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapExitedTargetReturnsESRCHBeforePtraceAuthorization) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFSTOPPED(status));
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  ASSERT_EQ(kill(child, SIGKILL), 0);
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  for (int attempt = 0; attempt < 100 && fcntl(dbg_fd, F_GETFD) != -1; ++attempt)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_EQ(fcntl(dbg_fd, F_GETFD), -1) << "target-exit reaper did not release notifier";
+  EXPECT_EQ(errno, EBADF);
+
+  kfd_ioctl_dbg_trap_args op{};
+  op.pid = static_cast<uint32_t>(child);
+  op.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &op), -ESRCH);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesTargetKfdConnectionClose) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  uint32_t inferior = daemon.open_process(child);
+  ASSERT_NE(debugger, 0u);
+  ASSERT_NE(inferior, 0u);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  ASSERT_EQ(daemon.close(inferior), 0);
+  kfd_ioctl_dbg_trap_args op{};
+  op.pid = static_cast<uint32_t>(child);
+  op.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &op), 0);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
+  EXPECT_EQ(ptrace(PTRACE_DETACH, child, nullptr, nullptr), 0);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapSessionSurvivesDebuggerKfdConnectionClose) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  ASSERT_EQ(daemon.close(debugger), 0);
+  debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+  kfd_ioctl_dbg_trap_args op{};
+  op.pid = static_cast<uint32_t>(child);
+  op.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &op), 0);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
+  EXPECT_EQ(ptrace(PTRACE_DETACH, child, nullptr, nullptr), 0);
+  daemon.close(debugger);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDebuggerExitReapsSessionAndAllowsReenable) {
+  int debugger_ready[2];
+  ASSERT_EQ(pipe2(debugger_ready, O_CLOEXEC), 0);
+
+  pid_t debugger_pid = fork();
+  ASSERT_GE(debugger_pid, 0);
+  if (debugger_pid == 0) {
+    ::close(debugger_ready[0]);
+    int target_ready[2];
+    if (pipe2(target_ready, O_CLOEXEC) != 0)
+      _exit(2);
+
+    pid_t target_pid = fork();
+    if (target_pid < 0)
+      _exit(3);
+    if (target_pid == 0) {
+      ::close(target_ready[0]);
+      ::close(debugger_ready[1]);
+      if (prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY) != 0)
+        _exit(4);
+      const char ready = 1;
+      if (::write(target_ready[1], &ready, sizeof(ready)) != sizeof(ready))
+        _exit(5);
+      for (;;)
+        pause();
+    }
+
+    auto fail = [&](int code) {
+      kill(target_pid, SIGKILL);
+      while (waitpid(target_pid, nullptr, 0) == -1 && errno == EINTR) {
+      }
+      _exit(code);
+    };
+    ::close(target_ready[1]);
+    char ready = 0;
+    if (::read(target_ready[0], &ready, sizeof(ready)) != sizeof(ready))
+      fail(6);
+    if (ptrace(PTRACE_ATTACH, target_pid, nullptr, nullptr) != 0)
+      fail(7);
+    int status = 0;
+    if (waitpid(target_pid, &status, 0) != target_pid || !WIFSTOPPED(status))
+      fail(8);
+    if (::write(debugger_ready[1], &target_pid, sizeof(target_pid)) != sizeof(target_pid))
+      fail(9);
+    for (;;)
+      pause();
+  }
+  ChildProcessGuard debugger_guard(debugger_pid);
+  ::close(debugger_ready[1]);
+
+  pid_t target_pid = 0;
+  ASSERT_EQ(::read(debugger_ready[0], &target_pid, sizeof(target_pid)),
+            static_cast<ssize_t>(sizeof(target_pid)));
+  ASSERT_GT(target_pid, 0);
+  ChildProcessGuard target_guard(target_pid);
+  ::close(debugger_ready[0]);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(debugger_pid);
+  ASSERT_NE(debugger, 0u);
+
+  int first_notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(first_notifier, 0);
+  kfd_ioctl_dbg_trap_args first_enable{};
+  first_enable.pid = static_cast<uint32_t>(target_pid);
+  first_enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  first_enable.enable.dbg_fd = static_cast<uint32_t>(first_notifier);
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &first_enable), 0);
+
+  ASSERT_EQ(kill(debugger_pid, SIGKILL), 0);
+  int status = 0;
+  ASSERT_EQ(waitpid(debugger_pid, &status, 0), debugger_pid);
+  ASSERT_TRUE(WIFSIGNALED(status));
+  debugger_guard.release();
+
+  for (int attempt = 0; attempt < 100 && fcntl(first_notifier, F_GETFD) != -1; ++attempt)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_EQ(fcntl(first_notifier, F_GETFD), -1) << "debugger-exit reaper did not release notifier";
+  EXPECT_EQ(errno, EBADF);
+  ASSERT_EQ(kill(target_pid, 0), 0) << "target exited with its debugger";
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, target_pid, nullptr, nullptr), 0) << strerror(errno);
+  ASSERT_EQ(waitpid(target_pid, &status, 0), target_pid);
+  ASSERT_TRUE(WIFSTOPPED(status));
+
+  uint32_t replacement_debugger = daemon.open_process(getpid());
+  ASSERT_NE(replacement_debugger, 0u);
+  int replacement_notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(replacement_notifier, 0);
+  kfd_ioctl_dbg_trap_args replacement_enable{};
+  replacement_enable.pid = static_cast<uint32_t>(target_pid);
+  replacement_enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  replacement_enable.enable.dbg_fd = static_cast<uint32_t>(replacement_notifier);
+  EXPECT_EQ(daemon.ioctl(replacement_debugger, AMDKFD_IOC_DBG_TRAP, &replacement_enable), 0);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(target_pid);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(replacement_debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
+  ASSERT_EQ(ptrace(PTRACE_KILL, target_pid, nullptr, nullptr), 0);
+  ASSERT_EQ(waitpid(target_pid, &status, 0), target_pid);
+  target_guard.release();
+  daemon.close(debugger);
+  daemon.close(replacement_debugger);
+}
+
+TEST_F(KfdIoctlTest, DebugSessionReaperShutdownDoesNotHang) {
+  pid_t worker = fork();
+  ASSERT_GE(worker, 0);
+  if (worker == 0) {
+    alarm(5);
+    for (int iteration = 0; iteration < 250; ++iteration) {
+      rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+    }
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(worker, &status, 0), worker);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 } // namespace

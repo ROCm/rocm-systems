@@ -162,13 +162,15 @@ public:
     uint64_t r_debug = 0;
   };
 
-  /// @brief Per-process debugger session state.
+  /// @brief Debugger session state for one target process.
   ///
   /// @details Mirrors the debug-related fields the kernel maintains on
   /// @c struct @c kfd_process in
   /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
-  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
-  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  /// SimulatedKfd stores these sessions in a table keyed by the target's Linux
+  /// pid, independently of KfdProcess, so a debugger can attach before the
+  /// inferior opens /dev/kfd. This mirrors the real driver's DBG_TRAP_ENABLE
+  /// path creating the target kfd_process.
   ///
   /// Field mapping to @c kfd_priv.h:
   /// | DebugSession field     | kfd_process field                               |
@@ -204,9 +206,24 @@ public:
     /// descriptor and is not owned here. RAII replaces an explicit close.
     UniqueFd owned_dbg_fd;
 
+    /// @brief Pins the target process identity and reports target exit.
+    /// @details Prevents a stale session from being mistaken for a later process
+    /// that reuses the same numeric pid.
+    UniqueFd target_pidfd;
+
+    /// @brief Pins the target's procfs directory used for ptrace authorization.
+    /// @details Status is opened relative to this descriptor so authorization
+    /// cannot silently switch to a process that reuses the numeric pid.
+    UniqueFd target_procfd;
+
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
     pid_t debugger_pid = 0;
+
+    /// @brief Pins the debugger process identity and reports debugger exit.
+    /// @details Mirrors the kernel's debugger-process notifier: the session is
+    /// disabled when the debugger task exits, even if the target remains alive.
+    UniqueFd debugger_pidfd;
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.
@@ -287,9 +304,6 @@ public:
   std::unordered_map<uint64_t, SvmRange> svm_ranges_;
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
-
-  mutable std::mutex debug_mutex_;
-  DebugSession debug_session_;
 
 private:
 };

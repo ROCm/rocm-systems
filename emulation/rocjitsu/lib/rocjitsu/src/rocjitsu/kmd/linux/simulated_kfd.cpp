@@ -21,13 +21,15 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <format>
-#include <fstream>
 #include <linux/types.h>
+#include <poll.h>
 #include <sstream>
 #include <string_view>
 #include <sys/mman.h>
@@ -110,24 +112,84 @@ template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
   return libc_passthrough().fcntl(fd, cmd, args...);
 }
 
-/// @brief Read the TracerPid field from /proc/<pid>/status.
-/// @returns The pid of the process ptrace-attached to @p pid, or 0 if none (or
-/// the target is gone). This exposes the real kernel ptrace relationship that
-/// the KFD debug ioctl authorizes against (kfd_ioctl_set_debug_trap uses
-/// ptrace_parent(target->lead_thread) == current). Both the debugger and the
-/// target are real Linux processes under the emulator, so consulting the live
-/// /proc state models the exact relationship the kernel checks — no mock.
-pid_t tracer_pid_of(pid_t pid) {
-  if (pid <= 0)
-    return 0;
-  std::ifstream status("/proc/" + std::to_string(pid) + "/status");
-  std::string line;
-  constexpr std::string_view kKey = "TracerPid:";
-  while (std::getline(status, line)) {
-    if (std::string_view(line).substr(0, kKey.size()) == kKey)
-      return static_cast<pid_t>(std::strtol(line.c_str() + kKey.size(), nullptr, 10));
+int pidfd_is_exited(int pidfd) {
+  pollfd pfd{pidfd, POLLIN, 0};
+  const int rc = ::poll(&pfd, 1, 0);
+  if (rc < 0)
+    return -errno;
+  return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
+}
+
+int pin_process_identity(pid_t pid, UniqueFd &pidfd, UniqueFd &procfd) {
+  const int raw_pidfd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+  if (raw_pidfd < 0)
+    return errno == ESRCH ? -ESRCH : -errno;
+  pidfd = UniqueFd(raw_pidfd);
+
+  const std::string proc_path = "/proc/" + std::to_string(pid);
+  const int raw_procfd = ::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (raw_procfd < 0) {
+    const int open_error = errno;
+    const int exited = pidfd_is_exited(pidfd.get());
+    return exited == 1 ? -ESRCH : (exited < 0 ? exited : -open_error);
   }
-  return 0;
+  procfd = UniqueFd(raw_procfd);
+
+  const int exited = pidfd_is_exited(pidfd.get());
+  return exited == 0 ? 0 : (exited == 1 ? -ESRCH : exited);
+}
+
+/// @brief Read TracerPid through a procfs directory pinned to the pidfd identity.
+int tracer_pid_of(const UniqueFd &pidfd, const UniqueFd &procfd,
+                  const SimulatedKfd::DebugIdentityValidationHook &validation_hook,
+                  pid_t &tracer_pid) {
+  int exited = pidfd_is_exited(pidfd.get());
+  if (exited != 0)
+    return exited == 1 ? -ESRCH : exited;
+
+  UniqueFd status_fd(::openat(procfd.get(), "status", O_RDONLY | O_CLOEXEC));
+  if (status_fd.get() < 0) {
+    const int open_error = errno;
+    const int exited = pidfd_is_exited(pidfd.get());
+    return exited == 1 ? -ESRCH : (exited < 0 ? exited : -open_error);
+  }
+
+  std::string status;
+  char buffer[4096];
+  for (;;) {
+    const ssize_t count = ::read(status_fd.get(), buffer, sizeof(buffer));
+    if (count > 0) {
+      status.append(buffer, static_cast<size_t>(count));
+      continue;
+    }
+    if (count == 0)
+      break;
+    if (errno == EINTR)
+      continue;
+    return -errno;
+  }
+
+  constexpr std::string_view kKey = "TracerPid:";
+  tracer_pid = 0;
+  size_t offset = 0;
+  while (offset < status.size()) {
+    const size_t end = status.find('\n', offset);
+    const std::string_view line(status.data() + offset,
+                                (end == std::string::npos ? status.size() : end) - offset);
+    if (line.substr(0, kKey.size()) == kKey) {
+      tracer_pid = static_cast<pid_t>(std::strtol(line.data() + kKey.size(), nullptr, 10));
+      break;
+    }
+    if (end == std::string::npos)
+      break;
+    offset = end + 1;
+  }
+
+  if (validation_hook)
+    validation_hook();
+
+  exited = pidfd_is_exited(pidfd.get());
+  return exited == 0 ? 0 : (exited == 1 ? -ESRCH : exited);
 }
 
 } // namespace
@@ -204,7 +266,11 @@ void SimulatedKfd::setup_topology(const config::KfdDeviceConfig &dev, uint32_t n
   setup_topology(gpu_info_from_config(dev, num_xcc));
 }
 
-SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode) : daemon_mode_(daemon_mode) {
+SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
+                           DebugIdentityValidationHook debug_identity_validation_hook)
+    : daemon_mode_(daemon_mode),
+      debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
+      debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
   // Resolve the real libc entry points once, up front and single-threaded, so no
   // passthrough call site ever triggers a first-time dlsym under a per-process
   // lock. Idempotent: a no-op if the interposer already resolved the table.
@@ -212,8 +278,11 @@ SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode) : daemon_mode_(daemon_mod
   gpus_.push_back({&soc, 0, false, {}});
 }
 
-SimulatedKfd::SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode)
-    : daemon_mode_(daemon_mode) {
+SimulatedKfd::SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode,
+                           DebugIdentityValidationHook debug_identity_validation_hook)
+    : daemon_mode_(daemon_mode),
+      debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
+      debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
   libc_passthrough().resolve();
   for (size_t i = 0; i < socs.size(); ++i)
     gpus_.push_back({socs[i], i < gpu_ids.size() ? gpu_ids[i] : socs[i]->gpu_id(), false, {}});
@@ -234,6 +303,9 @@ const SimulatedKfd::GpuDevice *SimulatedKfd::find_gpu(uint32_t gpu_id) const {
 }
 
 SimulatedKfd::~SimulatedKfd() {
+  debug_session_reaper_.request_stop();
+  debug_session_reaper_.join();
+
   std::vector<uint32_t> pids;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
@@ -241,6 +313,7 @@ SimulatedKfd::~SimulatedKfd() {
     for (auto &[id, proc] : processes_)
       pids.push_back(id);
   }
+
   // close() only tears a process down on the LAST open reference (release_open()
   // returns true at zero); a process opened more than once (dup/daemon reuse)
   // would otherwise survive with its allocations, queues, and CP callbacks still
@@ -249,6 +322,26 @@ SimulatedKfd::~SimulatedKfd() {
   for (auto pid : pids) {
     while (find_process(pid))
       close(pid);
+  }
+}
+
+void SimulatedKfd::reap_exited_debug_sessions(std::stop_token stop) {
+  std::unique_lock<std::mutex> lock(debug_sessions_mutex_);
+  while (!stop.stop_requested()) {
+    if (debug_sessions_.empty()) {
+      debug_sessions_cv_.wait(lock, stop, [&] { return !debug_sessions_.empty(); });
+    } else {
+      debug_sessions_cv_.wait_for(lock, stop, std::chrono::milliseconds(10), [] { return false; });
+    }
+    if (stop.stop_requested())
+      break;
+    for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
+      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
+          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+        it = debug_sessions_.erase(it);
+      else
+        ++it;
+    }
   }
 }
 
@@ -580,6 +673,21 @@ int SimulatedKfd::close(uint32_t process_id) {
   // teardown below additionally takes alloc_mutex_ to serialize against those
   // paths; op_mutex_ alone does not cover them.
   std::lock_guard<std::mutex> op_lock(proc.op_mutex_);
+
+  // Linux kfd_release() only drops the file's kfd_process reference;
+  // kfd_process_notifier_release_internal() disables debug when the process mm
+  // actually exits. Preserve live sessions across a /dev/kfd close, but reap
+  // targets whose pinned identity has exited.
+  {
+    std::lock_guard<std::mutex> debug_lock(debug_sessions_mutex_);
+    for (auto it = debug_sessions_.begin(); it != debug_sessions_.end();) {
+      if (pidfd_is_exited(it->second.target_pidfd.get()) == 1 ||
+          pidfd_is_exited(it->second.debugger_pidfd.get()) == 1)
+        it = debug_sessions_.erase(it);
+      else
+        ++it;
+    }
+  }
 
   // Set the closing flag first, under op_mutex_, so the dispatch_ioctl guard sees
   // it before any state is dismantled.
@@ -2092,41 +2200,125 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
   util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
 
-  KfdProcess *target = nullptr;
-  std::shared_ptr<KfdProcess> target_ref;
-  if (caller.client_pid() != 0 && static_cast<pid_t>(args->pid) == caller.client_pid()) {
-    target = &caller; // self-debug (local mode)
-  } else {
-    target_ref = find_process_by_client_pid(static_cast<pid_t>(args->pid));
-    target = target_ref.get();
-  }
-  if (target == nullptr)
+  // rocjitsu always models hardware scheduling, so the driver's
+  // KFD_SCHED_POLICY_NO_HWS -> EINVAL guard is not applicable.
+
+  // Resolve the target process by Linux pid (kernel: find_get_pid() +
+  // kfd_lookup_process_by_pid()). The target's KfdProcess may not exist yet:
+  // rocgdb enables debug on the inferior right after exec, before its ROCr has
+  // opened /dev/kfd. The debug session is keyed by the target pid
+  // (debug_sessions_) independently of the KfdProcess, mirroring the kernel
+  // creating the target kfd_process in the ENABLE path. Operations that need
+  // live GPU state look the process up lazily.
+  const auto target_pid = static_cast<pid_t>(args->pid);
+  if (target_pid <= 0)
     return -ESRCH;
 
-  const bool self_debug = (target == &caller);
+  const bool self_debug = caller.client_pid() != 0 && target_pid == caller.client_pid();
 
-  std::lock_guard<std::mutex> lk(target->debug_mutex_);
-  auto &sess = target->debug_session_;
-
-  // PTRACE gate: for any op other than DISABLE, a debugger acting on another
-  // process must be that process's ptrace parent. This mirrors the kernel's
-  // ptrace_parent(target->lead_thread) == current check in
-  // kfd_ioctl_set_debug_trap(); we consult the live /proc TracerPid so the
-  // authorization reflects the real OS ptrace relationship established by the
-  // debugger (e.g. rocgdb launching the inferior). Self-debug is exempt.
-  if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
-      tracer_pid_of(target->client_pid()) != caller.client_pid())
-    return -EPERM;
+  std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+  auto session_it = debug_sessions_.find(target_pid);
+  if (session_it != debug_sessions_.end()) {
+    const int target_exited = pidfd_is_exited(session_it->second.target_pidfd.get());
+    if (target_exited < 0)
+      return target_exited;
+    const int debugger_exited = pidfd_is_exited(session_it->second.debugger_pidfd.get());
+    if (debugger_exited < 0)
+      return debugger_exited;
+    if (target_exited == 1 || debugger_exited == 1) {
+      debug_sessions_.erase(session_it);
+      session_it = debug_sessions_.end();
+      if (target_exited == 1 && args->op != KFD_IOC_DBG_TRAP_ENABLE)
+        return -ESRCH;
+    }
+  }
+  const bool enabled = session_it != debug_sessions_.end();
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
-  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !sess.enabled)
+  if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !enabled) {
+    UniqueFd probe_pidfd;
+    UniqueFd probe_procfd;
+    const int probe_result = pin_process_identity(target_pid, probe_pidfd, probe_procfd);
+    if (probe_result == -ESRCH)
+      return -ESRCH;
+    if (probe_result != 0)
+      return probe_result;
     return -EINVAL;
+  }
 
-  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE.
-  const bool runtime_enabled = [&] {
-    std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
-    return target->runtime_state_.enabled;
-  }();
+  // Pin the exact Linux task before consulting ptrace state. For an existing
+  // session, use the identity captured by ENABLE; otherwise capture both a
+  // pidfd and the matching procfs directory now. The pidfd liveness checks on
+  // both sides of the procfs read ensure a numeric-pid reuse can never authorize
+  // a different task.
+  UniqueFd new_target_pidfd;
+  UniqueFd new_target_procfd;
+  UniqueFd *target_pidfd;
+  UniqueFd *target_procfd;
+  if (enabled) {
+    target_pidfd = &session_it->second.target_pidfd;
+    target_procfd = &session_it->second.target_procfd;
+  } else {
+    const int pin_result = pin_process_identity(target_pid, new_target_pidfd, new_target_procfd);
+    if (pin_result != 0)
+      return pin_result;
+    target_pidfd = &new_target_pidfd;
+    target_procfd = &new_target_procfd;
+  }
+
+  UniqueFd new_debugger_pidfd;
+  UniqueFd new_debugger_procfd;
+  if (args->op == KFD_IOC_DBG_TRAP_ENABLE) {
+    const int debugger_pin_result =
+        pin_process_identity(caller.client_pid(), new_debugger_pidfd, new_debugger_procfd);
+    if (debugger_pin_result != 0)
+      return debugger_pin_result;
+  }
+
+  // PTRACE gate: for any op other than DISABLE, a debugger acting on another
+  // process must be that exact process's ptrace parent. This mirrors
+  // ptrace_parent(target->lead_thread) == current in kfd_ioctl_set_debug_trap().
+  if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE) {
+    pid_t tracer_pid = 0;
+    const int tracer_result =
+        tracer_pid_of(*target_pidfd, *target_procfd, debug_identity_validation_hook_, tracer_pid);
+    if (tracer_result != 0) {
+      if (tracer_result == -ESRCH && enabled)
+        debug_sessions_.erase(target_pid);
+      return tracer_result;
+    }
+    if (tracer_pid != caller.client_pid())
+      return -EPERM;
+  }
+
+  // Resolve live GPU state only after pinning and authorizing the OS identity,
+  // so a KfdProcess associated with a reused numeric pid is never selected.
+  std::shared_ptr<KfdProcess> target_ref =
+      self_debug ? nullptr : find_process_by_client_pid(target_pid);
+  KfdProcess *target_proc = self_debug ? &caller : target_ref.get();
+
+  // Live runtime-enable state, set by ROCr's AMDKFD_IOC_RUNTIME_ENABLE on the
+  // inferior; false until the inferior connects and enables its runtime.
+  bool runtime_enabled = false;
+  if (target_proc != nullptr) {
+    std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
+    runtime_enabled = target_proc->runtime_state_.enabled;
+  }
+
+  // The target may exit after authorization. Revalidate before performing or
+  // committing an operation so a reused numeric pid cannot contribute live
+  // KfdProcess state to the pinned session.
+  const int still_live = pidfd_is_exited(target_pidfd->get());
+  if (still_live != 0) {
+    if (still_live == 1 && enabled)
+      debug_sessions_.erase(target_pid);
+    return still_live == 1 ? -ESRCH : still_live;
+  }
+  if (args->op == KFD_IOC_DBG_TRAP_ENABLE) {
+    const int debugger_still_live = pidfd_is_exited(new_debugger_pidfd.get());
+    if (debugger_still_live != 0)
+      return debugger_still_live == 1 ? -ESRCH : debugger_still_live;
+  }
 
   // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3132-L3142
   switch (args->op) {
@@ -2158,7 +2350,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   switch (args->op) {
   // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_debug.c#L788-L847
   case KFD_IOC_DBG_TRAP_ENABLE: {
-    if (sess.enabled)
+    if (enabled)
       return -EALREADY; // target process is already debug enabled
 
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
@@ -2174,26 +2366,26 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     if (fl == -1 || (fl & O_ACCMODE) == O_RDONLY)
       return -EBADF;
 
+    KfdProcess::DebugSession sess{};
+    sess.target_pidfd = std::move(new_target_pidfd);
+    sess.target_procfd = std::move(new_target_procfd);
     sess.enabled = true;
     sess.debugger_pid = caller.client_pid();
+    sess.debugger_pidfd = std::move(new_debugger_pidfd);
     sess.dbg_fd = dbg_fd;
-    // In daemon mode the session owns the transferred fd and releases it via
-    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
-    // debugger's own descriptor, left for the debugger to close.
-    if (daemon_mode_)
-      sess.owned_dbg_fd = UniqueFd(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
 
     // Snapshot the runtime-enable state under a single lock so the marshaled
     // runtime_state, r_debug and ttmp_setup stay mutually consistent: a
     // concurrent RUNTIME_ENABLE/DISABLE must not change them between reads.
-    // Lock order debug_mutex_ -> runtime_mutex_ is already held that way.
+    // Lock order debug_sessions_mutex_ -> runtime_mutex_ is already held that
+    // way.
     // Kernel: kfd_dbg_trap_enable copies the saved runtime info and returns its
     // size.
     kfd_runtime_info info{};
-    {
-      std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
-      const auto &rt = target->runtime_state_;
+    if (target_proc != nullptr) {
+      std::lock_guard<std::mutex> rlk(target_proc->runtime_mutex_);
+      const auto &rt = target_proc->runtime_state_;
       sess.runtime_state = rt.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
       info.r_debug = rt.r_debug;
       info.ttmp_setup = (rt.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
@@ -2204,13 +2396,27 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
                   copy_size);
     args->enable.rinfo_size = sizeof(info);
+
+    const int target_commit_live = pidfd_is_exited(sess.target_pidfd.get());
+    if (target_commit_live != 0)
+      return target_commit_live == 1 ? -ESRCH : target_commit_live;
+    const int debugger_commit_live = pidfd_is_exited(sess.debugger_pidfd.get());
+    if (debugger_commit_live != 0)
+      return debugger_commit_live == 1 ? -ESRCH : debugger_commit_live;
+
+    // In daemon mode the session owns the transferred fd and releases it via
+    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
+    // debugger's own descriptor, left for the debugger to close.
+    if (daemon_mode_)
+      sess.owned_dbg_fd = UniqueFd(dbg_fd);
+    debug_sessions_.emplace(target_pid, std::move(sess));
+    debug_sessions_cv_.notify_one();
     return 0;
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
-    // Resetting the session releases the debugger notifier: in daemon mode the
-    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
-    // mode nothing is owned, so the debugger's own fd is left untouched.
-    sess = KfdProcess::DebugSession{};
+    // Erasing releases the SCM_RIGHTS-transferred notifier in daemon mode. In
+    // local mode the session does not own the debugger's descriptor.
+    debug_sessions_.erase(target_pid);
     return 0;
   // Recognized ops whose handlers are not wired up yet. The kernel dispatches
   // each to a real implementation; the skeleton reports ENOSYS ("not
@@ -2234,7 +2440,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
     // debugger wants forwarded. Delivery is wired up with the event channel.
-    sess.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
+    session_it->second.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
     return 0;
   default:
     return -EINVAL;
