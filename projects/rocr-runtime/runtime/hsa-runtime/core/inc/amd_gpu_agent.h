@@ -820,6 +820,14 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // SDMA-disabled shader-blit fallback for a single DmaCopyBatch op.  Selects
+  // the blit shader based on op type: plain LINEAR uses the BlitDevToDev linear
+  // copy shader (one entry at a time).  Broadcast/swap/indirect have no shader
+  // equivalent yet and are rejected until those shaders are added.
+  hsa_status_t DmaCopyBatchFallback(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Linear swap: exchanges the contents of src and dst buffers.
   // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
   // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
