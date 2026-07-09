@@ -465,6 +465,10 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
+        cu->set_memory_violation_handler(
+            [this](amdgpu::Wavefront &wf, uint64_t address, bool is_write) {
+              return on_wave_memory_violation(wf, address, is_write);
+            });
       }
     });
     g.cps_initialized = true;
@@ -2503,6 +2507,49 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
   return true;
 }
 
+bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool) {
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(proc->client_pid());
+    if (session == debug_sessions_.end() || !session->second.enabled)
+      return false;
+  }
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = queue->second.ctx_save_restore_address;
+    ctx_size = queue->second.ctx_save_restore_area_size;
+    gpu_id = queue->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+  constexpr uint32_t kTrapstsXnackError = 1u << 28;
+  wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
+  wave.debug_trap(0);
+  report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size,
+                      KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION));
+  return true;
+}
+
+void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
+  for (auto &gpu : gpus_) {
+    if (!gpu.soc)
+      continue;
+    gpu.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        cu->set_debug_active(active);
+    });
+  }
+}
+
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   wave.pc = state.pc;
@@ -2887,6 +2934,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     if (daemon_mode_)
       sess.owned_dbg_fd = UniqueFd(dbg_fd);
     debug_sessions_.emplace(target_pid, std::move(sess));
+    set_debug_active_on_all_cus(true);
     debug_sessions_cv_.notify_one();
     return 0;
   }
@@ -2905,6 +2953,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       }
     }
     debug_sessions_.erase(target_pid);
+    if (debug_sessions_.empty())
+      set_debug_active_on_all_cus(false);
     return 0;
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the

@@ -484,25 +484,25 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  // Capture address-watchpoint probe info before the pipeline consumes the
-  // instruction. The match test runs after the PC advances (below) so that a
-  // wave stopped on a watchpoint resumes past the watched access instead of
-  // re-executing it (and re-triggering the watch).
-  const bool watch_probe = watchpoint_handler_ && inst->is_memory_op() && inst->data() &&
-                           inst->data()->tag() == GLOBAL_MEM;
-  std::vector<uint64_t> watch_addrs;
-  uint32_t watch_bytes = 0;
-  bool watch_is_write = false;
-  bool watch_is_atomic = false;
-  if (watch_probe) {
+  // Capture debugger probe info before the pipeline consumes the instruction.
+  // The checks run after the PC advances (below) so that a wave stopped on a
+  // watchpoint or memory fault resumes past the access instead of re-executing
+  // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
+  const bool debug_probe = debug_active_.load(std::memory_order_relaxed) && inst->is_memory_op() &&
+                           inst->data() && inst->data()->tag() == GLOBAL_MEM;
+  std::vector<uint64_t> dbg_addrs;
+  uint32_t dbg_bytes = 0;
+  bool dbg_is_write = false;
+  bool dbg_is_atomic = false;
+  if (debug_probe) {
     auto &d = *inst->data_as<VectorMemState>();
-    watch_is_atomic = (d.atomic_op != AtomicOp::NONE);
-    watch_is_write = !d.is_load || watch_is_atomic;
-    watch_bytes = watch_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
-    watch_addrs.reserve(d.wf_size);
+    dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
+    dbg_is_write = !d.is_load || dbg_is_atomic;
+    dbg_bytes = dbg_is_atomic ? d.elem_size : std::max(1u, d.num_elems * d.elem_size);
+    dbg_addrs.reserve(d.wf_size);
     for (uint32_t lane = 0; lane < d.wf_size; ++lane)
       if (d.lane_mask & (1ULL << lane))
-        watch_addrs.push_back(d.per_lane_addr[lane]);
+        dbg_addrs.push_back(d.per_lane_addr[lane]);
   }
 
   if (inst->is_memory_op()) {
@@ -516,14 +516,23 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->pc += inst_size;
 
-  // Address watchpoints: after the access completed and the PC advanced, stop
-  // the wave (with the matching TRAPSTS.addr_watch bit) if any accessed address
-  // fell in a debugger watchpoint. Done here, post-advance, so the serialized
-  // wave resumes at the next instruction.
-  if (watch_probe && !active->debug_halted())
-    for (uint64_t addr : watch_addrs)
-      if (watchpoint_handler_(*active, addr, watch_bytes, watch_is_write, watch_is_atomic))
-        break;
+  // Debugger per-access checks, after the access completed and the PC advanced
+  // (so the serialized wave resumes at the next instruction). A memory fault is
+  // more severe than a watchpoint and wins if both would fire on the same
+  // instruction.
+  if (debug_probe && !active->debug_halted()) {
+    if (memory_violation_handler_) {
+      const uint32_t vmid = active->process_id();
+      for (uint64_t addr : dbg_addrs)
+        if (memory_->resolve_host_ptr(addr, vmid) == nullptr &&
+            memory_violation_handler_(*active, addr, dbg_is_write))
+          return; // wave stopped on a memory fault
+    }
+    if (watchpoint_handler_)
+      for (uint64_t addr : dbg_addrs)
+        if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
+          break;
+  }
 }
 
 bool ComputeUnitCore::step() {

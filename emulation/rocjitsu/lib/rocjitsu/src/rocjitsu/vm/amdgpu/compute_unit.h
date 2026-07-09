@@ -194,6 +194,13 @@ public:
   using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
   void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
 
+  using MemoryViolationHandler =
+      std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
+  void set_memory_violation_handler(MemoryViolationHandler cb) {
+    memory_violation_handler_ = std::move(cb);
+  }
+  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
 
@@ -630,6 +637,8 @@ protected:
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
   IllegalInstHandler illegal_inst_handler_;
+  MemoryViolationHandler memory_violation_handler_;
+  std::atomic<bool> debug_active_{false};
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
