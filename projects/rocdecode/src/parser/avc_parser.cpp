@@ -174,8 +174,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                         num_slices_ = 0;
                     }
 
-                    // Save slice NAL unit header of the picture currently being accumulated
-                    slice_nal_unit_header_ = nal_unit_header_;
+                    // Save slice NAL unit header of the picture currently being accumulated (first VCL NAL)
+                    if (num_slices_ == 0) {
+                        slice_nal_unit_header_ = nal_unit_header_;
+                    }
 
                     // Resize slice info list if needed and commit the parsed slice header
                     if ((num_slices_ + 1) > slice_info_list_.size()) {
