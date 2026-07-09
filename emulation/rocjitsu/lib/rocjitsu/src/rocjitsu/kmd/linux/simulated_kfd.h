@@ -30,6 +30,9 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 
+namespace amdgpu {
+class Wavefront;
+}
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
   uint32_t words[4];
@@ -272,6 +275,23 @@ private:
   void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
+  int debug_query_event(pid_t target_pid, uint64_t enabled_mask,
+                        kfd_ioctl_dbg_trap_query_debug_event_args &args);
+
+  /// @brief s_trap handler installed on every compute unit's wavefronts.
+  /// @details Runs on the engine thread when a wave executes s_trap. Returns
+  /// true (stop the wave) if the wave's process is being debugged, having
+  /// serialized the queue's stopped waves into its CWSR area and raised an
+  /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
+  bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
+
+  /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
+  void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                                   uint64_t ctx_base, uint32_t ctx_size);
+
+  /// @brief Record a debug exception on a queue and reflect it on the snapshot.
+  void raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                         uint32_t gpu_id, uint64_t exception_mask);
 
   /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
   /// @details Each further ordinal shifts the per-GPU LDS/scratch windows by
@@ -338,6 +358,20 @@ private:
   DebugIdentityValidationHook debug_identity_validation_hook_;
   std::condition_variable_any debug_sessions_cv_;
   std::jthread debug_session_reaper_;
+
+  /// @brief Pending debug exceptions per target, grouped by queue.
+  /// @details Populated by wave traps (engine thread) and drained by
+  /// KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT (ioctl thread). Never held together
+  /// with debug_sessions_mutex_ by the wave-trap path (lock ordering).
+  struct DebugQueueException {
+    uint32_t gpu_id = 0;
+    uint64_t mask = 0;
+  };
+  mutable std::mutex debug_events_mutex_;
+  std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;
+
+  /// @brief Monotonic source of stable debugger wave ids (TTMP4:5).
+  std::atomic<uint64_t> next_debug_wave_id_{1};
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
