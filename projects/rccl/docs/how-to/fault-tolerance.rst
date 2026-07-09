@@ -58,9 +58,15 @@ call stack.
    * - ``ncclInvalidUsage``
      - The sequence of RCCL calls is invalid.
      - Fatal. Abort the communicator and re-create it.
+   * - ``ncclRemoteError``
+     - A remote process exited or a network error occurred.
+     - Fatal. Abort the communicator, then shrink out the failed ranks or re-create it.
    * - ``ncclInProgress``
      - The call is still running (non-blocking mode).
      - Poll with :cpp:func:`ncclCommGetAsyncError`.
+   * - ``ncclTimeout``
+     - An operation exceeded its time limit, for example an unresponsive peer.
+     - Fatal. Abort the communicator, then shrink out the failed ranks or re-create it.
 
 A fatal error applies to all communicators in the same group. To recover, call
 :cpp:func:`ncclCommAbort` on every affected communicator and re-create it.
@@ -179,25 +185,32 @@ Growing a communicator
 coordinator generates a unique ID with :cpp:func:`ncclCommGetUniqueId` and
 distributes it to the new ranks out of band (here using ``MPI_Bcast``).
 
-* Existing ranks: ``comm`` set, ``rank = -1`` (the coordinator passes the ID).
-* New ranks: ``comm = NULL``, ``rank =`` the assigned rank, with the ID.
+* Existing root (coordinator): ``comm`` set, ``uniqueId = &growId``, ``rank = -1``.
+* Existing non-root ranks: ``comm`` set, ``uniqueId = NULL``, ``rank = -1``.
+* New ranks: ``comm = NULL``, ``uniqueId = &growId``, ``rank =`` the assigned rank
+  (a non-NULL ``uniqueId`` is required here).
 
 .. code-block:: cpp
 
    // Grow a communicator of `existing` ranks up to `newTotal` ranks.
    ncclComm_t newComm = nullptr;
 
-   // 1. Coordinator generates the grow ID and broadcasts it to everyone.
+   // 1. Coordinator generates the grow ID; the new ranks need it out of band.
    ncclUniqueId growId{};
    if (myRank == 0) {
        ncclCommGetUniqueId(comm, &growId);
    }
    MPI_Bcast(&growId, sizeof(growId), MPI_BYTE, 0, MPI_COMM_WORLD);
 
-   // 2. Existing and new ranks call grow with the matching arguments.
-   if (myRank < existing) {
+   // 2. Each rank calls grow with the arguments for its role.
+   if (myRank == 0) {
+       // Existing root: passes the ID.
        ncclCommGrow(comm, newTotal, &growId, -1, &newComm, nullptr);
+   } else if (myRank < existing) {
+       // Existing non-root: pass NULL (grow contract in rccl.h).
+       ncclCommGrow(comm, newTotal, nullptr, -1, &newComm, nullptr);
    } else {
+       // New rank: comm = NULL, passes the ID and its assigned rank.
        hipSetDevice(localDevice);
        ncclCommGrow(nullptr, newTotal, &growId, myRank, &newComm, nullptr);
    }
@@ -210,8 +223,10 @@ completion before using the new communicator.
    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
    config.blocking = 0;
 
-   if (myRank < existing) {
+   if (myRank == 0) {
        ncclCommGrow(comm, newTotal, &growId, -1, &newComm, &config);
+   } else if (myRank < existing) {
+       ncclCommGrow(comm, newTotal, nullptr, -1, &newComm, &config);
    } else {
        ncclCommGrow(nullptr, newTotal, &growId, myRank, &newComm, &config);
    }
