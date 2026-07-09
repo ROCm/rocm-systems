@@ -786,47 +786,9 @@
           "command_args": "-d fp8_e5m2"
         }
       ]
-    },
-    "smoke_base": {
-      "extends": "perf_base",
-      "command_args": "-b 1 -e 512M -f 2 -g 1 -n 1 -w 20 -N 1 -A 1"
-    },
-    "smoke_all_reduce_perf": {
-      "extends": "smoke_base",
-      "binary": "all_reduce_perf",
-      "tests": [
-        {
-          "name": "AllReduce_float",
-          "description": "AllReduce smoke, datatype float",
-          "command_args": "-d float"
-        }
-      ]
-    },
-    "smoke_alltoall_perf": {
-      "extends": "smoke_base",
-      "binary": "alltoall_perf",
-      "tests": [
-        {
-          "name": "AlltoAll_float",
-          "description": "AlltoAll smoke, datatype float",
-          "command_args": "-d float"
-        }
-      ]
     }
   },
   "test_suites": [
-    {
-      "name": "Smoke - AllReduce (float, 512M)",
-      "description": "rccl-tests AllReduce smoke: float only, 1B-512M, 1 cycle x 1 iteration",
-      "config": "smoke_all_reduce_perf",
-      "enabled": true
-    },
-    {
-      "name": "Smoke - AlltoAll (float, 512M)",
-      "description": "rccl-tests AlltoAll smoke: float only, 1B-512M, 1 cycle x 1 iteration",
-      "config": "smoke_alltoall_perf",
-      "enabled": true
-    },
     {
       "name": "Perf - AllReduce (datatype sweep)",
       "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-1G)",
