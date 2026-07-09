@@ -287,21 +287,7 @@ uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
 extern "C" {
 #endif
 
-static inline int hsakmt_safe_env_to_int(const char* envvar, int default_val) {
-  if (envvar == NULL) return default_val;
-  char* endptr;
-  errno = 0;
-  long val = strtol(envvar, &endptr, 10);
-  if (endptr == envvar) return default_val;
-  // Allow trailing whitespace from shell/.env files; reject other trailing content.
-  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') {
-    ++endptr;
-  }
-  if (*endptr != '\0') return default_val;
-  // On LLP64 (Windows), long is 32-bit so rely on errno for overflow.
-  if (errno == ERANGE || val < INT_MIN || val > INT_MAX) return default_val;
-  return (int)val;
-}
+int hsakmt_safe_env_to_int(const char* envvar, int default_val);
 
 #ifdef __cplusplus
 }

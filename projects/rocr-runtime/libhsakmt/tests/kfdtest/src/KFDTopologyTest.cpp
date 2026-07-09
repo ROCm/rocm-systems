@@ -177,9 +177,10 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
                             int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
-                            if (written > 0 && offset + written < sizeof(string)) {
-                                offset += written;
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
                             }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
@@ -200,9 +201,10 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
                     for (unsigned i = 0; i < 256; i++) {
                         if (cacheProperties[n].SiblingMap[i]) {
                             int written = snprintf(string + offset, sizeof(string) - offset, "%d,", i);
-                            if (written > 0 && offset + written < sizeof(string)) {
-                                offset += written;
+                            if (written <= 0 || offset + (size_t)written >= sizeof(string)) {
+                                break;
                             }
+                            offset += written;
                         }
                     }
                     LOG() << "     ProcIdLow " << cacheProperties[n].ProcessorIdLow <<
