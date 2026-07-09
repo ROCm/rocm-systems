@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -25,6 +26,10 @@ RJ_DIAGNOSTIC_POP
 #include <unordered_set>
 
 namespace rocjitsu {
+
+namespace amdgpu {
+class Wavefront;
+}
 
 // KFD mmap offset encoding (mirrors kfd_priv.h).
 inline constexpr uint64_t KFD_MMAP_TYPE_SHIFT = 62;
@@ -207,6 +212,25 @@ private:
   int debug_trap_ioctl(KfdProcess &caller, void *arg);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
+  int debug_query_event(pid_t target_pid, kfd_ioctl_dbg_trap_query_debug_event_args &args);
+
+  /// @brief s_trap handler installed on every compute unit's wavefronts.
+  /// @details Runs on the engine thread when a wave executes s_trap. Returns
+  /// true (stop the wave) if the wave's process is being debugged, having
+  /// serialized the queue's stopped waves into its CWSR area and raised an
+  /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
+  bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
+
+  /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
+  void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
+                                   uint64_t ctx_base, uint32_t ctx_size);
+
+  /// @brief Record a debug exception on a queue and reflect it on the snapshot.
+  void raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                         uint32_t gpu_id, uint64_t exception_mask);
+
+  /// @brief Wake a debugger blocked on its notifier pipe (best effort).
+  void notify_debugger(int dbg_fd);
 
   /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
   /// @details Ordinal 0 is @ref default_apertures_; each further ordinal shifts
@@ -233,6 +257,20 @@ private:
   /// kernel creating the target kfd_process in the DBG_TRAP_ENABLE path.
   mutable std::mutex debug_sessions_mutex_;
   std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
+
+  /// @brief Pending debug exceptions per target, grouped by queue.
+  /// @details Populated by wave traps (engine thread) and drained by
+  /// KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT (ioctl thread). Never held together
+  /// with debug_sessions_mutex_ by the wave-trap path (lock ordering).
+  struct DebugQueueException {
+    uint32_t gpu_id = 0;
+    uint64_t mask = 0;
+  };
+  mutable std::mutex debug_events_mutex_;
+  std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;
+
+  /// @brief Monotonic source of stable debugger wave ids (TTMP4:5).
+  std::atomic<uint64_t> next_debug_wave_id_{1};
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_

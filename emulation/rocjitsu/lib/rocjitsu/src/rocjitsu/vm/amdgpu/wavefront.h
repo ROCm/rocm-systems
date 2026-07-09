@@ -456,6 +456,13 @@ public:
   /// @brief The trap id recorded by the last s_trap (breakpoint = 1).
   uint32_t trap_id() const { return trap_id_; }
 
+  /// @brief Stable, unique debugger wave id (planted into TTMP4:5 on stop).
+  /// @details Zero until assigned. rocm-dbgapi reads this from the CWSR area as
+  /// the wave's identity, so it must be stable across re-serialization of the
+  /// same wave. Assigned lazily by the driver on the first stop.
+  uint64_t debug_wave_id() const { return debug_wave_id_; }
+  void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
+
   /// @brief Stop this wave in the debugger (models the trap handler entry).
   /// @param trap_id Trap id from the s_trap immediate (breakpoint = 1).
   /// @details Records the trap id and halts the wave for debugger inspection.
@@ -525,6 +532,7 @@ public:
     debug_halted_ = false;
     single_step_ = false;
     trap_id_ = 0;
+    debug_wave_id_ = 0;
     queue_id_ = 0;
   }
 
@@ -576,11 +584,12 @@ private:
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
-  uint32_t ttmp_[16] = {};    ///< Trap temporary registers (TTMP0-15).
-  uint32_t trapsts_ = 0;      ///< Trap status register (EXCP flags).
-  bool debug_halted_ = false; ///< Stopped by the debugger (skipped by scheduler).
-  bool single_step_ = false;  ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;      ///< Trap id from the last s_trap (breakpoint = 1).
+  uint32_t ttmp_[16] = {};     ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;       ///< Trap status register (EXCP flags).
+  bool debug_halted_ = false;  ///< Stopped by the debugger (skipped by scheduler).
+  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

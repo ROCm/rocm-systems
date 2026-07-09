@@ -3,9 +3,13 @@
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -381,6 +385,9 @@ int SimulatedDriver::open() {
           [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
             return allocate_scratch_backing(process_id, gpu_va, size);
           });
+      for (auto *cu : cp->compute_units())
+        cu->set_trap_handler(
+            [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
     });
     g.cps_initialized = true;
   }
@@ -483,6 +490,9 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
           [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
             return allocate_scratch_backing(process_id, gpu_va, size);
           });
+      for (auto *cu : cp->compute_units())
+        cu->set_trap_handler(
+            [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
     });
     g.cps_initialized = true;
   }
@@ -1893,6 +1903,178 @@ std::shared_ptr<KfdProcess> SimulatedDriver::find_process_by_client_pid(pid_t pi
   return nullptr;
 }
 
+namespace {
+
+// Build the debugger's serialized view of one stopped wave.
+kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
+  kmd::CwsrWaveState w;
+  const uint32_t raw_status = wf.status_raw();
+  w.pc = wf.pc;
+  w.exec = wf.exec();
+  w.vcc = wf.vcc();
+  w.m0 = wf.m0();
+  w.mode = wf.mode_raw();
+  w.trapsts = wf.trapsts();
+  // On stop the trap handler sets STATUS.HALT and records the previous value in
+  // TTMP6 (see rocm-dbgapi wave_set_state); reproduce that so a later resume can
+  // restore the wave's real halt state.
+  w.saved_status_halt = (raw_status >> 13) & 1u;
+  w.status = raw_status | (1u << 13);
+  w.wave_stopped = true;
+  w.trap_id = wf.trap_id();
+  w.wave_id = wf.debug_wave_id();
+  w.group_ids = {wf.wg_id(), 0u, 0u};
+  w.wave_in_group = 0;
+  w.queue_packet_id = wf.dispatch_id() & 0x1FFFFFFu;
+  w.num_sgprs = wf.num_sgprs();
+  w.num_vgprs = wf.num_vgprs();
+
+  const auto &cu = wf.cu();
+  const uint32_t sbase = wf.sgpr_alloc().base;
+  w.sgprs.resize(w.num_sgprs);
+  for (uint32_t s = 0; s < w.num_sgprs; ++s)
+    w.sgprs[s] = cu.read_sgpr(sbase + s);
+  const uint32_t vbase = wf.vgpr_alloc().base;
+  w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
+  for (uint32_t r = 0; r < w.num_vgprs; ++r)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      w.vgprs[static_cast<size_t>(r) * 64 + lane] = cu.read_vgpr(vbase + r, lane);
+  return w;
+}
+
+} // namespace
+
+void SimulatedDriver::notify_debugger(int dbg_fd) {
+  // Wake a debugger blocked on its notifier pipe. In local (in-process) mode the
+  // fd is invalid; the daemon transport delivers the wake across the RPC
+  // boundary. Best effort: an error just means no debugger is listening.
+  if (dbg_fd < 0)
+    return;
+  const char byte = 1;
+  ssize_t n = ::write(dbg_fd, &byte, 1);
+  (void)n;
+}
+
+void SimulatedDriver::raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                        uint32_t gpu_id, uint64_t exception_mask) {
+  if (!proc)
+    return;
+  {
+    std::lock_guard<std::mutex> lk(debug_events_mutex_);
+    auto &qe = debug_events_[proc->client_pid()][queue_id];
+    qe.gpu_id = gpu_id;
+    qe.mask |= exception_mask;
+  }
+  // Reflect the exception on the queue snapshot so GET_QUEUE_SNAPSHOT reports it.
+  std::lock_guard<std::mutex> plk(proc->alloc_mutex_);
+  auto qit = proc->queue_snapshot_map_.find(queue_id);
+  if (qit != proc->queue_snapshot_map_.end())
+    qit->second.exception_status |= exception_mask;
+}
+
+void SimulatedDriver::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
+                                                  uint32_t gpu_id, uint64_t ctx_base,
+                                                  uint32_t ctx_size) {
+  auto *gpu = find_gpu(gpu_id);
+  if (!gpu || !gpu->soc || ctx_base == 0)
+    return;
+
+  std::vector<kmd::CwsrWaveState> waves;
+  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units()) {
+      for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
+        auto *w = cu->wf(i);
+        if (w->debug_halted() && w->process_id() == process_id && w->queue_id() == queue_id)
+          waves.push_back(build_cwsr_wave_state(*w));
+      }
+    }
+  });
+  if (waves.empty())
+    return;
+
+  auto *mem = gpu->soc->memory();
+  kmd::serialize_queue_cwsr(ctx_base, ctx_size, waves,
+                            [&](uint64_t va, uint32_t val) { mem->write32(va, val, process_id); });
+}
+
+bool SimulatedDriver::on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id) {
+  const uint32_t process_id = wf.process_id();
+  const uint32_t queue_id = wf.queue_id();
+
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  const pid_t target_pid = proc->client_pid();
+
+  // Is this process being debugged?
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto sit = debug_sessions_.find(target_pid);
+    if (sit == debug_sessions_.end() || !sit->second.enabled)
+      return false;
+  }
+
+  // Locate the queue's context-save-restore area.
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto qit = proc->queue_snapshot_map_.find(queue_id);
+    if (qit == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = qit->second.ctx_save_restore_address;
+    ctx_size = qit->second.ctx_save_restore_area_size;
+    gpu_id = qit->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false; // no CWSR area advertised: cannot expose the wave
+
+  // Assign a stable debugger id and stop the wave.
+  if (wf.debug_wave_id() == 0)
+    wf.set_debug_wave_id(next_debug_wave_id_.fetch_add(1, std::memory_order_relaxed));
+  wf.debug_trap(trap_id);
+
+  // Serialize this queue's stopped waves and raise the wave-trap event.
+  serialize_queue_debug_waves(process_id, queue_id, gpu_id, ctx_base, ctx_size);
+  raise_debug_event(proc, queue_id, gpu_id, KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
+
+  int dbg_fd = -1;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto sit = debug_sessions_.find(target_pid);
+    if (sit != debug_sessions_.end())
+      dbg_fd = sit->second.dbg_fd;
+  }
+  notify_debugger(dbg_fd);
+  return true;
+}
+
+int SimulatedDriver::debug_query_event(pid_t target_pid,
+                                       kfd_ioctl_dbg_trap_query_debug_event_args &args) {
+  // Mirrors kfd_dbg_ev_query_debug_event(): return one source (queue) with a
+  // pending exception intersecting the requested mask, clearing the requested
+  // bits; -EAGAIN when none remain (kfd_ioctl.h contract).
+  const uint64_t requested = args.exception_mask;
+  std::lock_guard<std::mutex> lk(debug_events_mutex_);
+  auto it = debug_events_.find(target_pid);
+  if (it == debug_events_.end())
+    return -EAGAIN;
+  auto &queues = it->second;
+  for (auto qit = queues.begin(); qit != queues.end(); ++qit) {
+    if ((qit->second.mask & requested) == 0)
+      continue;
+    args.exception_mask = qit->second.mask;
+    args.queue_id = qit->first;
+    args.gpu_id = qit->second.gpu_id;
+    qit->second.mask &= ~requested;
+    if (qit->second.mask == 0)
+      queues.erase(qit);
+    return 0;
+  }
+  return -EAGAIN;
+}
+
 // AMDKFD_IOC_DBG_TRAP dispatcher. This mirrors the pre-switch validation ladder
 // and per-operation routing of the real driver's kfd_ioctl_set_debug_trap()
 // (amd/amdkfd/kfd_chardev.c, amdgpu-6.16.13). The individual sub-operations are
@@ -2055,9 +2237,8 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
     return 0;
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
-    // EAGAIN = "no raised exception found" (kernel contract). The event channel
-    // that raises wave exceptions is wired up with the wave-level trap handler.
-    return -EAGAIN;
+    // Drain the next pending wave/queue exception for this target, or EAGAIN.
+    return debug_query_event(target_pid, args->query_debug_event);
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
     // Enumerate the target's compute queues so rocm-dbgapi can locate each
     // queue's CWSR area and walk its waves (kfd_debug.c: get_queue_snapshot).
