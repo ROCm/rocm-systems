@@ -255,6 +255,18 @@ contract:
   Contract_StreamMemoryOps_RejectsInvalidInputs:
     <<: *level_0
     tags: [stream_memory_ops]
+  Contract_StreamCuMask_DefaultMaskRoundTrips_AllCUsActive:
+    <<: *level_0
+    tags: [stream_cu_mask]
+  Contract_StreamCuMask_CreateWithDefaultMask_Succeeds:
+    <<: *level_0
+    tags: [stream_cu_mask]
+  Contract_StreamCuMask_CreateRejectsInvalidArgs:
+    <<: *level_0
+    tags: [stream_cu_mask]
+  Contract_StreamCuMask_GetRejectsInvalidArgs:
+    <<: *level_0
+    tags: [stream_cu_mask]
   Contract_AsyncTransfer_HostToDeviceToHost_RoundTripsAfterStreamSynchronize:
     <<: *level_0
     tags: [async_transfer]
