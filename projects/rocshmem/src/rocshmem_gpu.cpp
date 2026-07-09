@@ -983,17 +983,24 @@ __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx) {
   LOGD_API("device::ctx_n_pes (ctx=%zd)",
     ctx.ctx_opaque);
 
-  TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
-  return tinfo->size;
+  if (ctx.team_opaque) {
+    TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
+    return tinfo->size;
+  }
+  return constmem.num_pes;
 }
 
 __device__ int rocshmem_n_pes() {
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->num_pes;
+  return constmem.num_pes;
 }
 
 __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
   LOGD_API("device::ctx_my_pe (ctx=%zd)",
     ctx.ctx_opaque);
+
+  if (!ctx.team_opaque) {
+    return constmem.my_pe;
+  }
 
   TeamInfo *tinfo = reinterpret_cast<TeamInfo *>(ctx.team_opaque);
   int my_pe{get_internal_ctx(ctx)->my_pe};
@@ -1013,7 +1020,7 @@ __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx) {
 }
 
 __device__ int rocshmem_my_pe() {
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->my_pe;
+  return constmem.my_pe;
 }
 
 __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {

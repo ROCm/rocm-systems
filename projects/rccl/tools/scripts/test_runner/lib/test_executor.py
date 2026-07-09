@@ -2208,12 +2208,146 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Command was: {' '.join(text_cmd)}")
 
+        # Generate a plain (no --show-functions) llvm-cov report. Unlike the
+        # per-file --show-functions report above, a plain report ends in a single
+        # grand-TOTAL line, so it is a valid overall summary. This is the fallback
+        # the emitter parses when index.html is unavailable.
+        print("Generating plain coverage summary report...")
+        summary_report = os.path.join(self.report_dir, "coverage_summary.txt")
+        summary_cmd = [
+            llvm_cov,
+            "report",
+            f"--instr-profile={merged_profdata}",
+            "--Xdemangler=c++filt"
+        ]
+        summary_cmd.extend(object_files)
+        summary_cmd.extend([
+            f"--ignore-filename-regex={ignore_regex}",
+            "--sources",
+            self.build_dir
+        ])
+
+        try:
+            with open(summary_report, 'w') as f:
+                subprocess.run(
+                    summary_cmd,
+                    stdout=f,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True
+                )
+            print(f"Coverage summary report generated: {summary_report}")
+        except subprocess.CalledProcessError as e:
+            print("ERROR: Failed to generate plain coverage summary report")
+            print(f"Error: {e.stderr}")
+            if self.args.verbose:
+                print(f"Command was: {' '.join(summary_cmd)}")
+
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")
         print(f"{'='*80}")
         print(f"Report directory: {self.report_dir}")
         print(f"HTML report: {self.report_dir}/index.html")
         print(f"Text report: {text_report}")
+        if os.path.isfile(summary_report):
+            print(f"Summary report: {summary_report}")
+
+    def _resolve_rccl_lib(self):
+        """Best-effort: identify the librccl.so the tests actually loaded, and --
+        if it came from a ROCm install rather than a fresh build -- which one.
+
+        Resolution mirrors the loader search order the runner sets in
+        LD_LIBRARY_PATH: the (test) build_dir first, then the caller's
+        LD_LIBRARY_PATH, then <rocm_root>/lib, then the system ldconfig cache.
+        Returns a dict describing the chosen lib (or {"resolved": False, ...}).
+        Never raises -- provenance metadata must not break a run."""
+        try:
+            from lib import results_emitter as re_mod
+
+            cand_dirs = []
+            build_dir = getattr(self, "build_dir", None)
+            if build_dir:
+                cand_dirs.append(build_dir)
+            for d in (os.environ.get("LD_LIBRARY_PATH", "") or "").split(":"):
+                if d:
+                    cand_dirs.append(d)
+            rocm_root = None
+            try:
+                rocm_root = self._rocm_root()
+            except Exception:
+                rocm_root = None
+            if rocm_root:
+                cand_dirs.append(os.path.join(rocm_root, "lib"))
+
+            found = None
+            for d in cand_dirs:
+                if not d:
+                    continue
+                for name in ("librccl.so", "librccl.so.1"):
+                    p = os.path.join(d, name)
+                    if os.path.isfile(p) or os.path.islink(p):
+                        found = p
+                        break
+                if not found:
+                    hits = sorted(glob.glob(os.path.join(d, "librccl.so*")))
+                    if hits:
+                        found = hits[0]
+                if found:
+                    break
+
+            if not found:  # system loader cache
+                try:
+                    out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, timeout=10)
+                    m = re.search(r"librccl\.so\S*\s+.*=>\s+(\S+)", out.stdout or "")
+                    if m:
+                        found = m.group(1)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+
+            if not found:
+                return {"resolved": False,
+                        "note": "librccl.so not found on the test LD_LIBRARY_PATH or in ldconfig"}
+
+            real = os.path.realpath(found)
+            info = {"resolved": True, "path": found, "realpath": real}
+            try:
+                st = os.stat(real)
+                info["size"] = st.st_size
+                info["mtime"] = datetime.datetime.fromtimestamp(
+                    st.st_mtime, datetime.timezone.utc).isoformat()
+            except OSError:
+                pass
+
+            sm = re.search(r"librccl\.so\.([0-9][0-9.]*)$", real)
+            if sm:
+                info["soname_version"] = sm.group(1)
+
+            bd = os.path.realpath(build_dir) if build_dir else None
+            if bd and real.startswith(bd + os.sep):
+                info["source"] = "custom" if getattr(self, "using_custom_lib", False) else "test-build"
+            else:
+                # Walk up to the ROCm root (the dir holding .info/version).
+                root = None
+                d = os.path.dirname(real)
+                for _ in range(6):
+                    if os.path.isfile(os.path.join(d, ".info", "version")):
+                        root = d
+                        break
+                    nd = os.path.dirname(d)
+                    if nd == d:
+                        break
+                    d = nd
+                if root:
+                    info["source"] = "rocm-install"
+                    info["rocm_root"] = root
+                    rv = re_mod._rocm_version(root)
+                    if rv:
+                        info["rocm_version"] = rv
+                else:
+                    info["source"] = "system"
+            return info
+        except Exception as e:  # provenance is best-effort
+            return {"resolved": False, "note": f"rccl lib resolution failed: {e}"}
 
     def emit_results(self):
         """Emit structured results for the results dashboard.
@@ -2301,6 +2435,11 @@ class TestExecutor:
                 build_type = "release"
             md["rccl_build_type"] = build_type
             md["mpi_impl"] = self.mpi_impl
+            # Which librccl.so the tests actually loaded (and, if it came from a
+            # ROCm install rather than a fresh build, which install). rccl_sha/
+            # rccl_branch describe the *source* checkout, which may differ from
+            # the loaded lib on --no-build / system-RCCL runs.
+            md["rccl_lib"] = self._resolve_rccl_lib()
             md.setdefault("checks", {})["release_build"] = {
                 "status": "OK" if build_type == "release" else ("SKIP" if build_type == "custom" else "WARN"),
                 "value": build_type + (" (perf should use release)" if build_type == "debug" else ""),
@@ -2316,10 +2455,18 @@ class TestExecutor:
         for record in self.test_records:
             emitter.add_test(record)
 
-        # Attach coverage if a report was generated this run.
-        cov = re_mod.parse_coverage_report(
-            os.path.join(self.report_dir, "function_coverage_report.txt")
+        # Attach coverage if a report was generated this run. The authoritative
+        # overall summary is llvm-cov's index.html Totals row. The fallback is the
+        # plain (no --show-functions) report, whose single grand-TOTAL line is a
+        # valid overall summary; the --show-functions function_coverage_report.txt
+        # is deliberately NOT used here (it has only per-file totals).
+        cov = re_mod.parse_coverage_index_html(
+            os.path.join(self.report_dir, "index.html")
         )
+        if not cov:
+            cov = re_mod.parse_coverage_report(
+                os.path.join(self.report_dir, "coverage_summary.txt")
+            )
         emitter.set_coverage(cov)
 
         summary = {

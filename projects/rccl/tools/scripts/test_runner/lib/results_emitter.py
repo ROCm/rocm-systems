@@ -139,12 +139,74 @@ def parse_perf_output(text):
     return rows, avg_busbw
 
 
+def parse_coverage_index_html(index_html_path):
+    """
+    Parse the authoritative overall coverage summary from llvm-cov's
+    ``index.html`` ``Totals`` row. This is the correct source for a run's overall
+    percentages: unlike the ``--show-functions`` text report (which has only
+    per-file ``TOTAL`` lines and no grand total), the HTML ``Totals`` row is the
+    single run-wide roll-up.
+
+    The ``Totals`` columns are, in order, Function, Line, Region, Branch -- note
+    this differs from the plain ``llvm-cov report`` column order -- each formatted
+    ``PCT% (covered/total)``. Returns a dict with ``regions_pct``,
+    ``functions_pct``, ``lines_pct``, ``branches_pct`` (branch may be None on
+    older llvm-cov) plus a ``raw`` sub-dict, or None if the file is absent or the
+    ``Totals`` row can't be found.
+    """
+    if not index_html_path or not os.path.isfile(index_html_path):
+        return None
+    try:
+        with open(index_html_path, encoding="utf-8", errors="replace") as f:
+            html = f.read()
+    except OSError:
+        return None
+
+    m = re.search(r"Totals</pre>.*?</tr>", html, re.S)
+    if not m:
+        return None
+    # Each tuple is (pct, covered, total). index.html order: Function, Line,
+    # Region, Branch. Branch may be absent, so require only the first three.
+    # NB: column order reflects current llvm-cov HTML; revisit if it changes.
+    vals = re.findall(r">\s*([0-9.]+)%\s*\((\d+)/(\d+)\)", m.group(0))
+    if len(vals) < 3:
+        return None
+
+    order = ["functions", "lines", "regions", "branches"]
+    totals = {}
+    for i, name in enumerate(order):
+        if i < len(vals):
+            pct, covered, total = vals[i]
+            totals[name] = {"pct": float(pct), "covered": int(covered), "total": int(total)}
+
+    def _pct(name):
+        return totals[name]["pct"] if name in totals else None
+
+    return {
+        "regions_pct": _pct("regions"),
+        "functions_pct": _pct("functions"),
+        "lines_pct": _pct("lines"),
+        "branches_pct": _pct("branches"),
+        "raw": {"source": "index.html", "totals": totals},
+    }
+
+
 def parse_coverage_report(report_txt_path):
     """
-    Parse the ``TOTAL`` line of an llvm-cov ``report`` text file into coverage
-    percentages. llvm-cov emits, in order, region / function / line / branch
-    coverage, each with a trailing ``NN.NN%`` column. Returns None if the file is
-    absent or has no TOTAL line.
+    Parse the grand-``TOTAL`` line of a *plain* ``llvm-cov report`` text file
+    (one produced WITHOUT ``--show-functions``) into coverage percentages. A
+    plain report's ``TOTAL`` columns are, in order, region / function / line /
+    branch, each with a trailing ``NN.NN%``.
+
+    This is a last-resort fallback for :func:`parse_coverage_index_html`. Do NOT
+    rely on it for a ``--show-functions`` report (e.g.
+    ``function_coverage_report.txt``): that report emits one ``TOTAL`` line *per
+    file* and has no grand total, so any single ``TOTAL`` is a per-file figure,
+    not the run's overall coverage. To avoid silently emitting a bogus per-file
+    total, this returns None when it sees more than one ``TOTAL`` line.
+
+    Returns None if the file is absent, has no ``TOTAL`` line, or looks like a
+    per-file ``--show-functions`` report.
     """
     if not report_txt_path or not os.path.isfile(report_txt_path):
         return None
@@ -154,15 +216,22 @@ def parse_coverage_report(report_txt_path):
     except OSError:
         return None
 
-    total_line = next((ln for ln in lines if ln.strip().startswith("TOTAL")), None)
-    if not total_line:
+    total_lines = [ln for ln in lines if ln.strip().startswith("TOTAL")]
+    if not total_lines:
         return None
+    # More than one TOTAL => a per-file --show-functions report with no grand
+    # total; refuse rather than mistake the first per-file TOTAL for the overall.
+    if len(total_lines) > 1:
+        return None
+    total_line = total_lines[0]
 
-    pcts = [float(p) for p in re.findall(r"([0-9]+\.[0-9]+)%", total_line)]
-    # Region, Function, Line, Branch (branch may be absent in older llvm-cov).
+    pcts = [float(p) for p in re.findall(r"([0-9.]+)%", total_line)]
+    # Plain report order: Region, Function, Line, Branch (branch may be absent).
+    # NB: column order reflects current llvm-cov `report`; revisit if a future
+    # llvm-cov reorders columns.
     keys = ["regions_pct", "functions_pct", "lines_pct", "branches_pct"]
     cov = {k: (pcts[i] if i < len(pcts) else None) for i, k in enumerate(keys)}
-    cov["raw"] = {"total_line": total_line.strip(), "percents": pcts}
+    cov["raw"] = {"source": "plain-report", "total_line": total_line.strip(), "percents": pcts}
     return cov
 
 
@@ -331,10 +400,21 @@ class ResultsEmitter:
                               json.dumps(self.manifest["coverage"], indent=2, default=str))
 
             # Bundle captured logs + coverage report into the run dir so the
-            # tarball is self-contained for the dashboard scrape.
+            # tarball is self-contained for the dashboard scrape. To minimize
+            # bloat, only failing tests' logs are bundled: drop the per-test log
+            # files of passing/skipped tests (any non-per-test file is kept).
             if log_dir and os.path.isdir(log_dir):
                 dst = os.path.join(run_dir, "logs")
-                shutil.copytree(log_dir, dst, dirs_exist_ok=True)
+                drop = set()
+                for t in self.tests:
+                    rel = t.get("log_relpath")
+                    status = (t.get("status") or t.get("result") or "").upper()
+                    if rel and status not in ("FAILED", "TIMEOUT"):
+                        drop.add(os.path.basename(rel))
+                shutil.copytree(
+                    log_dir, dst, dirs_exist_ok=True,
+                    ignore=lambda _dir, names: [n for n in names if n in drop],
+                )
             if report_dir and os.path.isdir(report_dir):
                 dst = os.path.join(run_dir, "report")
                 shutil.copytree(report_dir, dst, dirs_exist_ok=True)

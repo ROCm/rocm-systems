@@ -1123,7 +1123,18 @@ Memory) is automatically detected based on the first available sensor.
 **Not Available**: The information cannot be retrieved by the `amd-smi` tool at this time. This could be due to one of the following reasons:
 
 - The hardware component does not report the specific metric.
-- The currently installed `amdgpu` driver version does not support querying this particular piece of information through `amd-smi-lib`.
+- The currently installed `amdgpu` driver version does not support querying
+  this particular piece of information through `amd-smi-lib`.
+- The `amdgpu` driver reports a newer `gpu_metrics` version than the installed
+  AMD SMI supports. `gpu_metrics` is a versioned structure supplied by the
+  driver, and AMD SMI needs explicit support for each version's layout. When the
+  driver is newer than your AMD SMI (or ROCm) release by a release cycle, AMD SMI
+  can't parse the newer layout, so fields sourced from `gpu_metrics` (violations,
+  `SOCKET_POWER`, engine usage, and so on) read N/A. Upgrade AMD SMI or ROCm to a
+  release that supports your driver's `gpu_metrics` version to resolve this. (ROCm
+  7.13 added support for the dynamic `gpu_metrics` layout introduced in v1.9,
+  which handles current and future versions, so releases from 7.13 onward are no
+  longer affected by this mismatch.)
 
 (cli-ex-static)=
 ### Example output from amd-smi static

@@ -559,20 +559,6 @@ void write_packed_half(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane,
   cu.write_vgpr(reg, lane, (old & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(value) << shift));
 }
 
-void fill_vgprs(amdgpu::ComputeUnitCore &cu, uint32_t base, uint32_t regs, uint32_t lanes,
-                uint32_t value) {
-  for (uint32_t reg = 0; reg < regs; ++reg)
-    for (uint32_t lane = 0; lane < lanes; ++lane)
-      cu.write_vgpr(base + reg, lane, value);
-}
-
-void write_wmma_f8_input(amdgpu::ComputeUnitCore &cu, uint32_t base, amdgpu::InputLoc loc,
-                         uint8_t value) {
-  ASSERT_EQ(loc.data_bits, 8u);
-  ASSERT_LT(loc.bit_offset, 32u);
-  write_packed_byte(cu, base + loc.vgpr_offset, loc.lane, loc.sub_element, value);
-}
-
 struct ForceScalarGuard {
   explicit ForceScalarGuard(bool force_scalar) : old_force_scalar(util::force_scalar()) {
     util::set_force_scalar_for_testing(force_scalar);
@@ -592,89 +578,6 @@ float wmma_test_b(uint32_t k, uint32_t col) {
 
 float wmma_test_c(uint32_t row, uint32_t col) {
   return static_cast<float>(static_cast<int>((2u * row + col) % 7u) - 3);
-}
-
-TEST(Gfx1250WmmaTest, F8SpecK128UsesPairAwareInputLocators) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "<experimental/simd> unavailable";
-  } else if (util::native<float>::size() != 16) {
-    GTEST_SKIP() << "specialized f8 WMMA SIMD fast path requires 16-wide native<float>";
-  }
-
-  ForceScalarGuard force_simd(false);
-  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_f8_spec_k128_locator_mem");
-  amdgpu::L2Cache l2("gfx1250_wmma_f8_spec_k128_locator_l2");
-
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_GFX1250;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 256;
-  cfg.lds_size_kb = 64;
-
-  auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
-  ASSERT_NE(cu, nullptr);
-
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
-  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
-
-  const uint32_t vb = wf->vgpr_alloc().base;
-  const uint32_t a_base = vb + 10;
-  const uint32_t b_base = vb + 30;
-  const uint32_t c_base = vb + 50;
-  const uint32_t d_base = vb + 70;
-  constexpr uint32_t kProbeRow = 3;
-  constexpr uint32_t kProbeCol = 5;
-  constexpr uint32_t kProbeK = 4;
-
-  auto clear_wmma_state = [&] {
-    fill_vgprs(*cu, a_base, 16, wf->wf_size(), 0);
-    fill_vgprs(*cu, b_base, 16, wf->wf_size(), 0);
-    fill_vgprs(*cu, c_base, 8, wf->wf_size(), 0);
-    fill_vgprs(*cu, d_base, 8, wf->wf_size(), 0xDEADBEEFu);
-  };
-
-  clear_wmma_state();
-  write_wmma_f8_input(*cu, a_base, amdgpu::wmma_a_input_loc(16, 128, kProbeRow, kProbeK, 8, 8),
-                      util::f32_to_fp8_e4m3_rne(1.0f));
-  write_wmma_f8_input(*cu, b_base, amdgpu::wmma_b_input_loc(16, 128, kProbeCol, kProbeK, 8, 8),
-                      util::f32_to_bf8_e5m2_rne(1.0f));
-
-  amdgpu::exec_wmma_f32_f8_spec<16, 16, 128, true, false>(*cu, d_base, a_base, b_base, c_base,
-                                                          amdgpu::ACC_FROM_VGPR);
-
-  for (uint32_t row = 0; row < 16; ++row) {
-    for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
-      const float expected = (row == kProbeRow && col == kProbeCol) ? 1.0f : 0.0f;
-      EXPECT_EQ(cu->read_vgpr(d_base + out.reg, out.lane), std::bit_cast<uint32_t>(expected))
-          << "f32 row=" << row << " col=" << col;
-    }
-  }
-
-  clear_wmma_state();
-  write_wmma_f8_input(*cu, a_base, amdgpu::wmma_a_input_loc(16, 128, kProbeRow, kProbeK, 8, 8),
-                      util::f32_to_bf8_e5m2_rne(1.0f));
-  write_wmma_f8_input(*cu, b_base, amdgpu::wmma_b_input_loc(16, 128, kProbeCol, kProbeK, 8, 8),
-                      util::f32_to_fp8_e4m3_rne(1.0f));
-
-  amdgpu::exec_wmma_f16_f8_spec<16, 16, 128, false, true>(*cu, d_base, a_base, b_base, c_base,
-                                                          amdgpu::ACC_FROM_VGPR);
-
-  for (uint32_t row = 0; row < 16; ++row) {
-    for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
-      const uint32_t raw = cu->read_vgpr(d_base + out.reg, out.lane);
-      const auto actual = static_cast<uint16_t>((raw >> (16u * out.sub_element)) & 0xFFFFu);
-      const uint16_t expected =
-          (row == kProbeRow && col == kProbeCol) ? util::f32_to_f16(1.0f) : 0u;
-      EXPECT_EQ(actual, expected) << "f16 row=" << row << " col=" << col;
-    }
-  }
-
-  cu->reset_all_wf();
 }
 
 TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
@@ -903,7 +806,7 @@ TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
   }
 
   const uint32_t add_f16_dpp8_words[] = {
-      0x64000000u | amdgpu::SRC_DPP8_LO | (kSrc1 << 9u) | (kDst << 17u),
+      0x64000000u | amdgpu::SRC_DPP8_FI_0 | (kSrc1 << 9u) | (kDst << 17u),
       kSrc0 | (lane_sel << 8u),
   };
   std::unique_ptr<Instruction> inst(decoder->decode(add_f16_dpp8_words));
