@@ -884,7 +884,6 @@ hsa_status_t DmaBufClose(int* dmabuf) {
   if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (*dmabuf < 0) return HSA_STATUS_SUCCESS;
   if (::close(*dmabuf) != 0) {
-    LogPrint(HSA_AMD_LOG_FLAG_INFO, "close dmabuf failed: %s", strerror(errno));
     *dmabuf = -1;
     return HSA_STATUS_ERROR_RESOURCE_FREE;
   }
