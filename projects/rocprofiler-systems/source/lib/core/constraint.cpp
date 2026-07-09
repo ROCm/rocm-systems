@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/env_vars.hpp"
 #include "common/units.hpp"
 #include "config.hpp"
 #include "state.hpp"
@@ -220,10 +221,13 @@ spec::spec(const std::string& _clock_id, double _delay, double _dur, std::uint64
 {}
 
 spec::spec(const std::string& _line)
-: spec{ config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-            .value_or("CLOCK_REALTIME"),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0),
-        config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0) }
+: spec{
+    config::get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+        .value_or("CLOCK_REALTIME"),
+    config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY }).value_or(0.0),
+    config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+        .value_or(0.0)
+}
 {
     auto _delim = tim::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
@@ -290,12 +294,15 @@ get_trace_specs()
 
     {
         auto _delay_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DELAY })
+                .value_or(0.0);
         auto _duration_v =
-            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
-        auto _clock_v = find_clock_identifier(
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
-                .value_or("CLOCK_REALTIME"));
+            config::get_setting_value<double>(std::string{ env_vars::TRACE_DURATION })
+                .value_or(0.0);
+        auto _clock_v =
+            find_clock_identifier(config::get_setting_value<std::string>(
+                                      std::string{ env_vars::TRACE_PERIOD_CLOCK_ID })
+                                      .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
         {
@@ -305,7 +312,7 @@ get_trace_specs()
 
     {
         auto _periods_v =
-            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
+            config::get_setting_value<std::string>(std::string{ env_vars::TRACE_PERIODS })
                 .value_or("");
         if(!_periods_v.empty())
         {

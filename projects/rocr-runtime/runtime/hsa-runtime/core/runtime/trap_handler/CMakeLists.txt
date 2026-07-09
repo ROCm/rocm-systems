@@ -138,7 +138,7 @@ function(generate_bytecodeStrm HeaderFILE)
   set(ARG_LIST ${ARG_LIST} ${HSACO_TARG_LIST})
 
   ## Add a custom command that generates amd_trap_handler_v2.h
-  ## This depends on all the generated code object files and the C++ generator script.
+  ## This depends on all the generated code object files and the Python generator script.
 
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_custom_command(

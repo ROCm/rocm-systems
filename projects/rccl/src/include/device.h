@@ -182,7 +182,13 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
 
 #define NCCL_LL128_MAX_NTHREADS 256
-#define NCCL_LL128_ELEMS_PER_THREAD 28
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+// Upstream NCCL value (120 = 8 lines * 15 dataElems for 128-byte lines).
+// On RCCL/HIP the host derives the per-channel LL128 buffer size from
+// rcclLL128ElemsPerThreadFromArch() (see rcclSetDefaultBuffSizes), so this
+// macro is unused on HIP and intentionally left undefined to prevent drift.
+#define NCCL_LL128_ELEMS_PER_THREAD 120
+#endif
 
 #define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
 #define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)
@@ -404,7 +410,7 @@ struct alignas(16) ncclDevWorkColl {
   uint32_t channelLo:8, channelHi:8;
 #endif
   uint32_t nWarps:8;
-  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, gfx9CheapFenceOff:1;
+  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1;
   uint32_t root:30, connIndex:2;
   uint16_t pivotA2ANumBiRings:15, profilerEnabled:1;
   void* recvbuff;
@@ -587,8 +593,10 @@ struct ncclKernelComm {
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
   int p2pChunkSize;
+  bool p2pCrossClique;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap post-peer fence is disabled (comm-global)
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
@@ -681,7 +689,7 @@ __host__ __device__ constexpr T max_constexpr(T a, T b, Ts ...c) {
 }
 
 constexpr int ncclDevMaxChannelsForArgsBytes(size_t argsBytes) {
-  return min_constexpr<size_t>(MAXCHANNELS, (argsBytes - sizeof(struct ncclDevKernelArgs))/sizeof(struct ncclDevWorkBatch));
+  return (int)min_constexpr<size_t>(MAXCHANNELS, (argsBytes - sizeof(struct ncclDevKernelArgs))/sizeof(struct ncclDevWorkBatch));
 }
 
 // Calculate the unroll factor given:
@@ -718,6 +726,10 @@ __device__ constexpr int ncclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH)
       // NVLS needs an extra 16B to read unaligned data.
       /*NVLS  */WARP_SIZE*(cudaArch >= 900 ? ncclNvlsUnrollBytes(cudaArch) : 0) + 16
     ) + 15) & -16; // pad to 16 bytes
+}
+
+__host__ __device__ constexpr int ncclTmaShmemScratchWarpSize(void) {
+  return 10 << 10;
 }
 
 // RCCL has its own varient of ncclShmemDynamicSize and ncclShmemScratchWarpSize

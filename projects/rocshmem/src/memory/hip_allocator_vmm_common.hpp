@@ -41,6 +41,44 @@ struct VMMCommonAllocationInfo {
 };
 
 /**
+ * @brief Query the minimum HIP VMM allocation granularity for this device.
+ *
+ * The property used for the query must match the one used at allocation time
+ * (see VMMAllocCommon), since granularity can depend on the requested handle
+ * type and allocation flags.
+ *
+ * @param handle_type Handle type the allocations will request (e.g.
+ *                    hipMemHandleTypePosixFileDescriptor or hipMemHandleTypeFabric)
+ * @return Minimum allocation granularity in bytes, or 0 on failure.
+ */
+inline size_t VMMQueryGranularity(hipMemAllocationHandleType handle_type) {
+  hipMemAllocationProp prop = {};
+#if HIP_VERSION < 70200000
+  prop.type = hipMemAllocationTypePinned;
+#else
+  prop.type = hipMemAllocationTypeUncached;
+#endif
+  prop.location.type = hipMemLocationTypeDevice;
+
+  int device_id = 0;
+  if (hipGetDevice(&device_id) != hipSuccess) {
+    return 0;
+  }
+  prop.location.id = device_id;
+  prop.requestedHandleTypes = handle_type;
+
+  // Match VMMAllocCommon: allocations are made RDMA-capable.
+  prop.allocFlags.gpuDirectRDMACapable = 1;
+
+  size_t granularity = 0;
+  if (hipMemGetAllocationGranularity(&granularity, &prop,
+                                     hipMemAllocationGranularityMinimum) != hipSuccess) {
+    return 0;
+  }
+  return granularity;
+}
+
+/**
  * Common VMM allocation helper
  *
  * @param ptr Output pointer for allocated memory
@@ -56,7 +94,7 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
 
-#if HIP_VERSION < 7020000
+#if HIP_VERSION < 70200000
   prop.type = hipMemAllocationTypePinned;
 #else
   prop.type = hipMemAllocationTypeUncached;

@@ -12,6 +12,14 @@ on:
         description: "Full CI image name & nvidia tag"
         required: true
         type: string
+      cxx_compiler:
+        description: "C++ compiler to use"
+        required: true
+        type: string
+      cxx_standard:
+        description: "C++ standard to use for building"
+        required: true
+        type: number
       platform:
         required: true
         type: string
@@ -29,39 +37,12 @@ jobs:
     uses: ./.github/workflows/hipfile-build.yml
     with:
       ci_image: ${{ inputs.ci_image }}
-      cxx_compiler: amdclang++
+      cxx_compiler: ${{ inputs.cxx_compiler }}
+      cxx_standard: ${{ inputs.cxx_standard }}
+      generate_coverage: ${{ inputs.cxx_standard == 20 && inputs.cxx_compiler == 'amdclang++' }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
       upload_artifacts: true
-
-  build_and_test_cxx23:
-    if: ${{ inputs.platform != 'rocky8' }}
-    uses: ./.github/workflows/hipfile-build.yml
-    with:
-      ci_image: ${{ inputs.ci_image }}
-      cxx_compiler: amdclang++
-      cxx_standard: 23
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-      upload_artifacts: false
-      generate_coverage: false
-
-  # Try building on other compilers, but keep as separate job.
-  # Removes issues regarding matrix job overwriting outputs and
-  # does not propagate failures.
-  build_and_test_other_compilers:
-    strategy:
-      fail-fast: false
-      matrix:
-        cxx_compiler:
-          - clang++
-          - g++
-    uses: ./.github/workflows/hipfile-build.yml
-    with:
-      ci_image: ${{ inputs.ci_image }}
-      cxx_compiler: ${{ matrix.cxx_compiler }}
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
 
   python_bindings:
     needs: [build_and_test]
@@ -70,6 +51,8 @@ jobs:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      cxx_compiler: ${{ inputs.cxx_compiler }}
+      cxx_standard: ${{ inputs.cxx_standard }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
@@ -80,13 +63,19 @@ jobs:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
+      cxx_compiler: ${{ inputs.cxx_compiler }}
+      cxx_standard: ${{ inputs.cxx_standard }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
   build_and_test_NVIDIA:
-    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' }}
+    # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
+    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
+    # run on the default C++20 standard.
+    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
       ci_image: ${{ inputs.ci_image_nvidia }}
+      cxx_compiler: ${{ inputs.cxx_compiler }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}

@@ -13,7 +13,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.roctx,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
@@ -29,6 +28,7 @@ def roctx_env() -> dict[str, str]:
         "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,marker_api,kernel_dispatch",
         "ROCPROFSYS_AMD_SMI_METRICS": "busy,temp,power,mem_usage,gfx_clock,mem_clock",
+        "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "1000",
     }
 
 
@@ -100,19 +100,13 @@ class TestROCTx(RocprofsysTest):
 
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode",
         [
-            "baseline",
-            "binary_rewrite",
-            "sys_run",
-            pytest.param(
-                "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Remove once TheRock switches to CTest
-            ),
+            pytest.param("baseline", marks=pytest.mark.timeout(120)),
+            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+            pytest.param("sys_run", marks=pytest.mark.timeout(120)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(180)),
         ],
     )
     def test(self, mode, roctx_env):
@@ -126,9 +120,6 @@ class TestROCTx(RocprofsysTest):
         self.assert_regex(result)
 
     @pytest.mark.timeout(120)
-    @pytest.mark.ci_disable(
-        "assert_rocpd"
-    )  # TODO: Deprecate once TheRock switches to CTest
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,
