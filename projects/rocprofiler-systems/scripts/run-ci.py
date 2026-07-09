@@ -570,7 +570,55 @@ def set_python_hints_from_cmake_args(cmake_args):
                 f.write(f"ROCPROFSYS_PYTHON_HINTS={hints}\n")
 
 
-def collect_test_artifacts(args, ctest_args):
+# ---------------------------------------------------------------------------
+# Failure log surfacing
+# The raw Testing/Temporary/Last*.log files keep the real ESC bytes,
+# so printing those gives working color in the GitHub Actions step log.
+# ---------------------------------------------------------------------------
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+_FAILURE_LOG_GLOBS = {
+    "configure": "LastConfigure*.log",
+    "build": "LastBuild*.log",
+    "test": "LastTest*.log",
+}
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences when color output is disabled."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def print_failure_log(args, stage_label: str) -> None:
+    """Print the raw CTest log for a failed stage so its ANSI color renders.
+
+    Looks up Testing/Temporary/Last<Stage>*.log for the given stage, reads it
+    with the real ESC bytes intact, and prints it in a log group instead of
+    relying on the XML dump (which has already lost its color to CTest's
+    "[NON-XML-CHAR-0x1B]" escaping).
+    """
+    pattern = _FAILURE_LOG_GLOBS.get(stage_label)
+    if pattern is None:
+        return
+
+    matches = glob.glob(os.path.join(args.binary_dir, "Testing", "Temporary", pattern))
+    if not matches:
+        return
+
+    log_path = max(matches, key=os.path.getmtime)
+    with open(log_path, encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        content = _strip_ansi(content)
+
+    log_group_start(f"{stage_label} log: {os.path.basename(log_path)}")
+    print(content, flush=True)
+    log_group_end()
+
+
+def collect_test_artifacts(args, ctest_args, print_xml: bool = True):
     log_group_start("Collecting dashboard artifacts")
     if "-VV" not in ctest_args:
         # Session-management files that are never useful as CI artifacts.
@@ -590,7 +638,10 @@ def collect_test_artifacts(args, ctest_args):
             # configure/build/test summaries that are meaningful in CI logs.
             # Temporary/*.log files (LastTest, LastBuild, etc.) are verbose
             # raw output; upload them as artifacts but don't flood the log.
-            if file.endswith(".xml"):
+            # On failure print_xml is False: print_failure_log() already
+            # showed the colored raw log, so the escaped-ANSI XML dump would
+            # be redundant noise.
+            if file.endswith(".xml") and print_xml:
                 print(fdata)
             if not oname.endswith(".log"):
                 oname += ".log"
@@ -662,10 +713,15 @@ def do_stage(args, script_name, stage_label, ctest_args=None):
         log(f"CTest {stage_label} failed: {e}", level="error")
         raise
     finally:
-        if stage_label == "test" or failed:
+        if failed:
+            print_failure_log(args, stage_label)
             collect_test_artifacts(
-                args, ctest_args or [] if stage_label == "test" else []
+                args,
+                ctest_args or [] if stage_label == "test" else [],
+                print_xml=False,
             )
+        elif stage_label == "test":
+            collect_test_artifacts(args, ctest_args or [], print_xml=True)
 
 
 def do_all(args, ctest_args):

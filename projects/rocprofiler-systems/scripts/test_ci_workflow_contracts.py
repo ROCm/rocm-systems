@@ -613,7 +613,11 @@ def fake_tool_invocations(log_path: Path) -> List[List[str]]:
 
 
 def run_ci_command(
-    args: Sequence[str], binary_dir: Path, fake_bin_dir: Path, env: Mapping[str, str]
+    args: Sequence[str],
+    binary_dir: Path,
+    fake_bin_dir: Path,
+    env: Mapping[str, str],
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, str(RUN_CI)] + list(args)
     return subprocess.run(
@@ -628,7 +632,7 @@ def run_ci_command(
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        check=True,
+        check=check,
     )
 
 
@@ -714,6 +718,86 @@ def check_run_ci_split_stage_contract(verbose: bool) -> None:
     ok("run-ci.py split test stage preserves JUnit and repeat behavior")
 
 
+_FAILURE_LOG_SENTINEL = "SENTINEL_BUILD_FAILURE"
+_SUPPRESSED_XML_SENTINEL = "XML_SHOULD_BE_SUPPRESSED"
+
+
+def write_fake_failing_ctest(bin_dir: Path, binary_dir: Path) -> None:
+    """Fake ctest that reproduces CTest's own on-failure artifacts: a raw log
+    file with real ANSI escape bytes plus an XML report where CTest would
+    have escaped those same bytes as "[NON-XML-CHAR-0x1B]", then exits
+    non-zero like a failed build.
+    """
+    temp_dir = binary_dir / "Testing" / "Temporary"
+    tool_path = bin_dir / "ctest"
+    tool_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        f"mkdir -p {str(temp_dir)!r}\n"
+        f"printf '\\x1b[01m{_FAILURE_LOG_SENTINEL}\\x1b[0m\\n' > "
+        f"{str(temp_dir / 'LastBuild_20260101-0000.log')!r}\n"
+        f"printf '<Build>{_SUPPRESSED_XML_SENTINEL} "
+        "[NON-XML-CHAR-0x1B]</Build>\\n' > "
+        f"{str(binary_dir / 'Testing' / 'Build.xml')!r}\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    tool_path.chmod(tool_path.stat().st_mode | stat.S_IXUSR)
+
+
+def check_run_ci_failure_colored_log(verbose: bool) -> None:
+    """run-ci.py must show the colored raw CTest log on stage failure instead
+    of the escaped-ANSI XML dump (see run-ci.py print_failure_log())."""
+    with tempfile.TemporaryDirectory(prefix="rocprofsys-ci-fail-check-") as temp_dir:
+        temp_path = Path(temp_dir)
+        binary_dir = temp_path / "build"
+        fake_bin_dir = temp_path / "bin"
+        fake_bin_dir.mkdir()
+        fake_tool_log = temp_path / "fake-tools.log"
+
+        for tool in ("cmake", "git", "gcov"):
+            write_fake_tool(fake_bin_dir, tool, fake_tool_log)
+        write_fake_failing_ctest(fake_bin_dir, binary_dir)
+
+        common_args = [
+            "--name",
+            "local-ci-fail-check",
+            "--site",
+            "Local",
+            "-B",
+            str(binary_dir),
+        ]
+        env = {"TERM": "dumb"}
+        run_ci_command(
+            ["--stage", "generate", *common_args], binary_dir, fake_bin_dir, env
+        )
+
+        build = run_ci_command(
+            ["--stage", "build", *common_args],
+            binary_dir,
+            fake_bin_dir,
+            env,
+            check=False,
+        )
+        require(
+            build.returncode != 0,
+            "fake failing ctest did not cause the run-ci.py build stage to fail",
+        )
+        require(
+            _FAILURE_LOG_SENTINEL in build.stdout,
+            "run-ci.py must print the raw LastBuild log on build stage failure",
+        )
+        require(
+            _SUPPRESSED_XML_SENTINEL not in build.stdout
+            and "[NON-XML-CHAR" not in build.stdout,
+            "run-ci.py must not print the escaped-ANSI XML dump on stage failure",
+        )
+
+        if verbose:
+            print(build.stdout)
+    ok("run-ci.py prints the colored raw log instead of escaped XML on stage failure")
+
+
 def run_checks(args: argparse.Namespace) -> None:
     for path in TARGET_WORKFLOWS + [RUN_CI, SUMMARY_SCRIPT, MATRIX_HELPER, MATRIX_FILE]:
         require(path.exists(), f"required file is missing: {path.relative_to(REPO_ROOT)}")
@@ -734,6 +818,7 @@ def run_checks(args: argparse.Namespace) -> None:
         parsed_workflows[SANITIZER_WORKFLOW], read_text(SANITIZER_WORKFLOW)
     )
     check_run_ci_split_stage_contract(args.verbose)
+    check_run_ci_failure_colored_log(args.verbose)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
