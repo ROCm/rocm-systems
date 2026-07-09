@@ -222,7 +222,7 @@ amdcuid_status_t CuidDevice::is_temporary_cuid(bool *is_temp) const {
     return status;
   }
   *is_temp = primary.raw_bits[14] &
-             0x04; // check the temp indicator bit in the reserved bits
+             0x20; // check the temp indicator bit in the reserved bits
 
   return AMDCUID_STATUS_SUCCESS;
 }

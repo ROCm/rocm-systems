@@ -25,7 +25,8 @@ set(DEFAULT_GPU_TARGETS
     "gfx1101"
     "gfx1102"
     "gfx1151"
-    "gfx1152")
+    "gfx1152"
+    "gfx1250")
 
 set(GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"

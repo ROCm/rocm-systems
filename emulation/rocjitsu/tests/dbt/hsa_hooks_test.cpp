@@ -20,6 +20,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include "../test_paths.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -39,7 +40,7 @@ using namespace rocjitsu;
 
 namespace {
 
-std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
+using test::kernel_path;
 
 struct GpuTarget {
   hsa_agent_t agent{};

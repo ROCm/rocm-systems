@@ -6,7 +6,7 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from utils.logger import (
     console_debug,
@@ -180,6 +180,16 @@ def get_gpu_vram_size(device: Any, amdsmi: Any) -> str:  # noqa: ANN401
     vram_size = str(int(vram_info["vram_size"]) * 1024)  # MB -> KB
     console_debug(f"GPU VRAM Size: {vram_size} KB")
     return vram_size
+
+
+@functools.partial(
+    _per_device_query, default_return=None, warning_label="GPU VRAM bit width"
+)
+def get_gpu_vram_bit_width(device: Any, amdsmi: Any) -> Optional[int]:  # noqa: ANN401
+    """Get the GPU memory bus width in bits."""
+    bit_width = amdsmi.amdsmi_get_gpu_vram_info(device).get("vram_bit_width")
+    console_debug(f"GPU VRAM bit width: {bit_width}")
+    return bit_width
 
 
 @functools.partial(
