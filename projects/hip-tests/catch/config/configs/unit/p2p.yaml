@@ -1,11 +1,13 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'p2p_alloc').
+# This allows filtering by area: ctest -L 'p2p' or ctest -L 'p2p_multigpu'.
 p2p:
   Unit_hipDeviceGetP2PAttribute_Basic:
     <<: *level_2
-    tags: [multigpu]
+    tags: [p2p_multigpu]
   Unit_hipDeviceGetP2PAttribute_Negative:
     <<: *level_2
-    tags: [multigpu]
+    tags: [p2p_multigpu]
   Unit_hipP2pLinkTypeAndHopFunc:
     <<: *level_2
-    tags: [multigpu]
+    tags: [p2p_multigpu]

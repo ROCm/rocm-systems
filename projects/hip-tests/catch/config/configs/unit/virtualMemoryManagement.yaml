@@ -1,110 +1,168 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'virtualMemoryManagement_alloc').
+# This allows filtering by area: ctest -L 'virtualMemoryManagement' or ctest -L 'virtualMemoryManagement_multigpu'.
 virtualMemoryManagement:
   Unit_hipMemGetAllocationGranularity_AllGPUs:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetAllocationGranularity_NegativeTests:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_hipMemGetAllocationGranularity_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetAllocationGranularity_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemRetainAllocationHandle_SetGet:
     <<: *level_2
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemRetainAllocationHandle_NegTst:
     <<: *level_2
     disabled: [amd_wsl]
-  Unit_hipMemRetainAllocationHandle_Capture: *level_2
-  Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_2
-  Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_2
-  Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_2
-  Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_2
-  Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl: *level_2
-  Unit_hipMemImportFromShareableHandle_Capture: *level_2
-  Unit_hipMemGetHandleForAddressRange_Negative: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemRetainAllocationHandle_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_Positive_Basic:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_Negative_Parameters:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemImportFromShareableHandle_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetHandleForAddressRange_Negative:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetHandleForAddressRange_DeviceMemory:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
-  Unit_hipMemGetHandleForAddressRange_VM: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetHandleForAddressRange_VM:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
   Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
   Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
-  Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_2
-  Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_2
-  Unit_hipMemExportToShareableHandle_Positive_Basic: *level_2
-  Unit_hipMemExportToShareableHandle_Negative_Parameters: *level_2
-  Unit_hipMemExportToShareableHandle_Capture: *level_2
-  Unit_hipGetProcAddress_VMM: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetHandleForAddressRange_MultipleThreads:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetHandleForAddressRange_DifferentOffsets:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemExportToShareableHandle_Positive_Basic:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemExportToShareableHandle_Negative_Parameters:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemExportToShareableHandle_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipGetProcAddress_VMM:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemAddressFree_negative:
     <<: *level_2
     # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-244
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAddressFree_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemAddressFree_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemAddressReserve_AlignmentTest:
     <<: *level_2
     # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-245
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemAddressReserve_Negative:
     <<: *level_2
     # === Patch which removes the typetraits implementation from std namespace in hiprtc is reverted ===
     disabled: [amd_wsl]
-  Unit_hipMemAddressReserve_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemAddressReserve_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_ChkWithKerLaunch:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_MapNonContiguousChunks:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_ChkWithMemset:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemCreate_Negative:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_hipMemCreate_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemCreate_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_SetGet:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_MultDevSetGet:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -113,12 +171,14 @@ virtualMemoryManagement:
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetAccess_NegTst:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_FuncTstOnMultDev:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -127,25 +187,28 @@ virtualMemoryManagement:
     # (amd_windows) SWDEV-413997: VMM test still failing in windows
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_Vmm2UnifiedMemCpy:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_Vmm2DevMemCpy:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_Vmm2PeerDevMemCpy:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
   Unit_hipMemSetAccess_Vmm2VMMMemCpy:
@@ -153,9 +216,10 @@ virtualMemoryManagement:
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -164,57 +228,74 @@ virtualMemoryManagement:
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_Multithreaded:
     <<: *level_2
     # (amd_windows) SWDEV-444031: This test fails in gfx1101 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccess_negative:
     <<: *level_2
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMemSetGetAccess_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemSetGetAccess_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccessHostDevice_hostalloc:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemSetAccessHost_devicealloc:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetAllocationPropertiesFromHandle_functional:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemGetAllocationPropertiesFromHandle_Negative:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_2
-  Unit_hipMemMap_Positive_APU_LargeAllocSpill: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemGetAllocationPropertiesFromHandle_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_Positive_APU_LargeAllocSpill:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_SameMemoryReuse:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_PhysicalMemory_Map2MultVMMs:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_UnmapOneAliasOfMultiAliasedHandle:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_PhysicalMemoryReuse_MultiDev:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -222,9 +303,10 @@ virtualMemoryManagement:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_VMMMemoryReuse_MultiGPU:
     <<: *level_2
-    tags: [multigpu]
+    tags: [virtualMemoryManagement_multigpu]
     # (amd_windows) SWDEV-396615 mGPUs not considered correctly
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
@@ -232,35 +314,67 @@ virtualMemoryManagement:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
+    tags: [virtualMemoryManagement]
   Unit_hipMemMap_negative:
     <<: *level_2
     # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMemMap_Capture: *level_2
-  Unit_hipMemMap_Retrieve_AllocationHandle: *level_2
-  Unit_hipMemMap_Retrieve_MultiAllocationHandle: *level_2
-  Unit_hipMemMap_CheckAddMemObj: *level_2
-  Unit_hipMemMap_RoundTrip: *level_2
-  Unit_hipMemMap_ConcurrentDisjointMapsNoDeadlock: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_Retrieve_AllocationHandle:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_Retrieve_MultiAllocationHandle:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_CheckAddMemObj:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_RoundTrip:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemMap_ConcurrentDisjointMapsNoDeadlock:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemRelease_negative:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_hipMemRelease_Capture: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemRelease_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemUnmap_negative:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-  Unit_hipMemUnmap_Capture: *level_2
-  Unit_hipMemUnmap_CrossLinksTornDown: *level_2
-  Unit_hipMemUnmap_RemapCrossLinks: *level_2
-  Unit_hipMemUnmap_DirectPath_BasicRoundTrip: *level_2
-  Unit_hipMemUnmap_DirectPath_InFlightKernelDrained: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemUnmap_Capture:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemUnmap_CrossLinksTornDown:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemUnmap_RemapCrossLinks:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemUnmap_DirectPath_BasicRoundTrip:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemUnmap_DirectPath_InFlightKernelDrained:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
   Unit_hipMemMapArrayAsync_Positive_Basic:
     <<: *level_2
-    tags: [image]
+    tags: [virtualMemoryManagement_image]
     # Below tests are failing PSDB
     disabled: [nvidia_linux, nvidia_windows]
-  Unit_hipMemSetAccess_SegmentsAccess: *level_2
-  Unit_hipMemExportFabricHandleToStdout_Positive_Basic: *level_2
+  Unit_hipMemSetAccess_SegmentsAccess:
+    <<: *level_2
+    tags: [virtualMemoryManagement]
+  Unit_hipMemExportFabricHandleToStdout_Positive_Basic:
+    <<: *level_2
+    tags: [virtualMemoryManagement]

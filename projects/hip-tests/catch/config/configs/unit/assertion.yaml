@@ -1,16 +1,21 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'assertion_alloc').
+# This allows filtering by area: ctest -L 'assertion' or ctest -L 'assertion_multigpu'.
 assertion:
   Unit_StaticAssert_Positive_Basic_RTC:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
     disabled: [amd_windows, amd_wsl]
-    tags: [deviceLib]
+    tags: [assertion_deviceLib]
   Unit_StaticAssert_Negative_Basic_RTC:
     <<: *level_2
-    tags: [deviceLib]
-  Unit_Assert_Positive_Basic_KernelPass: *level_2
+    tags: [assertion_deviceLib]
+  Unit_Assert_Positive_Basic_KernelPass:
+    <<: *level_2
+    tags: [assertion]
   Unit_Assert_Positive_Basic_KernelFail:
     <<: *level_2
     # === Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===
     # Disabled for asan since this test intentionally enter a failed state which prevents freeing resources
     disabled: [amd_windows, amd_wsl, asan]
+    tags: [assertion]

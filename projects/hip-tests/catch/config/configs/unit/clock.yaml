@@ -1,15 +1,17 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'clock_alloc').
+# This allows filtering by area: ctest -L 'clock' or ctest -L 'clock_multigpu'.
 clock:
   Unit_hipClock64_Positive_Basic:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows, amd_wsl]
-    tags: [deviceLib, timing]
+    tags: [clock_deviceLib, clock_timing]
   Unit_hipClock_Positive_Basic:
     <<: *level_2
     # SWDEV-555665
     disabled: [amd_windows, amd_wsl]
-    tags: [deviceLib, timing]
+    tags: [clock_deviceLib, clock_timing]
   Unit_hipWallClock64_Positive_Basic:
     <<: *level_2
-    tags: [deviceLib, timing]
+    tags: [clock_deviceLib, clock_timing]

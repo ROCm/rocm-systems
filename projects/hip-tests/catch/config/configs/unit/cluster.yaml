@@ -1,9 +1,14 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'cluster_alloc').
+# This allows filtering by area: ctest -L 'cluster' or ctest -L 'cluster_multigpu'.
 cluster:
   Unit_cluster_coop_group_class:
     <<: *level_2
     disabled: [amd_linux, amd_windows, amd_wsl]
+    tags: [cluster]
   Unit_hipClusterLaunch_CompilerDirective_Basic:
     <<: *level_2
+    tags: [cluster]
   Unit_hipClusterLaunch_LaunchApi_Basic:
     <<: *level_2
+    tags: [cluster]

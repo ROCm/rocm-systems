@@ -1,38 +1,40 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'threadfence_alloc').
+# This allows filtering by area: ctest -L 'threadfence' or ctest -L 'threadfence_multigpu'.
 threadfence:
   Unit___threadfence_block_Positive_Basic_Shared:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_block_Positive_Basic_Global:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_block_Positive_Basic_Pinned:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_block_Positive_Basic_Managed:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_block_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [threadfence_fence, threadfence_multigpu, threadfence_synchronization]
   Unit___threadfence_Positive_Basic_Shared:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_Positive_Basic_Global:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_Positive_Basic_Pinned:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_Positive_Basic_Managed:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]
   Unit___threadfence_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [threadfence_fence, threadfence_multigpu, threadfence_synchronization]
   Unit___threadfence_system_Positive_Basic_Peer:
     <<: *level_2
-    tags: [fence, multigpu, synchronization]
+    tags: [threadfence_fence, threadfence_multigpu, threadfence_synchronization]
   Unit___threadfence_system_Positive_Basic_Host:
     <<: *level_2
-    tags: [fence, synchronization]
+    tags: [threadfence_fence, threadfence_synchronization]

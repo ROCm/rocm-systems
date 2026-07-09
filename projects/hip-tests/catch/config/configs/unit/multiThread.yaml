@@ -1,35 +1,37 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'multiThread_alloc').
+# This allows filtering by area: ctest -L 'multiThread' or ctest -L 'multiThread_multigpu'.
 multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
     <<: *level_2
-    tags: [memory]
+    tags: [multiThread_memory]
     # AIRUNTIME-2291: temporarily disabled (hangs in CI 942)
     disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_2
-    tags: [device_mgmt]
+    tags: [multiThread_device_mgmt]
   Unit_hipMultiThreadDevice_SerialPyramid:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux, amd_wsl]
-    tags: [device_mgmt]
+    tags: [multiThread_device_mgmt]
   Unit_hipMultiThreadDevice_ParallelPyramid:
     <<: *level_2
-    tags: [device_mgmt]
+    tags: [multiThread_device_mgmt]
   Unit_hipMultiThreadDevice_NearZero:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-    tags: [device_mgmt]
+    tags: [multiThread_device_mgmt]
   Unit_hipMultiThreadStreams1_AsyncSync:
     <<: *level_2
-    tags: [stream]
+    tags: [multiThread_stream]
   Unit_hipMultiThreadStreams1_AsyncAsync:
     <<: *level_2
-    tags: [stream]
+    tags: [multiThread_stream]
   Unit_hipMultiThreadStreams1_AsyncSame:
     <<: *level_2
-    tags: [stream]
+    tags: [multiThread_stream]
   Unit_hipMultiThreadStreams2:
     <<: *level_2
-    tags: [stream]
+    tags: [multiThread_stream]

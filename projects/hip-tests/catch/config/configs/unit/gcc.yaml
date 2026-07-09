@@ -1,8 +1,10 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'gcc_alloc').
+# This allows filtering by area: ctest -L 'gcc' or ctest -L 'gcc_multigpu'.
 gcc:
   Unit_LaunchKernelgccTests:
     <<: *level_2
-    tags: [compiler]
+    tags: [gcc_compiler]
   Unit_hipMallocgccTests:
     <<: *level_2
-    tags: [compiler]
+    tags: [gcc_compiler]

@@ -1,11 +1,13 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'synchronization_alloc').
+# This allows filtering by area: ctest -L 'synchronization' or ctest -L 'synchronization_multigpu'.
 synchronization:
   Unit_Copy_Coherency:
     <<: *level_2
-    tags: [coherency]
+    tags: [synchronization_coherency]
   Unit_cache_coherency_cpu_gpu:
     <<: *level_2
-    tags: [coherency]
+    tags: [synchronization_coherency]
   Unit_cache_coherency_gpu_gpu:
     <<: *level_2
-    tags: [coherency, multigpu]
+    tags: [synchronization_coherency, synchronization_multigpu]

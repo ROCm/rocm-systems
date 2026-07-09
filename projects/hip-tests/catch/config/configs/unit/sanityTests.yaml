@@ -1,5 +1,13 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'sanityTests_alloc').
+# This allows filtering by area: ctest -L 'sanityTests' or ctest -L 'sanityTests_multigpu'.
 sanityTests:
-  Unit_AccessMallocAcrossKernels: *level_2
-  Unit_hipHostRegister_RegisterUnregister: *level_2
-  Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister: *level_2
+  Unit_AccessMallocAcrossKernels:
+    <<: *level_2
+    tags: [sanityTests]
+  Unit_hipHostRegister_RegisterUnregister:
+    <<: *level_2
+    tags: [sanityTests]
+  Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister:
+    <<: *level_2
+    tags: [sanityTests]

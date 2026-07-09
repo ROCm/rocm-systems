@@ -1,15 +1,17 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'launchBounds_alloc').
+# This allows filtering by area: ctest -L 'launchBounds' or ctest -L 'launchBounds_multigpu'.
 launchBounds:
   Unit_Kernel_Launch_bounds_Positive_Basic:
     <<: *level_2
-    tags: [attributes, kernel]
+    tags: [launchBounds_attributes, launchBounds_kernel]
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [attributes, kernel]
+    tags: [launchBounds_attributes, launchBounds_kernel]
   Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [attributes, kernel]
+    tags: [launchBounds_attributes, launchBounds_kernel]

@@ -1,17 +1,37 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'context_alloc').
+# This allows filtering by area: ctest -L 'context' or ctest -L 'context_multigpu'.
 context:
-  Unit_hipDeviceGetPCIBusId_Functional: *level_2
+  Unit_hipDeviceGetPCIBusId_Functional:
+    <<: *level_2
+    tags: [context]
   Unit_hipDrvMemcpy_Functional:
     <<: *level_2
-    tags: [memory, transfer]
+    tags: [context_memory, context_transfer]
   Unit_hipMemsetD8_Functional:
     <<: *level_2
-    tags: [memory, memset]
-  Unit_hipDevicePrimaryCtxSetFlags_Negative: *level_2
-  Unit_hipDeviceAPIs_not_supported: *level_2
-  Unit_hipCtxGetSetCacheConfig_not_supported: *level_2
-  Unit_hipCtxGetSetSharedMemConfig_not_supported: *level_2
-  Unit_hipCtxPeerAccess_not_supported: *level_2
-  Unit_hipCtxAPIs_not_supported: *level_2
-  Unit_hipDevicePrimaryCtxGetState_Negative: *level_2
-  Unit_hipSetDevice_CheckPrimaryCtxState: *level_2
+    tags: [context_memory, context_memset]
+  Unit_hipDevicePrimaryCtxSetFlags_Negative:
+    <<: *level_2
+    tags: [context]
+  Unit_hipDeviceAPIs_not_supported:
+    <<: *level_2
+    tags: [context]
+  Unit_hipCtxGetSetCacheConfig_not_supported:
+    <<: *level_2
+    tags: [context]
+  Unit_hipCtxGetSetSharedMemConfig_not_supported:
+    <<: *level_2
+    tags: [context]
+  Unit_hipCtxPeerAccess_not_supported:
+    <<: *level_2
+    tags: [context]
+  Unit_hipCtxAPIs_not_supported:
+    <<: *level_2
+    tags: [context]
+  Unit_hipDevicePrimaryCtxGetState_Negative:
+    <<: *level_2
+    tags: [context]
+  Unit_hipSetDevice_CheckPrimaryCtxState:
+    <<: *level_2
+    tags: [context]

@@ -1,27 +1,60 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'printf_alloc').
+# This allows filtering by area: ctest -L 'printf' or ctest -L 'printf_multigpu'.
 printf:
   Unit_Printf_flags_Sanity_Positive:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
     disabled: [amd_windows, amd_wsl]
+    tags: [printf]
   Unit_Printf_length_Sanity_Positive:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/274
     disabled: [amd_windows, amd_wsl]
-  Unit_Printf_specifier_Sanity_Positive: *level_2
-  Unit_Printf_Negative_Parameters_RTC: *level_2
-  Unit_Buffered_Printf_Flags: *level_2
-  Unit_Buffered_Printf_Specifier: *level_2
-  Unit_Host_Printf: *level_2
-  Unit_NonHost_Printf_basic: *level_2
-  Unit_NonHost_Printf_loop: *level_2
-  Unit_NonHost_Printf_multiple_Threads: *level_2
-  Unit_NonHost_Printf_BufferAvailability: *level_2
+    tags: [printf]
+  Unit_Printf_specifier_Sanity_Positive:
+    <<: *level_2
+    tags: [printf]
+  Unit_Printf_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [printf]
+  Unit_Buffered_Printf_Flags:
+    <<: *level_2
+    tags: [printf]
+  Unit_Buffered_Printf_Specifier:
+    <<: *level_2
+    tags: [printf]
+  Unit_Host_Printf:
+    <<: *level_2
+    tags: [printf]
+  Unit_NonHost_Printf_basic:
+    <<: *level_2
+    tags: [printf]
+  Unit_NonHost_Printf_loop:
+    <<: *level_2
+    tags: [printf]
+  Unit_NonHost_Printf_multiple_Threads:
+    <<: *level_2
+    tags: [printf]
+  Unit_NonHost_Printf_BufferAvailability:
+    <<: *level_2
+    tags: [printf]
   Unit_Printf_ManyDevicesTest:
     <<: *level_2
     tags: []
-  Unit_Printf_PrintfStar: *level_2
-  Unit_Printf_PrintfManyWaves: *level_2
-  Unit_Printf_PrintfWidthPrecision: *level_2
-  Unit_Printf_PrintfBasicTsts: *level_2
-  Unit_Printf_PrintfAltFormsTsts: *level_2
+    tags: [printf]
+  Unit_Printf_PrintfStar:
+    <<: *level_2
+    tags: [printf]
+  Unit_Printf_PrintfManyWaves:
+    <<: *level_2
+    tags: [printf]
+  Unit_Printf_PrintfWidthPrecision:
+    <<: *level_2
+    tags: [printf]
+  Unit_Printf_PrintfBasicTsts:
+    <<: *level_2
+    tags: [printf]
+  Unit_Printf_PrintfAltFormsTsts:
+    <<: *level_2
+    tags: [printf]

@@ -1,13 +1,18 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'device_memory_alloc').
+# This allows filtering by area: ctest -L 'device_memory' or ctest -L 'device_memory_multigpu'.
 device_memory:
   Unit_Device_memcpy_Positive:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux, amd_wsl]
+    tags: [device_memory]
   Unit_Device_memcpy_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [device_lang]
-  Unit_Device_memset_Positive: *level_2
+    tags: [device_memory_device_lang]
+  Unit_Device_memset_Positive:
+    <<: *level_2
+    tags: [device_memory]
   Unit_Device_memset_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [device_lang]
+    tags: [device_memory_device_lang]

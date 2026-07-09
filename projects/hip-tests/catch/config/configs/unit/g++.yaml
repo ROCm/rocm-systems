@@ -1,5 +1,7 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'g++_alloc').
+# This allows filtering by area: ctest -L 'g++' or ctest -L 'g++_multigpu'.
 g++:
   Unit_hipMalloc_gpptest:
     <<: *level_2
-    tags: [compiler]
+    tags: [g++_compiler]

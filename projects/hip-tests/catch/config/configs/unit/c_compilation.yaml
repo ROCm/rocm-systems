@@ -1,5 +1,7 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'c_compilation_alloc').
+# This allows filtering by area: ctest -L 'c_compilation' or ctest -L 'c_compilation_multigpu'.
 c_compilation:
   Unit_hipGetDeviceProp_ctest:
     <<: *level_2
-    tags: [integration, rtc]
+    tags: [c_compilation_integration, c_compilation_rtc]

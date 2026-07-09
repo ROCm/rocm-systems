@@ -1,115 +1,119 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'kernel_alloc').
+# This allows filtering by area: ctest -L 'kernel' or ctest -L 'kernel_multigpu'.
 kernel:
   Unit_hipMemFaultStackAllocation_Check:
     <<: *level_2
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check:
     <<: *level_2
-    tags: [attributes]
+    tags: [kernel_attributes]
   Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check:
     <<: *level_2
-    tags: [attributes]
+    tags: [kernel_attributes]
   Unit_hipDynamicShared:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows, amd_wsl]
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_hipDynamicShared2:
     <<: *level_2
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_hipEmptyKernel:
     <<: *level_2
-    tags: [language, smoke]
+    tags: [kernel_language, kernel_smoke]
   Unit_hipGridLaunch:
     <<: *level_2
-    tags: [launch, smoke]
+    tags: [kernel_launch, kernel_smoke]
   Unit_hipLanguageExtensions:
     <<: *level_2
-    tags: [language]
+    tags: [kernel_language]
   Unit_hipLaunchParm:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchParmFunctor:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_kernel_chkConstantViaKernel:
     <<: *level_2
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn:
     <<: *level_2
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_kernel_MemoryOperationsViaKernels:
     <<: *level_2
-    tags: [memory]
+    tags: [kernel_memory]
   Unit_kernel_LaunchBounds_Functional:
     <<: *level_2
-    tags: [attributes, smoke]
+    tags: [kernel_attributes, kernel_smoke]
   Unit_kernel_Assign_threadIdx_to_auto:
     <<: *level_2
-    tags: [language]
+    tags: [kernel_language]
   Unit_hipLaunchKernelExC_NegetiveTsts:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchKernelEx_NegetiveTsts:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchKernelEx_Functional:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchKernelEx_With_Different_Kernels:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchKernelEx_With_MaxBlockDims:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_kernel_ChkPrintf:
     <<: *level_2
-    tags: [language]
+    tags: [kernel_language]
   Unit_hipExtLaunchKernelGGL:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipSetupArgument_Simple:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipSetupArgument_Execute_Kernel_And_Check_Result:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_ConfigureCall:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_ConfigureCall_CheckParams:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_2
     disabled: [amd_windows, amd_linux, amd_wsl]
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipExtDynDataPrefetch_FunctionalDaxpy:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipExtDynDataPrefetch_SingleRegion:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipExtDynDataPrefetch_TemporalHints:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_KernelStackSize:
     <<: *level_2
     disabled: [amd_linux, amd_windows, amd_wsl]
+    tags: [kernel]
   Unit_Validate_User_Sgpr_Count:
     <<: *level_2
+    tags: [kernel]
   Unit_hipGridLaunch_MaxGridDim_DeviceProperties:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]
   Unit_hipLaunchParmFunctor_kernel_arg_prefetch:
     <<: *level_2
-    tags: [launch]
+    tags: [kernel_launch]

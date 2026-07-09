@@ -1,92 +1,94 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'library_alloc').
+# This allows filtering by area: ctest -L 'library' or ctest -L 'library_multigpu'.
 library:
   Unit_library_negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hip_library_load_co:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelGetParamInfo_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hip_library_load_rtc:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelGetAttribute_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelSetAttribute_Positive_LaunchAfterSet:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelSetAttribute_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipKernelGetFunction_Negative_Parameters:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_Positive:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_OneNullParam:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_HipMemcpyInterop:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetManaged_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetManaged_Positive:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetManaged_HipMemcpyInterop:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetKernel_CountAndEnumerate:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetKernel_OrderingWithGetGlobal:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGet_CrossKindRejection:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_CO_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_CO_Values:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetManaged_CO_Negative:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetManaged_CO_Values:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryEnumerateKernels_ZeroMax:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryEnumerateKernels_PartialFill:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryEnumerateKernels_HandlesUsable:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibrary_RepeatedQueriesAreStable:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibraryGetGlobal_MatchesModuleGetGlobal:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibrary_KernelGlobalLookupOrderIndependent:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]
   Unit_hipLibrary_LoadUnloadCycle:
     <<: *level_2
-    tags: [module]
+    tags: [library_module]

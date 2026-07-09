@@ -1,25 +1,44 @@
 ---
+# NOTE: All tags must be prefixed with the YAML filename (e.g., 'callback_alloc').
+# This allows filtering by area: ctest -L 'callback' or ctest -L 'callback_multigpu'.
 callback:
-  Unit_hipApiName_Positive_Basic: *level_2
-  Unit_hipApiName_Negative_ReservedIds: *level_2
-  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_2
+  Unit_hipApiName_Positive_Basic:
+    <<: *level_2
+    tags: [callback]
+  Unit_hipApiName_Negative_ReservedIds:
+    <<: *level_2
+    tags: [callback]
+  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic:
+    <<: *level_2
+    tags: [callback]
   Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
     <<: *level_2
     # Does not play well with ASAN
     disabled: [asan]
     tags: []
-  Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
+    tags: [callback]
+  Unit_hipGetStreamDeviceId_Negative_Parameters:
+    <<: *level_2
+    tags: [callback]
   Unit_hipKernelNameRef_Positive_Basic:
     <<: *level_2
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
+    tags: [callback]
   Unit_hipKernelNameRef_Negative_Parameters:
     <<: *level_2
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
     # (amd_wsl) Note: Linux disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_2
-  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_2
-  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_2
+    tags: [callback]
+  Unit_hipKernelNameRefByPtr_Positive_Basic:
+    <<: *level_2
+    tags: [callback]
+  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr:
+    <<: *level_2
+    tags: [callback]
+  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr:
+    <<: *level_2
+    tags: [callback]
