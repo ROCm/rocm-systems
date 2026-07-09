@@ -351,21 +351,8 @@ class VirtualGPU : public device::VirtualDevice {
         if (!IsAttached()) {
           return;
         }
-        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t>) {
-          if (pending_descriptor_ == nullptr) {
-            return;
-          }
-          hsa_amd_metadata_kernel_dispatch_packet_t* queue_metadata_packet =
-               &(reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
-                   queue_base_))[index];
-          SetPacket(packet, header, queue_metadata_packet);
-        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
-                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
-          hsa_amd_metadata_barrier_packet_t* queue_metadata_packet =
-               &(reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(
-                   queue_base_))[index];
-          SetPacket(packet, header, queue_metadata_packet);
-        }
+        FillMetadata(packet, header,
+                     static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize);
       }
 
       //! Set the launch descriptor version (called once from VirtualGPU::create)
@@ -394,6 +381,16 @@ class VirtualGPU : public device::VirtualDevice {
       //! Returns the metadata ring buffer base (nullptr if not attached)
       void* GetQueueBase() const { return queue_base_; }
 
+      //! Returns the metadata packet slot for the given (masked) queue index,
+      //! or nullptr if no metadata queue is attached. For logging/diagnostics.
+      const hsa_amd_metadata_kernel_dispatch_packet_t* GetMetadataPacket(uint64_t index) const {
+        if (!IsAttached()) {
+          return nullptr;
+        }
+        return reinterpret_cast<const hsa_amd_metadata_kernel_dispatch_packet_t*>(
+            static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize);
+      }
+
       //! Capture a metadata packet into a host buffer (for graph capture).
       //! Fills the 256-byte buffer with the same content that Set() would write
       //! to the queue metadata ring, but targets an arbitrary host pointer instead.
@@ -402,24 +399,40 @@ class VirtualGPU : public device::VirtualDevice {
         if (host_metadata == nullptr || !IsAttached()) {
           return;
         }
-        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t>) {
-          if (pending_descriptor_ == nullptr) {
-            return;
-          }
-          auto* metadata = reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(
-              host_metadata);
-          SetPacket(packet, header, metadata);
-        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
-                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
-          auto* metadata = reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(
-              host_metadata);
-          SetPacket(packet, header, metadata);
-        }
+        FillMetadata(packet, header, host_metadata);
       }
 
     private:
+      //! Dispatch and barrier metadata packets share the ring, so their slot size
+      //! must be identical for uniform indexing.
+      static_assert(sizeof(hsa_amd_metadata_kernel_dispatch_packet_t) ==
+                        sizeof(hsa_amd_metadata_barrier_packet_t),
+                    "metadata packet types must share a uniform ring slot size");
+      static constexpr size_t kMetadataPacketSize =
+          sizeof(hsa_amd_metadata_kernel_dispatch_packet_t);
+
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
+
+      //! Populate the metadata packet at `dst` from the given aql packet. Shared by
+      //! Set() (ring destination) and CaptureMetadata() (host buffer destination).
+      template <class AqlPacket>
+      void FillMetadata(AqlPacket* packet, uint16_t header, uint8_t* dst) {
+        if constexpr (std::is_same_v<AqlPacket, hsa_kernel_dispatch_packet_t> ||
+                     std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+          if (pending_descriptor_ == nullptr) {
+            return;
+          }
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_kernel_dispatch_packet_t*>(dst);
+          auto* dispatch_packet = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet);
+          SetPacket(dispatch_packet, header, metadata);
+        } else if constexpr (std::is_same_v<AqlPacket, hsa_barrier_and_packet_t> ||
+                             std::is_same_v<AqlPacket, hsa_barrier_or_packet_t> ||
+                             std::is_same_v<AqlPacket, hsa_amd_barrier_value_packet_t>) {
+          auto* metadata = reinterpret_cast<hsa_amd_metadata_barrier_packet_t*>(dst);
+          SetPacket(packet, header, metadata);
+        }
+      }
 
       //! Get type from aql packet header
       uint8_t GetType(uint16_t header) const {
@@ -650,12 +663,18 @@ class VirtualGPU : public device::VirtualDevice {
   //! Release pinned memory after previously submitted work on the queue has completed.
   void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
 
+  //! Apply fence-scope adjustments to the AQL header (system scope promotion,
+  //! consecutive-system-scope optimization, fence_state_ tracking).
+  void adjustHeader(uint16_t& header);
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 
-  bool dispatchAqlPacket(hsa_kernel_dispatch_packet_t* packet, uint16_t header, uint16_t rest,
-                         bool blocking = true, bool capturing = false,
-                         const uint8_t* aqlPacket = nullptr, bool attach_signal = false);
+  //! Dispatch (or capture, when graph-capturing) a kernel dispatch packet.
+  //! Handles both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t.
+  template <typename AqlPacket>
+  bool dispatchAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
+                         bool blocking = true, bool attach_signal = false);
   bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
                          bool blocking = true, bool attach_signal = false);
 
@@ -725,40 +744,21 @@ class VirtualGPU : public device::VirtualDevice {
   //! Resets the current queue state. Note: should be called after AQL queue becomes idle
   void ResetQueueStates();
 
-  //! Track the progress of the queue based on the last write index and completion signal.
-  //! When skip_signal is true, only the write index is advanced and the completion signal
-  //! is cleared. Used for graph pre-patched dispatches whose signals are externally
-  //! managed and freed after graph completion.
+  //! Record the last write index and whether the last packet is idle-trackable. Only tracker-owned
+  //! signals (from Barriers().ActiveSignal()) qualify; set skip_signal for externally-provided or
+  //! absent completion signals. IsQueueIdle() reads the tracker-owned signal at check time.
   template <typename AqlPacket>
   inline void TrackQueueProgress(const AqlPacket& packet, uint64_t index,
                                  bool skip_signal = false) {
     last_write_index_ = index;
-    if (skip_signal) {
-      last_completion_signal_.handle = 0;
-    } else if (packet.completion_signal.handle != 0) {
+    if (!skip_signal && packet.completion_signal.handle != 0) {
       last_packet_with_signal_index_ = index;
-      last_completion_signal_ = packet.completion_signal;
     }
   }
 
-  //! Returns true if the queue is considered as idle. That means all submitted packets are
-  //! complete. Note: it doesn't track the state of caches
-  bool IsQueueIdle() const {
-    if (gpu_queue_ == nullptr) {
-      return true;
-    }
-
-    // Make sure the last packet contained a completion signal
-    if (last_packet_with_signal_index_ == last_write_index_) {
-      if ((last_write_index_ == kInvalidQueueIndex) && (last_completion_signal_.handle == 0)) {
-        return true;
-      } else {
-        return (Hsa::signal_load_relaxed(last_completion_signal_) == 0);
-      }
-    }
-
-    return false;
-  }
+  //! Returns true if the queue is considered as idle, i.e. all submitted packets are complete.
+  //! Note: it doesn't track the state of caches.
+  bool IsQueueIdle() const;
 
   //! True if this marker records the same event as the preceding barrier with no
   //! intervening dispatch or sync. Caller must hold the execution() lock.
@@ -894,7 +894,6 @@ class VirtualGPU : public device::VirtualDevice {
   uint64_t last_write_index_ = kInvalidQueueIndex; //!< The last HW queue write index for any packet
   uint64_t last_packet_with_signal_index_ = kInvalidQueueIndex; //!< The last HW queue write index for a packet
                                               //!< with a completion signal
-  hsa_signal_t last_completion_signal_{};     //!< The last completion signal
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations

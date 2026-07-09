@@ -250,6 +250,18 @@
 //       : gfx12 - ttmp7 - 31:16 : workgroup_z[15:0]  (SPI) and 15:0 : workgroup_y[15:0]  (SPI)
 
 trap_entry:
+  // Clear only PC sampling routing bits in ttmp13, preserving ABI fields.
+  // Per gfx94x ABI: bit 23 = DebugEnabled (set by 1TH), bits 31:26 = IB_STS.
+  // Only bits 22:0 are "free" on 2TH entry, but bit 23 (DebugEnabled) must be preserved
+  // for correct debugtrap handling at .no_skip_debugtrap label.
+.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+  // Clear bits 21 (stochastic) and 22 (hosttrap) in a single instruction
+  s_andn2_b32                           ttmp13, ttmp13, ((1 << TTMP13_PCS_IS_STOCHASTIC) | (1 << TTMP13_PCS_IS_HOSTTRAP))
+.else
+  // For pre-gfx94x, ttmp13 is not used by ABI - safe to clear entirely
+  s_mov_b32                             ttmp13, 0
+.endif
+
   // Extract trap_id from ttmp2
   s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_cbranch_scc0                        .not_s_trap                      // If trap_id == 0, it's not an s_trap nor host trap
@@ -262,9 +274,16 @@ trap_entry:
   // ttmp[14:15] is TMA2; Available: ttmp[2:3], ttmp[4:5], ttmp7, TTMP_REG1
   // Check if this is a host-trap. For now, if so, that means we are sampling
   //
-  // TMA2 layout:
-  //   [0x00] out_buf_t* host_trap_buffers;
-  //   [0x08] out_buf_t* stochastic_trap_buffers;
+  // TMA2 layout (pcs_tma2_t):
+  //   [0x00] pcs_sampling_data_t* host_trap_buffers;       // Base of hosttrap buffer array
+  //   [0x08] pcs_sampling_data_t* stochastic_trap_buffers; // Base of stochastic buffer array
+  //   [0x10] uint64_t per_xcc_size;                        // Per-XCC stride (gfx9.4+ multi-XCC)
+  //   [0x18] uint64_t reserved_pad;                        // Alignment padding
+  //
+  // For multi-XCC (gfx9.4+): trap handler computes per-XCC buffer address as:
+  //   buffer_ptr = base + (XCC_ID * per_xcc_size)
+  //
+  // For single-XCC (gfx9.0-9.3): per_xcc_size is ignored, buffer_ptr = base
   //
   // --- Start profile trap handlers GFX9 --- //
   // If the wave entered the trap handler:
@@ -283,17 +302,42 @@ trap_entry:
   // - Set bit 21 in TTMP13 to indicate a stochastic trap.
   // - Branch to the profile trap handler logic.
 
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0 glc   // ttmp[14:15]=*host_trap_buffers
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0   // ttmp[2:3] = host_trap_buffers base
 .if .amdgcn.gfx_generation_minor >= 4
+  // GFX9.4+ (multi-XCC): PC sampling bits cleared at trap_entry (bits 21-22)
+  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
+  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
+  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
-  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
-  s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP   // set bit 22 in TTMP13
-.else
-  s_bitset1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP    // Set bit 22 in TTMP11
-.endif
+  s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP  // set bit 22 in TTMP13
   s_waitcnt                             lgkmcnt(0)
-  s_mov_b64                             ttmp[14:15], ttmp[2:3]          //now ttmp[14:15] = host_trap_buffers
-  s_branch                              .profile_trap_handlers_gfx9     // Off to the profile handlers
+
+  // Check if host_trap_buffers is NULL (not configured for hosttrap).
+  // If NULL, exit cleanly - hosttrap and stochastic are mutually exclusive.
+  s_cmp_eq_u64                          ttmp[2:3], 0
+  s_cbranch_scc1                        .exit_trap
+
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
+
+  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
+  s_add_u32                             ttmp14, ttmp2, ttmp14
+  s_addc_u32                            ttmp15, ttmp3, ttmp15
+  s_branch                              .profile_trap_handlers_gfx9
+.else
+  // GFX9.0-9.3 (single-XCC): Simple pointer copy, no per-XCC offset needed
+  s_bitset1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP  // Set bit 22 in TTMP11
+  s_waitcnt                             lgkmcnt(0)
+
+  // Check if host_trap_buffers is NULL (not configured for hosttrap).
+  // If NULL, exit cleanly - nothing to do (no stochastic on GFX9.0-9.3).
+  s_cmp_eq_u64                          ttmp[2:3], 0
+  s_cbranch_scc1                        .exit_trap
+
+  s_mov_b64                             ttmp[14:15], ttmp[2:3]          // ttmp14:15 = host_trap_buffers
+  s_branch                              .profile_trap_handlers_gfx9
+.endif
 .else
   // Ignore host traps.  They should be masked by the driver anyway.
   s_branch .not_s_trap
@@ -319,18 +363,33 @@ trap_entry:
 
 .not_s_trap:
 .if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
-  //Check for stochastic trap on gfx9.4+
-  s_getreg_b32                          ttmp7, hwreg(HW_REG_TRAPSTS)             // On gfx94x, TRAPSTS bit 26 ...
+  // GFX9.4+ (multi-XCC): Check for stochastic trap when trap_id is 0 (not s_trap).
+.check_stochastic_gfx94:
+  s_getreg_b32                          ttmp7, hwreg(HW_REG_TRAPSTS)                 // On gfx94x, TRAPSTS bit 26 ...
   s_bitcmp1_b32                         ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
   s_cbranch_scc0                        .no_skip_debugtrap
 
-  // Handle stochastic trap
+  // Handle stochastic trap (PC sampling bits cleared at trap_entry)
   s_setreg_imm32_b32                    hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
-  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8 glc // ttmp[14:15]=*stoch_trap_buf
-  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
-  s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 25 in TTMP13
+  s_load_dwordx2                        ttmp[2:3], ttmp[14:15], 0x8     // ttmp[2:3] = stochastic_trap_buffers base
+  // Multi-XCC: Load per_xcc_size and XCC_ID for offset calculation
+  s_load_dword                          ttmp4, ttmp[14:15], 0x10        // ttmp4 = per_xcc_size
+  s_getreg_b32                          ttmp5, hwreg(HW_REG_XCC_ID)     // ttmp5 = XCC_ID
+  s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 21 in TTMP13
   s_waitcnt                             lgkmcnt(0)
-  s_mov_b64                             ttmp[14:15], ttmp[2:3]
+
+  // Check if stochastic_trap_buffers is NULL (not configured for stochastic).
+  // If NULL, exit cleanly - nothing to do for this trap.
+  s_cmp_eq_u64                          ttmp[2:3], 0
+  s_cbranch_scc1                        .exit_trap
+
+  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
+  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
+  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
+
+  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
+  s_add_u32                             ttmp14, ttmp2, ttmp14
+  s_addc_u32                            ttmp15, ttmp3, ttmp15
   s_branch                              .profile_trap_handlers_gfx9      // Off to the profile handlers
 .else
   s_branch                              .no_skip_debugtrap

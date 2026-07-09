@@ -22,6 +22,7 @@ import shutil
 import subprocess
 from typing import Optional
 from .config import RocprofsysConfig
+from .environment import TestEnvironment, TestEnvKind
 
 
 def safe_remove(path: Path) -> None:
@@ -53,7 +54,7 @@ class TestResult:
                       (as of now, only used for timeout errors)
         output_dir: Directory containing output files
         command: The command that was executed
-        env: Environment variables used
+        environment: The layered TestEnvironment used for the run
         duration: Execution time in seconds (if measured)
         _instrumented_files: List of instrumented binary files created
     """
@@ -62,7 +63,7 @@ class TestResult:
     test_output: str
     output_dir: Path
     command: list[str]
-    environment: dict[str, str]
+    environment: TestEnvironment
     extra_output: Optional[str] = None
     duration: Optional[float] = None
     _instrumented_files: list[Path] = field(default_factory=list)
@@ -170,7 +171,7 @@ class BaseRunner(ABC):
     def __init__(
         self,
         config: RocprofsysConfig,
-        base_env: dict[str, str],
+        test_type: TestEnvKind,
         target: str,
         output_dir: Path,
         run_args: Optional[list[str]] = None,
@@ -198,14 +199,28 @@ class BaseRunner(ABC):
             ) from exc
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
-        self.env = config.get_fundamental_environment()
-        if no_base_env:
-            self.env["LD_LIBRARY_PATH"] = config.get_library_path()
-        else:
-            self.env.update(base_env)
-        self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
+        self.environment = TestEnvironment()
+        self.environment.set_base_environment(
+            config, TestEnvKind.NONE if no_base_env else test_type
+        )
+        # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
+        # next) may override it (e.g. Julia adds extra lib dirs).
+        self.environment.set_test_environment(
+            {"LD_LIBRARY_PATH": config.get_library_path()}
+        )
+        # LD_PRELOAD default (sanitizer builds prepend the asan runtime).
+        preload = config.get_preload_path()
+        if preload:
+            self.environment.set_test_environment({"LD_PRELOAD": preload})
         if env:
-            self.env.update(env)
+            self.environment.set_test_environment(env)
+        # ROCPROFSYS_OUTPUT_PATH is framework-controlled
+        self.environment.set_test_environment(
+            {"ROCPROFSYS_OUTPUT_PATH": str(self.output_dir)}
+        )
+        self.environment.set_user_environment()
+
+        self.env = self.environment.get_merged_environment(config)
 
     @abstractmethod
     def build_command(self) -> list[str]:
@@ -253,13 +268,13 @@ class BaseRunner(ABC):
                 pass
 
         if self.launcher is type(self).Launcher.SHMEM and command:
-            # PRRTE-based oshrun (Open MPI >= 5.0) strips the first literal
-            # `--` from the program argv, breaking `rocprof-sys-run -- <binary>`.
-            # A second `--` survives, so insert a decoy right after the program
-            # name to absorb the strip. Older ORTE-based oshrun (4.x) preserves
-            # `--` and would forward the decoy verbatim, so gate on version.
-            oshrun_version = self.config.capabilities.oshrun_version
-            if oshrun_version is not None and oshrun_version[0] >= 5:
+            # Some PRRTE-based oshrun builds strip the first literal `--` from
+            # the application argv, breaking `rocprof-sys-run -- <binary>`.
+            # A second `--` survives the strip, so insert a decoy to absorb it.
+            # The condition is probed at runtime (see capabilities.oshrun_strips_double_dash)
+            # rather than checked by version number, because distro packages may
+            # bundle a different PRRTE than the upstream Open MPI tarball.
+            if self.config.capabilities.oshrun_strips_double_dash:
                 command = [command[0], "--"] + command[1:]
 
         return cmd + command
@@ -282,7 +297,7 @@ class BaseRunner(ABC):
                 test_output=f"{e}",
                 output_dir=self.output_dir,
                 command=["Failed to build command"],
-                environment=self.env,
+                environment=self.environment,
                 duration=0,
             )
 
@@ -306,7 +321,7 @@ class BaseRunner(ABC):
                 test_output=_decode_bytes(result.stdout),
                 output_dir=self.output_dir,
                 command=command,
-                environment=self.env,
+                environment=self.environment,
                 duration=duration,
             )
         except subprocess.TimeoutExpired as e:
@@ -319,7 +334,7 @@ class BaseRunner(ABC):
                 extra_output=f"Timeout after {self.timeout}s\n{stderr}",
                 output_dir=self.output_dir,
                 command=command,
-                environment=self.env,
+                environment=self.environment,
                 duration=duration,
             )
         return test_result
@@ -340,7 +355,7 @@ class BaselineRunner(BaseRunner):
         **kwargs: Additional arguments passed to BaseRunner
     """
 
-    # rocprof-sys binaries that should use get_base_binary_environment()
+    # rocprof-sys binaries that should use the "binary" base environment preset
     ROCPROFSYS_BINARIES = {
         "rocprof-sys-instrument",
         "rocprof-sys-sample",
@@ -356,12 +371,10 @@ class BaselineRunner(BaseRunner):
         command: Optional[list[str]] = None,
         **kwargs,
     ):
-        if target in self.ROCPROFSYS_BINARIES:
-            base_env = config.get_base_binary_environment()
-        else:
-            base_env = config.get_base_environment()
-
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        test_type = (
+            TestEnvKind.BINARY if target in self.ROCPROFSYS_BINARIES else TestEnvKind.BASE
+        )
+        super().__init__(config, test_type, target, output_dir, **kwargs)
         self.command = command
 
     def build_command(self) -> list[str]:
@@ -390,8 +403,7 @@ class SamplingRunner(BaseRunner):
             sampling_args: Arguments for rocprof-sys-sample
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.sampling_args = sampling_args or []
 
     def build_command(self) -> list[str]:
@@ -429,8 +441,7 @@ class BinaryRewriteRunner(BaseRunner):
                 fixture handle cleanup after validation completes.
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.binary_rewrite_args = binary_rewrite_args or []
         self.instrumented_exe = output_dir / f"{target}.inst"
         self.cleanup_on_success = cleanup_on_success
@@ -472,7 +483,7 @@ class BinaryRewriteRunner(BaseRunner):
                 test_output=_decode_bytes(result.stdout),
                 output_dir=self.output_dir,
                 command=command,
-                environment=self.env,
+                environment=self.environment,
                 duration=duration,
                 _instrumented_files=self._instrumented_files.copy(),
             )
@@ -486,7 +497,7 @@ class BinaryRewriteRunner(BaseRunner):
                 extra_output=f"Timeout after {self.timeout}s (rewrite phase)\n{stderr}",
                 output_dir=self.output_dir,
                 command=command,
-                environment=self.env,
+                environment=self.environment,
                 duration=duration,
                 _instrumented_files=self._instrumented_files.copy(),
             )
@@ -586,8 +597,7 @@ class RuntimeInstrumentRunner(BaseRunner):
             runtime_instrument_args: Arguments for rocprof-sys-instrument
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.runtime_instrument_args = runtime_instrument_args or []
 
     def build_command(self) -> list[str]:
@@ -622,8 +632,7 @@ class SysRunRunner(BaseRunner):
             sys_run_args: Arguments for rocprof-sys-run (before --)
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.BASE, target, output_dir, **kwargs)
         self.sys_run_args = sys_run_args or []
 
     def build_command(self) -> list[str]:
@@ -659,8 +668,7 @@ class CausalRunner(BaseRunner):
             causal_args: Arguments for rocprof-sys-causal
             **kwargs: Additional arguments passed to BaseRunner
         """
-        base_env = config.get_base_causal_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.CAUSAL, target, output_dir, **kwargs)
         self.causal_mode = causal_mode
         self.causal_args = causal_args or []
 
@@ -690,8 +698,7 @@ class PythonRunner(BaseRunner):
         standalone: bool = False,
         **kwargs,
     ):
-        base_env = config.get_base_python_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
+        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
 
         self.python_version = python_version
         self.annotated = annotated
