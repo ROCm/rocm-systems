@@ -158,6 +158,9 @@ void SimulatedDriver::setup_topology(const config::KfdDeviceConfig &dev, uint32_
   gpu.location_id = dev.location_id;
   gpu.hive_id = dev.hive_id;
   gpu.domain = dev.domain;
+  gpu.capability = dev.capability;
+  gpu.capability2 = dev.capability2;
+  gpu.debug_prop = dev.debug_prop;
   gpu.num_xcc = num_xcc;
 
   setup_topology(gpu);
@@ -244,6 +247,9 @@ void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> 
     gpu.location_id = dev.location_id;
     gpu.hive_id = dev.hive_id;
     gpu.domain = dev.domain;
+    gpu.capability = dev.capability;
+    gpu.capability2 = dev.capability2;
+    gpu.debug_prop = dev.debug_prop;
     gpu.num_xcc = num_xcc;
     infos.push_back(gpu);
   }
