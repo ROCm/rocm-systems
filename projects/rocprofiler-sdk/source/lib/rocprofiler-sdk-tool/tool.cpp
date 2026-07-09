@@ -1429,9 +1429,22 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
     if(!counters_v.empty())
     {
         auto profile_v = rocprofiler_counter_config_id_t{};
-        ROCPROFILER_CALL(rocprofiler_create_counter_config(
-                             agent_id, counters_v.data(), counters_v.size(), &profile_v),
-                         "Could not construct profile cfg");
+        auto status    = rocprofiler_create_counter_config(
+            agent_id, counters_v.data(), counters_v.size(), &profile_v);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            // Unrecoverable config error (e.g. a pass exceeds the hardware counter
+            // capacity). Built up front (get_agent_profiles), so exit cleanly here
+            // instead of ROCP_FATAL-aborting inside the dispatch callback.
+            auto requested_counters =
+                fmt::format("{}", fmt::join(counters.begin(), counters.end(), ", "));
+            ROCP_ERROR << "Could not construct counter profile for agent " << agent_v->node_id
+                       << " (gpu-" << agent_v->gpu_index << ", " << agent_v->name << ") with ["
+                       << requested_counters << "]: " << rocprofiler_get_status_string(status)
+                       << ". This counter pass/group requests more counters than the hardware "
+                          "can collect in a single pass; reduce the number of counters in it.";
+            std::exit(EXIT_FAILURE);
+        }
         profile = profile_v;
     }
     return profile;
@@ -1459,11 +1472,20 @@ generate_agent_profiles()
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
 }
 
-// this function creates a rocprofiler profile config on the first entry
+// Builds (once) and caches the per-agent counter profiles so tool_init can build
+// them up front (before any dispatch) and the dispatch callback reuses them.
+agent_profiles&
+get_agent_profiles()
+{
+    static agent_profiles profiles = generate_agent_profiles();
+    return profiles;
+}
+
+// returns the profile config to use for the current dispatch on this agent
 std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto agent_profiles = generate_agent_profiles();
+    auto& agent_profiles = get_agent_profiles();
 
     auto agent_iter = agent_profiles.current_iter.find(agent_id);
     if(agent_iter == agent_profiles.current_iter.end())
@@ -2869,6 +2891,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                      callbacks.counter_record,
                                                                      nullptr),
             "Could not setup counting service");
+
+        // Build counter profiles up front so an invalid/over-capacity config fails
+        // cleanly here instead of aborting mid-dispatch.
+        (void) get_agent_profiles();
 
         if(!defer_counter_start) start_context(counter_collection_ctx, "counter collection");
     }
