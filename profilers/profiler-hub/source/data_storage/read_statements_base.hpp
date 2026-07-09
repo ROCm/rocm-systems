@@ -399,14 +399,27 @@ struct distinct_gpu_queue_result
     size_t queue_id{};
 };
 
-/// Distinct dma topology context synthesized from rocpd_memory_copy.
-/// queue_id / stream_id are kept as distinct group values, NULL included.
+/// Distinct dma topology context synthesized from rocpd_memory_copy. Keyed on the
+/// destination agent (dst_agent_id) to match Optiq's GetRocprofMemoryCopyTrackQuery
+/// swimlane grouping; stream identity lives on the separate `stream` track type.
+/// queue_id / dst_agent_id are kept as distinct group values, NULL included.
 struct distinct_dma_result
 {
     size_t                nid{};
     size_t                pid{};
     std::optional<size_t> queue_id;
-    std::optional<size_t> stream_id;
+    std::optional<size_t> dst_agent_id;
+};
+
+/// Distinct memory-track topology synthesized from rocpd_memory_allocate. Keyed on
+/// (nid, agent_id, queue_id, pid) to match Optiq's GetRocprofMemoryAllocTrackQuery
+/// GROUP BY exactly. agent_id / queue_id are nullable; NULL is a distinct group value.
+struct distinct_memory_result
+{
+    size_t                nid{};
+    size_t                pid{};
+    std::optional<size_t> agent_id;
+    std::optional<size_t> queue_id;
 };
 
 /// Distinct stream-track topology. v3: synthesized from the inline stream_id on
@@ -581,6 +594,13 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<distinct_gpu_queue_result>()>;
     using distinct_dma_func_t =
         std::function<sqlite_backend::result_set<distinct_dma_result>()>;
+    using distinct_memory_func_t =
+        std::function<sqlite_backend::result_set<distinct_memory_result>()>;
+    // v4.0 only: track_ids referenced by rocpd_memory_allocate, used in the generic
+    // classification loop to distinguish memory tracks from gpu_queue tracks (both may
+    // have agent_id + queue_id on their rocpd_track row).
+    using memory_alloc_track_ids_func_t =
+        std::function<sqlite_backend::result_set<sample_track_id_result>()>;
     using distinct_region_func_t =
         std::function<sqlite_backend::result_set<distinct_region_result>()>;
     using distinct_stream_func_t =
@@ -823,6 +843,14 @@ struct read_statements_base
         static const distinct_dma_func_t e{};
         return e;
     }
+    // v3: synthesized from rocpd_memory_allocate; v4.0: via rocpd_memory_allocate JOIN
+    // rocpd_track. One row per (nid, agent_id, queue_id, pid), NULL included as a
+    // distinct group value for both nullable columns.
+    [[nodiscard]] virtual const distinct_memory_func_t& distinct_memory_tracks() const
+    {
+        static const distinct_memory_func_t e{};
+        return e;
+    }
     [[nodiscard]] virtual const distinct_region_func_t& distinct_region_tracks() const
     {
         static const distinct_region_func_t e{};
@@ -838,6 +866,12 @@ struct read_statements_base
     [[nodiscard]] virtual const max_track_id_func_t& max_track_id() const
     {
         static const max_track_id_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const memory_alloc_track_ids_func_t& memory_alloc_track_ids()
+        const
+    {
+        static const memory_alloc_track_ids_func_t e{};
         return e;
     }
 
@@ -862,7 +896,7 @@ struct read_statements_base
         static const interval_track_4_func_t e{};
         return e;
     }
-    [[nodiscard]] virtual const interval_track_4_func_t& memory_copy_interval_qs() const
+    [[nodiscard]] virtual const interval_track_4_func_t& memory_copy_interval_qa() const
     {
         static const interval_track_4_func_t e{};
         return e;
@@ -873,13 +907,38 @@ struct read_statements_base
         static const interval_track_3_func_t e{};
         return e;
     }
-    [[nodiscard]] virtual const interval_track_3_func_t& memory_copy_interval_s_only()
+    [[nodiscard]] virtual const interval_track_3_func_t& memory_copy_interval_a_only()
         const
     {
         static const interval_track_3_func_t e{};
         return e;
     }
     [[nodiscard]] virtual const interval_track_2_func_t& memory_copy_interval_neither()
+        const
+    {
+        static const interval_track_2_func_t e{};
+        return e;
+    }
+    // memory (memory_allocate) interval track statements (v3: keyed by (nid, pid,
+    // agent_id, queue_id) with 4 NULL variants for the two nullable columns).
+    [[nodiscard]] virtual const interval_track_4_func_t& memory_alloc_interval_qa() const
+    {
+        static const interval_track_4_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const interval_track_3_func_t& memory_alloc_interval_q_only()
+        const
+    {
+        static const interval_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const interval_track_3_func_t& memory_alloc_interval_a_only()
+        const
+    {
+        static const interval_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const interval_track_2_func_t& memory_alloc_interval_neither()
         const
     {
         static const interval_track_2_func_t e{};
@@ -899,6 +958,13 @@ struct read_statements_base
         return e;
     }
     [[nodiscard]] virtual const interval_track_1_func_t& memory_copy_interval_track_v4()
+        const
+    {
+        static const interval_track_1_func_t e{};
+        return e;
+    }
+    // v4.0: memory allocations keyed by track_id (rocpd_memory_allocate.track_id).
+    [[nodiscard]] virtual const interval_track_1_func_t& memory_alloc_interval_track_v4()
         const
     {
         static const interval_track_1_func_t e{};
@@ -936,7 +1002,7 @@ struct read_statements_base
         static const stats_track_4_func_t e{};
         return e;
     }
-    [[nodiscard]] virtual const stats_track_4_func_t& memory_copy_stats_qs() const
+    [[nodiscard]] virtual const stats_track_4_func_t& memory_copy_stats_qa() const
     {
         static const stats_track_4_func_t e{};
         return e;
@@ -946,12 +1012,33 @@ struct read_statements_base
         static const stats_track_3_func_t e{};
         return e;
     }
-    [[nodiscard]] virtual const stats_track_3_func_t& memory_copy_stats_s_only() const
+    [[nodiscard]] virtual const stats_track_3_func_t& memory_copy_stats_a_only() const
     {
         static const stats_track_3_func_t e{};
         return e;
     }
     [[nodiscard]] virtual const stats_track_2_func_t& memory_copy_stats_neither() const
+    {
+        static const stats_track_2_func_t e{};
+        return e;
+    }
+    // memory (v3): stats aggregates keyed by (nid, pid, agent_id, queue_id), 4 variants.
+    [[nodiscard]] virtual const stats_track_4_func_t& memory_alloc_stats_qa() const
+    {
+        static const stats_track_4_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_3_func_t& memory_alloc_stats_q_only() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_3_func_t& memory_alloc_stats_a_only() const
+    {
+        static const stats_track_3_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_2_func_t& memory_alloc_stats_neither() const
     {
         static const stats_track_2_func_t e{};
         return e;
@@ -969,6 +1056,11 @@ struct read_statements_base
         return e;
     }
     [[nodiscard]] virtual const stats_track_1_func_t& memory_copy_stats_track_v4() const
+    {
+        static const stats_track_1_func_t e{};
+        return e;
+    }
+    [[nodiscard]] virtual const stats_track_1_func_t& memory_alloc_stats_track_v4() const
     {
         static const stats_track_1_func_t e{};
         return e;

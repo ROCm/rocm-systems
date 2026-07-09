@@ -431,8 +431,11 @@ reader_t::impl::synthesize_derived_tracks()
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 
-    // dma: one track per distinct (nid, pid, queue_id, stream_id); NULL is a distinct
-    // group value (Q2). v3 memory_copy has no single agent, so agent_info stays nullopt.
+    // dma: one track per distinct (nid, pid, queue_id, dst_agent_id); NULL is a distinct
+    // group value (Q2 amendment). Keyed on the destination agent to match Optiq's
+    // GetRocprofMemoryCopyTrackQuery swimlane grouping (stream-level grouping lives on
+    // the separate `stream` track type). agent_info resolves from dst_agent_id;
+    // stream_info is left nullopt on dma tracks.
     for(const auto& d : m_read_statements->distinct_dma_tracks()().to_vector())
     {
         auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
@@ -449,12 +452,12 @@ reader_t::impl::synthesize_derived_tracks()
         {
             track_info_ptr->process_info = process_it->second;
         }
-        if(d.stream_id.has_value())
+        if(d.dst_agent_id.has_value())
         {
-            auto stream_it = m_stream_info_utility.find(d.stream_id.value());
-            if(stream_it != m_stream_info_utility.end() && stream_it->second)
+            auto agent_it = m_agent_info_utility.find(d.dst_agent_id.value());
+            if(agent_it != m_agent_info_utility.end() && agent_it->second)
             {
-                track_info_ptr->stream_info = stream_it->second;
+                track_info_ptr->agent_info = agent_it->second;
             }
         }
 
@@ -465,11 +468,63 @@ reader_t::impl::synthesize_derived_tracks()
         m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
 
         track_query_info_t qi;
-        qi.type      = reader_types::track_type_t::dma;
-        qi.nid       = d.nid;
-        qi.pid       = d.pid;
-        qi.queue_id  = d.queue_id;
-        qi.stream_id = d.stream_id;
+        qi.type     = reader_types::track_type_t::dma;
+        qi.nid      = d.nid;
+        qi.pid      = d.pid;
+        qi.queue_id = d.queue_id;
+        qi.agent_id = d.dst_agent_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // memory: one track per distinct (nid, agent_id, queue_id, pid) in
+    // rocpd_memory_allocate. Keyed to match Optiq's GetRocprofMemoryAllocTrackQuery GROUP
+    // BY exactly. NULL agent_id / queue_id are distinct group values, not dropped.
+    // agent_info and queue_info resolve the same way gpu_queue does.
+    for(const auto& m : m_read_statements->distinct_memory_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::memory;
+
+        auto node_it = m_node_info_utility.find(m.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(m.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        if(m.agent_id.has_value())
+        {
+            auto agent_it = m_agent_info_utility.find(m.agent_id.value());
+            if(agent_it != m_agent_info_utility.end() && agent_it->second)
+            {
+                track_info_ptr->agent_info = agent_it->second;
+            }
+        }
+        if(m.queue_id.has_value())
+        {
+            auto queue_it = m_queue_info_utility.find(m.queue_id.value());
+            if(queue_it != m_queue_info_utility.end() && queue_it->second)
+            {
+                track_info_ptr->queue_info = queue_it->second;
+            }
+        }
+
+        // Q9: memory-alloc display name = category label (matching dma "Memory copy").
+        track_info_ptr->name = "Memory allocation";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::memory;
+        qi.nid      = m.nid;
+        qi.pid      = m.pid;
+        qi.agent_id = m.agent_id;
+        qi.queue_id = m.queue_id;
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 
@@ -603,6 +658,14 @@ reader_t::impl::build_v4_tracks()
         counter_track_ids.insert(r.track_id);
     }
 
+    // Memory tracks: any rocpd_track referenced by rocpd_memory_allocate. Checked before
+    // gpu_queue because both may carry agent_id + queue_id on their rocpd_track row.
+    std::unordered_set<size_t> memory_alloc_track_ids;
+    for(const auto& r : m_read_statements->memory_alloc_track_ids()().to_vector())
+    {
+        memory_alloc_track_ids.insert(r.track_id);
+    }
+
     // Counter display name = PMC name (Q9), keyed by track id.
     std::unordered_map<size_t, std::string> counter_track_names;
     for(const auto& r : m_read_statements->counter_track_names()().to_vector())
@@ -628,14 +691,22 @@ reader_t::impl::build_v4_tracks()
             if(sit != m_string_info_utility.end()) track_name = sit->second;
         }
 
-        // Classify the track from its identity columns. A track referenced by a
-        // sample is a counter regardless of other columns; otherwise queue_id marks a
-        // GPU queue, stream_id a memory-copy (dma) lane, and a bare tid a CPU thread.
+        // Classify the track from its identity columns. Counter is checked first (a
+        // rocpd_sample reference overrides any other column pattern). Memory-allocate is
+        // checked before gpu_queue because both may carry agent_id + queue_id on their
+        // rocpd_track row; the rocpd_memory_allocate set breaks the ambiguity. Then
+        // queue_id → gpu_queue, stream_id → dma, otherwise cpu_thread.
         const bool is_counter =
             counter_track_ids.find(track_info.id) != counter_track_ids.end();
+        const bool is_memory =
+            memory_alloc_track_ids.find(track_info.id) != memory_alloc_track_ids.end();
         if(is_counter)
         {
             track_info_ptr->type = reader_types::track_type_t::counter;
+        }
+        else if(is_memory)
+        {
+            track_info_ptr->type = reader_types::track_type_t::memory;
         }
         else if(track_info.queue_id.has_value())
         {
@@ -721,6 +792,10 @@ reader_t::impl::build_v4_tracks()
                track_info_ptr->queue_info)
             {
                 track_info_ptr->name = track_info_ptr->queue_info->name;
+            }
+            else if(track_info_ptr->type == reader_types::track_type_t::memory)
+            {
+                track_info_ptr->name = "Memory allocation";
             }
             else if(track_info_ptr->type == reader_types::track_type_t::dma)
             {
@@ -1837,6 +1912,11 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                     m_read_statements->memory_copy_interval_track_v4()(qi.real_track_id)
                         .to_vector();
                 break;
+            case reader_types::track_type_t::memory:
+                rows =
+                    m_read_statements->memory_alloc_interval_track_v4()(qi.real_track_id)
+                        .to_vector();
+                break;
             case reader_types::track_type_t::stream:
                 rows = m_read_statements
                            ->stream_interval_track()(qi.stream_id.value(),
@@ -1874,13 +1954,13 @@ reader_t::impl::get_interval_track(size_t                              track_id,
             case reader_types::track_type_t::dma:
             {
                 const bool has_q = qi.queue_id.has_value();
-                const bool has_s = qi.stream_id.has_value();
-                if(has_q && has_s)
+                const bool has_a = qi.agent_id.has_value();
+                if(has_q && has_a)
                 {
                     rows =
                         m_read_statements
-                            ->memory_copy_interval_qs()(
-                                qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
+                            ->memory_copy_interval_qa()(
+                                qi.nid, qi.pid, qi.queue_id.value(), qi.agent_id.value())
                             .to_vector();
                 }
                 else if(has_q)
@@ -1890,17 +1970,51 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                                    qi.nid, qi.pid, qi.queue_id.value())
                                .to_vector();
                 }
-                else if(has_s)
+                else if(has_a)
                 {
                     rows = m_read_statements
-                               ->memory_copy_interval_s_only()(
-                                   qi.nid, qi.pid, qi.stream_id.value())
+                               ->memory_copy_interval_a_only()(
+                                   qi.nid, qi.pid, qi.agent_id.value())
                                .to_vector();
                 }
                 else
                 {
                     rows =
                         m_read_statements->memory_copy_interval_neither()(qi.nid, qi.pid)
+                            .to_vector();
+                }
+                break;
+            }
+            case reader_types::track_type_t::memory:
+            {
+                const bool has_q = qi.queue_id.has_value();
+                const bool has_a = qi.agent_id.has_value();
+                if(has_q && has_a)
+                {
+                    rows =
+                        m_read_statements
+                            ->memory_alloc_interval_qa()(
+                                qi.nid, qi.pid, qi.agent_id.value(), qi.queue_id.value())
+                            .to_vector();
+                }
+                else if(has_q)
+                {
+                    rows = m_read_statements
+                               ->memory_alloc_interval_q_only()(
+                                   qi.nid, qi.pid, qi.queue_id.value())
+                               .to_vector();
+                }
+                else if(has_a)
+                {
+                    rows = m_read_statements
+                               ->memory_alloc_interval_a_only()(
+                                   qi.nid, qi.pid, qi.agent_id.value())
+                               .to_vector();
+                }
+                else
+                {
+                    rows =
+                        m_read_statements->memory_alloc_interval_neither()(qi.nid, qi.pid)
                             .to_vector();
                 }
                 break;
@@ -2055,6 +2169,10 @@ reader_t::impl::get_track_stats(size_t track_id)
                 rows = m_read_statements->memory_copy_stats_track_v4()(qi.real_track_id)
                            .to_vector();
                 break;
+            case reader_types::track_type_t::memory:
+                rows = m_read_statements->memory_alloc_stats_track_v4()(qi.real_track_id)
+                           .to_vector();
+                break;
             case reader_types::track_type_t::stream:
                 rows = m_read_statements
                            ->stream_stats_track()(qi.stream_id.value(),
@@ -2090,13 +2208,13 @@ reader_t::impl::get_track_stats(size_t track_id)
             case reader_types::track_type_t::dma:
             {
                 const bool has_q = qi.queue_id.has_value();
-                const bool has_s = qi.stream_id.has_value();
-                if(has_q && has_s)
+                const bool has_a = qi.agent_id.has_value();
+                if(has_q && has_a)
                 {
                     rows =
                         m_read_statements
-                            ->memory_copy_stats_qs()(
-                                qi.nid, qi.pid, qi.queue_id.value(), qi.stream_id.value())
+                            ->memory_copy_stats_qa()(
+                                qi.nid, qi.pid, qi.queue_id.value(), qi.agent_id.value())
                             .to_vector();
                 }
                 else if(has_q)
@@ -2106,16 +2224,49 @@ reader_t::impl::get_track_stats(size_t track_id)
                                    qi.nid, qi.pid, qi.queue_id.value())
                                .to_vector();
                 }
-                else if(has_s)
+                else if(has_a)
                 {
                     rows = m_read_statements
-                               ->memory_copy_stats_s_only()(
-                                   qi.nid, qi.pid, qi.stream_id.value())
+                               ->memory_copy_stats_a_only()(
+                                   qi.nid, qi.pid, qi.agent_id.value())
                                .to_vector();
                 }
                 else
                 {
                     rows = m_read_statements->memory_copy_stats_neither()(qi.nid, qi.pid)
+                               .to_vector();
+                }
+                break;
+            }
+            case reader_types::track_type_t::memory:
+            {
+                const bool has_q = qi.queue_id.has_value();
+                const bool has_a = qi.agent_id.has_value();
+                if(has_q && has_a)
+                {
+                    rows =
+                        m_read_statements
+                            ->memory_alloc_stats_qa()(
+                                qi.nid, qi.pid, qi.agent_id.value(), qi.queue_id.value())
+                            .to_vector();
+                }
+                else if(has_q)
+                {
+                    rows = m_read_statements
+                               ->memory_alloc_stats_q_only()(
+                                   qi.nid, qi.pid, qi.queue_id.value())
+                               .to_vector();
+                }
+                else if(has_a)
+                {
+                    rows = m_read_statements
+                               ->memory_alloc_stats_a_only()(
+                                   qi.nid, qi.pid, qi.agent_id.value())
+                               .to_vector();
+                }
+                else
+                {
+                    rows = m_read_statements->memory_alloc_stats_neither()(qi.nid, qi.pid)
                                .to_vector();
                 }
                 break;

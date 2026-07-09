@@ -144,6 +144,19 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_stream_tracks;
     }
+    // v4.0 memory tracks: distinct (nid, agent_id, queue_id, pid) from
+    // rocpd_memory_allocate JOIN rocpd_track (same join pattern as stream interval SQL).
+    [[nodiscard]] const distinct_memory_func_t& distinct_memory_tracks() const override
+    {
+        return m_distinct_memory_tracks;
+    }
+    // v4.0: set of rocpd_track.id values referenced by rocpd_memory_allocate, used in
+    // the generic classification loop to disambiguate memory from gpu_queue tracks.
+    [[nodiscard]] const memory_alloc_track_ids_func_t& memory_alloc_track_ids()
+        const override
+    {
+        return m_memory_alloc_track_ids;
+    }
     [[nodiscard]] const counter_track_name_func_t& counter_track_names() const override
     {
         return m_counter_track_names;
@@ -192,6 +205,11 @@ struct read_statements : public read_statements_base
     {
         return m_memory_copy_interval_track_v4;
     }
+    [[nodiscard]] const interval_track_1_func_t& memory_alloc_interval_track_v4()
+        const override
+    {
+        return m_memory_alloc_interval_track_v4;
+    }
     [[nodiscard]] const interval_track_3_func_t& stream_interval_track() const override
     {
         return m_stream_interval_track;
@@ -210,6 +228,10 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const stats_track_1_func_t& memory_copy_stats_track_v4() const override
     {
         return m_memory_copy_stats_track_v4;
+    }
+    [[nodiscard]] const stats_track_1_func_t& memory_alloc_stats_track_v4() const override
+    {
+        return m_memory_alloc_stats_track_v4;
     }
     [[nodiscard]] const stats_track_3_func_t& stream_stats_track() const override
     {
@@ -598,6 +620,28 @@ private:
                             fmt::arg("u", u)),
                 &counter_track_name_result::track_id,
                 &counter_track_name_result::name);
+
+        // memory tracks: one per distinct (nid, agent_id, queue_id, pid) in
+        // rocpd_memory_allocate JOIN rocpd_track (agent_id / queue_id from rocpd_track).
+        // NULL agent_id / queue_id are distinct group values per the Q2 rule.
+        m_distinct_memory_tracks =
+            m_backend->create_read_statement_executor<distinct_memory_result>(
+                fmt::format("SELECT DISTINCT T.nid, T.agent_id, T.queue_id, T.pid "
+                            "FROM rocpd_memory_allocate_{u} ma "
+                            "JOIN rocpd_track_{u} T ON T.id = ma.track_id",
+                            fmt::arg("u", u)),
+                &distinct_memory_result::nid,
+                &distinct_memory_result::agent_id,
+                &distinct_memory_result::queue_id,
+                &distinct_memory_result::pid);
+
+        // Collect the rocpd_track.id values referenced by rocpd_memory_allocate so the
+        // generic classification loop can check memory before gpu_queue (both may have
+        // agent_id + queue_id on their rocpd_track row).
+        m_memory_alloc_track_ids =
+            m_backend->create_read_statement_executor<sample_track_id_result>(
+                fmt::format("SELECT DISTINCT track_id FROM rocpd_memory_allocate_{}", u),
+                &sample_track_id_result::track_id);
     }
 
     void initialize_interval_track_statements()
@@ -661,6 +705,26 @@ private:
                         "LEFT JOIN rocpd_event_{u} E ON E.id = mc.event_id "
                         "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
                         "WHERE mc.track_id = ? ORDER BY ts_s.value",
+                        fmt::arg("u", u)),
+                    &interval_row_result::id,
+                    &interval_row_result::start,
+                    &interval_row_result::end,
+                    &interval_row_result::name_ref,
+                    &interval_row_result::category);
+
+        // memory allocate intervals. Mirrors memory_copy pattern; v4 has a native
+        // name_id on rocpd_memory_allocate, so name_ref is populated (unlike v3).
+        m_memory_alloc_interval_track_v4 =
+            m_backend
+                ->create_read_statement_executor<interval_row_result, bind_types<size_t>>(
+                    fmt::format(
+                        "SELECT ma.id, ts_s.value, ts_e.value, ma.name_id, IC.name "
+                        "FROM rocpd_memory_allocate_{u} ma "
+                        "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = ma.start_id "
+                        "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = ma.end_id "
+                        "LEFT JOIN rocpd_event_{u} E ON E.id = ma.event_id "
+                        "LEFT JOIN rocpd_info_category_{u} IC ON IC.id = E.category_id "
+                        "WHERE ma.track_id = ? ORDER BY ts_s.value",
                         fmt::arg("u", u)),
                     &interval_row_result::id,
                     &interval_row_result::start,
@@ -758,6 +822,19 @@ private:
                                 "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = mc.start_id "
                                 "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = mc.end_id "
                                 "WHERE mc.track_id = ?",
+                                fmt::arg("u", u)),
+                    &track_stats_result::min_ts,
+                    &track_stats_result::max_ts,
+                    &track_stats_result::count);
+
+        m_memory_alloc_stats_track_v4 =
+            m_backend
+                ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
+                    fmt::format("SELECT MIN(ts_s.value), MAX(ts_e.value), COUNT(*) "
+                                "FROM rocpd_memory_allocate_{u} ma "
+                                "JOIN rocpd_timestamp_{u} ts_s ON ts_s.id = ma.start_id "
+                                "JOIN rocpd_timestamp_{u} ts_e ON ts_e.id = ma.end_id "
+                                "WHERE ma.track_id = ?",
                                 fmt::arg("u", u)),
                     &track_stats_result::min_ts,
                     &track_stats_result::max_ts,
@@ -1503,18 +1580,22 @@ private:
     code_object_info_statement_func_t   m_code_object_info_statement;
     pmc_info_statement_func_t           m_pmc_info_statement;
 
-    sample_track_id_func_t    m_distinct_sample_track_ids;
-    distinct_stream_func_t    m_distinct_stream_tracks;
-    counter_track_name_func_t m_counter_track_names;
+    sample_track_id_func_t        m_distinct_sample_track_ids;
+    distinct_stream_func_t        m_distinct_stream_tracks;
+    distinct_memory_func_t        m_distinct_memory_tracks;
+    memory_alloc_track_ids_func_t m_memory_alloc_track_ids;
+    counter_track_name_func_t     m_counter_track_names;
 
     interval_track_1_func_t m_region_interval_track_v4;
     interval_track_1_func_t m_kernel_dispatch_interval_track_v4;
     interval_track_1_func_t m_memory_copy_interval_track_v4;
+    interval_track_1_func_t m_memory_alloc_interval_track_v4;
     interval_track_3_func_t m_stream_interval_track;
 
     stats_track_1_func_t m_region_stats_track_v4;
     stats_track_1_func_t m_kernel_dispatch_stats_track_v4;
     stats_track_1_func_t m_memory_copy_stats_track_v4;
+    stats_track_1_func_t m_memory_alloc_stats_track_v4;
     stats_track_3_func_t m_stream_stats_track;
     stats_track_1_func_t m_scalar_stats;
 

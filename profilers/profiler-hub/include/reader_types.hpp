@@ -275,14 +275,22 @@ enum class track_type_t
     cpu_thread,  ///< thread_info populated. Interval track of region events.
     gpu_queue,   ///< agent_info + queue_info populated. Interval track of kernel
                  ///< dispatches.
-    dma,         ///< agent_info + stream_info populated. Interval track of memory copies
-          ///< only, keyed (nid, pid, queue_id, stream_id) — a single event table.
+    dma,         ///< agent_info populated (stream_info nullopt). Interval track of memory
+          ///< copies only, keyed (nid, pid, queue_id, dst_agent_id) by destination agent
+          ///< to match Optiq's memory-copy swimlanes — a single event table. Stream-level
+          ///< grouping of memory copies lives on the `stream` track type instead.
     counter,  ///< thread_info + (optional) agent_info. Scalar track of counter samples.
-    stream    ///< stream_info populated. Interval track that AGGREGATES three event
-            ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
-            ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
-            ///< stream track's events span multiple per-type tables, so each returned
-            ///< interval_event_t carries op_kind to select the get_*_details() overload.
+    stream,   ///< stream_info populated. Interval track that AGGREGATES three event
+             ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
+             ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
+             ///< stream track's events span multiple per-type tables, so each returned
+             ///< interval_event_t carries op_kind to select the get_*_details() overload.
+    memory  ///< agent_info + queue_info populated. Interval track of memory-allocate
+            ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
+            ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly. Both
+            ///< agent_id and queue_id are nullable; NULL is preserved as a distinct group
+            ///< value, not dropped. Distinct from the `dma` (memory-copy) and `stream`
+            ///< (cross-table aggregate) track types.
 };
 
 /**
@@ -319,9 +327,10 @@ struct track_info_t
     std::shared_ptr<node_info_t>    node_info;     ///< Always populated.
     std::shared_ptr<process_info_t> process_info;  ///< Always populated.
     std::shared_ptr<thread_info_t>  thread_info;   ///< cpu_thread, counter.
-    std::shared_ptr<agent_info_t>   agent_info;   ///< gpu_queue, dma; optionally counter.
-    std::shared_ptr<queue_info_t>   queue_info;   ///< gpu_queue.
-    std::shared_ptr<stream_info_t>  stream_info;  ///< dma, stream.
+    std::shared_ptr<agent_info_t>
+        agent_info;  ///< gpu_queue, dma, memory; optionally counter.
+    std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
+    std::shared_ptr<stream_info_t> stream_info;  ///< stream.
 };
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
@@ -560,8 +569,8 @@ struct interval_event_t
                          ///< (region / kernel_dispatch / memory_copy). Pass to the
                          ///< get_*_details() method selected by the track's type, or by
                          ///< op_kind below for stream tracks.
-    timestamp_ns_t start{};  ///< Event start (nanoseconds).
-    timestamp_ns_t end{};    ///< Event end (nanoseconds).
+    timestamp_ns_t start{};       ///< Event start (nanoseconds).
+    timestamp_ns_t end{};         ///< Event end (nanoseconds).
     std::string    display_name;  ///< Human-readable label for the bar.
     std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
                            ///< "timer_sampling"); empty when the event carries none.
@@ -571,7 +580,7 @@ struct interval_event_t
                     ///< applies. nullopt for single-table tracks (use the track's
                     ///< type); populated for stream tracks, whose events span
                     ///< kernel_dispatch / memory_copy / memory_allocate.
-    int level{};  ///< Nesting depth; 0 = outermost. Computed in-reader.
+    int level{};    ///< Nesting depth; 0 = outermost. Computed in-reader.
     std::optional<size_t>
         parent_id{};  ///< opaque_id of the enclosing event when truly nested;
                       ///< nullopt when overlapping-but-not-nested.

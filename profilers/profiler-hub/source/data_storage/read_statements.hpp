@@ -264,6 +264,10 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_dma_tracks;
     }
+    [[nodiscard]] const distinct_memory_func_t& distinct_memory_tracks() const override
+    {
+        return m_distinct_memory_tracks;
+    }
     [[nodiscard]] const distinct_region_func_t& distinct_region_tracks() const override
     {
         return m_distinct_region_tracks;
@@ -301,24 +305,43 @@ struct read_statements : public read_statements_base
     {
         return m_kernel_dispatch_interval_track;
     }
-    [[nodiscard]] const interval_track_4_func_t& memory_copy_interval_qs() const override
+    [[nodiscard]] const interval_track_4_func_t& memory_copy_interval_qa() const override
     {
-        return m_memory_copy_interval_qs;
+        return m_memory_copy_interval_qa;
     }
     [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_q_only()
         const override
     {
         return m_memory_copy_interval_q_only;
     }
-    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_s_only()
+    [[nodiscard]] const interval_track_3_func_t& memory_copy_interval_a_only()
         const override
     {
-        return m_memory_copy_interval_s_only;
+        return m_memory_copy_interval_a_only;
     }
     [[nodiscard]] const interval_track_2_func_t& memory_copy_interval_neither()
         const override
     {
         return m_memory_copy_interval_neither;
+    }
+    [[nodiscard]] const interval_track_4_func_t& memory_alloc_interval_qa() const override
+    {
+        return m_memory_alloc_interval_qa;
+    }
+    [[nodiscard]] const interval_track_3_func_t& memory_alloc_interval_q_only()
+        const override
+    {
+        return m_memory_alloc_interval_q_only;
+    }
+    [[nodiscard]] const interval_track_3_func_t& memory_alloc_interval_a_only()
+        const override
+    {
+        return m_memory_alloc_interval_a_only;
+    }
+    [[nodiscard]] const interval_track_2_func_t& memory_alloc_interval_neither()
+        const override
+    {
+        return m_memory_alloc_interval_neither;
     }
     [[nodiscard]] const interval_track_3_func_t& stream_interval_track() const override
     {
@@ -338,21 +361,37 @@ struct read_statements : public read_statements_base
     {
         return m_kernel_dispatch_stats_track;
     }
-    [[nodiscard]] const stats_track_4_func_t& memory_copy_stats_qs() const override
+    [[nodiscard]] const stats_track_4_func_t& memory_copy_stats_qa() const override
     {
-        return m_memory_copy_stats_qs;
+        return m_memory_copy_stats_qa;
     }
     [[nodiscard]] const stats_track_3_func_t& memory_copy_stats_q_only() const override
     {
         return m_memory_copy_stats_q_only;
     }
-    [[nodiscard]] const stats_track_3_func_t& memory_copy_stats_s_only() const override
+    [[nodiscard]] const stats_track_3_func_t& memory_copy_stats_a_only() const override
     {
-        return m_memory_copy_stats_s_only;
+        return m_memory_copy_stats_a_only;
     }
     [[nodiscard]] const stats_track_2_func_t& memory_copy_stats_neither() const override
     {
         return m_memory_copy_stats_neither;
+    }
+    [[nodiscard]] const stats_track_4_func_t& memory_alloc_stats_qa() const override
+    {
+        return m_memory_alloc_stats_qa;
+    }
+    [[nodiscard]] const stats_track_3_func_t& memory_alloc_stats_q_only() const override
+    {
+        return m_memory_alloc_stats_q_only;
+    }
+    [[nodiscard]] const stats_track_3_func_t& memory_alloc_stats_a_only() const override
+    {
+        return m_memory_alloc_stats_a_only;
+    }
+    [[nodiscard]] const stats_track_2_func_t& memory_alloc_stats_neither() const override
+    {
+        return m_memory_alloc_stats_neither;
     }
     [[nodiscard]] const stats_track_3_func_t& stream_stats_track() const override
     {
@@ -1215,13 +1254,26 @@ private:
 
         m_distinct_dma_tracks =
             m_backend->create_read_statement_executor<distinct_dma_result>(
-                fmt::format("SELECT DISTINCT nid, pid, queue_id, stream_id "
+                fmt::format("SELECT DISTINCT nid, pid, queue_id, dst_agent_id "
                             "FROM rocpd_memory_copy_{}",
                             u),
                 &distinct_dma_result::nid,
                 &distinct_dma_result::pid,
                 &distinct_dma_result::queue_id,
-                &distinct_dma_result::stream_id);
+                &distinct_dma_result::dst_agent_id);
+
+        // memory tracks: one per distinct (nid, agent_id, queue_id, pid) in
+        // rocpd_memory_allocate, matching Optiq's GetRocprofMemoryAllocTrackQuery
+        // GROUP BY. agent_id / queue_id are nullable; NULL is a distinct group value.
+        m_distinct_memory_tracks =
+            m_backend->create_read_statement_executor<distinct_memory_result>(
+                fmt::format("SELECT DISTINCT nid, agent_id, queue_id, pid "
+                            "FROM rocpd_memory_allocate_{}",
+                            u),
+                &distinct_memory_result::nid,
+                &distinct_memory_result::agent_id,
+                &distinct_memory_result::queue_id,
+                &distinct_memory_result::pid);
 
         // Region (cpu_thread) tracks are synthesized from rocpd_region rather than
         // rocpd_track (v3 rocpd_track is not a reliable thread registry). Each distinct
@@ -1354,11 +1406,13 @@ private:
             &interval_row_result::name_ref,
             &interval_row_result::category);
 
-        // dma: memory copies keyed on (nid, pid, queue_id, stream_id). NULL queue_id /
-        // stream_id are distinct group values, so prepare one variant per NULL pattern.
-        // Category is resolved in-SQL via rocpd_event/rocpd_string (LEFT JOIN, additive —
-        // mirrors the region/kernel_dispatch/stream interval queries); the row set stays
-        // identical to get_track_stats' count, category NULL when event/category absent.
+        // dma: memory copies keyed on (nid, pid, queue_id, dst_agent_id) to match Optiq's
+        // GetRocprofMemoryCopyTrackQuery by-destination-agent swimlane grouping. NULL
+        // queue_id / dst_agent_id are distinct group values, so prepare one variant per
+        // NULL pattern. Category is resolved in-SQL via rocpd_event/rocpd_string (LEFT
+        // JOIN, additive — mirrors the region/kernel_dispatch/stream interval queries);
+        // the row set stays identical to get_track_stats' count, category NULL when
+        // event/category absent.
         auto make_mc_interval = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<interval_row_result, bt>(
@@ -1376,17 +1430,51 @@ private:
                 &interval_row_result::category);
         };
 
-        m_memory_copy_interval_qs =
-            make_mc_interval("mc.queue_id = ? AND mc.stream_id = ?",
+        m_memory_copy_interval_qa =
+            make_mc_interval("mc.queue_id = ? AND mc.dst_agent_id = ?",
                              bind_types<size_t, size_t, size_t, size_t>{});
         m_memory_copy_interval_q_only =
-            make_mc_interval("mc.queue_id = ? AND mc.stream_id IS NULL",
+            make_mc_interval("mc.queue_id = ? AND mc.dst_agent_id IS NULL",
                              bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_interval_s_only =
-            make_mc_interval("mc.queue_id IS NULL AND mc.stream_id = ?",
+        m_memory_copy_interval_a_only =
+            make_mc_interval("mc.queue_id IS NULL AND mc.dst_agent_id = ?",
                              bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_interval_neither = make_mc_interval(
-            "mc.queue_id IS NULL AND mc.stream_id IS NULL", bind_types<size_t, size_t>{});
+        m_memory_copy_interval_neither =
+            make_mc_interval("mc.queue_id IS NULL AND mc.dst_agent_id IS NULL",
+                             bind_types<size_t, size_t>{});
+
+        // memory: memory allocations keyed on (nid, pid, agent_id, queue_id). NULL
+        // agent_id / queue_id are distinct group values; one variant per NULL pattern.
+        // memory_allocate has no name column in v3 (name_ref stays NULL). Category is
+        // resolved via rocpd_event/rocpd_string (LEFT JOIN, additive).
+        auto make_ma_interval = [&](const char* aq_clause, auto bind_tag) {
+            using bt = decltype(bind_tag);
+            return m_backend->create_read_statement_executor<interval_row_result, bt>(
+                fmt::format("SELECT ma.id, ma.start, ma.\"end\", NULL, CS.string "
+                            "FROM rocpd_memory_allocate_{u} ma "
+                            "LEFT JOIN rocpd_event_{u} E ON E.id = ma.event_id "
+                            "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                            "WHERE ma.nid = ? AND ma.pid = ? AND {aq} ORDER BY ma.start",
+                            fmt::arg("u", u),
+                            fmt::arg("aq", aq_clause)),
+                &interval_row_result::id,
+                &interval_row_result::start,
+                &interval_row_result::end,
+                &interval_row_result::name_ref,
+                &interval_row_result::category);
+        };
+
+        m_memory_alloc_interval_qa =
+            make_ma_interval("ma.agent_id = ? AND ma.queue_id = ?",
+                             bind_types<size_t, size_t, size_t, size_t>{});
+        m_memory_alloc_interval_q_only =
+            make_ma_interval("ma.agent_id IS NULL AND ma.queue_id = ?",
+                             bind_types<size_t, size_t, size_t>{});
+        m_memory_alloc_interval_a_only =
+            make_ma_interval("ma.agent_id = ? AND ma.queue_id IS NULL",
+                             bind_types<size_t, size_t, size_t>{});
+        m_memory_alloc_interval_neither = make_ma_interval(
+            "ma.agent_id IS NULL AND ma.queue_id IS NULL", bind_types<size_t, size_t>{});
 
         // stream: a single track aggregates kernel_dispatch + memory_copy +
         // memory_allocate events sharing a stream_id (inline on each table in v3). A
@@ -1476,8 +1564,10 @@ private:
             &track_stats_result::max_ts,
             &track_stats_result::count);
 
-        // dma: memory copies on (nid,pid,queue_id,stream_id), one variant per NULL
-        // pattern.
+        // dma: memory copies keyed on (nid,pid,queue_id,dst_agent_id) -- shape-matched to
+        // the make_mc_interval variants above so stats scope to exactly the same rows the
+        // interval track returns. One variant per NULL pattern (NULL queue_id /
+        // dst_agent_id are distinct group values).
         auto make_mc_stats = [&](const char* qs_clause, auto bind_tag) {
             using bt = decltype(bind_tag);
             return m_backend->create_read_statement_executor<track_stats_result, bt>(
@@ -1490,15 +1580,41 @@ private:
                 &track_stats_result::count);
         };
 
-        m_memory_copy_stats_qs =
-            make_mc_stats("queue_id = ? AND stream_id = ?",
+        m_memory_copy_stats_qa =
+            make_mc_stats("queue_id = ? AND dst_agent_id = ?",
                           bind_types<size_t, size_t, size_t, size_t>{});
-        m_memory_copy_stats_q_only  = make_mc_stats("queue_id = ? AND stream_id IS NULL",
-                                                   bind_types<size_t, size_t, size_t>{});
-        m_memory_copy_stats_s_only  = make_mc_stats("queue_id IS NULL AND stream_id = ?",
-                                                   bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_stats_q_only =
+            make_mc_stats("queue_id = ? AND dst_agent_id IS NULL",
+                          bind_types<size_t, size_t, size_t>{});
+        m_memory_copy_stats_a_only =
+            make_mc_stats("queue_id IS NULL AND dst_agent_id = ?",
+                          bind_types<size_t, size_t, size_t>{});
         m_memory_copy_stats_neither = make_mc_stats(
-            "queue_id IS NULL AND stream_id IS NULL", bind_types<size_t, size_t>{});
+            "queue_id IS NULL AND dst_agent_id IS NULL", bind_types<size_t, size_t>{});
+
+        // memory: stats shape-matched to make_ma_interval, one variant per NULL pattern.
+        auto make_ma_stats = [&](const char* aq_clause, auto bind_tag) {
+            using bt = decltype(bind_tag);
+            return m_backend->create_read_statement_executor<track_stats_result, bt>(
+                fmt::format(
+                    "SELECT MIN(start), MAX(\"end\"), COUNT(*) "
+                    "FROM rocpd_memory_allocate_{} WHERE nid = ? AND pid = ? AND {}",
+                    u,
+                    aq_clause),
+                &track_stats_result::min_ts,
+                &track_stats_result::max_ts,
+                &track_stats_result::count);
+        };
+
+        m_memory_alloc_stats_qa =
+            make_ma_stats("agent_id = ? AND queue_id = ?",
+                          bind_types<size_t, size_t, size_t, size_t>{});
+        m_memory_alloc_stats_q_only  = make_ma_stats("agent_id IS NULL AND queue_id = ?",
+                                                    bind_types<size_t, size_t, size_t>{});
+        m_memory_alloc_stats_a_only  = make_ma_stats("agent_id = ? AND queue_id IS NULL",
+                                                    bind_types<size_t, size_t, size_t>{});
+        m_memory_alloc_stats_neither = make_ma_stats(
+            "agent_id IS NULL AND queue_id IS NULL", bind_types<size_t, size_t>{});
 
         // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the stream
         // interval query (stream_id bound three times), so bounds/count agree with a full
@@ -1681,6 +1797,7 @@ private:
     // Track synthesis statements
     distinct_gpu_queue_func_t m_distinct_gpu_queue_tracks;
     distinct_dma_func_t       m_distinct_dma_tracks;
+    distinct_memory_func_t    m_distinct_memory_tracks;
     distinct_region_func_t    m_distinct_region_tracks;
     distinct_stream_func_t    m_distinct_stream_tracks;
     sample_track_id_func_t    m_distinct_sample_track_ids;
@@ -1691,20 +1808,28 @@ private:
     interval_track_3_func_t m_region_interval_track_main;
     interval_track_3_func_t m_region_interval_track_sample;
     interval_track_4_func_t m_kernel_dispatch_interval_track;
-    interval_track_4_func_t m_memory_copy_interval_qs;
+    interval_track_4_func_t m_memory_copy_interval_qa;
     interval_track_3_func_t m_memory_copy_interval_q_only;
-    interval_track_3_func_t m_memory_copy_interval_s_only;
+    interval_track_3_func_t m_memory_copy_interval_a_only;
     interval_track_2_func_t m_memory_copy_interval_neither;
+    interval_track_4_func_t m_memory_alloc_interval_qa;
+    interval_track_3_func_t m_memory_alloc_interval_q_only;
+    interval_track_3_func_t m_memory_alloc_interval_a_only;
+    interval_track_2_func_t m_memory_alloc_interval_neither;
     interval_track_3_func_t m_stream_interval_track;
 
     // Track-stats statements
     stats_track_3_func_t m_region_stats_track_main;
     stats_track_3_func_t m_region_stats_track_sample;
     stats_track_4_func_t m_kernel_dispatch_stats_track;
-    stats_track_4_func_t m_memory_copy_stats_qs;
+    stats_track_4_func_t m_memory_copy_stats_qa;
     stats_track_3_func_t m_memory_copy_stats_q_only;
-    stats_track_3_func_t m_memory_copy_stats_s_only;
+    stats_track_3_func_t m_memory_copy_stats_a_only;
     stats_track_2_func_t m_memory_copy_stats_neither;
+    stats_track_4_func_t m_memory_alloc_stats_qa;
+    stats_track_3_func_t m_memory_alloc_stats_q_only;
+    stats_track_3_func_t m_memory_alloc_stats_a_only;
+    stats_track_2_func_t m_memory_alloc_stats_neither;
     stats_track_3_func_t m_stream_stats_track;
     stats_track_1_func_t m_scalar_stats;
 
