@@ -26,8 +26,10 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <fcntl.h>
 #include <format>
+#include <fstream>
 #include <linux/types.h>
 #include <sstream>
+#include <string_view>
 #include <sys/mman.h>
 #include <sys/random.h>
 #include <sys/resource.h>
@@ -106,6 +108,26 @@ int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd,
 /// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
 template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
   return libc_passthrough().fcntl(fd, cmd, args...);
+}
+
+/// @brief Read the TracerPid field from /proc/<pid>/status.
+/// @returns The pid of the process ptrace-attached to @p pid, or 0 if none (or
+/// the target is gone). This exposes the real kernel ptrace relationship that
+/// the KFD debug ioctl authorizes against (kfd_ioctl_set_debug_trap uses
+/// ptrace_parent(target->lead_thread) == current). Both the debugger and the
+/// target are real Linux processes under the emulator, so consulting the live
+/// /proc state models the exact relationship the kernel checks — no mock.
+pid_t tracer_pid_of(pid_t pid) {
+  if (pid <= 0)
+    return 0;
+  std::ifstream status("/proc/" + std::to_string(pid) + "/status");
+  std::string line;
+  constexpr std::string_view kKey = "TracerPid:";
+  while (std::getline(status, line)) {
+    if (std::string_view(line).substr(0, kKey.size()) == kKey)
+      return static_cast<pid_t>(std::strtol(line.c_str() + kKey.size(), nullptr, 10));
+  }
+  return 0;
 }
 
 } // namespace
@@ -2086,18 +2108,14 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::lock_guard<std::mutex> lk(target->debug_mutex_);
   auto &sess = target->debug_session_;
 
-  // Cross-process authorization is by-pid only: a non-self caller is admitted
-  // solely when it is the debugger already attached to this session
-  // (sess.debugger_pid, set by a prior successful ENABLE). This gate therefore
-  // only re-admits re-entrant ops from an already-attached debugger. Because a
-  // fresh session has debugger_pid == 0, it structurally rejects the *first*
-  // cross-process ENABLE with EPERM: cross-process attach is intentionally
-  // closed until it is implemented (#8364). Self-debug (local mode, the only
-  // supported path today) and DISABLE are exempt. The real kernel instead gates
-  // the first attach on a live ptrace relationship, which is deferred with the
-  // rest of cross-process support.
+  // PTRACE gate: for any op other than DISABLE, a debugger acting on another
+  // process must be that process's ptrace parent. This mirrors the kernel's
+  // ptrace_parent(target->lead_thread) == current check in
+  // kfd_ioctl_set_debug_trap(); we consult the live /proc TracerPid so the
+  // authorization reflects the real OS ptrace relationship established by the
+  // debugger (e.g. rocgdb launching the inferior). Self-debug is exempt.
   if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
-      sess.debugger_pid != caller.client_pid())
+      tracer_pid_of(target->client_pid()) != caller.client_pid())
     return -EPERM;
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
@@ -2202,7 +2220,6 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return debug_device_snapshot(args->device_snapshot);
   case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
-  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
@@ -2214,6 +2231,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
     return -ENOSYS;
+  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
+    // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the
+    // debugger wants forwarded. Delivery is wired up with the event channel.
+    sess.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
+    return 0;
   default:
     return -EINVAL;
   }

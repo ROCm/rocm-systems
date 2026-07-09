@@ -17,12 +17,15 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
+#include <csignal>
 #include <fcntl.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -36,6 +39,25 @@ namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 constexpr uint32_t kGpuId = 38144;
+
+class ChildProcessGuard {
+public:
+  explicit ChildProcessGuard(pid_t pid) : pid_(pid) {}
+  ~ChildProcessGuard() {
+    if (pid_ <= 0)
+      return;
+    kill(pid_, SIGKILL);
+    int status = 0;
+    while (waitpid(pid_, &status, 0) == -1 && errno == EINTR) {
+    }
+  }
+
+  ChildProcessGuard(const ChildProcessGuard &) = delete;
+  ChildProcessGuard &operator=(const ChildProcessGuard &) = delete;
+
+private:
+  pid_t pid_;
+};
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
   auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
@@ -1336,6 +1358,60 @@ TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
   EXPECT_NE(entry.max_waves_per_simd, 0u);
   EXPECT_NE(entry.array_count, 0u);
   EXPECT_NE(entry.simd_arrays_per_engine, 0u);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+    _exit(0);
+  }
+  ChildProcessGuard child_guard(child);
+
+  rocjitsu::SimulatedKfd daemon(*soc_, /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  uint32_t inferior = daemon.open_process(child);
+  ASSERT_NE(debugger, 0u);
+  ASSERT_NE(inferior, 0u);
+
+  auto enable_from_debugger = [&]() {
+    kfd_ioctl_dbg_trap_args en{};
+    en.pid = static_cast<uint32_t>(child);
+    en.op = KFD_IOC_DBG_TRAP_ENABLE;
+    en.enable.dbg_fd = KFD_INVALID_FD;
+    return daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en);
+  };
+
+  EXPECT_EQ(enable_from_debugger(), -EPERM);
+
+  ASSERT_EQ(ptrace(PTRACE_ATTACH, child, nullptr, nullptr), 0) << strerror(errno);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFSTOPPED(status));
+
+  int dbg_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dbg_fd, 0);
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dbg_fd);
+  const int enable_result = daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en);
+  if (enable_result != 0)
+    close(dbg_fd);
+  ASSERT_EQ(enable_result, 0);
+
+  kfd_ioctl_dbg_trap_args exceptions{};
+  exceptions.pid = static_cast<uint32_t>(child);
+  exceptions.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  exceptions.set_exceptions_enabled.exception_mask = 0x1234;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &exceptions), 0);
+
+  EXPECT_EQ(ptrace(PTRACE_DETACH, child, nullptr, nullptr), 0);
+
+  daemon.close(debugger);
+  daemon.close(inferior);
 }
 
 } // namespace
