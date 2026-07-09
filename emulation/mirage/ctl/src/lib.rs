@@ -593,6 +593,18 @@ pub struct RunArgs {
     /// daemon (the default).
     #[arg(long = "in-process")]
     in_process: bool,
+    /// Debug the workload interactively under ROCgdb: the command is
+    /// wrapped as `rocgdb --args <command...>`, with kernel breakpoints
+    /// made pending so `break <kernel>` works before the GPU code object
+    /// loads at launch. Requires a profile whose container ships ROCgdb.
+    #[arg(long)]
+    gdb: bool,
+    /// Extra ROCgdb command to run before the program, injected as
+    /// `-ex <CMD>` (repeatable, applied in order). Implies `--gdb`.
+    /// Useful for scripted/batch debugging, e.g.
+    /// `--gdb-ex 'break add_one' --gdb-ex run --gdb-ex continue`.
+    #[arg(long = "gdb-ex", value_name = "CMD")]
+    gdb_ex: Vec<String>,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -1725,6 +1737,32 @@ fn split_argv(argv: &[String]) -> (String, Vec<String>) {
     (cmd, it.collect())
 }
 
+/// Wrap a workload argv so it runs under ROCgdb for GPU kernel debugging
+/// (`mirage run --gdb`). `["./add_one", "5"]` becomes
+/// `rocgdb -ex "set breakpoint pending on" [-ex EX]... --args ./add_one 5`.
+///
+/// Kernel breakpoints are made pending because GPU code objects load lazily at
+/// dispatch: a `break <kernel>` set before launch would otherwise be rejected.
+/// Extra `-ex` commands (`--gdb-ex`) are injected in order, before `--args`, so
+/// a run can be fully scripted. When any `-ex` command is present the session is
+/// non-interactive, so `--batch` is added: ROCgdb runs the commands and exits
+/// (a bare `--gdb`, with no `-ex`, stays interactive and reads the terminal).
+fn gdb_wrap_argv(argv: &[String], gdb_ex: &[String]) -> Vec<String> {
+    let mut wrapped = vec!["rocgdb".to_string()];
+    if !gdb_ex.is_empty() {
+        wrapped.push("--batch".to_string());
+    }
+    wrapped.push("-ex".to_string());
+    wrapped.push("set breakpoint pending on".to_string());
+    for ex in gdb_ex {
+        wrapped.push("-ex".to_string());
+        wrapped.push(ex.clone());
+    }
+    wrapped.push("--args".to_string());
+    wrapped.extend_from_slice(argv);
+    wrapped
+}
+
 /// Parse repeated `KEY=VALUE` pairs from the CLI into the env map
 /// used by [`ExecArgs`]. Rejects entries without an `=` so a typo
 /// surfaces immediately instead of silently being dropped.
@@ -1972,7 +2010,14 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
             (def.id, true)
         }
     };
-    let (cmd, args) = split_argv(&a.argv);
+    // `--gdb` / `--gdb-ex` wrap the workload under ROCgdb for interactive GPU
+    // kernel debugging. `--gdb-ex` implies `--gdb`.
+    let effective_argv = if a.gdb || !a.gdb_ex.is_empty() {
+        gdb_wrap_argv(&a.argv, &a.gdb_ex)
+    } else {
+        a.argv.clone()
+    };
+    let (cmd, args) = split_argv(&effective_argv);
     let env = parse_envs(&a.envs)?;
     let def = ExecDef {
         timestamp: chrono::Utc::now(),
@@ -2191,6 +2236,45 @@ mod tests {
     fn parse_option_rejects_malformed() {
         assert!(parse_option("nope").is_err());
         assert!(parse_option("=value").is_err());
+    }
+
+    #[test]
+    fn gdb_wrap_prepends_rocgdb_with_pending_breakpoints() {
+        let got = gdb_wrap_argv(&["./add_one".to_string(), "5".to_string()], &[]);
+        assert_eq!(
+            got,
+            vec![
+                "rocgdb",
+                "-ex",
+                "set breakpoint pending on",
+                "--args",
+                "./add_one",
+                "5",
+            ]
+        );
+    }
+
+    #[test]
+    fn gdb_wrap_injects_extra_ex_commands_in_order() {
+        let got = gdb_wrap_argv(
+            &["./add_one".to_string()],
+            &["break add_one".to_string(), "run".to_string()],
+        );
+        assert_eq!(
+            got,
+            vec![
+                "rocgdb",
+                "--batch",
+                "-ex",
+                "set breakpoint pending on",
+                "-ex",
+                "break add_one",
+                "-ex",
+                "run",
+                "--args",
+                "./add_one",
+            ]
+        );
     }
 
     #[test]
