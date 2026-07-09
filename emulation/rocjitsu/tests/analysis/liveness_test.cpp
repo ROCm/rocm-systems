@@ -946,7 +946,7 @@ TEST(GeneratedInstDefUse, Vop2DppBoundCtrlOneEdgeCrossingDoesNotReadDestination)
 // abs[10:8], vdst[7:0]. word1: src0[8:0]=marker (250=SRC_DPP), src1[17:9]. The
 // DPP16 word2 layout matches VOP1/VOP2, so its bit fields are reused.
 constexpr uint32_t kVop3Enc = 53u << 26;
-constexpr uint32_t kVop3AddF32Op = 259u << 16; // v_add_f32_e64 (VGPR vdst)
+constexpr uint32_t kVop3AddF32Op = 259u << 16;  // v_add_f32_e64 (VGPR vdst)
 constexpr uint32_t kVop3CmpLtF32Op = 17u << 16; // v_cmp_lt_f32_e64 (SGPR vdst)
 // word1: src0=SRC_DPP, src1=VGPR3.
 constexpr uint32_t kVop3DppWord1 = (3u << 9) | 250u;
