@@ -421,6 +421,21 @@ void SimulatedKfd::init_command_processors_locked() {
       continue;
     if (!g.soc)
       continue;
+    // The WAVES field the CP writes into compute_tmpring_size must be a
+    // multiple of the per-XCC shader-engine count, or rocdbgapi disables
+    // private memory access outright (architecture.cpp,
+    // gfx9_architecture_t::scratch_memory_region). It recovers that count from
+    // the topology we publish: os_driver_kfd.cpp derives
+    // shader_engine_count = array_count * num_xcc / simd_arrays_per_engine and
+    // then divides by xcc_count, which inverts Sysfs::GpuInfo's
+    // array_count_per_xcc() exactly back to num_shader_engines. Read that same
+    // field here rather than recomputing a quotient, so the value the CP rounds
+    // to and the divisor rocdbgapi applies cannot drift apart.
+    const uint32_t scratch_wave_divisor =
+        i < gpu_infos_.size() ? std::max(1u, gpu_infos_[i].num_shader_engines) : 1u;
+    g.soc->for_each_cp([scratch_wave_divisor](amdgpu::CommandProcessor *cp) {
+      cp->set_scratch_wave_divisor(scratch_wave_divisor);
+    });
     // Same source as the apertures GET_PROCESS_APERTURES_NEW and the DBG_TRAP
     // device snapshot advertise: what the shaders translate LDS/scratch against
     // must be what the runtime and the debugger were told.
@@ -2246,6 +2261,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
   state.pc = wf.pc;
   state.exec = wf.exec();
   state.vcc = wf.vcc();
+  state.flat_scratch = wf.scratch_base();
   state.m0 = wf.m0();
   state.mode = wf.mode_raw();
   state.trapsts = wf.trapsts();

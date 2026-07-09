@@ -215,6 +215,15 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
     }
     write32(sgprs_addr + vcc_lo_slot * 4, static_cast<uint32_t>(w.vcc & 0xFFFFFFFF));
     write32(sgprs_addr + (vcc_lo_slot + 1) * 4, static_cast<uint32_t>(w.vcc >> 32));
+    // FLAT_SCRATCH aliases the two scalar slots below VCC (gfx9_4:
+    // aliased_sgpr_end - 6/-5; rocdbgapi architecture.cpp register_address).
+    // rocm-dbgapi checks its computed per-wave scratch base against this
+    // register, so it must hold the wave's scratch base.
+    const uint32_t flat_scratch_lo_slot = std::min(kArchScalars, sgpr_count) - 6;
+    write32(sgprs_addr + flat_scratch_lo_slot * 4,
+            static_cast<uint32_t>(w.flat_scratch & 0xFFFFFFFF));
+    write32(sgprs_addr + (flat_scratch_lo_slot + 1) * 4,
+            static_cast<uint32_t>(w.flat_scratch >> 32));
 
     // VGPR block: each VGPR is 64 lanes * 4 bytes; lane l of vgpr r at +r*256+l*4.
     for (uint32_t r = 0; r < vgpr_count; ++r) {

@@ -29,10 +29,11 @@ say "Debug the GPU kernel with one command — no GPU required:"
   "$mirage" run --profile mi350x --gdb \
     --gdb-ex 'break add_one' \
     --gdb-ex 'run' \
-    --gdb-ex 'info registers pc exec' \
-    --gdb-ex 'x/i $pc' \
+    --gdb-ex 'info args' \
+    --gdb-ex 'print n' \
+    --gdb-ex 'print data[0]' \
     --gdb-ex 'continue' \
     -- "$app"
 )
 
-say "ROCgdb stopped a real emulated wave, read its PC and instruction, and resumed it."
+say "ROCgdb stopped a real emulated wave, read its source-level arguments, and resumed it."
