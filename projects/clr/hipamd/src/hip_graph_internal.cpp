@@ -2846,6 +2846,10 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
       status = topoOrder_[i]->CreateCommand(topoOrder_[i]->GetQueue());
+      if (status != hipSuccess) {
+        this->release();
+        return status;
+      }
       topoOrder_[i]->EnqueueCommands(launch_stream);
       status = topoOrder_[i]->GetEnqueueStatus();
       if (status != hipSuccess) {
