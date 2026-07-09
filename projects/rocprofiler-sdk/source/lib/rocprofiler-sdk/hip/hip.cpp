@@ -24,6 +24,7 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -121,6 +122,10 @@ convert_arg_type(Tp&& val)
     if constexpr(std::is_same<data_type, dim3>::value)
     {
         return rocprofiler_dim3_t{val.x, val.y, val.z};
+    }
+    else if constexpr(std::is_same<data_type, const char*>::value)
+    {
+        return common::get_string_entry(val ? val : "")->c_str();
     }
     else
     {
