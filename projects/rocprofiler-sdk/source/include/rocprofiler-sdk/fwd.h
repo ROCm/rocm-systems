@@ -106,6 +106,8 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,  ///< rocprofiler-register version is
                                                              ///< incompatible. Late-start profiling
                                                              ///< requires ROCm 7.0+.
+    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_FIRMWARE,  ///< The requested service is incompatible with
+                                                     ///< the installed firmware version
     ROCPROFILER_STATUS_LAST,
     ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND =
         ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,  ///< ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND
@@ -135,6 +137,11 @@ typedef enum rocprofiler_agent_type_t  // NOLINT(performance-enum-size)
     ROCPROFILER_AGENT_TYPE_GPU,       ///< Agent type is a GPU
     ROCPROFILER_AGENT_TYPE_LAST,
 } rocprofiler_agent_type_t;
+
+/**
+ * @brief The NULL value of a firmware version.
+ */
+#define ROCPROFILER_FIRMWARE_VERSION_NONE 0
 
 /**
  * @brief Service Callback Phase.
