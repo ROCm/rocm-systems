@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -199,6 +200,7 @@ SimulatedDriver::~SimulatedDriver() {
 void SimulatedDriver::setup_topology(const Sysfs::GpuInfo &gpu) {
   if (!gpus_.empty())
     gpus_[0].gpu_id = gpu.gpu_id;
+  gpu_infos_ = {gpu};
   topology_.generate(gpu);
   topology_.setup_environment();
 }
@@ -257,6 +259,7 @@ void SimulatedDriver::setup_topology(const std::vector<config::KfdDeviceConfig> 
     return;
   for (size_t i = 0; i < infos.size() && i < gpus_.size(); ++i)
     gpus_[i].gpu_id = infos[i].gpu_id;
+  gpu_infos_ = infos;
   topology_.generate(infos);
   topology_.setup_environment();
 }
@@ -1045,6 +1048,17 @@ int SimulatedDriver::get_clock_counters_ioctl(void *arg) {
   return 0;
 }
 
+kfd_process_device_apertures SimulatedDriver::gpu_apertures(uint32_t ordinal) const {
+  kfd_process_device_apertures a = default_apertures_;
+  const uint64_t offset = static_cast<uint64_t>(ordinal) * kApertureStride;
+  a.lds_base += offset;
+  a.lds_limit += offset;
+  a.scratch_base += offset;
+  a.scratch_limit += offset;
+  a.gpu_id = ordinal < gpus_.size() ? gpus_[ordinal].gpu_id : 0;
+  return a;
+}
+
 int SimulatedDriver::get_apertures_ioctl(void *arg) {
   auto *args = static_cast<kfd_ioctl_get_process_apertures_new_args *>(arg);
   auto n = static_cast<uint32_t>(gpus_.size());
@@ -1056,16 +1070,8 @@ int SimulatedDriver::get_apertures_ioctl(void *arg) {
 
   auto *apertures =
       reinterpret_cast<kfd_process_device_apertures *>(args->kfd_process_device_apertures_ptr);
-  for (uint32_t i = 0; i < n && i < args->num_of_nodes; ++i) {
-    apertures[i].lds_base = 0x1000000000000ULL + static_cast<uint64_t>(i) * 0x10000000000ULL;
-    apertures[i].lds_limit = apertures[i].lds_base + 0xFFFFFFFFULL;
-    apertures[i].scratch_base = 0x2000000000000ULL + static_cast<uint64_t>(i) * 0x10000000000ULL;
-    apertures[i].scratch_limit = apertures[i].scratch_base + 0xFFFFFFFFULL;
-    apertures[i].gpuvm_base = 0x1000000000ULL;
-    apertures[i].gpuvm_limit = 0x3FFFFFFFFFFFULL;
-    apertures[i].gpu_id = gpus_[i].gpu_id;
-    apertures[i].pad = 0;
-  }
+  for (uint32_t i = 0; i < n && i < args->num_of_nodes; ++i)
+    apertures[i] = gpu_apertures(i);
 
   args->num_of_nodes = n;
   return 0;
@@ -1955,12 +1961,70 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_DISABLE:
     sess = KfdProcess::DebugSession{};
     return 0;
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return debug_device_snapshot(args->device_snapshot);
   default:
     // SEND_RUNTIME_EVENT, SET_EXCEPTIONS_ENABLED, wave-launch, queue suspend/
-    // resume, address watch, flags, and the query/snapshot ops are wired in
-    // subsequent changes.
+    // resume, address watch, flags, and the query/queue-snapshot ops are wired
+    // in subsequent changes.
     return -ENOSYS;
   }
+}
+
+int SimulatedDriver::debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args) {
+  // Mirrors kfd_dbg_trap_device_snapshot() (amd/amdkfd/kfd_debug.c): report the
+  // total device count, clamp the per-entry size, and fill up to the caller's
+  // buffer capacity. The two-call protocol is: pass num_devices=0 to learn the
+  // count, then pass a buffer sized for that many entries.
+  const uint32_t total = static_cast<uint32_t>(gpus_.size());
+  const uint32_t in_entry_size = args.entry_size;
+  const uint32_t fill = std::min<uint32_t>(args.num_devices, total);
+
+  args.num_devices = total;
+  args.entry_size = std::min<uint32_t>(in_entry_size, sizeof(kfd_dbg_device_info_entry));
+
+  if (fill == 0)
+    return 0;
+  if (args.snapshot_buf_ptr == 0 || in_entry_size == 0)
+    return -EFAULT;
+
+  const Sysfs::GpuInfo empty_info{};
+  auto *out = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(args.snapshot_buf_ptr));
+  for (uint32_t i = 0; i < fill; ++i) {
+    const Sysfs::GpuInfo &info = i < gpu_infos_.size() ? gpu_infos_[i] : empty_info;
+    const kfd_process_device_apertures ap = gpu_apertures(i);
+
+    kfd_dbg_device_info_entry e{};
+    e.gpu_id = gpus_[i].gpu_id;
+    e.lds_base = ap.lds_base;
+    e.lds_limit = ap.lds_limit;
+    e.scratch_base = ap.scratch_base;
+    e.scratch_limit = ap.scratch_limit;
+    e.gpuvm_base = ap.gpuvm_base;
+    e.gpuvm_limit = ap.gpuvm_limit;
+    e.location_id = info.location_id;
+    e.vendor_id = info.vendor_id;
+    e.device_id = info.device_id;
+    e.revision_id = info.pci_revision_id;
+    e.fw_version = info.fw_version;
+    e.gfx_target_version = info.gfx_target_version;
+    e.simd_count = info.simd_count;
+    e.max_waves_per_simd = info.max_waves_per_simd;
+    // KFD array_count is the total shader-array count (node_props.array_count),
+    // which rocjitsu tracks as num_shader_engines.
+    e.array_count = info.num_shader_engines;
+    e.simd_arrays_per_engine = info.num_shader_arrays_per_engine;
+    e.num_xcc = info.num_xcc;
+    // Report the same debugger-relevant capability/debug_prop as the sysfs
+    // topology (shared kmd::debug_topology_for), including the ASIC revision.
+    const kmd::DebugTopology dbg = kmd::debug_topology_for(info.gfx_target_version);
+    e.capability = dbg.capability |
+                   ((info.revision_id << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
+    e.debug_prop = dbg.debug_prop;
+
+    std::memcpy(out + static_cast<uint64_t>(i) * in_entry_size, &e, args.entry_size);
+  }
+  return 0;
 }
 
 int SimulatedDriver::set_xnack_mode_ioctl(void *arg) {
