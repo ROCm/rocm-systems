@@ -1195,6 +1195,88 @@ class TestPerKernelNormalization:
         )
 
 
+@pytest.mark.division_by_zero
+class TestNormalizedAvgWithinMinMax:
+    """Pooled Avg must stay within [Min, Max] for every normalization unit.
+
+    Avg is SUM(num) / SUM($denom) -- a weighted mean of the per-dispatch ratios
+    num/$denom -- so it cannot exceed their Max or fall below their Min for any
+    positive denominator. The Avg-vs-Max bug broke this for per_kernel only, but
+    the invariant is checked here across all denoms and metric-equation shapes.
+    """
+
+    # (avg, min, max) triples in the YAML form: SUM(num)/SUM($denom) for the
+    # pooled Avg, MIN/MAX(num/$denom) for the bounds. Covers a plain count, a
+    # scaled numerator, and a composite numerator.
+    METRIC_EQUATIONS = [
+        (
+            "SUM(SQ_WAVE_CYCLES) / SUM($denom)",
+            "MIN(SQ_WAVE_CYCLES / $denom)",
+            "MAX(SQ_WAVE_CYCLES / $denom)",
+        ),
+        (
+            "4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)",
+            "4 * MIN(SQ_ACTIVE_INST_ANY / $denom)",
+            "4 * MAX(SQ_ACTIVE_INST_ANY / $denom)",
+        ),
+        (
+            "SUM(SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / SUM($denom)",
+            "MIN((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
+            "MAX((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
+        ),
+    ]
+
+    @staticmethod
+    def _make_pmc_df():
+        """Multi-dispatch counters with strictly positive per-dispatch denoms."""
+        from utils.utils_analysis import add_per_kernel_denom_column
+
+        df = pd.DataFrame({
+            "SQ_WAVE_CYCLES": [120.0, 300.0, 210.0, 450.0, 180.0],
+            "SQ_ACTIVE_INST_ANY": [80.0, 160.0, 300.0, 100.0, 220.0],
+            "SQ_WAVES": [10.0, 20.0, 15.0, 25.0, 12.0],
+            "GRBM_GUI_ACTIVE": [900.0, 1800.0, 1400.0, 2500.0, 1100.0],
+            "Start_Timestamp": [0.0, 500.0, 1000.0, 1500.0, 2000.0],
+            "End_Timestamp": [400.0, 1300.0, 1600.0, 2600.0, 2500.0],
+        })
+        add_per_kernel_denom_column(df)
+        return df
+
+    @staticmethod
+    def _make_sys_vars(raw_pmc_df):
+        """Built-in vars a real run supplies; per_cycle needs the per-XCD
+        active-cycle Series, computed here as calc_builtin_vars would."""
+        sys_vars = {"ammolite__num_xcd": 2}
+        per_xcd = MetricEvaluator(raw_pmc_df, sys_vars, {}).eval_expression(
+            build_eval_string("(GRBM_GUI_ACTIVE / $num_xcd)")
+        )
+        sys_vars["ammolite__GRBM_GUI_ACTIVE_PER_XCD"] = per_xcd
+        return sys_vars
+
+    def test_avg_within_min_max_for_all_denoms(self):
+        from utils.metrics.expression import update_denominator_string
+        from utils.utils_counter_defs import SUPPORTED_DENOM
+
+        raw_pmc_df = self._make_pmc_df()
+        evaluator = MetricEvaluator(raw_pmc_df, self._make_sys_vars(raw_pmc_df), {})
+
+        for normal_unit in SUPPORTED_DENOM:
+            for avg_eq, min_eq, max_eq in self.METRIC_EQUATIONS:
+                avg, minimum, maximum = (
+                    evaluator.eval_expression(
+                        build_eval_string(update_denominator_string(eq, normal_unit))
+                    )
+                    for eq in (avg_eq, min_eq, max_eq)
+                )
+                context = f"{normal_unit}: '{avg_eq}'"
+                assert isinstance(avg, (int, float)), f"{context}: Avg is {avg}"
+                # Non-degenerate data so the bound is meaningful, not min==max.
+                assert minimum < maximum, f"{context}: Min {minimum} !< Max {maximum}"
+                assert minimum <= avg <= maximum, (
+                    f"{context}: Avg {avg} outside [{minimum}, {maximum}]"
+                )
+
+
 @pytest.fixture
 def sample_time_data():
     return pd.DataFrame({
