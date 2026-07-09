@@ -932,5 +932,80 @@ TEST(GeneratedInstDefUse, Vop2DppBoundCtrlOneEdgeCrossingDoesNotReadDestination)
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+// --- Generated VOP3 DPP destination-preserve reads (real decode) ---
+//
+// VOP3 gained DPP on gfx11+ (RDNA3/RDNA4/gfx1250) and has no SDWA, so only the
+// partial-DPP path applies. Unlike VOP1/VOP2 the VOP3 vdst field can name an
+// SGPR: a VOP3-re-encoded compare (v_cmp_*_e64) writes its lane mask to an SGPR
+// through vdst. So Vop3::implicit_uses derives the preserved ref from the
+// decoded destination operand rather than assuming VGPR -- these cases exercise
+// both a VGPR-dest op and an SGPR-dest compare. VOP3 is not in CDNA, so these
+// decode for RDNA4.
+//
+// RDNA4 VOP3 word0: encoding[31:26]=53, op[25:16], clamp[15], opsel[14:11],
+// abs[10:8], vdst[7:0]. word1: src0[8:0]=marker (250=SRC_DPP), src1[17:9]. The
+// DPP16 word2 layout matches VOP1/VOP2, so its bit fields are reused.
+constexpr uint32_t kVop3Enc = 53u << 26;
+constexpr uint32_t kVop3AddF32Op = 259u << 16; // v_add_f32_e64 (VGPR vdst)
+constexpr uint32_t kVop3CmpLtF32Op = 17u << 16; // v_cmp_lt_f32_e64 (SGPR vdst)
+// word1: src0=SRC_DPP, src1=VGPR3.
+constexpr uint32_t kVop3DppWord1 = (3u << 9) | 250u;
+
+std::unique_ptr<Instruction> decode_rdna4(const std::array<uint32_t, 3> &words) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(words.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, Vop3DppPartialRowMaskReadsVgprDestination) {
+  // v_add_f32_e64 (VGPR vdst=5), DPP word2: row_mask=0x7 (partial), bank_mask=0xF.
+  auto inst = decode_rdna4(
+      {kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_add_f32");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3DppFullRowMaskDoesNotReadDestination) {
+  // Full masks, dpp_ctrl=0 (quad_perm, never OOB) -> every lane written.
+  auto inst = decode_rdna4(
+      {kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1, (0xFu << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3DppBoundCtrlZeroEdgeCrossingReadsDestination) {
+  // Full masks, bound_ctrl=0, row_shr:1 -> row-edge lanes read OOB and are left
+  // unwritten, preserving the VGPR vdst.
+  auto inst = decode_rdna4(
+      {kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1, kDppFullMasks | kDppCtrlRowShr1 | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskReadsSgprDestinationNotVgpr) {
+  // v_cmp_lt_f32_e64 writes its lane mask to an SGPR pair through the vdst field
+  // (here s[8:9]), so a partial DPP mask preserves the SGPR -- not a VGPR. This
+  // is why Vop3::implicit_uses derives the ref from the dst operand instead of
+  // hardcoding RegClass::VGPR like VOP1/VOP2.
+  auto inst = decode_rdna4(
+      {kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_cmp_lt_");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
+}
+
 } // namespace
 } // namespace rocjitsu

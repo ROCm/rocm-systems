@@ -1698,14 +1698,12 @@ class CodeGenerator:
                 '}'
             )
         # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial
-        # row/bank mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl
-        # that leaves OOB lanes unwritten) read the old vdst, so surface it
-        # as a use for liveness/def-use.
+        # row/bank mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl)
+        # leave the old destination in place, so surface it as a use.
+        # Relevant only for VOP1, VOP2, and VOP3 encodings.
         #
-        # Only VOP1/VOP2 need this. VOPC/VOPCX apply the same partial-mask
-        # preservation to VCC/EXEC, but liveness tracks only SGPR/VGPR/ACC_VGPR
-        # (see liveness.h) -- VCC/EXEC/SCC are outside the dataflow model, so
-        # there is no tracked register to surface for those encodings.
+        # VOP1/VOP2: the modifier forms are always 32-bit VGPR-dest, so emit a
+        # fixed VGPR ref. (SGPR-dest ops like v_readfirstlane have no SDWA/DPP.)
         if (
             inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
             and 'vdst' in enc_field_names
@@ -1720,6 +1718,26 @@ class CodeGenerator:
                 'if (sdwa_preserve || dpp_partial) '
                 'uses.expand(RegisterRef{RegClass::VGPR, '
                 'static_cast<uint16_t>(inst_.vdst), 1});'
+            )
+        # VOP3 gained DPP on gfx11+ (no SDWA). Its vdst can name an SGPR
+        # (re-encoded compares), so derive the ref from the decoded dst operand
+        # for the real class/width. Gated on VOP3-DPP support (GCN/CDNA lack the
+        # dpp_* fields). VOPC/VOPCX stay omitted: they preserve VCC/EXEC, which
+        # liveness does not track (see liveness.h).
+        if (
+            inst_enc.enc_name.upper() == 'ENC_VOP3'
+            and 'vdst' in enc_field_names
+            and self._supports_vop_dpp_encoding('ENC_VOP3')
+        ):
+            return (
+                'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                '(dpp_bound_ctrl_ == 0 && '
+                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+                'if (dpp_partial) '
+                'if (const auto *dst = dst_operand(0)) '
+                'if (auto ref = dst->to_register_ref()) '
+                'uses.expand(*ref);'
             )
         return ''
 

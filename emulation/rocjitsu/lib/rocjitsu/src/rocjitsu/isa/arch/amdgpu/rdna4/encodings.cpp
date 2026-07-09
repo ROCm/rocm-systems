@@ -192,6 +192,16 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
 }
 
+void Vop3::implicit_uses(RegisterSet &uses) const {
+  bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP &&
+                     (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
+                      (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
+  if (dpp_partial)
+    if (const auto *dst = dst_operand(0))
+      if (auto ref = dst->to_register_ref())
+        uses.expand(*ref);
+}
+
 bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
 
 bool Vop3::has_lit_1() {
