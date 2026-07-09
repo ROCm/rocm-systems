@@ -495,6 +495,24 @@ contract:
   Contract_GraphCapture_GetCaptureInfo_ReturnsActiveState:
     <<: *level_0
     tags: [graph_capture]
+  Contract_StreamCaptureMode_Exchange_RoundTripsPreviousMode:
+    <<: *level_0
+    tags: [stream_capture_mode]
+  Contract_StreamCaptureMode_Exchange_NullMode_IsRejected:
+    <<: *level_0
+    tags: [stream_capture_mode]
+  Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsActiveDuringCapture:
+    <<: *level_0
+    tags: [stream_capture_mode]
+  Contract_StreamCaptureMode_GetCaptureInfoV2_ReportsNoneOutsideCapture:
+    <<: *level_0
+    tags: [stream_capture_mode]
+  Contract_StreamCaptureMode_GetCaptureInfoV2_ReturnsDependencyNode:
+    <<: *level_0
+    tags: [stream_capture_mode]
+  Contract_StreamCaptureMode_GetCaptureInfoV2_NullStatus_IsRejected:
+    <<: *level_0
+    tags: [stream_capture_mode]
   Contract_GraphKernel_AddKernelNode_WritesExpectedValue:
     <<: *level_0
     tags: [graph_kernel]
