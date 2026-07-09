@@ -103,11 +103,9 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
-void pc_sampling_collector_impl_t::on_kernel_symbol_register(size_t             code_object_id,
-                                                             uint64_t           kernel_id,
-                                                             const std::string& name)
+void pc_sampling_collector_impl_t::on_kernel_symbol_register(size_t code_object_id, const kernel_t& kernel)
 {
-    m_kernels_by_obj[code_object_id].push_back({kernel_id, name});
+    m_kernels_by_obj[code_object_id].push_back(kernel);
 }
 
 void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
@@ -119,7 +117,7 @@ void pc_sampling_collector_impl_t::finalize(code_object_writer_t& writer)
         {
             for (const auto& kernel : kernels->second)
             {
-                writer.write_kernel(kernel.kernel_id, kernel.name);
+                writer.write_kernel(kernel);
             }
         }
         const auto& symbols = m_translator->get_symbols(id);

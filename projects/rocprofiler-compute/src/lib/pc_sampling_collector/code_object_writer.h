@@ -16,16 +16,16 @@ class code_object_writer_t
 public:
     using ptr = std::shared_ptr<code_object_writer_t>;
 
-    virtual ~code_object_writer_t()                                               = default;
-    virtual void        start_code_obj(size_t obj_id)                             = 0;
-    virtual void        end_code_obj()                                            = 0;
-    virtual void        write_kernel(uint64_t kernel_id, const std::string& name) = 0;
-    virtual void        start_symbol(const symbol_t& symbol)                      = 0;
-    virtual void        end_symbol()                                              = 0;
-    virtual void        write_instruction(const instruction_t& inst)              = 0;
-    virtual std::string get_result()                                              = 0;
-    virtual void        flush(const std::filesystem::path& string)                = 0;
-    virtual bool        empty() const                                             = 0;
+    virtual ~code_object_writer_t()                                  = default;
+    virtual void        start_code_obj(size_t obj_id)                = 0;
+    virtual void        end_code_obj()                               = 0;
+    virtual void        write_kernel(const kernel_t& kernel)         = 0;
+    virtual void        start_symbol(const symbol_t& symbol)         = 0;
+    virtual void        end_symbol()                                 = 0;
+    virtual void        write_instruction(const instruction_t& inst) = 0;
+    virtual std::string get_result()                                 = 0;
+    virtual void        flush(const std::filesystem::path& string)   = 0;
+    virtual bool        empty() const                                = 0;
 };
 
 class code_object_writer_json_t : public code_object_writer_t
@@ -33,7 +33,7 @@ class code_object_writer_json_t : public code_object_writer_t
 public:
     void        start_code_obj(size_t obj_id) override;
     void        end_code_obj() override;
-    void        write_kernel(uint64_t kernel_id, const std::string& name) override;
+    void        write_kernel(const kernel_t& kernel) override;
     void        start_symbol(const symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const instruction_t& inst) override;

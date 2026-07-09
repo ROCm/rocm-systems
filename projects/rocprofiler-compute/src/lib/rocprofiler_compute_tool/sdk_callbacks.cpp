@@ -376,8 +376,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         {
             const auto kernel_name = truncate_name(strip_kd_suffix(raw_kernel_name));
             tool->pc_sampling.on_kernel_symbol_register(static_cast<size_t>(data->code_object_id),
-                                                        data->kernel_id,
-                                                        kernel_name);
+                                                        kernel_t{data->kernel_id, kernel_name});
         }
     }
 }

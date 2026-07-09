@@ -61,11 +61,9 @@ void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_traci
     m_collector->on_code_object_load(info);
 }
 
-void pc_sampling_feature_t::on_kernel_symbol_register(size_t             code_object_id,
-                                                      uint64_t           kernel_id,
-                                                      const std::string& name)
+void pc_sampling_feature_t::on_kernel_symbol_register(size_t code_object_id, const kernel_t& kernel)
 {
-    m_collector->on_kernel_symbol_register(code_object_id, kernel_id, name);
+    m_collector->on_kernel_symbol_register(code_object_id, kernel);
 }
 
 void pc_sampling_feature_t::finalize()

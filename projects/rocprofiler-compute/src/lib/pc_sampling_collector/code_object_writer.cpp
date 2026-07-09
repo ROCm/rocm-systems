@@ -32,13 +32,13 @@ void code_object_writer_json_t::end_code_obj()
     m_symbols = nlohmann::json::array();
 }
 
-void code_object_writer_json_t::write_kernel(uint64_t kernel_id, const std::string& name)
+void code_object_writer_json_t::write_kernel(const kernel_t& kernel)
 {
     Expects(m_code_object_closure_count != 0);
 
     m_kernels.push_back(nlohmann::json::object({
-        {"kernel_id", kernel_id},
-        {"name", name},
+        {"kernel_id", kernel.kernel_id},
+        {"name", kernel.name},
     }));
 }
 
