@@ -12,11 +12,7 @@ namespace
 std::string kernel_symbol_register_test_name(
     const ::testing::TestParamInfo<kernel_symbol_register_test_params_t>& info)
 {
-    if (info.param.kernel_name == nullptr)
-        return "NullName";
-
-    const std::string kernel_name = info.param.kernel_name;
-    return !kernel_name.empty() && kernel_name.front() == '_' ? "DemangledName" : "PlainName";
+    return fmt::format("KernelNameCase{}", info.index);
 }
 }  // namespace
 
@@ -233,10 +229,89 @@ TEST_F(TestSdkCallbacks, ProvidedPcSamplingAndKernelFilteringEnabled_ForwardsAll
     ASSERT_EQ(calls.size(), 2);
     EXPECT_EQ(calls[0].code_object_id, matching_code_object_id);
     EXPECT_EQ(calls[0].kernel_id, matching_kernel_id);
-    EXPECT_EQ(calls[0].name, "my_kernel");
+    EXPECT_EQ(calls[0].name, "_Z9my_kernelv");
     EXPECT_EQ(calls[1].code_object_id, nonmatching_code_object_id);
     EXPECT_EQ(calls[1].kernel_id, nonmatching_kernel_id);
-    EXPECT_EQ(calls[1].name, "other_kernel");
+    EXPECT_EQ(calls[1].name, "_Z12other_kernelv");
+}
+
+TEST_F(TestSdkCallbacks, ProvidedMangledKernelName_FilterMatchesDemangledPcSamplingKeepsMangled)
+{
+    constexpr size_t   code_object_id = 123;
+    constexpr uint64_t kernel_id      = 10;
+
+    auto& collector                          = enable_pc_sampling();
+    m_tool_data->kernel_filter_include_regex = ".*jacobi_iteration.*";
+
+    invoke_kernel_symbol_register(code_object_id, kernel_id, "_Z16jacobi_iterationPfPKfi");
+
+    ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_TRUE(m_tool_data->target_kernel_ids.count(kernel_id));
+
+    const auto& calls = collector.get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_EQ(calls[0].name, "_Z16jacobi_iterationPfPKfi");
+}
+
+TEST_F(TestSdkCallbacks, ProvidedKdSuffix_FilterAndPcSamplingUseStrippedName)
+{
+    constexpr size_t   code_object_id = 123;
+    constexpr uint64_t kernel_id      = 10;
+
+    auto& collector                          = enable_pc_sampling();
+    m_tool_data->kernel_filter_include_regex = ".*streamOpsWrite$";
+
+    invoke_kernel_symbol_register(code_object_id, kernel_id, "__amd_rocclr_streamOpsWrite.kd");
+
+    ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_TRUE(m_tool_data->target_kernel_ids.count(kernel_id));
+
+    const auto& calls = collector.get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_EQ(calls[0].name, "__amd_rocclr_streamOpsWrite");
+}
+
+TEST_F(TestSdkCallbacks, ProvidedInternalKd_FilterAndPcSamplingKeepInternalKd)
+{
+    constexpr size_t   code_object_id = 123;
+    constexpr uint64_t kernel_id      = 10;
+
+    auto& collector                          = enable_pc_sampling();
+    m_tool_data->kernel_filter_include_regex = R"(.*\.kd\.middle$)";
+
+    invoke_kernel_symbol_register(code_object_id, kernel_id, "prefix.kd.middle");
+
+    ASSERT_EQ(m_tool_data->target_kernel_ids.size(), 1);
+    EXPECT_TRUE(m_tool_data->target_kernel_ids.count(kernel_id));
+
+    const auto& calls = collector.get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_EQ(calls[0].name, "prefix.kd.middle");
+}
+
+TEST_F(TestSdkCallbacks, ProvidedEmptyKernelName_FilterDoesNotTargetAndPcSamplingForwardsEmpty)
+{
+    constexpr size_t   code_object_id = 123;
+    constexpr uint64_t kernel_id      = 10;
+
+    auto& collector                          = enable_pc_sampling();
+    m_tool_data->kernel_filter_include_regex = ".*";
+
+    invoke_kernel_symbol_register(code_object_id, kernel_id, "");
+
+    EXPECT_TRUE(m_tool_data->target_kernel_ids.empty());
+
+    const auto& calls = collector.get_kernel_symbol_register_calls();
+    ASSERT_EQ(calls.size(), 1);
+    EXPECT_EQ(calls[0].code_object_id, code_object_id);
+    EXPECT_EQ(calls[0].kernel_id, kernel_id);
+    EXPECT_TRUE(calls[0].name.empty());
 }
 
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)
@@ -417,8 +492,14 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     KernelSymbolRegister,
     TestSdkCallbacksKernelSymbolRegister,
-    ::testing::Values(kernel_symbol_register_test_params_t{"_Z9my_kernelv", "my_kernel"},
+    ::testing::Values(kernel_symbol_register_test_params_t{"_Z9my_kernelv", "_Z9my_kernelv"},
+                      kernel_symbol_register_test_params_t{"_Z16jacobi_iterationPfPKfi",
+                                                           "_Z16jacobi_iterationPfPKfi"},
                       kernel_symbol_register_test_params_t{"plain_kernel", "plain_kernel"},
+                      kernel_symbol_register_test_params_t{"", ""},
+                      kernel_symbol_register_test_params_t{"__amd_rocclr_streamOpsWrite.kd",
+                                                           "__amd_rocclr_streamOpsWrite"},
+                      kernel_symbol_register_test_params_t{"prefix.kd.middle", "prefix.kd.middle"},
                       kernel_symbol_register_test_params_t{nullptr, ""}),
     kernel_symbol_register_test_name);
 
@@ -437,6 +518,10 @@ INSTANTIATE_TEST_SUITE_P(
         kernel_filtering_test_params_t{"_Z10my_kernel", "my_kernel()", ".*my_kernel.*"},
         kernel_filtering_test_params_t{"_ZN3hip12vector_add_1Ev", "hip::vector_add_1()", ".*vector_add.*"},
         kernel_filtering_test_params_t{"_Z6kernelIiEvv", "void kernel<int>()", ".*kernel.*"},
+        kernel_filtering_test_params_t{"__amd_rocclr_streamOpsWrite.kd",
+                                       "__amd_rocclr_streamOpsWrite",
+                                       ".*streamOpsWrite$"},
+        kernel_filtering_test_params_t{"prefix.kd.middle", "prefix.kd.middle", R"(.*\.kd\.middle$)"},
         kernel_filtering_test_params_t{
             "_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_15gpu_kernel_implIZZZNS0_31direct_"
             "copy_"
