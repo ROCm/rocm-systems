@@ -42,10 +42,10 @@ def retry(
 
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(subprocess.TimeoutExpired,))
-def get_modified_paths(base_ref: str) -> set[str]:
-    """Returns paths of files changed relative to the base reference."""
+def get_modified_paths(base_ref: str, head_ref: str = "HEAD") -> set[str]:
+    """Returns paths of files changed between base_ref and head_ref."""
     result = subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
+        ["git", "diff", "--name-only", base_ref, head_ref],
         capture_output=True,
         text=True,
         check=True,

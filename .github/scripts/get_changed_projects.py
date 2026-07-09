@@ -61,7 +61,7 @@ def should_run_all_tests(paths: Optional[Iterable[str]]) -> bool:
     return matches_paths(paths, FULL_TEST_TRIGGER_PATTERNS)
 
 
-def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
+def get_changed_projects(base_ref: str, head_ref: str = "HEAD") -> ChangedProjectsResult:
     """Get changed project paths validated against repos-config.json.
 
     Returns a ChangedProjectsResult with:
@@ -69,7 +69,7 @@ def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
     - run_all_tests: True if CI-related files changed (run full test suite)
     - skip_tests: True if only skippable files changed (skip tests entirely)
     """
-    modified_paths = get_modified_paths(base_ref)
+    modified_paths = get_modified_paths(base_ref, head_ref)
     if not modified_paths:
         return ChangedProjectsResult(
             changed_projects="", run_all_tests=False, skip_tests=True
@@ -102,7 +102,8 @@ def get_changed_projects(base_ref: str) -> ChangedProjectsResult:
 
 if __name__ == "__main__":
     base_ref = os.environ.get("BASE_REF", "HEAD^")
-    result = get_changed_projects(base_ref)
+    head_ref = os.environ.get("HEAD_REF", "HEAD")
+    result = get_changed_projects(base_ref, head_ref)
     set_github_output(
         {
             "changed_projects": result.changed_projects,
