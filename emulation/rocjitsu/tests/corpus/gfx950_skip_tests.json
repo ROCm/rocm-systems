@@ -1,5 +1,7 @@
 {
-  "iree": [],
+  "iree": [
+    "iree.gfx950.e2e.pack_i8.static_pack_vnni_lhs_large"
+  ],
   "cts": [
     "cts.gfx950.fpsan.fpsan_mfma_gfx950_test",
     "cts.gfx950.fpsan.fpsan_cvt_gfx950_test",

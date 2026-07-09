@@ -20,6 +20,7 @@
     "iree.gfx1250.e2e.map_store.copy_like",
     "iree.gfx1250.e2e.map_store.expand_shape_shape_like",
     "iree.gfx1250.e2e.map_store.extract_slice_like",
+    "iree.gfx1250.e2e.pack_i8.static_pack_vnni_lhs_large",
     "iree.gfx1250.e2e.scatter.scatter_2d_batch",
     "iree.gfx1250.e2e.scatter.scatter_2d_multiple",
     "iree.gfx1250.e2e.scatter.scatter_2d_offset",
