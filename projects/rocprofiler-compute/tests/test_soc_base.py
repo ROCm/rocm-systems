@@ -8,6 +8,8 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce — no GPU hardware required.
 """
 
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -356,3 +358,38 @@ def test_expand_tcc_no_templates(perfmon_config):
 
     # No templates — input unchanged
     assert result == inp
+
+
+# =============================================================================
+# H. _append_analysis_yaml_for_filter_token alias handling
+# =============================================================================
+
+
+def _fake_soc_for_filter_token(arch: str = "gfx942") -> Any:
+    """Minimal stand-in exposing only the _mspec.gpu_arch the method reads."""
+    return SimpleNamespace(_mspec=SimpleNamespace(gpu_arch=arch))
+
+
+def test_filter_token_unknown_alias_exits_instead_of_keyerror(monkeypatch):
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
+        lambda arch: {"lds": "10"},
+    )
+    with pytest.raises(SystemExit):
+        OmniSoC_Base._append_analysis_yaml_for_filter_token(
+            _fake_soc_for_filter_token(), "SQ", {}, "/cfg", []
+        )
+
+
+def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
+        lambda arch: {"lds": "10"},
+    )
+    texts: list[str] = []
+    # Alias resolves to block id 10 -> file id "1000", absent from the
+    # empty config dict, so the token is skipped with a warning, not a crash.
+    OmniSoC_Base._append_analysis_yaml_for_filter_token(
+        _fake_soc_for_filter_token(), "lds", {}, "/cfg", texts
+    )
+    assert texts == []
