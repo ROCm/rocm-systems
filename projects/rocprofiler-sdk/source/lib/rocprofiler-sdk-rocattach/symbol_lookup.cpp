@@ -37,6 +37,7 @@
 #include <cerrno>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -52,6 +53,8 @@ namespace rocattach
 {
 namespace
 {
+// Keep limits generous enough for debug builds, but bounded so malformed target
+// ELFs cannot force unbounded memory use or symbol/hash traversal.
 constexpr auto MAX_TARGET_ELF_SIZE      = uint64_t{512} * 1024 * 1024;
 constexpr auto MAX_DYNAMIC_SYMBOLS      = size_t{1} << 24;
 constexpr auto MAX_GNU_HASH_CHAIN_STEPS = size_t{1} << 24;
@@ -322,6 +325,50 @@ find_mapped_objects(pid_t pid, const std::string& library)
     return result;
 }
 
+void
+log_mapped_object_candidates(const std::vector<mapped_object>& objects)
+{
+    for(const auto& object : objects)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Candidate mapped object: " << object.path
+                   << " dev " << object.device_major << ":" << object.device_minor << " inode "
+                   << object.inode << " load address 0x" << std::hex
+                   << object.mappings.front().start << std::dec;
+    }
+}
+
+std::optional<mapped_object>
+select_unique_mapped_object(pid_t pid, const std::string& library)
+{
+    auto objects = find_mapped_objects(pid, library);
+    if(library.find('/') != std::string::npos)
+    {
+        objects.erase(std::remove_if(objects.begin(),
+                                     objects.end(),
+                                     [&](const auto& object) {
+                                         return !library_path_matches_exactly(object, library);
+                                     }),
+                      objects.end());
+    }
+
+    if(objects.empty())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find mapped target library " << library
+                   << " in /proc/" << pid << "/maps";
+        return std::nullopt;
+    }
+
+    if(objects.size() > 1)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Found multiple mapped target libraries matching "
+                   << library << " in /proc/" << pid << "/maps; refusing to choose one implicitly";
+        log_mapped_object_candidates(objects);
+        return std::nullopt;
+    }
+
+    return objects.front();
+}
+
 std::optional<std::vector<uint8_t>>
 read_file_from_fd(int fd, const std::string& path, uint64_t size)
 {
@@ -359,7 +406,7 @@ read_file_from_fd(int fd, const std::string& path, uint64_t size)
 }
 
 std::optional<target_elf>
-read_target_elf_file(const std::string& path, const mapped_object& object)
+read_file_if_matches_mapping(const std::string& path, const mapped_object& object)
 {
     struct stat st
     {};
@@ -412,7 +459,7 @@ open_target_elf(pid_t pid, const mapped_object& object)
                                           pid,
                                           static_cast<uint64_t>(mapping.start),
                                           static_cast<uint64_t>(mapping.end));
-        if(auto elf = read_target_elf_file(map_files_path, object))
+        if(auto elf = read_file_if_matches_mapping(map_files_path, object))
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << map_files_path;
             return elf;
@@ -422,8 +469,10 @@ open_target_elf(pid_t pid, const mapped_object& object)
     auto target_path = strip_deleted_suffix(object.path);
     if(!target_path.empty() && target_path.front() == '/')
     {
-        auto root_path = fmt::format("/proc/{}/root{}", pid, target_path);
-        if(auto elf = read_target_elf_file(root_path, object))
+        auto root_path = (std::filesystem::path{fmt::format("/proc/{}/root", pid)} /
+                          std::filesystem::path{target_path}.relative_path())
+                             .string();
+        if(auto elf = read_file_if_matches_mapping(root_path, object))
         {
             ROCP_TRACE << "[rocprofiler-sdk-rocattach] Opened target ELF via " << root_path;
             return elf;
@@ -854,10 +903,10 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
         return std::nullopt;
     }
 
-    ROCP_INFO << "[rocprofiler-sdk-rocattach] Resolved " << symbol << " in target pid " << pid
-              << " from " << elf->path << " (mapped as " << object.path << ", dev "
-              << object.device_major << ":" << object.device_minor << ", inode " << object.inode
-              << ") at 0x" << std::hex << *address << std::dec;
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Resolved " << symbol << " in target pid " << pid
+               << " from " << elf->path << " (mapped as " << object.path << ", dev "
+               << object.device_major << ":" << object.device_minor << ", inode " << object.inode
+               << ") at 0x" << std::hex << *address << std::dec;
     return address;
 }
 }  // namespace
@@ -865,41 +914,15 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
 bool
 find_library(void*& addr, int inpid, const std::string& library)
 {
-    auto objects = find_mapped_objects(inpid, library);
-    if(library.find('/') != std::string::npos)
-    {
-        objects.erase(std::remove_if(objects.begin(),
-                                     objects.end(),
-                                     [&](const auto& object) {
-                                         return !library_path_matches_exactly(object, library);
-                                     }),
-                      objects.end());
-    }
+    auto object = select_unique_mapped_object(inpid, library);
+    if(!object) return false;
 
-    if(objects.size() > 1)
+    for(const auto& mapping : object->mappings)
     {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Found multiple mapped target libraries matching "
-                   << library << " in /proc/" << inpid
-                   << "/maps; refusing to choose one implicitly";
-        for(const auto& object : objects)
-        {
-            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Candidate mapped object: " << object.path
-                       << " dev " << object.device_major << ":" << object.device_minor << " inode "
-                       << object.inode << " load address 0x" << std::hex
-                       << object.mappings.front().start << std::dec;
-        }
-        return false;
-    }
-
-    for(const auto& object : objects)
-    {
-        for(const auto& mapping : object.mappings)
-        {
-            if(mapping.file_offset != 0) continue;
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            addr = reinterpret_cast<void*>(mapping.start);
-            return true;
-        }
+        if(mapping.file_offset != 0) continue;
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        addr = reinterpret_cast<void*>(mapping.start);
+        return true;
     }
 
     ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
@@ -912,45 +935,14 @@ find_symbol(int target_pid, void*& addr, const std::string& library, const std::
 {
     addr = nullptr;
 
-    auto objects = find_mapped_objects(target_pid, library);
-    if(library.find('/') != std::string::npos)
-    {
-        objects.erase(std::remove_if(objects.begin(),
-                                     objects.end(),
-                                     [&](const auto& object) {
-                                         return !library_path_matches_exactly(object, library);
-                                     }),
-                      objects.end());
-    }
-    if(objects.empty())
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find mapped target library " << library
-                   << " in /proc/" << target_pid << "/maps";
-        return false;
-    }
-    if(objects.size() > 1)
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Found multiple mapped target libraries matching "
-                   << library << " in /proc/" << target_pid
-                   << "/maps; refusing to choose one implicitly";
-        for(const auto& object : objects)
-        {
-            ROCP_ERROR << "[rocprofiler-sdk-rocattach] Candidate mapped object: " << object.path
-                       << " dev " << object.device_major << ":" << object.device_minor << " inode "
-                       << object.inode << " load address 0x" << std::hex
-                       << object.mappings.front().start << std::dec;
-        }
-        return false;
-    }
+    auto object = select_unique_mapped_object(target_pid, library);
+    if(!object) return false;
 
-    for(const auto& object : objects)
+    if(auto resolved = resolve_target_symbol(target_pid, *object, symbol))
     {
-        if(auto resolved = resolve_target_symbol(target_pid, object, symbol))
-        {
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            addr = reinterpret_cast<void*>(*resolved);
-            return true;
-        }
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        addr = reinterpret_cast<void*>(*resolved);
+        return true;
     }
 
     ROCP_ERROR << "[rocprofiler-sdk-rocattach] Failed to resolve " << library << "::" << symbol
