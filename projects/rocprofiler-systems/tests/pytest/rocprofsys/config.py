@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from functools import cached_property
 import getpass
 import os
 from pathlib import Path
@@ -76,7 +77,8 @@ class RocprofsysConfig:
             self._capabilities = SystemCapabilities.from_config(self)
         return self._capabilities
 
-    def get_llvm_lib_paths(self) -> list[Path]:
+    @cached_property
+    def llvm_lib_paths(self) -> list[Path]:
         """Get list of found ROCm LLVM lib paths.
 
         Returns:
@@ -89,6 +91,36 @@ class RocprofsysConfig:
                 self.rocm_path / "llvm" / "lib",
                 self.rocm_path / "lib" / "llvm" / "lib",
             ]
+            # Determine the per-target runtime subdir used when
+            # LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+            clang_candidates = [
+                self.rocm_path / "bin" / "amdclang",
+                self.rocm_path / "llvm" / "bin" / "amdclang",
+                self.rocm_path / "lib" / "llvm" / "bin" / "amdclang",
+            ]
+            clang_path = next((c for c in clang_candidates if c.exists()), None)
+            if clang_path is None:
+                which_clang = shutil.which("amdclang")
+                if which_clang:
+                    clang_path = Path(which_clang)
+            if clang_path is not None:
+                try:
+                    host_triple = subprocess.run(
+                        [str(clang_path), "--print-target-triple"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    ).stdout.strip()
+                except (subprocess.SubprocessError, OSError) as exc:
+                    raise RuntimeError(
+                        f"'{clang_path} --print-target-triple' failed; "
+                        "this suggests a broken toolchain."
+                    ) from exc
+                if host_triple:
+                    candidates.append(
+                        self.rocm_path / "lib" / "llvm" / "lib" / host_triple
+                    )
             for candidate in candidates:
                 if candidate.exists():
                     found_paths.append(candidate)
@@ -113,7 +145,7 @@ class RocprofsysConfig:
             paths.append(existing)
 
         # Add ROCm LLVM lib as fallback
-        for llvm_path in self.get_llvm_lib_paths():
+        for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
 
         return ":".join(paths)

@@ -20,6 +20,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
 )
 
@@ -50,6 +51,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/track_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
 )
 
@@ -64,6 +66,7 @@ add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
 add_subdirectory(output)
+add_subdirectory(perfetto)
 add_subdirectory(progress)
 add_subdirectory(rocpd)
 add_subdirectory(trace_cache)

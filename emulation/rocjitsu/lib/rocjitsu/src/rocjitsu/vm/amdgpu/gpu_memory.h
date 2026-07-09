@@ -42,10 +42,10 @@ public:
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       if (hdr.op == simdojo::MessageOp::READ) {
         for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          data[i] = read8(hdr.addr + i);
+          data[i] = read8(hdr.addr + i, hdr.vmid);
       } else if (hdr.op == simdojo::MessageOp::WRITE) {
         for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          write8(hdr.addr + i, data[i]);
+          write8(hdr.addr + i, data[i], hdr.vmid);
       }
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
