@@ -415,6 +415,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
       command->release();
     }
   }
+  virtual hipError_t GetEnqueueStatus() const { return hipSuccess; }
   Graph* GetParentGraph() { return parentGraph_; }
   virtual Graph* GetChildGraph() { return nullptr; }
   void SetParentGraph(Graph* graph) { parentGraph_ = graph; }
@@ -777,10 +778,10 @@ class Graph {
   void CalculateSegmentTopoDependencyLevels();
 
   //! Runs one node on the assigned stream
-  bool RunOneNode(Node node);  //!< Node for the execution on GPU
+  hipError_t RunOneNode(Node node);  //!< Node for the execution on GPU
 
   //! Runs all nodes from the execution graph on the assigned streams
-  bool RunNodes(
+  hipError_t RunNodes(
       int32_t base_stream = 0,                             //!< The base stream to run the graph on
       const std::vector<hip::Stream*>* streams = nullptr,  //!< Streams to run the graph
       const amd::Command::EventWaitList* parent_waitlist = nullptr  //!< Parent Graph waitlist
@@ -2999,6 +3000,7 @@ class GraphMemAllocNode final : public GraphNode {
   amd::Memory* va_ = nullptr;          // Memory object, which holds a virtual address
   bool mapped_ = false;                // True after first successful VA map with matching free
   void* phys_ptr_ = nullptr;           // Physical memory dev_ptr for targeted FindMemory reuse
+  hipError_t enqueue_status_ = hipSuccess;  // Launch-time status available on DD enqueue
 
   // Derive the new class for VirtualMapCommand,
   // so runtime can allocate memory during the execution of command
@@ -3209,6 +3211,19 @@ class GraphMemAllocNode final : public GraphNode {
     }
     return error;
   }
+
+  void EnqueueCommands(hip::Stream* stream) final {
+    enqueue_status_ = hipSuccess;
+    for (auto& command : commands_) {
+      command->enqueue();
+      if (AMD_DIRECT_DISPATCH && command->status() == CL_OUT_OF_RESOURCES) {
+        enqueue_status_ = hipErrorOutOfMemory;
+      }
+      command->release();
+    }
+  }
+
+  hipError_t GetEnqueueStatus() const final { return enqueue_status_; }
 
   void* ReserveAddress() {
     auto graph = GetParentGraph();

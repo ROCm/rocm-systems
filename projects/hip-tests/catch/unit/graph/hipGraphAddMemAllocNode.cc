@@ -317,7 +317,7 @@ static hipError_t queryUntilComplete(hipStream_t stream) {
  * Test Description
  * ------------------------
  *  - Test to verify launch-time graph mem-alloc node failures are surfaced as out-of-memory
- *    errors through stream completion APIs.
+ *    errors either directly at graph launch or through stream completion APIs.
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAddMemAllocNode.cc
@@ -341,45 +341,51 @@ HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_LaunchOutOfMemory) {
   SECTION("hipStreamSynchronize") {
     StreamGuard stream_guard(Streams::created);
     hipStream_t stream = stream_guard.stream();
-    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-    hipError_t ret = hipStreamSynchronize(stream);
+    hipError_t launch_ret = hipGraphLaunch(graph_exec, stream);
+    hipError_t sync_ret = hipStreamSynchronize(stream);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE(ret == hipErrorOutOfMemory);
+    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
+    REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
 
   SECTION("hipStreamSynchronize nullptr") {
-    HIP_CHECK(hipGraphLaunch(graph_exec, nullptr));
-    hipError_t ret = hipStreamSynchronize(nullptr);
+    hipError_t launch_ret = hipGraphLaunch(graph_exec, nullptr);
+    hipError_t sync_ret = hipStreamSynchronize(nullptr);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE(ret == hipErrorOutOfMemory);
+    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
+    REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
 
   SECTION("hipStreamSynchronize nullptr observes blocking stream error") {
     StreamGuard stream_guard(Streams::created);
     hipStream_t stream = stream_guard.stream();
-    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-    hipError_t ret = hipStreamSynchronize(nullptr);
+    hipError_t launch_ret = hipGraphLaunch(graph_exec, stream);
+    hipError_t sync_ret = hipStreamSynchronize(nullptr);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
-    REQUIRE(ret == hipErrorOutOfMemory);
+    REQUIRE((launch_ret == hipSuccess || launch_ret == hipErrorOutOfMemory));
+    REQUIRE(sync_ret == hipErrorOutOfMemory);
   }
 
   SECTION("hipStreamQuery") {
     StreamGuard stream_guard(Streams::created);
     hipStream_t stream = stream_guard.stream();
-    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-    hipError_t ret = queryUntilComplete(stream);
-    if (ret == hipErrorNotReady) {
-      HIP_CHECK(hipGraphExecDestroy(graph_exec));
-      HIP_CHECK(hipGraphDestroy(graph));
-      FAIL("Timed out waiting for graph launch to complete.");
+    hipError_t ret = hipGraphLaunch(graph_exec, stream);
+    hipError_t second_query = hipSuccess;
+    if (ret == hipSuccess) {
+      ret = queryUntilComplete(stream);
+      if (ret == hipErrorNotReady) {
+        HIP_CHECK(hipGraphExecDestroy(graph_exec));
+        HIP_CHECK(hipGraphDestroy(graph));
+        FAIL("Timed out waiting for graph launch to complete.");
+      }
+      second_query = hipStreamQuery(stream);
     }
-    hipError_t second_query = hipStreamQuery(stream);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipDeviceGraphMemTrim(0));
