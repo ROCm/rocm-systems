@@ -26,14 +26,57 @@ During profiling phase `ROCm Compute` loads two collectors via `LD_PRELOAD`:
     - After each collection pass, the data from csv is merged into resulting database.
 
 The following diagram illustrates the flow. Note that in real workloads there will be multiple processes and each process will do data writing independently from each other.
-![](assets/hld-profiler-hub-integration/profiler-hub-integration-current-profiling-flow.png)
+
+```mermaid
+sequenceDiagram
+    participant compute as Rocprof-compute (profile)
+    participant process as Target process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant procRocpd as per-process rocpd
+    participant procCsv as per-process csv
+    participant passRocpd as Per-pass rocpd
+
+    compute->>process: Launches
+    process->>sdkTool: Loads via LD_PRELOAD
+    process->>computeTool: Loads via LD_PRELOAD
+
+    rect rgb(120, 120, 120)
+    note left of compute: Loop: per collection pass
+        rect rgb(140, 140, 140)
+        note right of sdkTool: In-process data collection
+            sdkTool->>procRocpd: Write rocpd (per-process)
+            computeTool->>procCsv: Write csv (per-process)
+        end
+
+        rect rgb(140, 140, 140)
+        note right of compute: Data merge
+            procRocpd-->>compute: Rocpd data is read at the end of the pass
+            procCsv-->>compute: CSV data is read at the end of the pass
+            compute->>passRocpd: Intermediate rocpd and csv data is merged into a single per-pass rocpd
+        end
+
+        rect rgb(140, 140, 140)
+        note right of compute: Removal of intermediate<br>data
+            compute->>procRocpd: Deletes per-process rocpds
+            compute->>procCsv: Deletes per-process CSVs
+        end
+    end
+```
 
 *Note: Currently `profile` phase converts the databases into CSV files but this step is to be removed as part of another effort. Therefore, in scope of this HLD this step is ignored.*
 
 ### Analysis phase
 During analysis phase `ROCm Compute` loads and merges all per-pass rocpd databases into a single Pandas dataframe in the memory. The merge is done by `Kernel Name + Grid Size` (default) or just `Kernel Name`.
 
-![](assets/hld-profiler-hub-integration/profiler-hub-integration-current-analysis-flow.png)
+```mermaid
+sequenceDiagram
+    participant compute as Rocprof-compute (profile)
+    participant passRocpd as Per-pass rocpds
+
+    passRocpd-->>compute: Read rocpd data
+    note over compute: Merges rocpd data to<br/>pandas dataframe
+```
 
 *Note: Currently `analyze` phase can load only CSVs (for this `profiler` phase converts rocpd to CSVs). But this step is to be removed soon. Therefore, in scope of this HLD this step is ignored and it's assumed that rocpd are read directly.*
 
@@ -69,14 +112,66 @@ The following architectural changes are to be made to switch counter collection 
 - `rocprofiler-compute-tool` collector creates Profiler Hub storage file and writes counters data into it. This file name shall include `<pid>` because real workloads will spawn multiple processes.
 - `Profile` mode of `ROCm Compute` still merges per-process Profiler Hub storage files into a single file in scope of a single pass. However, it does it by using Profiler Hub interface as well in order to abstract this logic from concrete format on the disk. This is not a strong requirement and we may reconsider it if there are performance and implementation cost implications. But the reasoning for this requirement is convenience as it will reduce a number of resulting files by an order of magnitude.
 - Data from `rocpd` and `Profiler Hub` produce separate artifacts and have separate processing code paths. This is because the long-term plan is to fully switch on rocprofiler-compute-tool for data collection and therefore on ProfilerHub for data read/write. Therefore, merge of `rocpd` and `Profiler Hub` data would introduce unnecessary coupling between these data formats which would increase the cost of aforementioned switch.
-![](assets/hld-profiler-hub-integration/profiler-hub-integration-suggested-profiling-flow.png)
+
+```mermaid
+sequenceDiagram
+    participant compute as Rocprof-compute (profile)
+    participant process as Target process
+    participant sdkTool as rocprofiler-sdk-tool.so
+    participant computeTool as rocprofiler-compute-tool.so
+    participant procRocpd as per-process rocpd
+    participant procHub as Per-process Profiler Hub storage
+    participant passRocpd as Per-pass rocpd (data from SDK tool)
+    participant passHub as Per-pass Profiler Hub storage
+
+    compute->>process: Launches
+    process->>sdkTool: Loads via LD_PRELOAD
+    process->>computeTool: Loads via LD_PRELOAD
+
+    rect rgb(120, 120, 120)
+    note left of compute: collection pass
+        rect rgb(140, 140, 140)
+        note right of sdkTool: In-process data collection
+            sdkTool->>procRocpd: Write rocpd (per-process)
+            computeTool->>procHub: Write data via Profiler Hub (per-process)
+        end
+
+        rect rgb(140, 140, 140)
+        note right of compute: SDK data merge
+            procRocpd-->>compute: Rocpd data is read at the end of the pass
+            compute->>passRocpd: Intermediate rocpd data from SDK is merged into a single per-pass rocpd
+        end
+
+        rect rgb(140, 140, 140)
+        note right of compute: Profiler Hub data merge
+            procHub-->>compute: Profiler Hub Storage data is read at the end of the pass (via Profiler Hub interface)
+            compute->>passHub: Intermediate Profiler Hub data is merged into a single per-pass rocpd
+        end
+
+        rect rgb(140, 140, 140)
+        note right of compute: Removal of intermediate<br>data
+            compute->>procRocpd: Deletes per-process rocpds
+            compute->>procHub: Deletes per-process Profiler Hub Storage
+        end
+    end
+```
 
 This design also means that rocprof-compute will need to implement Python bindings for both read and write interfaces of Profiler Hub.
 
 ### Analysis phase
 The following architectural changes are to be made to switch counter collection in analysis phase onto Profiler Hub:
 - `Analysis` phase reads both per-pass Profiler Hub and rocpd data and merges them both into a single Pandas dataframe.
-![](assets/hld-profiler-hub-integration/profiler-hub-integration-suggested-analysis-flow.png)
+
+```mermaid
+sequenceDiagram
+    participant compute as Rocprof-compute (profile)
+    participant passRocpd as Per-pass rocpds from SDK Tool
+    participant passHub as Per-pass Profiler Hub storage
+
+    passRocpd-->>compute: Read rocpd data
+    passHub-->>compute: Read native collector data via Profiler Hub
+    note over compute: Merges all counters data to<br/>pandas dataframe
+```
 
 ### Addition of PC Sampling data support in Profiler Hub
 PC Sampling data collection is spread between both `rocprofiler-compute-tool` and `rocprofiler-sdk-tool`. However, the long-term plan is to move all this data collection to `rocprofiler-compute-tool` only. This work is currently in progress.
