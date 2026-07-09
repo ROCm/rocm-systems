@@ -6,18 +6,17 @@
 Instrumenting and rewriting a binary application
 ****************************************************
 
-There are three ways to perform instrumentation with the ``rocprof-sys-instrument`` executable:
+There are two ways to perform instrumentation with the ``rocprof-sys-instrument`` executable:
 
 * Runtime instrumentation
-* Attaching to an already running process
 * Binary rewrite
 
-Here is a comparison of the three modes:
+Here is a comparison of the two modes:
 
 * Runtime instrumentation of the application using the ``rocprof-sys-instrument`` executable
   (analogous to ``gdb --args <program> <args>``)
 
-  * This mode is the default if neither the ``-p`` nor ``-o`` command-line options are used
+  * This mode is the default if the ``-o`` command-line option is not used
   * Runtime instrumentation supports instrumenting not only the target executable but also
     the shared libraries loaded by the target executable. Consequently, this mode consumes more memory,
     takes longer to perform the instrumentation, and tends to add more significant overhead to the
@@ -25,15 +24,10 @@ Here is a comparison of the three modes:
   * This mode is recommended if you want to analyze not only the performance of your executable and/or
     libraries but also the performance of the library dependencies
 
-* Attaching to a process that is currently running (analogous to ``gdb -p <PID>``)
-
-  * This mode is activated using ``-p <PID>``
-  * The same caveats from the first example apply with respect to memory and overhead
-
   .. note::
 
-     Attaching to a running process is an alpha feature and detaching from the target process
-     without ending the target process is not currently supported.
+     To attach to and profile an already running process, use the ``rocprof-sys-attach``
+     executable instead. See :doc:`Attaching to a running process <./attaching-to-running-process>`.
 
 * Binary rewrite to generate a new executable or library with the instrumentation built-in
 
@@ -75,7 +69,6 @@ view the help menu.
                                                             --print-overlapping (count: 1)
                                                             --print-instructions (max: 1, dtype: bool)
                                                             --output (min: 0, dtype: string)
-                                                            --pid (count: 1, dtype: int)
                                                             --mode (count: 1)
                                                             --force (max: 1, dtype: bool)
                                                             --command (count: 1)
@@ -169,7 +162,6 @@ view the help menu.
                                     rocprof-sys will use the basename and output to the cwd, unless the target binary is in
                                     the cwd. In the latter case, rocprof-sys will either use ${PWD}/<basename>.inst
                                     (non-libraries) or ${PWD}/instrumented/<basename> (libraries) (min: 0, dtype: string)
-      -p, --pid                      Connect to running process (count: 1, dtype: int)
       -M, --mode [ coverage | sampling | trace ]
                                     Instrumentation mode. 'trace' mode instruments the selected functions, 'sampling' mode
                                     only instruments the main function to start and stop the sampler. (count: 1)
@@ -380,15 +372,6 @@ The following example shows how to enable runtime instrumentation.
 .. code-block:: shell
 
    rocprof-sys-instrument <rocprof-sys-options> -- <exe> [<exe-options>...]
-
-Attaching to a running process
-========================================
-
-Use the following command to attach to an active process.
-
-.. code-block:: shell
-
-   rocprof-sys-instrument <rocprof-sys-options> -p <PID> -- <exe-name>
 
 Binary rewrite
 ========================================

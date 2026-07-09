@@ -745,6 +745,7 @@ endif()
 rocm_install(TARGETS rcclras)
 
 if(BUILD_TESTS)
+  enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
   if(BUILD_EXT_EXAMPLES)
