@@ -75,7 +75,7 @@ repos:
     hooks:
       - id: hash-check
         name: Hash consistency check
-        entry: python projects/rocprofiler-compute/src/utils/hash_checker.py
+        entry: python projects/rocprofiler-compute/tools/config_management/hash_checker.py
         language: python
         additional_dependencies: [pyyaml==6.0.3]
         files: ^projects/rocprofiler-compute/
