@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_POP
 #include <fcntl.h>
 #include <string>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -34,6 +35,8 @@ constexpr uint32_t kGuestGpuId = 38144;
 constexpr int kChildCount = 4;
 constexpr int kStressThreadCount = 8;
 constexpr int kStressIterations = 25;
+constexpr uint64_t kAllocVa = 0x1000000000ULL;
+constexpr uint64_t kAllocSize = 4096;
 
 bool read_gpu_id(const std::string &path, uint32_t *gpu_id) {
   FILE *file = fopen(path.c_str(), "r");
@@ -132,7 +135,7 @@ TEST(GuestKfdMultiprocessTest, ForkedChildrenDoNotRemoveParentOverlay) {
   ASSERT_GE(parent_fd, 0);
   if (!guest_gpu_is_visible()) {
     close(parent_fd);
-    GTEST_SKIP() << "guest GPU overlay is not visible";
+    FAIL() << "guest GPU overlay is not visible";
   }
 
   std::vector<pid_t> children;
@@ -166,7 +169,7 @@ TEST(GuestKfdMultiprocessTest, ForkedChildDropsInheritedGuestDriverBeforeReopen)
   ASSERT_GE(parent_fd, 0);
   if (!guest_gpu_is_visible()) {
     close(parent_fd);
-    GTEST_SKIP() << "guest GPU overlay is not visible";
+    FAIL() << "guest GPU overlay is not visible";
   }
 
   uint32_t parent_count_before = 0;
@@ -197,7 +200,7 @@ TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
   ASSERT_GE(probe_fd, 0);
   if (!guest_gpu_is_visible()) {
     close(probe_fd);
-    GTEST_SKIP() << "guest GPU overlay is not visible";
+    FAIL() << "guest GPU overlay is not visible";
   }
   close(probe_fd);
 
@@ -230,6 +233,42 @@ TEST(GuestKfdConcurrencyTest, ConcurrentOpenIoctlAndSysfsRedirect) {
   EXPECT_EQ(open_failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(ioctl_failures.load(std::memory_order_relaxed), 0);
   EXPECT_EQ(sysfs_failures.load(std::memory_order_relaxed), 0);
+}
+
+TEST(GuestKfdMemoryTest, GuestAllocationMmapOffsetIsRejected) {
+  if (access(kKfdPath, R_OK | W_OK) != 0)
+    GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
+
+  int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  if (!guest_gpu_is_visible()) {
+    close(fd);
+    FAIL() << "guest GPU overlay is not visible";
+  }
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = kAllocVa;
+  alloc.size = kAllocSize;
+  alloc.gpu_id = kGuestGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(ioctl(fd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0) << std::strerror(errno);
+  EXPECT_NE(alloc.handle, 0u);
+  EXPECT_NE(alloc.mmap_offset, 0u);
+
+  errno = 0;
+  void *mapped = mmap(nullptr, kAllocSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+                      static_cast<off_t>(alloc.mmap_offset));
+  if (mapped != MAP_FAILED) {
+    munmap(mapped, kAllocSize);
+    ADD_FAILURE() << "guest synthetic allocation mmap unexpectedly succeeded";
+  } else {
+    EXPECT_EQ(errno, ENODEV);
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(ioctl(fd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0) << std::strerror(errno);
+  close(fd);
 }
 
 } // namespace

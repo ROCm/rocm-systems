@@ -627,10 +627,20 @@ if(RJ_HAS_GFX1201_GPU)
             --gtest_filter=GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
+    add_test(
+        NAME "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
+        COMMAND
+            ${RJ_CLI} --config
+            ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+            $<TARGET_FILE:guest_kfd_test>
+            --gtest_filter=GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
     set_tests_properties(
         "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
         "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+        "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
         PROPERTIES TIMEOUT 60 SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
     )
     foreach(
@@ -640,6 +650,7 @@ if(RJ_HAS_GFX1201_GPU)
             "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
             "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
+            "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
     )
         rj_set_default_runtime_dir("${_guest_kfd_test}")
     endforeach()
@@ -1027,17 +1038,13 @@ if(HSA_RUNTIME64)
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 60
-                ENVIRONMENT
-                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>"
-                    "RJ_DBT_TARGET_ISA=gfx1201"
-                    "RJ_DBT_LOG=1"
                 INSTALL_COMMAND
+                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+                    "--config"
+                    "\${RJ_INSTALLED_CONFIG_DIR}/guest_gfx950_on_gfx1201.json"
+                    "--"
                     "bin/hsa_hooks_test"
                     "--gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
-                INSTALL_ENVIRONMENT
-                    "HSA_TOOLS_LIB=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
-                    "RJ_DBT_TARGET_ISA=gfx1201"
-                    "RJ_DBT_LOG=1"
             )
         endif()
 

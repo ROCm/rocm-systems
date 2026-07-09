@@ -150,6 +150,7 @@ private:
   static constexpr uint64_t kSyntheticHandleBase = 1ULL << 63;
   uint64_t next_synthetic_handle_ = kSyntheticHandleBase;
   std::unordered_set<uint64_t> synthetic_handles_;
+  std::unordered_set<uint64_t> synthetic_mmap_offsets_;
   std::atomic<bool> ready_{false};
 };
 

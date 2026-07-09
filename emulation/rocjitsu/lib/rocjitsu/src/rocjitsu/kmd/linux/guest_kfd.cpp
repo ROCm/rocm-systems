@@ -35,7 +35,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr const char *kRealTopologyPath = "/sys/devices/virtual/kfd/kfd/topology";
+constexpr std::string_view kRealTopologyPaths[] = {
+    "/sys/devices/virtual/kfd/kfd/topology",
+    "/sys/class/kfd/kfd/topology",
+};
+constexpr uint64_t kGuestSyntheticMmapType = 0x1ULL << KFD_MMAP_TYPE_SHIFT;
+constexpr uint64_t kGuestSyntheticMmapPayloadMask = (1ULL << KFD_MMAP_TYPE_SHIFT) - 1;
 
 std::string read_text_file(const fs::path &path) {
   const std::string path_str = path.string();
@@ -176,18 +181,20 @@ std::optional<uint32_t> first_real_gpu_id_matching_isa(std::string_view host_isa
   if (!target_version)
     return std::nullopt;
 
-  fs::path nodes_dir = fs::path(kRealTopologyPath) / "nodes";
-  const uint32_t max_node = max_numeric_dir(nodes_dir);
-  for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
-    fs::path node_dir = nodes_dir / std::to_string(node_id);
-    const uint32_t gfx_target_version =
-        read_u32_property(node_dir / "properties", "gfx_target_version", 0);
-    if (gfx_target_version != *target_version)
-      continue;
+  for (std::string_view topology_path : kRealTopologyPaths) {
+    fs::path nodes_dir = fs::path(std::string(topology_path)) / "nodes";
+    const uint32_t max_node = max_numeric_dir(nodes_dir);
+    for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
+      fs::path node_dir = nodes_dir / std::to_string(node_id);
+      const uint32_t gfx_target_version =
+          read_u32_property(node_dir / "properties", "gfx_target_version", 0);
+      if (gfx_target_version != *target_version)
+        continue;
 
-    std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
-    if (gpu_id && *gpu_id != 0)
-      return gpu_id;
+      std::optional<uint32_t> gpu_id = read_u32_file(node_dir / "gpu_id");
+      if (gpu_id && *gpu_id != 0)
+        return gpu_id;
+    }
   }
   return std::nullopt;
 }
@@ -244,6 +251,14 @@ uint32_t choose_render_minor(uint32_t requested) {
   }
   return (requested >= kRenderMinorBegin && requested < kRenderMinorEnd) ? requested
                                                                          : kRenderMinorEnd - 1;
+}
+
+uint64_t synthetic_mmap_offset_for_handle(uint64_t handle, uint64_t handle_base) {
+  // KFD allocation mmap offsets normally use type 0. Use the otherwise unused
+  // type-1 top-bit pattern for guest-only allocations, and keep a private set
+  // of emitted offsets so GuestKfd::mmap() can reject only offsets it created.
+  const uint64_t ordinal = handle - handle_base + 1;
+  return kGuestSyntheticMmapType | ((ordinal << 12) & kGuestSyntheticMmapPayloadMask);
 }
 
 bool passthrough_lstat(const std::string &path, struct stat *st) {
@@ -346,6 +361,9 @@ private:
   /// @brief Copy a host sysfs subtree into the generated overlay.
   bool copy_tree(const std::string &src, const std::string &dst);
 
+  /// @brief Copy the first available real KFD topology root into the overlay.
+  bool copy_host_topology();
+
   /// @brief Generate the appended guest KFD node and guest DRM metadata.
   bool copy_guest_node(const Sysfs::GpuInfo &guest);
 
@@ -416,6 +434,22 @@ bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::str
   return ok;
 }
 
+bool GuestKfd::TopologyOverlay::copy_host_topology() {
+  for (std::string_view topology_path : kRealTopologyPaths) {
+    if (copy_tree(std::string(topology_path), topology_dir_))
+      return true;
+
+    // If the first topology root is absent or only partially copyable, reset
+    // the destination before trying the alternate root. This mirrors the
+    // launcher/HSA-hook discovery policy without mixing trees from two roots.
+    std::error_code ec;
+    fs::remove_all(topology_dir_, ec);
+    ec.clear();
+    fs::create_directories(topology_dir_, ec);
+  }
+  return false;
+}
+
 bool GuestKfd::TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
   if (guest_sysfs_.generate(guest).empty())
     return false;
@@ -456,7 +490,7 @@ bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest) {
   cleanup();
   if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
     return false;
-  if (!copy_tree(kRealTopologyPath, topology_dir_)) {
+  if (!copy_host_topology()) {
     cleanup();
     return false;
   }
@@ -513,6 +547,7 @@ void GuestKfd::reset_after_fork() {
   open_refs_ = 0;
   overlay_->release_after_fork();
   synthetic_handles_.clear();
+  synthetic_mmap_offsets_.clear();
   next_synthetic_handle_ = kSyntheticHandleBase;
 }
 
@@ -602,6 +637,7 @@ int GuestKfd::close() {
     kfd_fd = real_kfd_fd_.exchange(-1, std::memory_order_acq_rel);
     ready_.store(false, std::memory_order_release);
     synthetic_handles_.clear();
+    synthetic_mmap_offsets_.clear();
     next_synthetic_handle_ = kSyntheticHandleBase;
     // Removing copied sysfs trees can block on filesystem work. Swap the
     // overlay object while serialized, then perform the actual remove_all after
@@ -747,7 +783,9 @@ int GuestKfd::alloc_memory_ioctl(void *arg) {
 
   std::lock_guard lock(mutex_);
   args->handle = next_synthetic_handle_++;
+  args->mmap_offset = synthetic_mmap_offset_for_handle(args->handle, kSyntheticHandleBase);
   synthetic_handles_.insert(args->handle);
+  synthetic_mmap_offsets_.insert(args->mmap_offset);
   return 0;
 }
 
@@ -759,8 +797,11 @@ int GuestKfd::free_memory_ioctl(void *arg) {
   }
   {
     std::lock_guard lock(mutex_);
-    if (synthetic_handles_.erase(args->handle) != 0)
+    if (synthetic_handles_.erase(args->handle) != 0) {
+      synthetic_mmap_offsets_.erase(
+          synthetic_mmap_offset_for_handle(args->handle, kSyntheticHandleBase));
       return 0;
+    }
   }
   assert(args->handle < kSyntheticHandleBase);
   return forward_ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, arg);
@@ -878,6 +919,13 @@ void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offse
   }
   uint64_t encoded_gpu =
       (static_cast<uint64_t>(offset) & ~KFD_MMAP_TYPE_MASK) >> KFD_MMAP_GPU_ID_SHIFT;
+  {
+    std::lock_guard lock(mutex_);
+    if (synthetic_mmap_offsets_.count(static_cast<uint64_t>(offset)) != 0) {
+      errno = ENODEV;
+      return MAP_FAILED;
+    }
+  }
   if ((static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK) == KFD_MMAP_TYPE_DOORBELL &&
       encoded_gpu == guest_.gpu_id) {
     errno = ENODEV;
