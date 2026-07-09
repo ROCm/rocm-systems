@@ -84,7 +84,7 @@ set(AMD_TEST_SRC
 # bitfield ABI on Windows. Only compile the fp6 OCP test on non-Windows until
 # the header is made portable.
 if(NOT WIN32)
-  list(APPEND TEST_SRC ext_ocp_fp6.cc)
+  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc)
 endif()
 
 set(AMD_ARCH_SPEC_TEST_SRC
