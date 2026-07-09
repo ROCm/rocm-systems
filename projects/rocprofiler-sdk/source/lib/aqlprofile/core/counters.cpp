@@ -83,7 +83,8 @@ HandleSQFlagsBlock(Pm4Factory* pm4_factory, const aqlprofile_pmc_event_t& event)
 counter_des_t
 GetCounter(Pm4Factory*                                    pm4_factory,
            EventRequest&                                  event,
-           std::map<block_des_t, uint32_t, lt_block_des>& index_map)
+           std::map<block_des_t, uint32_t, lt_block_des>& index_map,
+           int                                            num_sp_events)
 {
     const GpuBlockInfo* block_info = pm4_factory->GetBlockInfo(event.block_name);
     const block_des_t   block_des  = {block_info->id, event.block_index};
@@ -107,6 +108,17 @@ GetCounter(Pm4Factory*                                    pm4_factory,
         {
             throw HSA_STATUS_ERROR_INVALID_ARGUMENT;  // NOLINT(misc-throw-by-value-catch-by-reference)
         }
+    }
+
+    // Remap SQ register indices to avoid collision with SP counters on gfx1250.
+    // Accum internal copies are excluded from remapping.
+    const bool is_accum_copy = event.bInternal && (event.event_id != 0);
+    if(event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ && !is_accum_copy)
+    {
+        if(reg_index < num_sp_events)
+            reg_index = 2 * reg_index + 1;
+        else
+            reg_index += num_sp_events;
     }
 
     if(reg_index >= block_info->counter_count)
@@ -153,14 +165,23 @@ CountersVec(std::vector<EventRequest>& events, Pm4Factory* pm4_factory)
             std::stable_sort(events.begin(), events.end());
     }
 
+    int num_sp_events = 0;
+    if(pm4_factory->IsGFX1250())
+    {
+        for(const auto& ev : events)
+            if(ev.block_name == static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SP) &&
+               !ev.bInternal && !ev.flags.raw)
+                num_sp_events++;
+    }
+
     for(auto& event : events)
-        vec.push_back(GetCounter(pm4_factory, event, index_map));
+        vec.push_back(GetCounter(pm4_factory, event, index_map, num_sp_events));
 
     if(pm4_factory->IsGFX10() && (vec.get_attr() & CounterBlockGRBMAttr) == 0)
     {
         EventRequest grbm_event{0};
         grbm_event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
-        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map));
+        vec.push_back(GetCounter(pm4_factory, grbm_event, index_map, 0));
     }
     return vec;
 }
