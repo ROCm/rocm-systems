@@ -322,6 +322,7 @@ ParserResult AvcVideoParser::DecodeCurrentPicture() {
     if (pfn_get_sei_message_cb_ && sei_message_count_ > 0) {
         SendSeiMsgPayload();
         sei_message_count_ = 0;
+        sei_payload_size_ = 0;
     }
 
     // Output decoded pictures from DPB if any are ready in case of frame_num gaps.
