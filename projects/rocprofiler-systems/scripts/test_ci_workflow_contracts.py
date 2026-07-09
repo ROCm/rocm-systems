@@ -522,10 +522,6 @@ def check_sanitizer_workflow(
         "sanitizer workflow must generate CI scripts through run-ci.py",
     )
     require(
-        "--repeat-until-pass 1" in workflow_text,
-        "sanitizer workflow must keep its explicit repeat-until-pass override",
-    )
-    require(
         "EnricoMi/publish-unit-test-result-action" not in workflow_text,
         "sanitizer workflow must use the custom summary path, not EnricoMi",
     )
@@ -544,6 +540,27 @@ def check_sanitizer_workflow(
         workflow_jobs["ubuntu-noble-sanitizers"], "ubuntu-noble-sanitizers job"
     )
     matrix_steps = job_steps(matrix_job, "ubuntu-noble-sanitizers")
+
+    generate_step = step_with_name(matrix_steps, "Generate CI scripts")
+    require(
+        generate_step is not None,
+        "sanitizer matrix job must have a 'Generate CI scripts' step",
+    )
+    require(
+        "--repeat-until-pass" not in str(generate_step.get("run", "")),
+        "sanitizer generate stage must not pass --repeat-until-pass "
+        "(ignored at generate; run-ci.py applies --repeat only at the test stage)",
+    )
+
+    test_step = step_with_name(matrix_steps, "Test")
+    require(test_step is not None, "sanitizer matrix job must have a 'Test' step")
+    test_run = str(test_step.get("run", ""))
+    require(
+        "--repeat-until-pass 1" in test_run and "--repeat-after-timeout 1" in test_run,
+        "sanitizer test stage must pass --repeat-until-pass 1 and "
+        "--repeat-after-timeout 1 so sanitizer findings are not masked by retries",
+    )
+
     junit_upload = step_with_name(matrix_steps, "Upload JUnit test results")
     require(
         junit_upload is not None,

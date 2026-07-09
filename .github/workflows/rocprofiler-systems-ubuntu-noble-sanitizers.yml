@@ -155,7 +155,6 @@ jobs:
           python3 ./scripts/run-ci.py --stage generate \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
             --build-jobs $(nproc) \
-            --repeat-until-pass 1 \
             --site GitHub \
             -B build \
             -- \
@@ -242,6 +241,8 @@ jobs:
         run: |
           python3 ./scripts/run-ci.py --stage test \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}-${{ matrix.sanitizer-type }}-sanitizer" \
+            --repeat-until-pass 1 \
+            --repeat-after-timeout 1 \
             -B build
 
       - name: ccache stats
