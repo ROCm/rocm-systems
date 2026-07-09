@@ -22,9 +22,8 @@
 # standard layout:
 #   <prefix>/bin/mirage
 #   <prefix>/bin/rocjitsu
-#   <prefix>/lib/librocjitsu.so            (KMD LD_PRELOAD interposer)
-#   <prefix>/lib/librocjitsu_core.so       (simulator runtime + VM API)
-#   <prefix>/lib/libsimdojo.so             (simulation engine)
+#   <prefix>/lib/librocjitsu.so            (combined rocjitsu library:
+#                                          VM API + KMD interposer)
 #   <prefix>/lib/librocjitsu_hooks.so      (DBT HSA hooks)
 #   <prefix>/share/rocjitsu/configs/*.json
 # `mirage` searches `../lib` relative to its own binary (see
@@ -101,11 +100,11 @@ trap '"$ENGINE" rm -f "$CID" >/dev/null 2>&1 || true' EXIT
 
 # --- Report -----------------------------------------------------------
 echo "== Installed artifacts ==" >&2
-ls -lh "$OUTPUT_PREFIX"/bin/mirage "$OUTPUT_PREFIX"/lib/librocjitsu*.so "$OUTPUT_PREFIX"/lib/libsimdojo.so 2>&1 || true
+ls -lh "$OUTPUT_PREFIX"/bin/mirage "$OUTPUT_PREFIX"/lib/librocjitsu*.so 2>&1 || true
 
 if command -v objdump >/dev/null 2>&1; then
     echo "== glibc version requirements (max GLIBC_* symbol per binary) ==" >&2
-    for f in "$OUTPUT_PREFIX"/bin/mirage "$OUTPUT_PREFIX"/lib/librocjitsu*.so "$OUTPUT_PREFIX"/lib/libsimdojo.so; do
+    for f in "$OUTPUT_PREFIX"/bin/mirage "$OUTPUT_PREFIX"/lib/librocjitsu*.so; do
         [ -f "$f" ] || continue
         maxglibc=$(objdump -T "$f" 2>/dev/null \
             | grep -oE "GLIBC_[0-9]+\.[0-9]+" \

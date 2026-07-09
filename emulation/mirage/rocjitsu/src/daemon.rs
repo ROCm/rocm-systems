@@ -81,6 +81,42 @@ struct Shared {
 unsafe impl Send for Shared {}
 unsafe impl Sync for Shared {}
 
+/// Attach the execution plugins a daemon config selects. Reads the config
+/// JSON and hands it to `rj_vm_load_plugins`, resolving plugin shared
+/// objects by explicit path from `plugin_dir`. Non-fatal: every failure
+/// path only warns so the daemon still serves emulation without plugins.
+fn load_daemon_plugins(shared: &Arc<Shared>, config_path: &Path, plugin_dir: &Path) {
+    let config_json = match std::fs::read_to_string(config_path) {
+        Ok(json) => json,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                config = %config_path.display(),
+                "rocjitsu daemon: cannot read config for plugin loading; \
+                 continuing without plugins"
+            );
+            return;
+        }
+    };
+    let (Ok(cfg_json), Ok(dir)) = (
+        CString::new(config_json),
+        CString::new(plugin_dir.as_os_str().as_encoded_bytes()),
+    ) else {
+        tracing::warn!("rocjitsu daemon: config or plugin path is not a valid C string");
+        return;
+    };
+    match unsafe { shared.lib.vm_load_plugins(shared.vm, &cfg_json, &dir) } {
+        Some(rocjitsu_sys::ROCJITSU_STATUS_SUCCESS) => {}
+        Some(status) => tracing::warn!(
+            status,
+            "rocjitsu daemon: rj_vm_load_plugins failed; continuing without plugins"
+        ),
+        None => tracing::debug!(
+            "rocjitsu daemon: loaded library predates rj_vm_load_plugins; plugins unsupported"
+        ),
+    }
+}
+
 /// A running rocjitsu daemon. Dropping it (or calling
 /// [`EmulatorDaemon::stop`]) tears the server down cleanly: it stops
 /// accepting, unblocks and joins all client threads, stops the engine,
@@ -125,6 +161,22 @@ impl Daemon {
             ));
         }
         let shared = Arc::new(Shared { lib, vm });
+
+        // Attach the execution plugins the config selects (its `plugins`
+        // and `sinks` sections) before the engine runs. The daemon is not
+        // re-`exec`'d, so it cannot rely on a launcher-populated
+        // `LD_LIBRARY_PATH`; resolve the plugin shared objects by explicit
+        // path from the directory the rocjitsu library lives in, where the
+        // build and install layouts co-locate
+        // `librocjitsu_plugin_<name>.so`. A plugin loaded here carries its
+        // own logic and resolves nothing from the simulator at load time.
+        // Plugin failures are logged and skipped by the loader; a library
+        // that predates the loader reports no support. None of this is fatal
+        // — the daemon still serves emulation without plugins — so failures
+        // only warn.
+        if let Some(plugin_dir) = lib_path.parent() {
+            load_daemon_plugins(&shared, config_path, plugin_dir);
+        }
 
         // Bind the listening socket *before* spawning the engine so a
         // bind failure leaves nothing to tear down but the VM.
