@@ -20,16 +20,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tools.config_management import hash_manager  # noqa: E402
 
-CONFIGS_ROOT: Path = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
-HASH_FILE: Path = PROJECT_ROOT / "src" / "utils" / ".config_hashes.json"
-
 
 def main() -> int:
-    if not CONFIGS_ROOT.is_dir():
-        print(f"ERROR: analysis_configs directory not found at: {CONFIGS_ROOT}")
+    configs_root = hash_manager.ANALYSIS_CONFIGS_PATH
+    if not configs_root.is_dir():
+        print(f"ERROR: analysis_configs directory not found at: {configs_root}")
         return 2
 
-    changes: dict = hash_manager.detect_changes(CONFIGS_ROOT, HASH_FILE)
+    changes: dict = hash_manager.detect_changes(configs_root, hash_manager.HASH_DB_PATH)
 
     errors: list[str] = [
         f"Arch '{arch}' removed from disk but still in .config_hashes.json.\n"
