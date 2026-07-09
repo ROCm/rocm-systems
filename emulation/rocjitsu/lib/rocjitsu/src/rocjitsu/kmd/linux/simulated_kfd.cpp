@@ -3,10 +3,14 @@
 
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -450,6 +454,9 @@ void SimulatedKfd::init_command_processors_locked() {
           [this](uint32_t process_id, uint64_t gpu_va, size_t size) -> bool {
             return allocate_scratch_backing(process_id, gpu_va, size);
           });
+      for (auto *cu : cp->compute_units())
+        cu->set_trap_handler(
+            [this](amdgpu::Wavefront &wf, uint32_t trap_id) { return on_wave_trap(wf, trap_id); });
     });
     g.cps_initialized = true;
   }
@@ -2224,6 +2231,160 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) 
   return nullptr;
 }
 
+namespace {
+
+kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf) {
+  kmd::CwsrWaveState state;
+  const uint32_t raw_status = wf.status_raw();
+  state.pc = wf.pc;
+  state.exec = wf.exec();
+  state.vcc = wf.vcc();
+  state.m0 = wf.m0();
+  state.mode = wf.mode_raw();
+  state.trapsts = wf.trapsts();
+  state.saved_status_halt = (raw_status >> 13) & 1u;
+  state.status = raw_status | (1u << 13);
+  state.wave_stopped = true;
+  state.trap_id = wf.trap_id();
+  state.wave_id = wf.debug_wave_id();
+  state.group_ids = {wf.wg_id(), 0u, 0u};
+  state.wave_in_group = 0;
+  state.queue_packet_id = wf.dispatch_id() & 0x1FFFFFFu;
+  state.num_sgprs = wf.num_sgprs();
+  state.num_vgprs = wf.num_vgprs();
+
+  state.sgprs.resize(state.num_sgprs);
+  for (uint32_t s = 0; s < state.num_sgprs; ++s)
+    state.sgprs[s] = wf.debug_read_sgpr(s);
+  state.vgprs.resize(static_cast<size_t>(state.num_vgprs) * 64);
+  for (uint32_t r = 0; r < state.num_vgprs; ++r)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      state.vgprs[static_cast<size_t>(r) * 64 + lane] = wf.debug_read_vgpr(r, lane);
+  return state;
+}
+
+} // namespace
+
+void SimulatedKfd::raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                                     uint32_t gpu_id, uint64_t exception_mask) {
+  if (!proc)
+    return;
+  {
+    std::lock_guard<std::mutex> lk(debug_events_mutex_);
+    auto &queue = debug_events_[proc->client_pid()][queue_id];
+    queue.gpu_id = gpu_id;
+    queue.mask |= exception_mask;
+  }
+  std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+  auto queue = proc->queue_snapshot_map_.find(queue_id);
+  if (queue != proc->queue_snapshot_map_.end())
+    queue->second.exception_status |= exception_mask;
+}
+
+void SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
+                                               uint32_t gpu_id, uint64_t ctx_base,
+                                               uint32_t ctx_size) {
+  auto *gpu = find_gpu(gpu_id);
+  if (!gpu || !gpu->soc || ctx_base == 0)
+    return;
+
+  std::vector<kmd::CwsrWaveState> waves;
+  gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    for (auto *cu : cp->compute_units()) {
+      for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
+        auto *wave = cu->wf(i);
+        if (wave->debug_halted() && wave->process_id() == process_id &&
+            wave->queue_id() == queue_id)
+          waves.push_back(build_cwsr_wave_state(*wave));
+      }
+    }
+  });
+  if (waves.empty())
+    return;
+
+  auto *memory = gpu->soc->memory();
+  kmd::serialize_queue_cwsr(ctx_base, ctx_size, waves, [&](uint64_t address, uint32_t value) {
+    memory->write32(address, value, process_id);
+  });
+}
+
+bool SimulatedKfd::on_wave_trap(amdgpu::Wavefront &wave, uint32_t trap_id) {
+  const uint32_t process_id = wave.process_id();
+  const uint32_t queue_id = wave.queue_id();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  const pid_t target_pid = proc->client_pid();
+
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(target_pid);
+    if (session == debug_sessions_.end() || !session->second.enabled)
+      return false;
+  }
+
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = queue->second.ctx_save_restore_address;
+    ctx_size = queue->second.ctx_save_restore_area_size;
+    gpu_id = queue->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+
+  if (wave.debug_wave_id() == 0)
+    wave.set_debug_wave_id(next_debug_wave_id_.fetch_add(1, std::memory_order_relaxed));
+  wave.debug_trap(trap_id);
+
+  serialize_queue_debug_waves(process_id, queue_id, gpu_id, ctx_base, ctx_size);
+  constexpr uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP);
+  raise_debug_event(proc, queue_id, gpu_id, exception_mask);
+
+  // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
+  // the descriptor, then perform notifier I/O without holding a driver lock.
+  UniqueFd notifier;
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto session = debug_sessions_.find(target_pid);
+    if (session != debug_sessions_.end() && session->second.dbg_fd >= 0 &&
+        (session->second.exception_enable_mask & exception_mask) != 0)
+      notifier = UniqueFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+  }
+  if (notifier.get() >= 0) {
+    const uint64_t one = 1;
+    [[maybe_unused]] const ssize_t written = ::write(notifier.get(), &one, sizeof(one));
+  }
+  return true;
+}
+
+int SimulatedKfd::debug_query_event(pid_t target_pid, uint64_t enabled_mask,
+                                    kfd_ioctl_dbg_trap_query_debug_event_args &args) {
+  const uint64_t clear_mask = args.exception_mask;
+  std::lock_guard<std::mutex> lk(debug_events_mutex_);
+  auto process = debug_events_.find(target_pid);
+  if (process == debug_events_.end())
+    return -EAGAIN;
+  auto &queues = process->second;
+  for (auto queue = queues.begin(); queue != queues.end(); ++queue) {
+    if ((queue->second.mask & enabled_mask) == 0)
+      continue;
+    args.exception_mask = queue->second.mask;
+    args.queue_id = queue->first;
+    args.gpu_id = queue->second.gpu_id;
+    queue->second.mask &= ~clear_mask;
+    if (queue->second.mask == 0)
+      queues.erase(queue);
+    return 0;
+  }
+  return -EAGAIN;
+}
+
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
 int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
@@ -2445,6 +2606,17 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_DISABLE:
     // Erasing releases the SCM_RIGHTS-transferred notifier in daemon mode. In
     // local mode the session does not own the debugger's descriptor.
+    {
+      std::lock_guard<std::mutex> event_lock(debug_events_mutex_);
+      debug_events_.erase(target_pid);
+    }
+    if (target_proc != nullptr) {
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      for (auto &[queue_id, queue] : target_proc->queue_snapshot_map_) {
+        [[maybe_unused]] const auto id = queue_id;
+        queue.exception_status = 0;
+      }
+    }
     debug_sessions_.erase(target_pid);
     return 0;
   // Recognized ops whose handlers are not wired up yet. The kernel dispatches
@@ -2489,7 +2661,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
     return 0;
   case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
-    return -EAGAIN;
+    return debug_query_event(target_pid, session_it->second.exception_enable_mask,
+                             args->query_debug_event);
   case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
     return debug_queue_snapshot(target_proc, args->queue_snapshot);
   case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:

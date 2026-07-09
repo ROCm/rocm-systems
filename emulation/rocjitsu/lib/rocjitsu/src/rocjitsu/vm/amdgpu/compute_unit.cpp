@@ -28,6 +28,13 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
+  return cu_.read_sgpr(sgpr_alloc_.base + reg);
+}
+
+uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
+  return cu_.read_vgpr(vgpr_alloc_.base + reg, lane);
+}
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
