@@ -142,14 +142,16 @@ TEST_F(test_code_object_writer_t, ProvidedWriteInstructionAfterEndCodeObj_Throws
 
 TEST_F(test_code_object_writer_t, ProvidedWriteKernelWithoutAnyScope_Throws)
 {
-    expect_runtime_throw([&]() { m_writer.write_kernel(1, "kernel0"); });
+    expect_runtime_throw(
+        [&]() { m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{1, "kernel0"}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedWriteKernelAfterEndCodeObj_Throws)
 {
     m_writer.start_code_obj(0);
     m_writer.end_code_obj();
-    expect_runtime_throw([&]() { m_writer.write_kernel(1, "kernel0"); });
+    expect_runtime_throw(
+        [&]() { m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{1, "kernel0"}); });
 }
 
 TEST_F(test_code_object_writer_t, ProvidedCodeObjDesc_SerializesIt)
@@ -190,24 +192,23 @@ TEST_F(test_code_object_writer_t, ProvidedNoKernels_SerializesEmptyKernelsArray)
 
 TEST_F(test_code_object_writer_t, ProvidedKernel_SerializesItInsideCodeObj)
 {
-    constexpr uint64_t kernel_id = 42;
-    const std::string  name      = "kernel0";
+    const rocprofiler_compute_tool::kernel_t kernel{42, "kernel0"};
 
     m_writer.start_code_obj(1);
-    m_writer.write_kernel(kernel_id, name);
+    m_writer.write_kernel(kernel);
     m_writer.end_code_obj();
 
     const auto  json    = nlohmann::json::parse(m_writer.get_result());
     const auto& kernels = json["code_objects"][0]["kernels"];
     ASSERT_EQ(kernels.size(), 1);
-    expect_kernel_json(kernels[0], kernel_id, name);
+    expect_kernel_json(kernels[0], kernel.kernel_id, kernel.name);
 }
 
 TEST_F(test_code_object_writer_t, ProvidedMultipleKernels_SerializesAllInOrder)
 {
     m_writer.start_code_obj(1);
-    m_writer.write_kernel(42, "kernel0");
-    m_writer.write_kernel(43, "kernel1");
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{42, "kernel0"});
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{43, "kernel1"});
     m_writer.end_code_obj();
 
     const auto  json    = nlohmann::json::parse(m_writer.get_result());
@@ -220,12 +221,12 @@ TEST_F(test_code_object_writer_t, ProvidedMultipleKernels_SerializesAllInOrder)
 TEST_F(test_code_object_writer_t, ProvidedKernelsInDifferentCodeObjs_SerializesUnderRespectiveOwners)
 {
     m_writer.start_code_obj(100);
-    m_writer.write_kernel(42, "kernel0");
-    m_writer.write_kernel(43, "kernel1");
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{42, "kernel0"});
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{43, "kernel1"});
     m_writer.end_code_obj();
 
     m_writer.start_code_obj(200);
-    m_writer.write_kernel(44, "kernel2");
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{44, "kernel2"});
     m_writer.end_code_obj();
 
     const auto json = nlohmann::json::parse(m_writer.get_result());
@@ -330,7 +331,7 @@ TEST_F(test_code_object_writer_t, ProvidedInstruction_SerializesItInsideSymbol)
 TEST_F(test_code_object_writer_t, ProvidedKernelAndInstruction_PreservesInstructionOutput)
 {
     m_writer.start_code_obj(1);
-    m_writer.write_kernel(42, "kernel0");
+    m_writer.write_kernel(rocprofiler_compute_tool::kernel_t{42, "kernel0"});
     m_writer.start_symbol(m_symbol0);
     m_writer.write_instruction(m_inst0);
     m_writer.end_symbol();

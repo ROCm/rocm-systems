@@ -159,7 +159,7 @@ class MockCodeObjectWriter : public rocprofiler_compute_tool::code_object_writer
 public:
     void        start_code_obj(size_t obj_id) override;
     void        end_code_obj() override;
-    void        write_kernel(uint64_t kernel_id, const std::string& name) override;
+    void        write_kernel(const rocprofiler_compute_tool::kernel_t& kernel) override;
     void        start_symbol(const rocprofiler_compute_tool::symbol_t& symbol) override;
     void        end_symbol() override;
     void        write_instruction(const rocprofiler_compute_tool::instruction_t& inst) override;
@@ -187,7 +187,8 @@ public:
     };
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void on_kernel_symbol_register(size_t code_object_id, uint64_t kernel_id, const std::string& name) override;
+    void on_kernel_symbol_register(size_t                                    code_object_id,
+                                   const rocprofiler_compute_tool::kernel_t& kernel) override;
     void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 

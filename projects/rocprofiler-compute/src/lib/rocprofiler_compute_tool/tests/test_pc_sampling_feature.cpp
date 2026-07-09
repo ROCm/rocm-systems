@@ -41,17 +41,16 @@ TEST_F(TestPcSamplingFeature, OnKernelSymbolRegister_ForwardsToCollector)
 {
     auto feature = create_feature();
 
-    constexpr size_t   code_object_id = 222;
-    constexpr uint64_t kernel_id      = 99;
-    const std::string  name           = "kernel0";
+    constexpr size_t code_object_id = 222;
+    const kernel_t   kernel{99, "kernel0"};
 
-    feature.on_kernel_symbol_register(code_object_id, kernel_id, name);
+    feature.on_kernel_symbol_register(code_object_id, kernel);
 
     const auto& calls = m_collector->get_kernel_symbol_register_calls();
     ASSERT_EQ(calls.size(), 1);
     EXPECT_EQ(calls[0].code_object_id, code_object_id);
-    EXPECT_EQ(calls[0].kernel_id, kernel_id);
-    EXPECT_EQ(calls[0].name, name);
+    EXPECT_EQ(calls[0].kernel_id, kernel.kernel_id);
+    EXPECT_EQ(calls[0].name, kernel.name);
 }
 
 TEST_F(TestPcSamplingFeature, Finalize_WritesCollectorAndSnapshotsCollectorSourcePaths)

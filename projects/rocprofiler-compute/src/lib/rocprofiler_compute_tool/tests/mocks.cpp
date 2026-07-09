@@ -265,7 +265,7 @@ void MockCodeObjectWriter::start_code_obj(size_t obj_id)
 
 void MockCodeObjectWriter::end_code_obj() {}
 
-void MockCodeObjectWriter::write_kernel(uint64_t, const std::string&)
+void MockCodeObjectWriter::write_kernel(const rocprofiler_compute_tool::kernel_t& /*kernel*/)
 {
     m_empty = false;
 }
@@ -313,11 +313,10 @@ void MockPcSamplingCollector::on_code_object_load(
     ++load_count;
 }
 
-void MockPcSamplingCollector::on_kernel_symbol_register(size_t             code_object_id,
-                                                        uint64_t           kernel_id,
-                                                        const std::string& name)
+void MockPcSamplingCollector::on_kernel_symbol_register(size_t code_object_id,
+                                                        const rocprofiler_compute_tool::kernel_t& kernel)
 {
-    m_kernel_symbol_register_calls.push_back({code_object_id, kernel_id, name});
+    m_kernel_symbol_register_calls.push_back({code_object_id, kernel.kernel_id, kernel.name});
 }
 
 void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer)

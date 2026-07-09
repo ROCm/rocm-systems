@@ -99,8 +99,10 @@ TEST_F(test_pc_sampling_collector_t, ProvidedKernelSymbols_WritesThemUnderCodeOb
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    m_pc_sampling_collector->on_kernel_symbol_register(m_mem_info.code_object_id, 100, "kernel1");
-    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 99, "kernel0");
+    m_pc_sampling_collector->on_kernel_symbol_register(m_mem_info.code_object_id,
+                                                       kernel_t{100, "kernel1"});
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id,
+                                                       kernel_t{99, "kernel0"});
 
     m_pc_sampling_collector->finalize(*m_writer);
 
@@ -113,7 +115,7 @@ TEST_F(test_pc_sampling_collector_t, ProvidedKernelSymbols_WritesThemUnderCodeOb
 TEST_F(test_pc_sampling_collector_t, ProvidedOrphanKernelSymbol_DoesNotWriteIt)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
-    m_pc_sampling_collector->on_kernel_symbol_register(999, 100, "orphan");
+    m_pc_sampling_collector->on_kernel_symbol_register(999, kernel_t{100, "orphan"});
 
     m_pc_sampling_collector->finalize(*m_writer);
 
@@ -133,9 +135,12 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectsWithoutKernelSymbols_Wri
 TEST_F(test_pc_sampling_collector_t, ProvidedMultipleKernelSymbols_PreservesOrder)
 {
     m_pc_sampling_collector->on_code_object_load(m_file_info);
-    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 99, "kernel0");
-    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 100, "kernel1");
-    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id, 101, "kernel2");
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id,
+                                                       kernel_t{99, "kernel0"});
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id,
+                                                       kernel_t{100, "kernel1"});
+    m_pc_sampling_collector->on_kernel_symbol_register(m_file_info.code_object_id,
+                                                       kernel_t{101, "kernel2"});
 
     m_pc_sampling_collector->finalize(*m_writer);
 

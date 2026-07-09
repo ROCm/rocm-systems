@@ -93,9 +93,9 @@ void mock_code_object_writer_t::end_code_obj()
     ++m_ended_code_obj_count;
 }
 
-void mock_code_object_writer_t::write_kernel(uint64_t kernel_id, const std::string& name)
+void mock_code_object_writer_t::write_kernel(const kernel_t& kernel)
 {
-    m_kernel_descriptions.push_back({m_current_code_obj_id, kernel_id, name});
+    m_kernel_descriptions.push_back({m_current_code_obj_id, kernel.kernel_id, kernel.name});
 }
 
 void mock_code_object_writer_t::start_symbol(const symbol_t& symbol)
