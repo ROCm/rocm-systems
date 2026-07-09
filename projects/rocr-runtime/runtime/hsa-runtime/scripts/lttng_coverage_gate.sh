@@ -35,6 +35,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # hsa-runtime root is the parent of scripts/.
 HSA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Shared Python tooling (project-agnostic; curated_apis.yaml and the
+# migration inventory itself remain per-project in $SCRIPT_DIR).
+SHARED_SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../../../../../shared/lttng/scripts" && pwd)"
+COVERAGE_CHECK="$SHARED_SCRIPTS_DIR/lttng_coverage_check.py"
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -82,100 +87,29 @@ fi
 # ---------------------------------------------------------------------------
 STRICT="${LTTNG_COVERAGE_STRICT:-0}"
 
-# We scan only hsa_table_interface.cpp -- that's where every migrated
-# wrapper lives.
-SRC_FILE="$HSA_ROOT/core/common/hsa_table_interface.cpp"
-if [ ! -f "$SRC_FILE" ]; then
-    echo "WARN: $SRC_FILE not found; skipping body-content gate"
-else
-    PYTHON_GATE="$(cat <<'PY'
-import re, sys
+# Inventory symbol names (first column of the TSV), deduplicated.
+awk '{print $1}' "$INV" | sort -u > "$TMP_DIR/inventory_names.txt"
 
-src_path = sys.argv[1]
-inv_path = sys.argv[2]
+# Body-content gate driven by lttng_coverage_check.py (subcommand `body`),
+# shared with HIP's coverage gate. Walks $HSA_ROOT for .cpp wrappers (every
+# migrated HSA wrapper lives in hsa_table_interface.cpp) and verifies each
+# inventoried symbol's body contains both an ENTER call and a balancing
+# EXIT macro/helper. See lttng_coverage_check.py for full semantics.
+set +e
+python3 "$COVERAGE_CHECK" body \
+    --src-dir "$HSA_ROOT" \
+    --names-file "$TMP_DIR/inventory_names.txt" \
+    > "$TMP_DIR/body.log" 2>&1
+BODY_RC=$?
+set -e
+cat "$TMP_DIR/body.log"
 
-with open(src_path) as f:
-    text = f.read()
-with open(inv_path) as f:
-    names = [ln.split('\t', 1)[0].strip() for ln in f if ln.strip()]
-
-ENTER_RE = re.compile(r'rocm_trace_emit_hsa_api_enter\s*\(')
-EXIT_MACRO_RE = re.compile(r'\bROCR_TRACE_API_RET_[A-Z0-9_]+\s*\(')
-EXIT_FN_RE = re.compile(r'rocm_trace_emit_hsa_api_exit_[a-z0-9_]+\s*\(')
-
-def find_bodies(text, name):
-    """Yield each function-definition body whose signature begins with
-    `name(...)` followed by '{ ... }'."""
-    pat = re.compile(r'\b' + re.escape(name) + r'\s*\(')
-    for m in pat.finditer(text):
-        depth = 0
-        i = m.end() - 1
-        while i < len(text):
-            c = text[i]
-            if c == '(':
-                depth += 1
-            elif c == ')':
-                depth -= 1
-                if depth == 0:
-                    j = text.find('{', i)
-                    if j < 0:
-                        break
-                    bdepth = 0
-                    k = j
-                    while k < len(text):
-                        if text[k] == '{':
-                            bdepth += 1
-                        elif text[k] == '}':
-                            bdepth -= 1
-                            if bdepth == 0:
-                                yield text[j:k+1]
-                                break
-                        k += 1
-                    break
-            i += 1
-
-
-MARKER = '__rocm_corr'
-
-bad = []
-not_found = []
-unmigrated = []
-for n in names:
-    chosen = None
-    for body in find_bodies(text, n):
-        if MARKER in body:
-            chosen = body
-            break
-    if chosen is None:
-        # Listed in inventory but definition we found has no migration
-        # marker -- treat as un-migrated for body-content purposes.
-        unmigrated.append(n)
-        continue
-    has_enter = bool(ENTER_RE.search(chosen))
-    has_exit = bool(EXIT_MACRO_RE.search(chosen) or EXIT_FN_RE.search(chosen))
-    if not (has_enter and has_exit):
-        bad.append((n, has_enter, has_exit))
-
-for n, e, x in bad:
-    print(f'  body-content miss: {n}: enter={e} exit={x}')
-print(f'BODY: {len(bad)} body-content gaps; '
-      f'{len(unmigrated)} not-migrated-but-listed; '
-      f'{len(not_found)} not_found')
-sys.exit(1 if bad else 0)
-PY
-)"
-    set +e
-    python3 -c "$PYTHON_GATE" "$SRC_FILE" "$INV" > "$TMP_DIR/body.log" 2>&1
-    BODY_RC=$?
-    set -e
-    cat "$TMP_DIR/body.log"
-    if [ "$BODY_RC" -ne 0 ]; then
-        if [ "$STRICT" = "1" ]; then
-            echo "FAIL: body-content coverage gate failed (LTTNG_COVERAGE_STRICT=1)"
-            exit 1
-        else
-            echo "WARN: body-content coverage gate found gaps (set LTTNG_COVERAGE_STRICT=1 to fail the build)"
-        fi
+if [ "$BODY_RC" -ne 0 ]; then
+    if [ "$STRICT" = "1" ]; then
+        echo "FAIL: body-content coverage gate failed (LTTNG_COVERAGE_STRICT=1)"
+        exit 1
+    else
+        echo "WARN: body-content coverage gate found gaps (set LTTNG_COVERAGE_STRICT=1 to fail the build)"
     fi
 fi
 
@@ -189,7 +123,7 @@ CURATED_YAML="$SCRIPT_DIR/curated_apis.yaml"
 if [ -f "$CURATED_YAML" ]; then
     # Curated APIs (one per line). Drives the inventory-membership check
     # below; the actual body-content scan lives in lttng_coverage_check.py.
-    python3 "$SCRIPT_DIR/lttng_coverage_check.py" list-curated \
+    python3 "$COVERAGE_CHECK" list-curated \
         --yaml "$CURATED_YAML" | sort -u > "$TMP_DIR/curated.txt"
 
     # All inventoried wrappers (already in $TMP_DIR/migrated.txt from gate 1).
@@ -207,7 +141,7 @@ if [ -f "$CURATED_YAML" ]; then
     # (_CURATED) and HSA (_CURATED_HSA) variants, so the same script
     # serves both providers.
     set +e
-    python3 "$SCRIPT_DIR/lttng_coverage_check.py" curated \
+    python3 "$COVERAGE_CHECK" curated \
         --src-dir "$HSA_ROOT" \
         --yaml "$CURATED_YAML" \
         > "$TMP_DIR/curated.log" 2>&1

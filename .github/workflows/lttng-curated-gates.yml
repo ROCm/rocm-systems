@@ -16,12 +16,10 @@ on:
     paths:
       - 'projects/clr/hipamd/scripts/curated_apis.yaml'
       - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
-      - 'projects/clr/hipamd/scripts/lttng_curated_verify.py'
-      - 'projects/clr/hipamd/scripts/lttng_curated_lib.py'
       - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
       - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_lib.py'
+      - 'shared/lttng/scripts/lttng_curated_verify.py'
+      - 'shared/lttng/scripts/lttng_curated_lib.py'
       - '.github/workflows/lttng-curated-gates.yml'
   push:
     branches: [develop]
@@ -45,6 +43,7 @@ jobs:
           sparse-checkout: |
             projects/clr/hipamd/scripts
             projects/rocr-runtime/runtime/hsa-runtime/scripts
+            shared/lttng/scripts
             .github/workflows
 
       - name: Set up Python
@@ -62,7 +61,7 @@ jobs:
         # way that affects an OUT-handle's libclang-resolved C type, the
         # sidecar diff catches it.
         run: |
-          python3 projects/clr/hipamd/scripts/lttng_curated_verify.py \
+          python3 shared/lttng/scripts/lttng_curated_verify.py \
             --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
             --header /opt/rocm/include/hip/hip_runtime_api.h \
             --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
@@ -78,7 +77,7 @@ jobs:
         # per Task 15a). The --out-sidecar + diff catches header-side
         # OUT-handle type changes per the C10 fix.
         run: |
-          python3 projects/rocr-runtime/runtime/hsa-runtime/scripts/lttng_curated_verify.py \
+          python3 shared/lttng/scripts/lttng_curated_verify.py \
             --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
             --header /opt/rocm/include/hsa/hsa.h \
             --header /opt/rocm/include/hsa/hsa_ext_amd.h \

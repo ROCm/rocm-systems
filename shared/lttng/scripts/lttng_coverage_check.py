@@ -11,14 +11,15 @@ Subcommands:
                 Used by the shell script to feed the curated-vs-inventory
                 set diff that runs before the body-content scan.
 
-  body          Body-content gate (defense-in-depth). For each migrated
-                symbol name listed in --names-file, locate its function
-                body under --src-dir and require:
-                  - >=1 rocm_trace_emit_hip_api_enter call
+  body          Body-content gate (defense-in-depth). Shared by both the
+                HIP and HSA coverage gates. For each migrated symbol name
+                listed in --names-file, locate its function body under
+                --src-dir and require:
+                  - >=1 rocm_trace_emit_{hip,hsa}_api_enter call
                   - AND (>=1 ROCM_TRACE_RET_*/ROCR_TRACE_API_RET_* macro
-                    OR    >=1 rocm_trace_emit_hip_api_exit_* call)
+                    OR    >=1 rocm_trace_emit_{hip,hsa}_api_exit_* call)
                 Symbols whose definition lives in a TU not touched by
-                the migrator (no rocm_trace_emit_hip_api_enter(__func__)
+                the migrator (no rocm_trace_emit_{hip,hsa}_api_enter(__func__)
                 marker in any candidate body) are reported as
                 'not-migrated-but-listed' and do not fail the gate; the
                 symbol-coverage gate vouches for them upstream.
@@ -120,10 +121,14 @@ def gate_list_curated(args):
 # Subcommand: body
 # ---------------------------------------------------------------------------
 
-_BODY_ENTER_RE = re.compile(r'rocm_trace_emit_hip_api_enter\s*\(')
+# Provider-generic: matches both the HIP (rocm_trace_emit_hip_*) and HSA
+# (rocm_trace_emit_hsa_*) wrapper conventions so this shared checker works
+# unmodified for either project's --src-dir.
+_BODY_ENTER_RE = re.compile(r'rocm_trace_emit_(?:hip|hsa)_api_enter\s*\(')
 _BODY_EXIT_MACRO_RE = re.compile(
     r'\b(ROCM_TRACE_RET_[A-Z0-9_]+|ROCR_TRACE_API_RET_[A-Z0-9_]+)\s*\(')
-_BODY_EXIT_FN_RE = re.compile(r'rocm_trace_emit_hip_api_exit_[a-z0-9_]+\s*\(')
+_BODY_EXIT_FN_RE = re.compile(
+    r'rocm_trace_emit_(?:hip|hsa)_api_exit_[a-z0-9_]+\s*\(')
 
 # Presence in a candidate body => this is the migrated wrapper (vs. a
 # forward decl or pre-migration helper). The migrator injects an

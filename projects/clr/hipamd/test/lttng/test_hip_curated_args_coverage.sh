@@ -29,7 +29,7 @@ trap cleanup EXIT
 # the curated emit can fire).
 python3 - <<PY > "$WORK/harness.hip.cpp"
 import sys, os, json
-sys.path.insert(0, 'projects/clr/hipamd/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 SIDECAR = json.load(open('projects/clr/hipamd/scripts/curated_apis_sigs.json'))
 def header_c_type(api_name, arg_name):
@@ -593,7 +593,7 @@ lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch
 # comma-separated event-name list, not multiple positional args.
 EVENTS=$(python3 -c "
 import sys
-sys.path.insert(0, 'projects/clr/hipamd/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 print(','.join(f'rocm_hip:{a[\"api\"]}_args' for a in parse_yaml_file('$YAML')))
 ")
@@ -654,7 +654,7 @@ while read api; do
     fi
 done < <(python3 -c "
 import sys
-sys.path.insert(0, 'projects/clr/hipamd/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 for a in parse_yaml_file('$YAML'):
     print(a['api'])

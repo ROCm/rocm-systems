@@ -42,6 +42,11 @@ EXEMPT_FILE="$SCRIPT_DIR/lttng_coverage_exemptions.txt"
 # projects/clr/hipamd/src; the script itself is in projects/clr/hipamd/scripts.
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/src"
 
+# Shared Python tooling (project-agnostic; curated_apis.yaml and the
+# migration inventory itself remain per-project in $SCRIPT_DIR).
+SHARED_SCRIPTS_DIR="$(cd "$SCRIPT_DIR/../../../../shared/lttng/scripts" && pwd)"
+COVERAGE_CHECK="$SHARED_SCRIPTS_DIR/lttng_coverage_check.py"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -102,7 +107,7 @@ N_BODY_FAIL=0
 # inventoried symbol's body contains both an ENTER call and a balancing
 # EXIT macro/helper. See lttng_coverage_check.py for full semantics.
 set +e
-python3 "$SCRIPT_DIR/lttng_coverage_check.py" body \
+python3 "$COVERAGE_CHECK" body \
     --src-dir "$SRC_DIR" \
     --names-file "$WORK/inventory_names.txt" \
     > "$WORK/body.log" 2>&1
@@ -129,7 +134,7 @@ CURATED_YAML="$SCRIPT_DIR/curated_apis.yaml"
 if [ -f "$CURATED_YAML" ]; then
     # Curated APIs (one per line). Drives the inventory-membership check
     # below; the actual body-content scan lives in lttng_coverage_check.py.
-    python3 "$SCRIPT_DIR/lttng_coverage_check.py" list-curated \
+    python3 "$COVERAGE_CHECK" list-curated \
         --yaml "$CURATED_YAML" | sort -u > "$WORK/curated.txt"
 
     # All inventoried wrappers (already in $WORK/migrated.txt from gate 1).
@@ -145,7 +150,7 @@ if [ -f "$CURATED_YAML" ]; then
     # least one __rocm_in_ local. See lttng_coverage_check.py:gate_curated
     # for the implementation.
     set +e
-    python3 "$SCRIPT_DIR/lttng_coverage_check.py" curated \
+    python3 "$COVERAGE_CHECK" curated \
         --src-dir "$SRC_DIR" \
         --yaml "$CURATED_YAML" \
         > "$WORK/curated.log" 2>&1

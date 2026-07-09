@@ -40,7 +40,7 @@ trap cleanup EXIT
 # Generate the harness from the YAML so new curated APIs auto-extend.
 python3 - "$YAML" > "$WORK/harness.cpp" <<'PY'
 import sys
-sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 
 yaml_path = sys.argv[1]
@@ -254,7 +254,7 @@ lttng enable-channel --userspace --discard --subbuf-size=32768 --num-subbuf=4 ch
 # Enable each <api>_args event from the YAML.
 python3 - "$YAML" <<'PY' | xargs -r lttng enable-event --userspace --channel=ch1 >/dev/null
 import sys
-sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 events = []
 for a in parse_yaml_file(sys.argv[1]):
@@ -298,7 +298,7 @@ while read api; do
     fi
 done < <(python3 - "$YAML" <<'PY'
 import sys
-sys.path.insert(0, 'projects/rocr-runtime/runtime/hsa-runtime/scripts')
+sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
 for a in parse_yaml_file(sys.argv[1]):
     print(a['api'])

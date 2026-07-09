@@ -1,7 +1,7 @@
 """Unit tests for lttng_curated_lib. Run from worktree root:
-    python3 -m pytest projects/clr/hipamd/scripts/test_lttng_curated_lib.py -v
+    python3 -m pytest shared/lttng/scripts/test_lttng_curated_lib.py -v
 or:
-    python3 projects/clr/hipamd/scripts/test_lttng_curated_lib.py
+    python3 shared/lttng/scripts/test_lttng_curated_lib.py
 """
 import io
 import sys
