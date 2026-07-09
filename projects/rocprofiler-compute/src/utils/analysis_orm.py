@@ -27,6 +27,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     func,
     select,
@@ -41,7 +42,7 @@ from sqlalchemy.sql import Select
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "2.0.0"
 
 
 Base = declarative_base()
@@ -69,6 +70,8 @@ class Workload(Base):
     workload_roofline_data_points = relationship(
         "WorkloadRooflineData", back_populates="workload"
     )
+    # Workload can have multiple code objects
+    code_object_stores = relationship("CodeObjectStore", back_populates="workload")
 
 
 class MetricDefinition(Base):
@@ -146,27 +149,147 @@ class Kernel(Base):
     metric_values = relationship("KernelMetricValue", back_populates="kernel")
     # Kernel can have multiple roofline data points
     roofline_data_points = relationship("KernelRooflineData", back_populates="kernel")
-    # Kernel can have multiple pc_sampling values
-    pc_sampling_values = relationship("PCsampling", back_populates="kernel")
+    # Kernel can have multiple sampled instruction lines
+    instruction_lines = relationship("InstructionLine", back_populates="kernel")
 
 
-class PCsampling(Base):
-    __tablename__ = f"{PREFIX}pcsampling"
+class CodeObjectStore(Base):
+    __tablename__ = f"{PREFIX}code_object_store"
+    __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
-    pc_sampling_uuid = Column(Integer, primary_key=True)
-    kernel_uuid = Column(
-        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+    id = Column(Integer, primary_key=True)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
-    source = Column(String)
-    instruction = Column(String)
-    count = Column(Integer)
-    offset = Column(Integer)
-    count_issue = Column(Integer)
-    count_stall = Column(Integer)
-    stall_reason = Column(JSON)
+    pid = Column(Integer)
+    code_object_id = Column(Integer)
+    load_base = Column(Integer, nullable=True)
+    uri = Column(String, nullable=True)
 
-    # PCsampling can have one kernel
-    kernel = relationship("Kernel", back_populates="pc_sampling_values")
+    # Code object belongs to one workload
+    workload = relationship("Workload", back_populates="code_object_stores")
+    # One code object owns many instruction lines
+    instruction_lines = relationship(
+        "InstructionLine", back_populates="code_object_store"
+    )
+
+
+class InstructionLine(Base):
+    __tablename__ = f"{PREFIX}instruction_line"
+    __table_args__ = (
+        UniqueConstraint("code_object_store_id", "code_object_offset", "kernel_uuid"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    code_object_store_id = Column(
+        Integer, ForeignKey(f"{PREFIX}code_object_store.id"), nullable=False
+    )
+    # Attributed per-sample via dispatch correlation; nullable when the sample's
+    # dispatch has no kernel mapping.
+    kernel_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=True
+    )
+    code_object_offset = Column(Integer)
+    comment = Column(Text)
+    instruction = Column(Text)
+
+    # Instruction line belongs to one code object
+    code_object_store = relationship(
+        "CodeObjectStore", back_populates="instruction_lines"
+    )
+    # Instruction line is attributed to one kernel
+    kernel = relationship("Kernel", back_populates="instruction_lines")
+    # An instruction line has at most one sampled state
+    pc_sample_state = relationship(
+        "PCSampleState", back_populates="instruction_line", uselist=False
+    )
+
+
+class PCSampleState(Base):
+    __tablename__ = f"{PREFIX}pc_sample_state"
+
+    id = Column(Integer, primary_key=True)
+    instruction_line_id = Column(
+        Integer, ForeignKey(f"{PREFIX}instruction_line.id"), nullable=False
+    )
+    total_count = Column(Integer)
+    issue_count = Column(Integer, nullable=True)
+    stall_count = Column(Integer, nullable=True)
+
+    # State belongs to one instruction line
+    instruction_line = relationship("InstructionLine", back_populates="pc_sample_state")
+    # State has many stall-reason counts
+    stall_reasons = relationship(
+        "PCSampleStallReason", back_populates="pc_sample_state"
+    )
+    # State has many instruction-sample-type counts
+    instruction_samples = relationship(
+        "InstructionSample", back_populates="pc_sample_state"
+    )
+
+
+class PCSampleStallReasonType(Base):
+    __tablename__ = f"{PREFIX}pc_sample_stall_reason_type"
+
+    id = Column(Integer, primary_key=True)
+    text = Column(String, unique=True)
+
+    stall_reasons = relationship(
+        "PCSampleStallReason", back_populates="stall_reason_type"
+    )
+
+
+class PCSampleStallReason(Base):
+    __tablename__ = f"{PREFIX}pc_sample_stall_reason"
+
+    id = Column(Integer, primary_key=True)
+    pc_sample_state_id = Column(
+        Integer, ForeignKey(f"{PREFIX}pc_sample_state.id"), nullable=False
+    )
+    pc_sample_stall_reason_type_id = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}pc_sample_stall_reason_type.id"),
+        nullable=False,
+    )
+    count = Column(Integer)
+
+    pc_sample_state = relationship("PCSampleState", back_populates="stall_reasons")
+    stall_reason_type = relationship(
+        "PCSampleStallReasonType", back_populates="stall_reasons"
+    )
+
+
+class InstructionSampleType(Base):
+    __tablename__ = f"{PREFIX}instruction_sample_type"
+
+    id = Column(Integer, primary_key=True)
+    text = Column(String, unique=True)
+
+    instruction_samples = relationship(
+        "InstructionSample", back_populates="instruction_sample_type"
+    )
+
+
+class InstructionSample(Base):
+    __tablename__ = f"{PREFIX}instruction_sample"
+
+    id = Column(Integer, primary_key=True)
+    pc_sample_state_id = Column(
+        Integer, ForeignKey(f"{PREFIX}pc_sample_state.id"), nullable=False
+    )
+    instruction_sample_type_id = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_sample_type.id"),
+        nullable=False,
+    )
+    count = Column(Integer)
+
+    pc_sample_state = relationship(
+        "PCSampleState", back_populates="instruction_samples"
+    )
+    instruction_sample_type = relationship(
+        "InstructionSampleType", back_populates="instruction_samples"
+    )
 
 
 class KernelMetricValue(Base):

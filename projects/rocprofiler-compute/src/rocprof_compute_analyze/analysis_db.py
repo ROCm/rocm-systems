@@ -47,7 +47,10 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.pc_sampling_analysis import load_aggregated_pc_sampling
+from utils.pc_sampling_analysis import (
+    InstructionLineRecord,
+    normalize_pc_sampling_for_db,
+)
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     OpsSupport,
@@ -76,6 +79,18 @@ class ExpressionRow(NamedTuple):
     value: str
 
 
+def _get_or_create_type(
+    text: str,
+    cache: dict[str, Any],
+    orm_class: type,
+) -> Any:  # noqa: ANN401
+    """Return a de-duplicated lookup-table row for *text*, creating it once."""
+    if text not in cache:
+        cache[text] = orm_class(text=text)
+        Database.get_session().add(cache[text])
+    return cache[text]
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -91,18 +106,15 @@ class db_analysis(OmniAnalyze_Base):
             )
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
-        pc_sampling_tool_data = (
+        self._pc_sampling_tool_data_per_workload = (
             {path: load_pc_sampling_results(path) for path in self._runs}
             if self.pc_sampling_collected()
             else {}
         )
-        self._pc_sampling_data_per_workload = self.calc_pc_sampling_data(
-            pc_sampling_tool_data
-        )
         self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
         self._dispatch_data_per_workload = self.calc_dispatch_data(
-            pc_sampling_tool_data
+            self._pc_sampling_tool_data_per_workload
         )
         (
             self._metrics_info_data_per_workload,
@@ -209,27 +221,7 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add pc sampling data
-            for pc_sample in self._pc_sampling_data_per_workload.get(
-                workload_path, pd.DataFrame()
-            ).itertuples():
-                if pc_sample.kernel_name not in kernel_objs:
-                    console_warning(
-                        f"Kernel {pc_sample.kernel_name} from PC sampling data "
-                        "not found in dispatch data. Skipping PC sampling entry."
-                    )
-                    continue
-                Database.get_session().add(
-                    orm.PCsampling(
-                        source=pc_sample.source_line,
-                        instruction=pc_sample.instruction,
-                        count=pc_sample.count,
-                        offset=pc_sample.offset,
-                        count_issue=pc_sample.count_issued,
-                        count_stall=pc_sample.count_stalled,
-                        stall_reason=pc_sample.stall_reason,
-                        kernel=kernel_objs[pc_sample.kernel_name],
-                    )
-                )
+            self.add_pc_sampling_data(workload_path, workload_obj, kernel_objs)
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -399,42 +391,85 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Collected roofline ceilings")
         return roofline_ceilings_per_workload
 
-    def calc_pc_sampling_data(
+    def add_pc_sampling_data(
         self,
-        tool_data_per_workload: dict[str, Optional[dict[str, Any]]],
-    ) -> dict[str, pd.DataFrame]:
-        pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
+        workload_path: str,
+        workload_obj: orm.Workload,
+        kernel_objs: dict[str, orm.Kernel],
+    ) -> None:
+        """Insert the normalized PC-sampling rows for one workload."""
+        tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
+        if tool_data is None:
+            return
 
-        for workload_path in self._runs.keys():
-            pc_sampling_data = tool_data_per_workload.get(workload_path)
-            if pc_sampling_data is None:
-                console_warning(f"PC sampling data not found for {workload_path}.")
-                continue
+        pid = tool_data.get("metadata", {}).get("pid")
+        stall_reason_types: dict[str, orm.PCSampleStallReasonType] = {}
+        instruction_sample_types: dict[str, orm.InstructionSampleType] = {}
 
-            grouped_df = load_aggregated_pc_sampling(
-                pc_sampling_data,
-                group_by=["code_object_id", "code_object_offset"],
-                attach={"instruction", "source_line", "kernel_name"},
+        for code_object in normalize_pc_sampling_for_db(tool_data):
+            code_object_store = orm.CodeObjectStore(
+                pid=pid,
+                code_object_id=code_object.code_object_id,
+                load_base=code_object.load_base,
+                uri=code_object.uri,
+                workload=workload_obj,
             )
-            grouped_df = grouped_df.rename(columns={"code_object_offset": "offset"})
-            grouped_df = grouped_df[
-                [
-                    "offset",
-                    "count",
-                    "count_issued",
-                    "count_stalled",
-                    "stall_reason",
-                    "instruction",
-                    "source_line",
-                    "kernel_name",
-                ]
-            ]
+            Database.get_session().add(code_object_store)
+            for line in code_object.instruction_lines:
+                self._add_instruction_line(
+                    line,
+                    code_object_store,
+                    kernel_objs,
+                    stall_reason_types,
+                    instruction_sample_types,
+                )
 
-            pc_sampling_data_per_workload[workload_path] = grouped_df
+    @staticmethod
+    def _add_instruction_line(
+        line: InstructionLineRecord,
+        code_object_store: orm.CodeObjectStore,
+        kernel_objs: dict[str, orm.Kernel],
+        stall_reason_types: dict[str, orm.PCSampleStallReasonType],
+        instruction_sample_types: dict[str, orm.InstructionSampleType],
+    ) -> None:
+        """Insert one instruction line, its sample state, and child counts."""
+        instruction_line = orm.InstructionLine(
+            code_object_offset=line.code_object_offset,
+            comment=line.comment,
+            instruction=line.instruction,
+            code_object_store=code_object_store,
+            kernel=kernel_objs.get(line.kernel_name),
+        )
+        Database.get_session().add(instruction_line)
 
-        if pc_sampling_data_per_workload:
-            console_debug("Collected PC sampling data")
-        return pc_sampling_data_per_workload
+        sample_state = orm.PCSampleState(
+            total_count=line.total_count,
+            issue_count=line.issue_count,
+            stall_count=line.stall_count,
+            instruction_line=instruction_line,
+        )
+        Database.get_session().add(sample_state)
+
+        for text, count in line.stall_reasons.items():
+            Database.get_session().add(
+                orm.PCSampleStallReason(
+                    pc_sample_state=sample_state,
+                    stall_reason_type=_get_or_create_type(
+                        text, stall_reason_types, orm.PCSampleStallReasonType
+                    ),
+                    count=count,
+                )
+            )
+        for text, count in line.inst_types.items():
+            Database.get_session().add(
+                orm.InstructionSample(
+                    pc_sample_state=sample_state,
+                    instruction_sample_type=_get_or_create_type(
+                        text, instruction_sample_types, orm.InstructionSampleType
+                    ),
+                    count=count,
+                )
+            )
 
     @staticmethod
     def evaluate(
