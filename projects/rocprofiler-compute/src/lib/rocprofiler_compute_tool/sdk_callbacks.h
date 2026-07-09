@@ -138,6 +138,7 @@ private:
     std::unordered_map<uint64_t, iteration_multiplexing_dispatch_record_t> m_iteration_multiplexing_per_agent = {};
 
     static std::string truncate_name(std::string_view name);
+    static std::string strip_kd_suffix(std::string_view name);
     static std::string cxa_demangle(const std::string& mangled_name, int* status);
     static std::vector<std::string> split_by_regex(const std::string& s, const std::string& regex_pattern);
 };

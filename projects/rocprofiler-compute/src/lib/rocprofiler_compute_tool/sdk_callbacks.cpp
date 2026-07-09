@@ -344,16 +344,13 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         const bool                  pc_sampling_enabled = tool->pc_sampling.enabled();
         const bool                  filtering_by_name = !tool->kernel_filter_include_regex.empty();
 
-        std::string kernel_name;
-        if (pc_sampling_enabled || filtering_by_name)
-        {
-            const char* raw_kernel_name = data->kernel_name == nullptr ? "" : data->kernel_name;
-            int         demangle_status = 0;
-            kernel_name = truncate_name(cxa_demangle(raw_kernel_name, &demangle_status));
-        }
+        const char* raw_kernel_name = data->kernel_name == nullptr ? "" : data->kernel_name;
 
         if (filtering_by_name)
         {
+            const auto stripped_kernel_name = strip_kd_suffix(raw_kernel_name);
+            int        demangle_status      = 0;
+            const auto kernel_name = truncate_name(cxa_demangle(stripped_kernel_name, &demangle_status));
             try
             {
                 std::regex re(tool->kernel_filter_include_regex);
@@ -377,6 +374,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
 
         if (pc_sampling_enabled)
         {
+            const auto kernel_name = truncate_name(strip_kd_suffix(raw_kernel_name));
             tool->pc_sampling.on_kernel_symbol_register(static_cast<size_t>(data->code_object_id),
                                                         data->kernel_id,
                                                         kernel_name);
@@ -436,6 +434,16 @@ std::string SdkCallbacksImpl::truncate_name(std::string_view name)
     while ((rit != rend) && (*rit != ' ') && (*rit != ':'))
         rit++;
     return std::string{name.substr(rend - rit, rit - rbeg)};
+}
+
+std::string SdkCallbacksImpl::strip_kd_suffix(std::string_view name)
+{
+    constexpr std::string_view kd_suffix = ".kd";
+    if (name.size() >= kd_suffix.size() && name.substr(name.size() - kd_suffix.size()) == kd_suffix)
+    {
+        name.remove_suffix(kd_suffix.size());
+    }
+    return std::string{name};
 }
 
 std::string SdkCallbacksImpl::cxa_demangle(const std::string& mangled_name, int* status)
