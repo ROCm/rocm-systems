@@ -10,5 +10,5 @@ rj_add_object_library(rocjitsu_kmd
 )
 target_include_directories(
     rocjitsu_kmd
-    PRIVATE ${GENERATED_DIR} ${DRM_KERNEL_INCLUDE_DIR}
+    PRIVATE ${GENERATED_DIR}
 )

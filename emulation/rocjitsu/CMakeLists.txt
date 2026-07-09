@@ -64,13 +64,6 @@ set(DRM_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
 )
 
-# Vendored amdkfd driver headers (GPL-2.0 OR MIT). Rooted at the vendored kernel
-# source tree so headers resolve exactly as they do in-kernel, e.g.
-# "drivers/gpu/drm/amd/amdkfd/kfd_topology.h".
-set(DRM_KERNEL_INCLUDE_DIR
-    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux"
-)
-
 include(rj_log)
 
 # Install directory variables are used by subdirectories that add install rules.

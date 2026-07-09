@@ -5,9 +5,9 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "drivers/gpu/drm/amd/amdkfd/kfd_topology.h"
 #include "linux/uapi/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
@@ -70,10 +70,9 @@ DebugTopology debug_topology_for(uint32_t gfx_target_version) {
     // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
     // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
     if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
-      topo.debug_prop |=
-          HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX9_4_3 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT_GFX9_4_3;
+      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx943 | kmd::kWatchAddrMaskHiBitGfx943;
     else
-      topo.debug_prop |= HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX9 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT;
+      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx9 | kmd::kWatchAddrMaskHiBit;
 
     if (gc >= make_gc_ip_version(9, 4, 2))
       topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
@@ -83,7 +82,7 @@ DebugTopology debug_topology_for(uint32_t gfx_target_version) {
     topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
   } else {
     // gfx10+ (RDNA).
-    topo.debug_prop |= HSA_DBG_WATCH_ADDR_MASK_LO_BIT_GFX10 | HSA_DBG_WATCH_ADDR_MASK_HI_BIT;
+    topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx10 | kmd::kWatchAddrMaskHiBit;
 
     if (gc >= make_gc_ip_version(12, 0, 0))
       topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
