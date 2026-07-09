@@ -1906,7 +1906,12 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   // Existence check (kernel: ESRCH from find_get_pid/get_task_mm). A target that
   // has not connected is still valid if it is a live OS process; a pid that maps
   // to no process at all is rejected.
-  if (!self_debug && target_proc == nullptr) {
+  // Existence check (kernel: ESRCH from find_get_pid/get_task_mm). A target that
+  // has not connected is still valid if it is a live OS process; a pid that maps
+  // to no process at all is rejected. DISABLE is exempt so a debugger can always
+  // tear down its session, even after the inferior has exited (the kernel
+  // likewise exempts DISABLE from its liveness checks).
+  if (!self_debug && target_proc == nullptr && args->op != KFD_IOC_DBG_TRAP_DISABLE) {
     errno = 0;
     if (::kill(target_pid, 0) != 0 && errno == ESRCH)
       return -ESRCH;
@@ -2006,11 +2011,58 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // debugger wants forwarded. Delivery is wired up with the event channel.
     session_it->second.exception_enable_mask = args->set_exceptions_enabled.exception_mask;
     return 0;
+  case KFD_IOC_DBG_TRAP_SET_FLAGS: {
+    // kfd_dbg_trap_set_flags(): IN = flags to enable, OUT = previously enabled.
+    const uint32_t previous = session_it->second.flags;
+    session_it->second.flags = args->set_flags.flags;
+    args->set_flags.flags = previous;
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+    // Record the launch mode (NORMAL/HALT/DEBUG). Halting waves at launch is
+    // wired up with the wave-level scheduler hooks.
+    session_it->second.launch_mode = args->launch_mode.launch_mode;
+    return 0;
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE: {
+    // OUT enable_mask = previously enabled; OUT support_request_mask echoes the
+    // request (the emulator honours the requested trap-override bits). Actual
+    // trap-on-exception is wired up with the wave-level trap handler.
+    const uint32_t previous = session_it->second.launch_override_enable;
+    session_it->second.launch_override_enable = args->launch_override.enable_mask;
+    args->launch_override.enable_mask = previous;
+    return 0;
+  }
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+    // Address watchpoints are wired up with the memory pipeline; accept and
+    // report a watch id so the debugger's bookkeeping stays consistent.
+    args->set_node_address_watch.id = 0;
+    return 0;
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+    return 0;
+  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
+    // EAGAIN = "no raised exception found" (kernel contract). The event channel
+    // that raises wave exceptions is wired up with the wave-level trap handler.
+    return -EAGAIN;
+  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+    // No queues are exposed to the debugger yet; report an empty snapshot so
+    // attach/detach enumerate cleanly. Wave/queue visibility is wired up with
+    // the wave-level stack.
+    args->queue_snapshot.entry_size =
+        std::min<uint32_t>(args->queue_snapshot.entry_size, sizeof(kfd_queue_snapshot_entry));
+    args->queue_snapshot.num_queues = 0;
+    return 0;
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+    // With no queues exposed there is nothing to suspend; the number "handled"
+    // is the count the debugger passed (their ids are left unmodified, so
+    // rocm-dbgapi decodes them back without error/invalid flags).
+    return static_cast<int>(args->suspend_queues.num_queues);
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+    return static_cast<int>(args->resume_queues.num_queues);
   case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
     return debug_device_snapshot(args->device_snapshot);
   default:
-    // SEND_RUNTIME_EVENT, wave-launch, queue suspend/resume, address watch,
-    // flags, and the query/queue-snapshot ops are wired in subsequent changes.
+    // SEND_RUNTIME_EVENT and QUERY_EXCEPTION_INFO are wired in subsequent
+    // changes.
     return -ENOSYS;
   }
 }

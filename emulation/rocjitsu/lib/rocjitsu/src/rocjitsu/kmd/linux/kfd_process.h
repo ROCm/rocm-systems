@@ -129,11 +129,14 @@ public:
   /// kfd_process in the DBG_TRAP_ENABLE path. @ref runtime_state holds a
   /// @c kfd_dbg_runtime_state value.
   struct DebugSession {
-    bool enabled = false;               ///< debug_trap_enabled.
-    uint32_t runtime_state = 0;         ///< kfd_dbg_runtime_state (see kfd_ioctl.h).
-    uint64_t exception_enable_mask = 0; ///< Exceptions raised to the debugger.
-    int dbg_fd = -1;                    ///< Debugger notification fd (poll target).
-    pid_t debugger_pid = 0;             ///< Attached debugger's Linux pid (ptrace parent).
+    bool enabled = false;                ///< debug_trap_enabled.
+    uint32_t runtime_state = 0;          ///< kfd_dbg_runtime_state (see kfd_ioctl.h).
+    uint64_t exception_enable_mask = 0;  ///< Exceptions raised to the debugger.
+    int dbg_fd = -1;                     ///< Debugger notification fd (poll target).
+    pid_t debugger_pid = 0;              ///< Attached debugger's Linux pid (ptrace parent).
+    uint32_t flags = 0;                  ///< kfd_dbg_trap_flags (SET_FLAGS).
+    uint32_t launch_mode = 0;            ///< kfd_dbg_trap_wave_launch_mode (SET_WAVE_LAUNCH_MODE).
+    uint32_t launch_override_enable = 0; ///< Enabled wave-launch trap override mask.
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.

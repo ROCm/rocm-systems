@@ -436,12 +436,18 @@ TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
   en.enable.dbg_fd = KFD_INVALID_FD;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
-  // QUERY_DEBUG_EVENT is not a HW-op, so the gate ladder admits it; the handler
-  // itself is added by a later change and currently reports not-implemented.
+  // QUERY_DEBUG_EVENT is admitted by the gate ladder and reports EAGAIN (no
+  // raised exception) until the wave-level event channel is wired up.
   kfd_ioctl_dbg_trap_args q{};
   q.pid = static_cast<uint32_t>(getpid());
   q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -ENOSYS);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -EAGAIN);
+
+  // SEND_RUNTIME_EVENT is admitted but not implemented yet.
+  kfd_ioctl_dbg_trap_args ev{};
+  ev.pid = static_cast<uint32_t>(getpid());
+  ev.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ev), -ENOSYS);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {
@@ -526,6 +532,103 @@ TEST_F(KfdIoctlTest, DbgTrapCrossProcessEnableAuthorizedByPtrace) {
   kill(child, SIGKILL);
   int status = 0;
   waitpid(child, &status, 0);
+}
+
+// The debugger config / query ops rocm-dbgapi issues during attach and detach
+// (SET_FLAGS, SET_WAVE_LAUNCH_MODE/OVERRIDE, GET_QUEUE_SNAPSHOT, QUERY_DEBUG_
+// EVENT) succeed so the attach/detach lifecycle completes cleanly.
+TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOps) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // SET_FLAGS returns the previously-enabled flags.
+  kfd_ioctl_dbg_trap_args f{};
+  f.pid = static_cast<uint32_t>(getpid());
+  f.op = KFD_IOC_DBG_TRAP_SET_FLAGS;
+  f.set_flags.flags = KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &f), 0);
+  EXPECT_EQ(f.set_flags.flags, 0u); // nothing was enabled before
+  f.set_flags.flags = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &f), 0);
+  EXPECT_EQ(f.set_flags.flags, static_cast<uint32_t>(KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP));
+
+  // SET_WAVE_LAUNCH_MODE / OVERRIDE are accepted.
+  kfd_ioctl_dbg_trap_args m{};
+  m.pid = static_cast<uint32_t>(getpid());
+  m.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE;
+  m.launch_mode.launch_mode = KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &m), 0);
+
+  kfd_ioctl_dbg_trap_args ov{};
+  ov.pid = static_cast<uint32_t>(getpid());
+  ov.op = KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE;
+  ov.launch_override.override_mode = KFD_DBG_TRAP_OVERRIDE_OR;
+  ov.launch_override.enable_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  ov.launch_override.support_request_mask = KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ov), 0);
+  EXPECT_EQ(ov.launch_override.enable_mask, 0u); // previously enabled = none
+
+  // GET_QUEUE_SNAPSHOT reports an empty snapshot for now.
+  kfd_ioctl_dbg_trap_args qs{};
+  qs.pid = static_cast<uint32_t>(getpid());
+  qs.op = KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT;
+  qs.queue_snapshot.entry_size = sizeof(kfd_queue_snapshot_entry);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &qs), 0);
+  EXPECT_EQ(qs.queue_snapshot.num_queues, 0u);
+}
+
+// DISABLE must clean up the session even after the inferior has exited (rocgdb
+// disables debug while detaching from a killed process). The kernel likewise
+// exempts DISABLE from its liveness checks.
+TEST_F(KfdIoctlTest, DbgTrapDisableSucceedsAfterInferiorExits) {
+  pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    for (;;)
+      pause();
+    _exit(0);
+  }
+
+  rocjitsu::SimulatedDriver daemon(*loaded_.soc(), /*daemon_mode=*/true);
+  uint32_t debugger = daemon.open_process(getpid());
+  ASSERT_NE(debugger, 0u);
+
+  if (ptrace(PTRACE_ATTACH, child, nullptr, nullptr) != 0) {
+    kill(child, SIGKILL);
+    int s = 0;
+    waitpid(child, &s, 0);
+    daemon.close(debugger);
+    GTEST_SKIP() << "ptrace not permitted in this environment";
+  }
+  int status = 0;
+  waitpid(child, &status, 0);
+
+  // Enable debug on the (unconnected) ptraced child.
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(child);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // The child exits and is reaped: its pid no longer resolves to a process.
+  ptrace(PTRACE_DETACH, child, nullptr, nullptr);
+  kill(child, SIGKILL);
+  waitpid(child, &status, 0);
+
+  // DISABLE still tears the session down cleanly.
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(child);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(daemon.ioctl(debugger, AMDKFD_IOC_DBG_TRAP, &dis), 0);
+
+  daemon.close(debugger);
 }
 
 // PR: debug sessions are keyed by the inferior's Linux pid in a driver-level
