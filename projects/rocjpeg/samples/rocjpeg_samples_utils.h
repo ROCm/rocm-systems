@@ -571,11 +571,15 @@ public:
         aliged_heights[0] = align(heights[0], mem_alignment);
         aliged_heights[1] = align(heights[1], mem_alignment);
         aliged_heights[2] = align(heights[2], mem_alignment);
-        uint32_t channel0_size = output_image->pitch[0] * aliged_heights[0];
-        uint32_t channel1_size = output_image->pitch[1] * aliged_heights[1];
-        uint32_t channel2_size = output_image->pitch[2] * aliged_heights[2];
+        // Compute per-channel sizes in size_t. pitch and aligned height each derive
+        // from the JPEG dimensions (up to 65535, then alignment-padded), so their
+        // product can exceed 32 bits. Accumulating in uint32_t would wrap and yield an
+        // undersized host buffer while hipMemcpyDtoH still copies the full surface.
+        size_t channel0_size = static_cast<size_t>(output_image->pitch[0]) * aliged_heights[0];
+        size_t channel1_size = static_cast<size_t>(output_image->pitch[1]) * aliged_heights[1];
+        size_t channel2_size = static_cast<size_t>(output_image->pitch[2]) * aliged_heights[2];
 
-        uint32_t output_image_size = channel0_size + channel1_size + channel2_size;
+        size_t output_image_size = channel0_size + channel1_size + channel2_size;
 
         if (hst_ptr == nullptr) {
             hst_ptr = new uint8_t [output_image_size];

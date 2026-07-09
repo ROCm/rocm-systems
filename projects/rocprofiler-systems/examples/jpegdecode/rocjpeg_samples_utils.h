@@ -691,11 +691,15 @@ public:
             default: std::cout << "Unknown output format!" << std::endl; return;
         }
 
-        uint32_t channel0_size = output_image->pitch[0] * heights[0];
-        uint32_t channel1_size = output_image->pitch[1] * heights[1];
-        uint32_t channel2_size = output_image->pitch[2] * heights[2];
+        // Compute per-channel sizes in size_t. pitch and height each derive from
+        // the JPEG dimensions (up to 65535), so their product can exceed 32 bits.
+        // Accumulating in uint32_t would wrap and yield an undersized host buffer
+        // while hipMemcpyDtoH still copies the full surface.
+        size_t channel0_size = static_cast<size_t>(output_image->pitch[0]) * heights[0];
+        size_t channel1_size = static_cast<size_t>(output_image->pitch[1]) * heights[1];
+        size_t channel2_size = static_cast<size_t>(output_image->pitch[2]) * heights[2];
 
-        uint32_t output_image_size = channel0_size + channel1_size + channel2_size;
+        size_t output_image_size = channel0_size + channel1_size + channel2_size;
 
         if(hst_ptr == nullptr)
         {

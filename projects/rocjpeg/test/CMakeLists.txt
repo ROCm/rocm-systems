@@ -340,3 +340,14 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocjpegnegativetest"
 )
+
+add_test(
+  NAME
+    jpeg-saveimage-overflow-test
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/test/rocjpeg_negative_api_tests"
+                              "${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_negative_api_tests"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "test_saveimage_overflow"
+)
