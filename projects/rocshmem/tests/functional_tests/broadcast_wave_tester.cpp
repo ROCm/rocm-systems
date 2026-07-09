@@ -65,7 +65,7 @@ __global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start
 
   int flat_wf_id = wf_id + wg_offset;
 
-  rocshmem_wg_team_create_ctx(teams[flat_wf_id], ctx_type, &ctx);
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   [[maybe_unused]] int n_pes = rocshmem_ctx_n_pes(ctx);
   source_buf += flat_wf_id * size;
@@ -112,7 +112,7 @@ BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
 
   if (num_teams < num_warps * args.num_wgs){
     printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
-    abort();
+    exit(0);
   }
 
   CHECK_HIP(hipMalloc(&bcast_wave_world_dup,
