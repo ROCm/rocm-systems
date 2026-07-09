@@ -144,7 +144,7 @@ uint32_t mock_code_object_writer_t::get_end_symbol_count() const
     return m_end_symbol_count;
 }
 
-std::string_view mock_sdk_wrapper_t::source_frame_separator()
+std::string_view mock_sdk_wrapper_t::source_frame_separator() const
 {
     return m_source_frame_separator;
 }

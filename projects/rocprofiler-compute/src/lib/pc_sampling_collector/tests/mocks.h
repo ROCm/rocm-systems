@@ -95,7 +95,7 @@ private:
 class mock_sdk_wrapper_t : public rocprofiler_compute_tool::sdk_wrapper_t
 {
 public:
-    std::string_view source_frame_separator() override;
+    std::string_view source_frame_separator() const override;
 
     void set_source_frame_separator(std::string source_frame_separator);
 

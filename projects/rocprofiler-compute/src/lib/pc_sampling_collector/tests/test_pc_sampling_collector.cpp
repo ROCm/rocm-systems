@@ -168,6 +168,13 @@ TEST(test_pc_sampling_collector_source_paths_t, ProvidedNoColonFrame_ReturnsWhol
     EXPECT_EQ(paths, expected);
 }
 
+TEST(test_pc_sampling_collector_source_paths_t, ProvidedTrailingColon_ReturnsWholeFrame)
+{
+    const auto                            paths = collect_source_paths_from_comment("kernel.cpp:");
+    const std::set<std::filesystem::path> expected = {"kernel.cpp:"};
+    EXPECT_EQ(paths, expected);
+}
+
 TEST(test_pc_sampling_collector_source_paths_t, ProvidedDuplicateFrames_ReturnsDeduplicatedPaths)
 {
     const auto paths = collect_source_paths_from_comment("kernel.cpp:42 -> kernel.cpp:42");
