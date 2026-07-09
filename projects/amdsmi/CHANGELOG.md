@@ -14,6 +14,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
+- **`amd-smi static` now omits `MEM_CARVEOUT` from default human-readable output on hardware without VRAM carveout support**.  
+  - On a default run the human-readable output drops the section entirely instead of printing a verbose reason string; JSON and CSV keep a stable `N/A` key. An explicit `-m`/`--mem-carveout` always reports `N/A` in every format. VRAM carveout is only exposed on carveout-capable APUs.
+
 ### Fixed
 
 - **Fixed `amd-smi ras --cper --json` emitting nothing when there are no CPER entries**.
@@ -36,6 +39,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` hanging in `amdsmi_init()` on UALink systems when the IFoE driver is unresponsive**.  
   - `AMDSmiGPUDevice` opened the per-GPU IFoE/UALoE generic-netlink session in its constructor, so `amdsmi_init(AMDSMI_INIT_AMD_GPUS)` (and every CLI verb) blocked in an uninterruptible netlink wait when the Broadcom IFoE driver was wedged, even for queries that never use fabric data.
   - The UALoE session is now opened lazily on the first fabric query via `get_ualoe_handle()`, so initialization and non-fabric queries no longer touch the IFoE driver.
+
+- **Fixed mis-indented `amd-smi static --profile` list in human-readable output**.  
+  - The available power profiles rendered outdented below the following field; plain list items now nest correctly under their key. JSON and CSV output are unchanged.
+
+- **Fixed `amd-smi static --profile` printing a raw status-code string on unsupported devices**.  
+  - When the power-profile query fails, the section now reports `N/A` instead of the full error info string, matching every other `amd-smi static` field.
 
 ## amd_smi_lib for ROCm 7.14.0
 

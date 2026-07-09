@@ -278,6 +278,13 @@ class StaticCommands:
             current_platform_args += ["dfc_ucode", "fb_info", "num_vf"]
             current_platform_values += [args.dfc_ucode, args.fb_info, args.num_vf]
 
+        # UMA carveout only exists on supported APUs. Capture whether the user
+        # explicitly asked for it before the "show everything" default fills
+        # every arg; the hasattr guard preserves it across the recursive
+        # multi-GPU re-entry, which reuses the same (already-defaulted) args.
+        if not hasattr(args, "mem_carveout_explicit"):
+            args.mem_carveout_explicit = bool(args.mem_carveout)
+
         if not any(current_platform_values):
             for arg in current_platform_args:
                 setattr(args, arg, True)
@@ -936,7 +943,7 @@ class StaticCommands:
                         "num_profiles": profile_status["num_profiles"],
                     }
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    static_dict["profile"] = e.get_error_info()
+                    static_dict["profile"] = "N/A"
                     logging.debug(
                         "Failed to get power profile info for gpu %s | %s",
                         gpu_id,
@@ -1165,22 +1172,21 @@ class StaticCommands:
                     else:
                         static_dict["mem_carveout"] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                # UMA carveout is only exposed by APU VBIOSes that support
-                # ATCS function 0xA. On dGPUs and Instinct parts (including
-                # MI300A) the sysfs attribute does not exist and the library
-                # returns NOT_SUPPORTED; surface a clearer reason than bare N/A.
+                # UMA carveout only exists on supported APUs. On a default
+                # human-readable `amd-smi static` run, omit the section on
+                # everything else so the output stays clean; JSON/CSV keep a
+                # stable `N/A` key, and an explicit `-m/--mem-carveout` always
+                # reports N/A (the reason lives in the flag's help).
                 not_supported = (
                     e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                 )
-                if not_supported and not (
-                    self.logger.is_json_format() or self.logger.is_csv_format()
+                if (
+                    not_supported
+                    and not args.mem_carveout_explicit
+                    and self.logger.is_human_readable_format()
                 ):
-                    # Human-readable: give a descriptive reason. JSON/CSV
-                    # consumers keep the legacy bare "N/A" for back-compat.
-                    static_dict["mem_carveout"] = (
-                        "N/A (UMA carveout is not supported on this ASIC/VBIOS)"
-                    )
+                    pass
                 elif self.logger.is_csv_format():
                     static_dict["mem_carveout_index"] = "N/A"
                 else:

@@ -1550,7 +1550,7 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 | Feature | Hardware | Status |
 |---|---|---|
 | `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
-| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
+| `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — omitted from default human-readable `amd-smi static` output (JSON/CSV keep an `N/A` key); `MEM_CARVEOUT: N/A` when queried explicitly with `-m`/`--mem-carveout` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
@@ -1558,14 +1558,18 @@ interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
-### Troubleshooting: `MEM_CARVEOUT: N/A`
+### Troubleshooting: missing `MEM_CARVEOUT` section
 
 On MI300A (and every non-APU / pre-ATCS-0xA platform) the kernel does not
-create `/sys/class/drm/<card>/device/uma/`, so `amd-smi static --mem-carveout`
-prints
+create `/sys/class/drm/<card>/device/uma/`, so carveout is not supported. A
+default human-readable `amd-smi static` run omits the `MEM_CARVEOUT` section
+entirely on these platforms (JSON and CSV keep a stable `N/A` key). Querying
+it explicitly prints a plain `N/A`:
 
 ```text
-MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
+amd-smi static --mem-carveout
+...
+MEM_CARVEOUT: N/A
 ```
 
 This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune

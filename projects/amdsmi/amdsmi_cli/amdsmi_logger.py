@@ -390,8 +390,10 @@ class AMDSMILogger:
                 for item in value:
                     if isinstance(item, dict):
                         yaml_string += self.custom_dump(item, indent + 1)
-                    else:  # If the list is not a dictionary, print it as a string
-                        yaml_string += "  " * (indent + 1) + f"- {item}\n"
+                    else:
+                        # Scalar items carry no ':', so post-processing won't
+                        # double their indent; emit at the final 4-space level.
+                        yaml_string += "    " * (indent + 1) + f"{item}\n"
             else:
                 key_prefix = "  " * indent
                 if isinstance(value, str) and "\n" in value:

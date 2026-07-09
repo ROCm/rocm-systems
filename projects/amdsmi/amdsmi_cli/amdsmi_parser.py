@@ -1518,7 +1518,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
-        profile_help = "Display current and available power profiles"
+        profile_help = "Displays current and available power profiles."
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove("PCIE")
         clk_option_str = ", ".join(clk_options) + ", ALL"
