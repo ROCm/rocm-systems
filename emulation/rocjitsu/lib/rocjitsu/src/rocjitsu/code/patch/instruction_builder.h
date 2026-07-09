@@ -23,6 +23,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <vector>
 
 #include "rocjitsu/code/rj_code.h"
 
@@ -174,14 +175,24 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Patch an emitted direct PC-relative branch instruction in-place.
 ///
 /// @details @p words points into the translated output buffer. @p delta_bytes is
-/// relative to the instruction's branch base. For AMDGPU SOPP direct branches,
-/// the base is the next instruction and the immediate is a signed dword offset.
-/// The function handles unconditional and conditional SOPP direct branches by
-/// replacing bits [15:0] of word 0. It returns false when @p inst is not a
-/// decoded direct branch, the buffer is empty, or the delta is not representable
-/// by SOPP's signed 16-bit dword immediate.
+/// relative to the instruction's branch base. For AMDGPU SOPP direct branches
+/// and SOPK `s_call_b64`, the base is the next instruction and the immediate is
+/// a signed dword offset. The function replaces bits [15:0] of word 0. It
+/// returns false when @p inst has no decoded PC-relative branch offset, the
+/// buffer is empty, or the delta is not representable by a signed 16-bit dword
+/// immediate.
 [[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
                                              int64_t delta_bytes, rj_code_arch_t arch);
+
+/// @brief Append a canonical PC-relative target builder for a recovered branch.
+///
+/// @details The original getpc remains in the instruction stream and initializes
+/// @p pc_sreg / @p pc_sreg+1. This helper appends the smallest positive or
+/// negative scalar add/sub sequence needed to turn that pair into the final
+/// relocated target. Static PC recovery only records address-builder ranges that
+/// have enough instruction words for this replacement to be written in place.
+[[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
+                                           uint16_t pc_sreg, int64_t delta);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///

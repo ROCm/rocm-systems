@@ -355,6 +355,66 @@ TEST_F(TopoTest, GetSystemFromXml_SingleSystem_BuildsLinks) {
   ncclTopoFree(built);
 }
 
+// Under the 2.30 DEV model a direct XGMI GPU->GPU path is the 3-hop
+// GPU-DEV-DEV-GPU route, typed PATH_NVL — the predicate the matching fixes use.
+TEST_F(TopoTest, DevModel_DirectXgmiPath_IsThreeHopNvl) {
+  const uint64_t host = 0x55;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci0 = addGpuPci(cpu, "0000:01:00.0", "gfx942", 0, 0);
+  struct ncclXmlNode* pci1 = addGpuPci(cpu, "0000:02:00.0", "gfx942", 1, 1);
+  addGpuLink(pci0, "0000:02:00.0", 8);
+  addGpuLink(pci1, "0000:01:00.0", 8);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  // paths[GPU] is indexed by GPU node index; GPU 0 -> GPU 1 is direct.
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  EXPECT_EQ(p01->type, PATH_NVL);
+  EXPECT_EQ(p01->count, 3);
+
+  ncclTopoFree(built);
+}
+
+// An indirect XGMI route (through a middle GPU's DEV) is the 4-hop path and must
+// not be mistaken for a direct link; the count<=3 filters depend on this.
+TEST_F(TopoTest, DevModel_IndirectXgmiPath_IsFourHops) {
+  const uint64_t host = 0x56;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci0 = addGpuPci(cpu, "0000:01:00.0", "gfx942", 0, 0);
+  struct ncclXmlNode* pci1 = addGpuPci(cpu, "0000:02:00.0", "gfx942", 1, 1);
+  struct ncclXmlNode* pci2 = addGpuPci(cpu, "0000:03:00.0", "gfx942", 2, 2);
+  // Chain 0<->1 and 1<->2 are direct XGMI; 0 and 2 are not directly linked.
+  addGpuLink(pci0, "0000:02:00.0", 8);
+  addGpuLink(pci1, "0000:01:00.0", 8);
+  addGpuLink(pci1, "0000:03:00.0", 8);
+  addGpuLink(pci2, "0000:02:00.0", 8);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_EQ(built->nodes[GPU].count, 3);
+
+  auto idxByRank = [&](int rank) -> int {
+    for (int i = 0; i < built->nodes[GPU].count; i++)
+      if (built->nodes[GPU].nodes[i].gpu.rank == rank) return i;
+    return -1;
+  };
+  int i0 = idxByRank(0), i2 = idxByRank(2);
+  ASSERT_GE(i0, 0);
+  ASSERT_GE(i2, 0);
+
+  struct ncclTopoLinkList* p02 = built->nodes[GPU].nodes[i0].paths[GPU] + i2;
+  EXPECT_EQ(p02->count, 4);
+  EXPECT_GT(p02->count, 3); // excluded by the direct-XGMI filter
+
+  ncclTopoFree(built);
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped

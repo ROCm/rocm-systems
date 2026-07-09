@@ -31,6 +31,7 @@ RUN apt-get dist-upgrade -y && \
 RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
+        python3 -m pip install --upgrade pip; \
         python3 -m pip install 'cmake==3.21'; \
     else \
         python3 -m pip install --break-system-packages 'cmake==3.21'; \

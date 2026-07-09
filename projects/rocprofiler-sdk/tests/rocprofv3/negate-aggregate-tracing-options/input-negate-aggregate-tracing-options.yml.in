@@ -14,6 +14,7 @@ jobs:
     scratch_memory_trace: False
     rccl_trace: False
     kokkos_trace: False
+    ompt_trace: False
     rocdecode_trace: False
     rocjpeg_trace: False
     hip_runtime_trace: False

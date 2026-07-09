@@ -1444,15 +1444,15 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   if (errorCode == static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_FAULT)) {
     queue->MarkVMFaulted();
     core::Runtime::runtime_singleton_->SignalVMFault();
-    debug_print("Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
+    log_warning_n(1,"Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n");
     return exceptionHandlerDone();
   }
 
   const char* errorMsg = nullptr;
   if (HSA::hsa_status_string(errorCode, &errorMsg) == HSA_STATUS_SUCCESS && errorMsg) {
-    fprintf(stderr, "Queue error: %s\n", errorMsg);
+    log_warning_n(1, "Queue error: %s\n", errorMsg);
   } else {
-    fprintf(stderr, "Queue error: code 0x%lx\n", (unsigned long)error_code);
+    log_warning_n(1, "Queue error: code 0x%lx\n", (unsigned long)error_code);
   }
 
   // Fallback if KFD does not support GPU core dump. In this case, the core
@@ -1529,7 +1529,10 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
   if ((!cu_mask_.empty()) || (num_cu_mask_count != 0) || (!global_mask.empty())) {
 
     // Devices with WGPs must conform to even-indexed contiguous pairwise CU enablement.
-    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10) {
+    // Disable WGP mode check for gfx1250
+    if (agent_->supported_isas()[0]->GetMajorVersion() >= 10 &&
+        !(agent_->supported_isas()[0]->GetMajorVersion() == 12 &&
+          agent_->supported_isas()[0]->GetMinorVersion() >= 5)) {
       for (int i = 0; i < mask.size() * 32; i += 2) {
         uint32_t cu_pair = (mask[i / 32] >> (i % 32)) & 0x3;
         if (cu_pair && cu_pair != 0x3) return HSA_STATUS_ERROR_INVALID_ARGUMENT;

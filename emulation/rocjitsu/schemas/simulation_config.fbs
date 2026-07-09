@@ -51,6 +51,8 @@ table GpuMemoryConfig {
 ///   - GFX target versions: projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
 ///   - Real hardware values: `cat /sys/class/kfd/kfd/topology/nodes/*/properties` on a system
 ///     with the target GPU installed.
+///
+/// \NPI new GPU: add a configs/<gpu>.json that fills in these identity fields for the new device.
 table KfdDeviceInfo {
   gpu_id: uint32;                  // KFD GPU ID (e.g., 0x9500 for gfx950).
   gfx_target_version: uint32;     // Packed GFX version (e.g., 90500 for gfx950).

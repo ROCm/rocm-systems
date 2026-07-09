@@ -34,16 +34,16 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 ```bash
 # Local mode: in-process simulation
-rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --config configs/gfx950_cdna4_kmd.json -- ./app
 
 # Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json
+rocjitsu --daemon --config configs/gfx950_cdna4_kmd.json
 
 # Attach to running daemon
-rocjitsu --attach --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_cdna4_kmd.json -- ./app
 ```
 
 ## Architecture

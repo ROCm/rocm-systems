@@ -499,8 +499,10 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
 
     auto op_data = malloc(sizeof(AsyncOpFallback));
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
     ASSERT_NE(op_data, nullptr);
     auto bounce_buffer = malloc(size);
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc): freed via mocked hipHostFree on cleanup
     ASSERT_NE(bounce_buffer, nullptr);
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data)).WillOnce(Return(bounce_buffer));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer), _))

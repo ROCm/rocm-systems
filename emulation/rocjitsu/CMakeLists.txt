@@ -21,7 +21,7 @@ unset(_RJ_ROCM_PATH_EXPLICIT)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite VERSION 0.1.0)
+project(rocm_jit_suite VERSION 0.2.0)
 
 include(rj_version)
 
@@ -38,6 +38,12 @@ include(CTest)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Hide symbols by default so the shared library (librocjitsu.so) exports only its
+# intended ABI.
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 find_package(Threads REQUIRED)
 
@@ -57,7 +63,17 @@ set(HSA_INCLUDE_DIR
     "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers"
 )
 
+# DRM/amdgpu UAPI headers (vendored kernel ABI, MIT-licensed). Lets the
+# interposer service the amdgpu DRM ioctl surface using the real kernel structs
+# instead of hand-mirrored copies, without depending on libdrm library types.
+set(DRM_INCLUDE_DIR
+    "${PROJECT_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers/linux/uapi/drm"
+)
+
 include(rj_log)
+
+# Install directory variables are used by subdirectories that add install rules.
+include(GNUInstallDirs)
 
 # Sanitizer and static analysis options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
@@ -70,6 +86,7 @@ option(
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
+option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -262,6 +279,7 @@ target_link_libraries(
         rocjitsu_isa_rdna3_5
         rocjitsu_isa_rdna4
         rocjitsu_isa_gfx1250
+        # \NPI new ISA family: link its rocjitsu_isa_<isa> object library here.
         rocjitsu_isa_risc_v
         simdojo
         rocjitsu_kmd
@@ -275,7 +293,27 @@ target_link_libraries(
         flatbuffers
         Threads::Threads
 )
-target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
+target_include_directories(
+    rocjitsu_shared
+    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+)
+target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
+
+# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(
+        rocjitsu_shared
+        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+    )
+    target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
+    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
+    target_link_libraries(rocjitsu_shared PRIVATE dl)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
 
 # Developer and test workflow tools.
@@ -293,8 +331,6 @@ endif()
 # Install rules.
 # ---------------------------------------------------------------------------
 
-include(GNUInstallDirs)
-
 # Public headers: include/rocjitsu/
 install(
     DIRECTORY lib/rocjitsu/include/rocjitsu
@@ -310,10 +346,6 @@ install(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    install(
-        TARGETS rocjitsu_kmd_shim
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
     install(TARGETS rocjitsu_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 

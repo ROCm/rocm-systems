@@ -237,7 +237,7 @@ endif ()
 ## Address Sanitize Flag
 if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
     set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address" )
-    set ( CMAKE_EXE_LINKER_FLAGS -fsanitize=address )
+    set ( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address" )
 endif ()
 
 # link_directories() has to be put before add_executable()

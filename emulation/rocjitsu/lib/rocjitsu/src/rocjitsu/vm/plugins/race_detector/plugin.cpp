@@ -30,6 +30,7 @@ void warn_cluster_peer_writes_ignored_once() {
 
 } // namespace
 
+// Declared in plugin.h (used by formatTrace tests in execution_plugin_test.cpp).
 std::optional<MarkedPc> findConflict(const RaceViolation &v, RaceDetector &detector) {
   auto make = [&](auto eid) -> MarkedPc {
     return {detector.events().pc(eid), detector.events().waveId(eid).value, -1};
@@ -376,7 +377,7 @@ void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> 
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);
-    s->race_state->flushWaveCompleteMemoryEvents();
+    s->race_state->flushBarrierPendingEvents();
   }
 }
 
