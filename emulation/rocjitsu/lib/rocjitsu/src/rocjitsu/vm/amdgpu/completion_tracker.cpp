@@ -15,28 +15,11 @@ RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstring>
 #include <format>
 
 namespace rocjitsu {
 namespace amdgpu {
-
-namespace {
-
-/// @brief Return a monotonic timestamp in the guest HSA system-clock domain.
-///
-/// @details `LinuxKfd::fill_get_clock_counters_ioctl` exposes a 1 GHz
-/// nanosecond clock for the synthetic guest GPU. The ROCR `amd_signal_t`
-/// profiling fields are specified in the HSA system-clock domain, so using the
-/// same source here makes `hsa_amd_profiling_get_dispatch_time` and HIP event
-/// elapsed-time math agree with the guest KFD clock.
-uint64_t hsa_system_timestamp() {
-  auto now = std::chrono::steady_clock::now().time_since_epoch();
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-}
-
-} // namespace
 
 void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
                                            std::vector<HwQueueState> &queues) {

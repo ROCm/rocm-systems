@@ -30,6 +30,8 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
+#include "hsa/hsa.h"
+
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
@@ -88,6 +90,28 @@ using rocjitsu::LinuxKfd;
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
+
+namespace {
+
+constexpr uint32_t kHsaExtensionImages = 1;
+constexpr uint32_t kHsaExtAgentInfoImage1dMaxElements = 0x3000;
+constexpr uint32_t kHsaExtAgentInfoImage1daMaxElements = 0x3001;
+constexpr uint32_t kHsaExtAgentInfoImage1dbMaxElements = 0x3002;
+constexpr uint32_t kHsaExtAgentInfoImage2dMaxElements = 0x3003;
+constexpr uint32_t kHsaExtAgentInfoImage2daMaxElements = 0x3004;
+constexpr uint32_t kHsaExtAgentInfoImage2dDepthMaxElements = 0x3005;
+constexpr uint32_t kHsaExtAgentInfoImage2daDepthMaxElements = 0x3006;
+constexpr uint32_t kHsaExtAgentInfoImage3dMaxElements = 0x3007;
+constexpr uint32_t kHsaExtAgentInfoImageArrayMaxLayers = 0x3008;
+constexpr uint32_t kHsaExtAgentInfoMaxImageReadHandles = 0x3009;
+constexpr uint32_t kHsaExtAgentInfoMaxImageReadOrWriteHandles = 0x300A;
+constexpr uint32_t kHsaExtAgentInfoMaxSamplerHandles = 0x300B;
+constexpr uint32_t kHsaExtAgentInfoImageLinearRowPitchAlignment = 0x300C;
+constexpr uint32_t kHsaExtAgentInfoImageSupport = 0x300D;
+
+using HsaAgentGetInfoFn = hsa_status_t (*)(hsa_agent_t, hsa_agent_info_t, void *);
+
+} // namespace
 
 static int connect_to_daemon() {
   auto path = rocjitsu::rpc_default_socket_path();
@@ -603,6 +627,49 @@ InterposerContext &InterposerContext::ctx =
 
 __attribute__((constructor)) static void init_interposer() { InterposerContext::init(); }
 
+bool rocjitsu_simulation_active_for_hsa() {
+  if (!InterposerContext::real().ready() || InterposerContext::in_construction)
+    return false;
+  if (InterposerContext::ctx.driver())
+    return true;
+  return InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()) != nullptr;
+}
+
+hsa_status_t write_disabled_image_agent_info(hsa_agent_info_t attribute, void *value) {
+  if (value == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const uint32_t attr = static_cast<uint32_t>(attribute);
+  switch (attr) {
+  case kHsaExtAgentInfoImage1dMaxElements:
+  case kHsaExtAgentInfoImage1daMaxElements:
+  case kHsaExtAgentInfoImage1dbMaxElements:
+  case kHsaExtAgentInfoImageArrayMaxLayers:
+  case kHsaExtAgentInfoMaxImageReadHandles:
+  case kHsaExtAgentInfoMaxImageReadOrWriteHandles:
+  case kHsaExtAgentInfoMaxSamplerHandles:
+    *static_cast<uint32_t *>(value) = 0;
+    return HSA_STATUS_SUCCESS;
+  case kHsaExtAgentInfoImage2dMaxElements:
+  case kHsaExtAgentInfoImage2daMaxElements:
+  case kHsaExtAgentInfoImage2dDepthMaxElements:
+  case kHsaExtAgentInfoImage2daDepthMaxElements:
+    std::memset(value, 0, sizeof(uint32_t) * 2);
+    return HSA_STATUS_SUCCESS;
+  case kHsaExtAgentInfoImage3dMaxElements:
+    std::memset(value, 0, sizeof(uint32_t) * 3);
+    return HSA_STATUS_SUCCESS;
+  case kHsaExtAgentInfoImageLinearRowPitchAlignment:
+    *static_cast<size_t *>(value) = 0;
+    return HSA_STATUS_SUCCESS;
+  case kHsaExtAgentInfoImageSupport:
+    *static_cast<bool *>(value) = false;
+    return HSA_STATUS_SUCCESS;
+  default:
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+}
+
 } // namespace
 
 extern "C" {
@@ -610,6 +677,36 @@ extern "C" {
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
 static const Sysfs::GpuInfo *interposer_gpu_info(uint32_t render_minor);
+
+RJ_INTERPOSER_EXPORT hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
+                                                     void *value) {
+  auto real = util::lookup_symbol<HsaAgentGetInfoFn>(RTLD_NEXT, "hsa_agent_get_info");
+  if (!real)
+    return HSA_STATUS_ERROR;
+
+  if (rocjitsu_simulation_active_for_hsa()) {
+    const uint32_t attr = static_cast<uint32_t>(attribute);
+    if (attr >= kHsaExtAgentInfoImage1dMaxElements && attr <= kHsaExtAgentInfoImageSupport) {
+      // The functional simulator does not implement HSA image operations. Newer
+      // HIP probes image limits during device initialization; answering these
+      // probes here prevents ROCR's image-extension helper from dereferencing
+      // synthetic-agent state that is not backed by a real image runtime path.
+      return write_disabled_image_agent_info(attribute, value);
+    }
+
+    if (attribute == HSA_AGENT_INFO_EXTENSIONS) {
+      hsa_status_t status = real(agent, attribute, value);
+      if (status == HSA_STATUS_SUCCESS && value != nullptr) {
+        auto *extensions = static_cast<uint8_t *>(value);
+        extensions[kHsaExtensionImages / 8] &=
+            static_cast<uint8_t>(~(1u << (kHsaExtensionImages % 8)));
+      }
+      return status;
+    }
+  }
+
+  return real(agent, attribute, value);
+}
 
 struct SyntheticDrmOpenResult {
   bool handled = false;
