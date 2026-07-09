@@ -261,6 +261,13 @@ private:
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
   int debug_trap_ioctl(KfdProcess &caller, void *arg);
+  int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
+
+  /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
+  /// @details Each further ordinal shifts the per-GPU LDS/scratch windows by
+  /// @ref kApertureStride. Shared by
+  /// AMDKFD_IOC_GET_PROCESS_APERTURES_NEW and the debug device snapshot.
+  kfd_process_device_apertures gpu_apertures(uint32_t ordinal) const;
   int set_xnack_mode_ioctl(void *arg);
   int get_tile_config_ioctl(void *arg);
   bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
@@ -326,16 +333,9 @@ private:
   /// single-primary-fd local path.
   uint32_t local_process_id_ = 0;
 
-  static constexpr kfd_process_device_apertures default_apertures_{
-      .lds_base = 0x1000000000000ULL,
-      .lds_limit = 0x10000FFFFFFFFULL,
-      .scratch_base = 0x2000000000000ULL,
-      .scratch_limit = 0x20000FFFFFFFFULL,
-      .gpuvm_base = 0x1000000000ULL,
-      .gpuvm_limit = 0x3FFFFFFFFFFFULL,
-      .gpu_id = 0,
-      .pad = 0,
-  };
+  /// @brief Per-ordinal shift applied to the LDS and scratch aperture windows
+  /// so each GPU in a multi-GPU process gets a distinct range.
+  static constexpr uint64_t kApertureStride = 0x10000000000ULL;
 
   /// @brief IPC handle store for cross-process memory sharing.
   /// @details Lock ordering: process_mutex_ < alloc_mutex_ < ipc_mutex_.
@@ -346,6 +346,10 @@ private:
   std::unordered_set<int> owned_fds_;
 
   Sysfs topology_;
+
+  /// @brief Per-GPU topology info captured at setup_topology, indexed to match
+  /// gpus_. Feeds the AMDKFD_IOC_DBG_TRAP device snapshot.
+  std::vector<Sysfs::GpuInfo> gpu_infos_;
 
   static constexpr int kReservedFdCount = 256;
   int reserved_fd_base_ = 0;
