@@ -53,23 +53,59 @@ if(HIP_PLATFORM STREQUAL "amd" )
               DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT ${COMPONENT_NAME})
 
-   # Vendored LTTng-UST + userspace-rcu .so files. libamdhip64 finds
-   # these at runtime via RPATH $ORIGIN; without them in the package,
-   # the loader would fall back to a system lttng-ust (or fail).
-   # Installed flat under ${CMAKE_INSTALL_LIBDIR} (no lttng/ subdir) so
-   # downstream consumers that link -lamdhip64 also resolve the NEEDED
-   # liblttng-ust.so.1 etc. via the same -L path. LTTNG_VENDORED_LIB_DIR
+   # Vendored LTTng-UST + userspace-rcu .so files. LTTNG_VENDORED_LIB_DIR
    # is set by the include() of shared/lttng/cmake/VendorLttng.cmake from
    # hipamd/src/CMakeLists.txt — only populated when
    # HIP_ENABLE_LTTNG_UST=ON, hence the guard.
    if(HIP_ENABLE_LTTNG_UST AND DEFINED LTTNG_VENDORED_LIB_DIR)
-      install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
-              DESTINATION ${CMAKE_INSTALL_LIBDIR}
-              COMPONENT ${COMPONENT_NAME}
-              USE_SOURCE_PERMISSIONS
-              FILES_MATCHING
-              PATTERN "liblttng*.so*"
-              PATTERN "liburcu*.so*")
+      if(HIP_LTTNG_UST_LINK_MODE STREQUAL "dynamic")
+         # Non-flat packaging: install both the vendored LTTng-UST/urcu
+         # .so files and the rocm_hip_lttng_provider DSO into a dedicated
+         # ${CMAKE_INSTALL_LIBDIR}/rocm-lttng/ subdirectory rather than
+         # flat under ${CMAKE_INSTALL_LIBDIR} (alongside libamdhip64.so).
+         # Flat placement would put liblttng-ust-tracepoint.so.1 (and
+         # friends) right next to libamdhip64.so, where the default
+         # dynamic-linker search path (or the LTTng-UST tracepoint-
+         # provider constructor's own opportunistic discovery/dlopen
+         # probing) could find and load it even without an explicit
+         # LD_PRELOAD -- silently re-establishing the always-on
+         # dependency this dynamic-linkage split is meant to remove. The
+         # provider DSO's INSTALL_RPATH is $ORIGIN (set in
+         # hipamd/src/CMakeLists.txt), so once installed at
+         # .../rocm-lttng/librocm_hip_lttng_provider.so it still finds
+         # .../rocm-lttng/liblttng-ust.so.1 etc. alongside it. See
+         # ~/ai/task_info/lttng-no-link-plan.md for the full rationale.
+         install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocm-lttng
+                 COMPONENT ${COMPONENT_NAME}
+                 USE_SOURCE_PERMISSIONS
+                 FILES_MATCHING
+                 PATTERN "liblttng*.so*"
+                 PATTERN "liburcu*.so*")
+         if(TARGET rocm_hip_lttng_provider)
+            install(TARGETS rocm_hip_lttng_provider
+                    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocm-lttng
+                    COMPONENT ${COMPONENT_NAME})
+         endif()
+      else()
+         # direct mode: install the vendored .so files directly under
+         # ${CMAKE_INSTALL_LIBDIR} alongside libamdhip64.so (no lttng/
+         # subdir), unchanged from pre-split behavior. libamdhip64 finds
+         # these at runtime via RPATH $ORIGIN (pointing directly at
+         # ${CMAKE_INSTALL_LIBDIR} in direct mode); without them in the
+         # package, the loader would fall back to a system lttng-ust (or
+         # fail). Flat placement also lets downstream consumers that
+         # link -lamdhip64 resolve the NEEDED liblttng-ust.so.1 etc. via
+         # the same -L path. Moving these files to a subdirectory here
+         # would break direct mode's runtime resolution.
+         install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+                 DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                 COMPONENT ${COMPONENT_NAME}
+                 USE_SOURCE_PERMISSIONS
+                 FILES_MATCHING
+                 PATTERN "liblttng*.so*"
+                 PATTERN "liburcu*.so*")
+      endif()
    endif()
 
 #TODO:This do not belong in BINARY package.
@@ -195,11 +231,13 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
    set(HIP_RUNTIME_ROCM_PKG_DEPENDENCIES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, rocprofiler-register")
 endif()
 
-# LTTng-UST runtime libraries are now bundled inside the package under
-# ${CMAKE_INSTALL_LIBDIR}/ alongside libamdhip64.so (see
-# hipamd/packaging/CMakeLists.txt install rule above). libamdhip64.so
-# resolves liblttng-ust.so.1 there via RPATH $ORIGIN, so the .deb/.rpm
-# no longer requires the host distro's lttng-ust package to be installed.
+# LTTng-UST runtime libraries are now bundled inside the package (see the
+# install rule above: flat under ${CMAKE_INSTALL_LIBDIR} alongside
+# libamdhip64.so in 'direct' link mode, or under
+# ${CMAKE_INSTALL_LIBDIR}/rocm-lttng/ alongside the opt-in
+# rocm_hip_lttng_provider DSO in 'dynamic' link mode). Either way, the
+# .deb/.rpm no longer requires the host distro's lttng-ust package to be
+# installed.
 
 set(HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES "libnuma1, libstdc++6, libc6")
 
