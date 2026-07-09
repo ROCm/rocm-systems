@@ -72,6 +72,8 @@ struct CwsrLayout {
   /// Offset to the high end (one past the last byte) of the wave-state area.
   uint32_t wave_state_offset = 0;
   uint32_t wave_state_size = 0; ///< Size extending down from @ref wave_state_offset.
+  uint32_t debug_offset = 0;    ///< Offset of the debugger displaced-step region.
+  uint32_t debug_size = 0;      ///< Size of the debugger displaced-step region.
   bool ok = false;              ///< False if the waves do not fit in the ctx-save area.
 };
 

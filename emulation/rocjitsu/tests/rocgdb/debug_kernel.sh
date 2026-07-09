@@ -145,6 +145,48 @@ else
   fi
 fi
 
+# --- Second scenario: interior breakpoint + continue (displaced stepping) -----
+# Continuing past a breakpoint whose original instruction dbgapi cannot simulate
+# forces amd_dbgapi_displaced_stepping: dbgapi copies the instruction into the
+# per-queue debugger memory reserved in the CWSR header, steps it there, and
+# resumes. This asserts that reserved region exists and the emulator executes
+# from it (otherwise dbgapi aborts: "Per-queue memory reserved for the debugger
+# is missing").
+echo "running rocgdb (interior breakpoint + continue) ..."
+outfile2="$workdir/rocgdb2.out"
+timeout 180 "$mirage_bin" run --profile "$profile" -- \
+  rocgdb --batch \
+    -ex 'set breakpoint pending on' \
+    -ex 'break add_one.hip:15' \
+    -ex 'run' \
+    -ex 'info registers pc' \
+    -ex 'continue' \
+    "$app" </dev/null >"$outfile2" 2>&1
+status2=$?
+out2="$(cat "$outfile2")"
+echo "--------------------------------------------------------------------"
+echo "$out2"
+echo "--------------------------------------------------------------------"
+if [[ $status2 -ne 0 ]]; then
+  echo "FAIL: interior-breakpoint rocgdb run exited with status $status2" >&2
+  fail=1
+fi
+check2() { # <regex> <description>  (checks the second run's output)
+  if grep -qaE "$1" <<<"$out2"; then
+    echo "  ok: $2"
+  else
+    echo "  MISSING: $2 (/$1/)" >&2
+    fail=1
+  fi
+}
+check2 'hit Breakpoint 1, .*add_one .*at .*:15' 'stopped at the interior line breakpoint'
+check2 'add_one done: host\[0\]=1 host\[63\]=1' 'kernel completed after displaced-stepping the breakpoint'
+check2 'Inferior 1 .*exited normally' 'inferior exited normally after interior breakpoint'
+if grep -qaE 'Per-queue memory reserved for the debugger is missing' <<<"$out2"; then
+  echo "  FAIL: dbgapi could not find the reserved debugger memory" >&2
+  fail=1
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
   exit 1

@@ -91,7 +91,7 @@ build on this and are tracked below.
 | Debug events + register write-back (breakpoint stop end to end) | done |
 | One-command debugging (`mirage run --gdb` / `--gdb-ex`) | done |
 | Deterministic single-step (`stepi`) | done |
-| Displaced stepping / step-over | pending |
+| Displaced stepping / step-over (debugger memory reserved) | done |
 | Watchpoints / illegal-instruction / memory-violation | pending |
 | Private/scratch reads / multi-wave | pending |
 

@@ -139,6 +139,20 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
       ctx_base > std::numeric_limits<uint64_t>::max() - wave_state_offset)
     return layout; // does not fit
 
+  constexpr uint32_t kDebuggerBytesPerWave = 32;
+  constexpr uint32_t kDebuggerBytesAlign = 64;
+  constexpr uint32_t kDebuggerReserveChunks = 8;
+  const uint64_t debug_size_64 =
+      ((num_waves + kDebuggerReserveChunks) * kDebuggerBytesPerWave + kDebuggerBytesAlign - 1) /
+      kDebuggerBytesAlign * kDebuggerBytesAlign;
+  const uint64_t debug_offset_64 =
+      (wave_state_offset + kDebuggerBytesAlign - 1) / kDebuggerBytesAlign * kDebuggerBytesAlign;
+  const bool debug_fits = debug_offset_64 <= std::numeric_limits<uint32_t>::max() &&
+                          debug_size_64 <= std::numeric_limits<uint32_t>::max() &&
+                          debug_offset_64 + debug_size_64 <= area_size;
+  const uint32_t debug_offset = debug_fits ? static_cast<uint32_t>(debug_offset_64) : 0;
+  const uint32_t debug_size = debug_fits ? static_cast<uint32_t>(debug_size_64) : 0;
+
   // Write the payload first so a newly allocated area is not advertised before
   // all bytes referenced by its header are initialized.
   const uint64_t cs_base = ctx_base + control_stack_offset;
@@ -220,8 +234,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   write32(ctx_base + 4, static_cast<uint32_t>(control_stack_size));
   write32(ctx_base + 8, static_cast<uint32_t>(wave_state_offset));
   write32(ctx_base + 12, static_cast<uint32_t>(wave_state_size));
-  write32(ctx_base + 16, 0); // debug_offset
-  write32(ctx_base + 20, 0); // debug_size
+  write32(ctx_base + 16, debug_offset);
+  write32(ctx_base + 20, debug_size);
   write32(ctx_base + 24, 0); // err_payload_addr lo
   write32(ctx_base + 28, 0); // err_payload_addr hi
   write32(ctx_base + 32, 0); // err_event_id
@@ -231,6 +245,8 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   layout.control_stack_size = static_cast<uint32_t>(control_stack_size);
   layout.wave_state_offset = static_cast<uint32_t>(wave_state_offset);
   layout.wave_state_size = static_cast<uint32_t>(wave_state_size);
+  layout.debug_offset = debug_offset;
+  layout.debug_size = debug_size;
   layout.ok = true;
   return layout;
 }
