@@ -397,6 +397,10 @@ int SimulatedDriver::open() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
+        cu->set_memory_violation_handler(
+            [this](amdgpu::Wavefront &wf, uint64_t addr, bool is_write) {
+              return on_wave_memory_violation(wf, addr, is_write);
+            });
       }
     });
     g.cps_initialized = true;
@@ -511,6 +515,10 @@ uint32_t SimulatedDriver::open_process(pid_t client_pid) {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
+        cu->set_memory_violation_handler(
+            [this](amdgpu::Wavefront &wf, uint64_t addr, bool is_write) {
+              return on_wave_memory_violation(wf, addr, is_write);
+            });
       }
     });
     g.cps_initialized = true;
@@ -2295,6 +2303,65 @@ bool SimulatedDriver::on_wave_illegal_instruction(amdgpu::Wavefront &wf) {
   return true;
 }
 
+bool SimulatedDriver::on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t /*addr*/,
+                                               bool /*is_write*/) {
+  // A wave accessed a global address that is not backed by any mapping. Under a
+  // debugger, report it as a memory violation instead of silently servicing it
+  // from sparse backing. rocm-dbgapi maps TRAPSTS.xnack_error to
+  // WAVE_STOP_REASON_MEMORY_VIOLATION (architecture.cpp signaled_exceptions ->
+  // wave_get_state) and the queue's EC_QUEUE_WAVE_MEMORY_VIOLATION drives
+  // next_pending_event. The access already completed and the PC advanced, so
+  // the stop is reported at the next instruction (imprecise memory reporting).
+  const uint32_t process_id = wf.process_id();
+  const uint32_t queue_id = wf.queue_id();
+  auto proc = find_process(process_id);
+  if (!proc)
+    return false;
+  const pid_t target_pid = proc->client_pid();
+  {
+    std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
+    auto sit = debug_sessions_.find(target_pid);
+    if (sit == debug_sessions_.end() || !sit->second.enabled)
+      return false;
+  }
+  uint64_t ctx_base = 0;
+  uint32_t ctx_size = 0;
+  uint32_t gpu_id = 0;
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    auto qit = proc->queue_snapshot_map_.find(queue_id);
+    if (qit == proc->queue_snapshot_map_.end())
+      return false;
+    ctx_base = qit->second.ctx_save_restore_address;
+    ctx_size = qit->second.ctx_save_restore_area_size;
+    gpu_id = qit->second.gpu_id;
+  }
+  if (ctx_base == 0)
+    return false;
+  // gfx9 TRAPSTS.XNACK_ERROR is bit 28 (rocdbgapi architecture.cpp
+  // sq_wave_trapsts_xnack_error_mask = 1 << 28); it is not mode-gated, so it
+  // maps straight to WAVE_STOP_REASON_MEMORY_VIOLATION.
+  constexpr uint32_t kSqWaveTrapstsXnackErrorMask = 1u << 28;
+  wf.set_trapsts(wf.trapsts() | kSqWaveTrapstsXnackErrorMask);
+  wf.debug_trap(0); // halt; not an s_trap breakpoint
+  report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size,
+                      KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION));
+  return true;
+}
+
+void SimulatedDriver::set_debug_active_on_all_cus(bool active) {
+  // gpus_ is populated once during open()/open_process() and read lock-free
+  // afterward, so no additional locking is needed here.
+  for (auto &g : gpus_) {
+    if (!g.soc)
+      continue;
+    g.soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        cu->set_debug_active(active);
+    });
+  }
+}
+
 void SimulatedDriver::resume_debug_queues(KfdProcess *proc) {
   // Reload each stopped wave from its queue's CWSR area (applying the debugger's
   // register edits and reading the requested run/single-step state that dbgapi
@@ -2708,6 +2775,9 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     args->enable.rinfo_size = sizeof(info);
 
     debug_sessions_[target_pid] = sess;
+    // Turn on the per-access debugger checks (watchpoints, memory-violation
+    // detection) now that a session exists.
+    set_debug_active_on_all_cus(true);
     return 0;
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
@@ -2719,6 +2789,10 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
         ::close(session_it->second.dbg_fd);
     }
     debug_sessions_.erase(target_pid);
+    // Once the last session is gone, disable the per-access debugger checks so
+    // undebugged execution pays no per-access cost.
+    if (debug_sessions_.empty())
+      set_debug_active_on_all_cus(false);
     return 0;
   case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
     // kfd_dbg_set_enabled_debug_exception_mask(): record the exceptions the

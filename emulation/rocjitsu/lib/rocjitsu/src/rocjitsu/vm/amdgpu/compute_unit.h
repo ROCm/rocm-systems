@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <functional>
@@ -199,6 +200,23 @@ public:
 
   /// @brief Install the illegal-instruction handler (see @ref IllegalInstHandler).
   void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
+
+  /// @brief Callback invoked for each active-lane global-memory access whose
+  /// address is not backed by any mapping (a memory access fault). Returns true
+  /// if the debugger stopped the wave. @param wf The faulting wavefront.
+  /// @param addr The unmapped global address. @param is_write store/atomic.
+  using MemoryViolationHandler = std::function<bool(Wavefront &wf, uint64_t addr, bool is_write)>;
+
+  /// @brief Install the memory-violation handler (see @ref MemoryViolationHandler).
+  void set_memory_violation_handler(MemoryViolationHandler cb) {
+    memory_violation_handler_ = std::move(cb);
+  }
+
+  /// @brief Enable/disable the per-access debugger checks (watchpoints and
+  /// memory-violation detection). The command processor sets this true only
+  /// while a debugger is attached, so global-memory accesses pay no per-access
+  /// debug cost otherwise. Relaxed atomic: it gates work, not correctness.
+  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -590,6 +608,10 @@ protected:
       watchpoint_handler_; ///< address-watchpoint handler; see set_watchpoint_handler.
   IllegalInstHandler
       illegal_inst_handler_; ///< illegal-instruction handler; see set_illegal_inst_handler.
+  MemoryViolationHandler
+      memory_violation_handler_; ///< memory-fault handler; see set_memory_violation_handler.
+  std::atomic<bool> debug_active_{
+      false}; ///< gates per-access debugger checks; see set_debug_active.
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;

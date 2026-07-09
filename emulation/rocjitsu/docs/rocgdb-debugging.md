@@ -95,7 +95,7 @@ tracked below.
 | Displaced stepping / step-over (debugger memory reserved) | done |
 | GPU address watchpoints (`watch`/`rwatch`/`awatch`) | done |
 | Illegal-instruction exception (SIGILL) | done |
-| Memory-access violation (SIGSEGV) | pending |
+| Memory-access violation (SIGSEGV) | done |
 | Private/scratch reads / multi-wave | pending |
 
 ## 4. Sources
