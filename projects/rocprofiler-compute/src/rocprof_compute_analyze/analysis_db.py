@@ -58,7 +58,11 @@ from utils.utils_analysis import (
     VALUE_COL_PREFERENCE,
 )
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
+from utils.utils_counter_defs import (
+    PER_KERNEL_DENOM_COL,
+    extract_counters_and_variables,
+    get_build_in_vars,
+)
 
 
 class MetricInfoRow(NamedTuple):
@@ -348,6 +352,9 @@ class db_analysis(OmniAnalyze_Base):
                     policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
+
+            # Per-dispatch column of 1s for per_kernel normalization (SUM == N).
+            pmc_df[PER_KERNEL_DENOM_COL] = 1
 
             pmc_df_per_workload[workload_path] = pmc_df
 

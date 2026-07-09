@@ -20,6 +20,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
+from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -307,6 +308,9 @@ def create_df_pmc(
     # Skip for Standalone Roofline with -1 to keep full kernel names
     if kernel_verbose >= 0:
         kernel_name_shortener(df, kernel_verbose)
+
+    # Per-dispatch column of 1s for per_kernel normalization (SUM == N).
+    df[PER_KERNEL_DENOM_COL] = 1
 
     if verbose >= 2:
         console_debug(f"pmc_raw_data final_single_df {df.info}")
