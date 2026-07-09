@@ -2132,6 +2132,19 @@ bool SimulatedDriver::on_wave_single_step_complete(amdgpu::Wavefront &wf) {
   // recognize breakpoints and apply the -4 PC adjust; trap id 0 means "no trap",
   // so the stepped PC is reported as-is (rocdbgapi architecture.cpp trap_id()).
   wf.debug_trap(0);
+  // Signal single-step completion the way gfx9.4 (MI300/MI350) hardware does:
+  // raise TRAPSTS.TRAP_AFTER_INST (bit 25). rocm-dbgapi's wave_get_state maps
+  // this exact bit to WAVE_STOP_REASON_SINGLE_STEP (rocdbgapi
+  // amdgcn_architecture_t::wave_get_state, architecture.cpp:1544, using
+  // gfx9_4_architecture_t::sq_wave_trapsts_trap_after_inst_mask = 1u << 25 at
+  // architecture.cpp:3782). It is also what dbgapi itself sets after emulating a
+  // stepped instruction (simulate_instruction_fixup, architecture.cpp:4044).
+  // Without this bit the debugger sees a stopped wave with no stop reason,
+  // concludes the step was spurious, and re-resumes the wave in an unbounded
+  // loop that runs the whole kernel. dbgapi clears the bit on the next resume
+  // via clear_stop_reasons (architecture.cpp:1418), so it never accumulates.
+  constexpr uint32_t kSqWaveTrapstsTrapAfterInstMask = 1u << 25; // gfx9.4 TRAPSTS.TRAP_AFTER_INST
+  wf.set_trapsts(wf.trapsts() | kSqWaveTrapstsTrapAfterInstMask);
   report_wave_stopped(proc, queue_id, gpu_id, ctx_base, ctx_size);
   return true;
 }
@@ -2211,8 +2224,13 @@ void SimulatedDriver::resume_debug_queues(KfdProcess *proc) {
     for (auto *cu : cus_to_activate)
       cu->activate_async();
   }
-  // Unhalted waves resume when their compute units are next stepped, which the
-  // activate_async calls above schedule on the engine thread.
+  // Unhalted (and single-stepped) waves resume when their compute units are next
+  // stepped, which the activate_async calls above schedule on the engine thread.
+  // The debugger is not blocked here: for a single-step the engine executes one
+  // instruction and re-stops the wave, and rocm-dbgapi only reads the wave back
+  // after it receives the wave-stop notification the engine writes to dbg_fd
+  // once the post-step CWSR is fully serialized (report_wave_stopped), so it
+  // never observes a mid-step state.
 }
 
 void SimulatedDriver::suspend_debug_queues(KfdProcess *proc) {

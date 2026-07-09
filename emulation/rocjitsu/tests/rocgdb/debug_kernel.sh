@@ -61,11 +61,14 @@ fi
 
 # --- Drive ROCgdb through mirage --------------------------------------------
 echo "running rocgdb under: $mirage_bin run --profile $profile"
-# The gating flow exercises the reliable core: stop at the kernel, inspect wave
-# state, and continue to a correct result. (Instruction single-stepping is
-# covered deterministically by the engine unit test
-# WaveDebugTest.SingleStepExecutesOneInstructionThenReports; driving it back to
-# back through ROCgdb is not yet race-free, so it is left out of the smoke test.)
+# The gating flow exercises the full core: stop at the kernel, inspect wave
+# state, single-step three instructions (asserting the PC advances each time),
+# and continue to a correct result. Single-stepping is also covered
+# deterministically by the engine unit test
+# WaveDebugTest.SingleStepExecutesOneInstructionThenReports.
+#
+# The `print/x $pc` before and after each stepi lets the assertions below verify
+# the wave advanced by real instruction boundaries rather than running away.
 #
 # Output is captured to a file rather than $(...) command substitution: `mirage
 # run` execs under a PTY whose forwarded fds keep a bash command substitution
@@ -80,6 +83,13 @@ timeout 180 "$mirage_bin" run --profile "$profile" -- \
     -ex 'run' \
     -ex 'info registers pc exec' \
     -ex 'x/i $pc' \
+    -ex 'print/x $pc' \
+    -ex 'stepi' \
+    -ex 'print/x $pc' \
+    -ex 'stepi' \
+    -ex 'print/x $pc' \
+    -ex 'stepi' \
+    -ex 'print/x $pc' \
     -ex 'continue' \
     "$app" </dev/null >"$outfile" 2>&1
 status=$?
@@ -110,6 +120,30 @@ check '^exec +0xffffffffffffffff' 'read the wave EXEC mask (all 64 lanes)'
 check '=> 0x[0-9a-f]+ <.*add_one.*>:' 'disassembled the instruction at PC'
 check 'add_one done: host\[0\]=1 host\[63\]=1' 'kernel produced the correct result after continue'
 check 'Inferior 1 .*exited normally' 'inferior exited normally'
+
+# Single-step assertion: the four `print/x $pc` values (at the breakpoint and
+# after each of three stepi) must be strictly increasing. A runaway wave would
+# either overshoot (fewer than four values, having exited) or repeat a PC.
+mapfile -t pcs < <(grep -aoE '\$[0-9]+ = 0x[0-9a-f]+' <<<"$out" | grep -aoE '0x[0-9a-f]+')
+if [[ ${#pcs[@]} -lt 4 ]]; then
+  echo "  MISSING: four PC samples across three stepi (got ${#pcs[@]}: ${pcs[*]:-none})" >&2
+  fail=1
+else
+  strictly_increasing=1
+  for ((i = 1; i < 4; i++)); do
+    # 64-bit compare via bash arithmetic (PCs fit in a signed 64-bit range here).
+    if (( $((pcs[i])) <= $((pcs[i - 1])) )); then
+      strictly_increasing=0
+      break
+    fi
+  done
+  if [[ $strictly_increasing -eq 1 ]]; then
+    echo "  ok: PC advanced across three single-steps (${pcs[0]} -> ${pcs[1]} -> ${pcs[2]} -> ${pcs[3]})"
+  else
+    echo "  MISSING: strictly increasing PC across single-steps (got ${pcs[*]})" >&2
+    fail=1
+  fi
+fi
 
 if [[ $fail -ne 0 ]]; then
   echo "FAIL: one or more debug markers were missing" >&2
