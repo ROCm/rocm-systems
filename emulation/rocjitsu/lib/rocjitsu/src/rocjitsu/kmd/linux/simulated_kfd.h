@@ -19,9 +19,12 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -67,10 +70,15 @@ struct IpcObject {
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
 public:
+  /// @brief Test seam invoked between procfs authorization and pidfd revalidation.
+  using DebugIdentityValidationHook = std::function<void()>;
+
   [[nodiscard]] bool daemon_mode() const { return daemon_mode_; }
 
-  SimulatedKfd(SoC &soc, bool daemon_mode = false);
-  SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false);
+  SimulatedKfd(SoC &soc, bool daemon_mode = false,
+               DebugIdentityValidationHook debug_identity_validation_hook = {});
+  SimulatedKfd(std::vector<SoC *> socs, std::vector<uint32_t> gpu_ids, bool daemon_mode = false,
+               DebugIdentityValidationHook debug_identity_validation_hook = {});
   ~SimulatedKfd() override;
 
   /// @brief Local-mode interface (interposer). Operates on the local process.
@@ -261,6 +269,7 @@ private:
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
   int debug_trap_ioctl(KfdProcess &caller, void *arg);
+  void reap_exited_debug_sessions(std::stop_token stop);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
 
   /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
@@ -299,12 +308,12 @@ private:
   ///   op_mutex_ < process_mutex_
   ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_mutex_, owned_fds_mutex_}
   ///   op_mutex_ < runtime_mutex_ < alloc_mutex_        (runtime_enable_ioctl)
-  ///   op_mutex_ < debug_mutex_ < runtime_mutex_        (debug_trap_ioctl)
+  ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
-  /// The op_mutex_ in the debug rule is always the CALLER's, while debug_mutex_/
-  /// runtime_mutex_ may belong to a DIFFERENT process (the debug target resolved
-  /// by client pid). debug_trap_ioctl holds only the caller's op_mutex_ and never
-  /// acquires the target's op_mutex_, so a cross-process attach cannot deadlock.
+  /// The op_mutex_ in the debug rule is always the CALLER's, while runtime_mutex_
+  /// may belong to a DIFFERENT process (the debug target resolved by client pid).
+  /// debug_trap_ioctl holds only the caller's op_mutex_ and never acquires the
+  /// target's op_mutex_, so a cross-process attach cannot deadlock.
   /// interrupt_mutex_ is a leaf: the CP interrupt callback takes it and only
   /// descends into EventState::mutex_, and close() takes it only after releasing
   /// process_mutex_, so there is no cycle.
@@ -318,6 +327,16 @@ private:
   mutable std::mutex process_mutex_;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
   uint32_t next_process_id_ = 1;
+
+  /// @brief Debugger sessions keyed by the target inferior's Linux pid.
+  /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a
+  /// session on an inferior before the inferior opens /dev/kfd, mirroring the
+  /// kernel creating the target kfd_process in the DBG_TRAP_ENABLE path.
+  mutable std::mutex debug_sessions_mutex_;
+  std::unordered_map<pid_t, KfdProcess::DebugSession> debug_sessions_;
+  DebugIdentityValidationHook debug_identity_validation_hook_;
+  std::condition_variable_any debug_sessions_cv_;
+  std::jthread debug_session_reaper_;
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_
