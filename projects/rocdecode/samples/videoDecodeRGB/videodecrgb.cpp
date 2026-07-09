@@ -408,6 +408,13 @@ int main(int argc, char **argv) {
                 return -1;
             }
         }
+        if (p_resize_dev_mem != nullptr) {
+            hip_status = hipFree(p_resize_dev_mem);
+            if (hip_status != hipSuccess) {
+                std::cout << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
+                return -1;
+            }
+        }
         for (int i = 0; i < frame_buffers_size; i++) {
             hip_status = hipFree(frame_buffers[i]);
             if (hip_status != hipSuccess) {

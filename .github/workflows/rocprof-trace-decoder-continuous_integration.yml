@@ -98,7 +98,7 @@ jobs:
       shell: bash
       run: |
         apt-get update
-        apt-get install -y git build-essential cmake g++ python3 python3-pip libgtest-dev libgmock-dev
+        apt-get install -y git build-essential cmake g++ python3 python3-pip python3-pyelftools libgtest-dev libgmock-dev
         git config --global --add safe.directory '*'
 
     - name: List Files
@@ -118,6 +118,7 @@ jobs:
         cmake -B build -S projects/rocprof-trace-decoder \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DPython3_EXECUTABLE=$(command -v python3) \
           -DBUILD_TESTS=ON \
           -DBUILD_UNIT_TESTS=ON
 
@@ -128,7 +129,7 @@ jobs:
         cmake --build build -j $(nproc)
 
     - name: Test
-      timeout-minutes: 15
+      timeout-minutes: 25
       shell: bash
       run: |
         cd build
