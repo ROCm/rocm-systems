@@ -323,9 +323,12 @@ class FileHandle:
             raise RuntimeError("The FileHandle is not open.")
         io = AsyncIOHandle(size, file_offset, buffer_offset)
         err, extra_err = hipFileReadAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches read()).
+            raise OSError(extra_err, os.strerror(extra_err))
         if err != 0:
             # err is hipFileOpError_t; extra_err is hipError_t when err ==
-            # hipFileHipDriverError, else errno (advisory).
+            # hipFileHipDriverError.
             raise HipFileException(err, extra_err)
         return io
 
@@ -346,6 +349,9 @@ class FileHandle:
             raise RuntimeError("The FileHandle is not open.")
         io = AsyncIOHandle(size, file_offset, buffer_offset)
         err, extra_err = hipFileWriteAsync(self._handle, buffer.ptr, io, stream)
+        if err == -1:
+            # POSIX/C error: extra_err is errno (matches write()).
+            raise OSError(extra_err, os.strerror(extra_err))
         if err != 0:
             raise HipFileException(err, extra_err)
         return io
@@ -395,10 +401,10 @@ class Stream:
         """Deregister the stream. Idempotent."""
         if not self._registered:
             return
-        self._registered = False
         err, extra = hipFileStreamDeregister(self._stream)
         if err != 0:
             raise HipFileException(err, extra)
+        self._registered = False
 
     def __enter__(self) -> Stream:
         self.register()

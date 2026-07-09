@@ -302,8 +302,13 @@ cdef class AsyncIOHandle:
     """In/out C storage for one async submit.
 
     Keep this object alive until the stream the I/O was submitted to has
-    been synchronised (``Stream.synchronize`` / a recorded ``Event``),
-    then read :attr:`bytes_done`.
+    been synchronised (synchronise the underlying HIP/CUDA stream, e.g.
+    ``hipStreamSynchronize`` / ``torch.cuda.Stream.synchronize``, or wait on
+    a recorded event), then read :attr:`bytes_done`.
+
+    ``size`` / ``file_offset`` / ``buffer_offset`` are writable: the async API
+    allows setting them after submission (when not known at submit time). The
+    driver reads the underlying C slots when the op runs on the stream.
     """
 
     cdef size_t _size
@@ -327,13 +332,25 @@ cdef class AsyncIOHandle:
     def size(self):
         return self._size
 
+    @size.setter
+    def size(self, value):
+        self._size = value
+
     @property
     def file_offset(self):
         return self._file_off
 
+    @file_offset.setter
+    def file_offset(self, value):
+        self._file_off = value
+
     @property
     def buffer_offset(self):
         return self._buf_off
+
+    @buffer_offset.setter
+    def buffer_offset(self, value):
+        self._buf_off = value
 
 
 def hipFileReadAsync(uintptr_t handle, uintptr_t buffer_base,
@@ -362,7 +379,8 @@ def hipFileReadAsync(uintptr_t handle, uintptr_t buffer_base,
         if <int>e.err != <int>_c.hipFileSuccess:
             if <int>e.err == <int>_c.hipFileHipDriverError:
                 extra = <int>e.hip_drv_err
-            else:
+            elif <int>e.err == -1:
+                # errno is only meaningful for a POSIX/C error (err == -1).
                 extra = errno
     return (<int>e.err, extra)
 
@@ -385,7 +403,8 @@ def hipFileWriteAsync(uintptr_t handle, uintptr_t buffer_base,
         if <int>e.err != <int>_c.hipFileSuccess:
             if <int>e.err == <int>_c.hipFileHipDriverError:
                 extra = <int>e.hip_drv_err
-            else:
+            elif <int>e.err == -1:
+                # errno is only meaningful for a POSIX/C error (err == -1).
                 extra = errno
     return (<int>e.err, extra)
 
@@ -400,6 +419,8 @@ def hipFileStreamRegister(uintptr_t stream_handle, unsigned flags=0):
         e = _c.hipFileStreamRegister(<_c.hipStream_t>stream_handle, flags)
         if <int>e.err == <int>_c.hipFileHipDriverError:
             extra = <int>e.hip_drv_err
+        elif <int>e.err == -1:
+            extra = errno  # POSIX/C error
     return (<int>e.err, extra)
 
 
@@ -411,6 +432,8 @@ def hipFileStreamDeregister(uintptr_t stream_handle):
         e = _c.hipFileStreamDeregister(<_c.hipStream_t>stream_handle)
         if <int>e.err == <int>_c.hipFileHipDriverError:
             extra = <int>e.hip_drv_err
+        elif <int>e.err == -1:
+            extra = errno  # POSIX/C error
     return (<int>e.err, extra)
 
 
@@ -423,6 +446,11 @@ def supports_async():
     cdef _c.hipFileError_t e
     with nogil:
         e = _c.hipFileStreamRegister(<_c.hipStream_t>0, 0)
+        # If the probe actually registered the default stream, undo it so the
+        # probe leaves no side effect (a leaked permanent registration would
+        # make a later user register fail with AlreadyRegistered).
+        if <int>e.err == <int>_c.hipFileSuccess:
+            _c.hipFileStreamDeregister(<_c.hipStream_t>0)
     return <int>e.err != <int>_c.hipFileAsyncNotSupported
 
 
