@@ -195,7 +195,19 @@ sequenceDiagram
 ### Addition of PC Sampling data support in Profiler Hub
 PC Sampling data collection is spread between both `rocprofiler-compute-tool` and `rocprofiler-sdk-tool`. However, the long-term plan is to move all this data collection to `rocprofiler-compute-tool` only. This work is currently in progress.
 
-Therefore, over the course of this transition the data which is collected in a `rocprofiler-compute-tool` shall be read/written via Profiler Hub. For this necessary interface extensions shall be made in a Profiler Hub.
+Therefore, over the course of this transition the data which is collected in a `rocprofiler-compute-tool` shall be read/written via Profiler Hub. For this necessary interface extensions shall be made in a Profiler Hub. Details of this work is to be defined in a separate HLD.
+
+## Implementation phases
+1. Integration of Profiler Hub in `rocprofiler-compute-tool.so`. This phase is covered by ./lld-profiler-hub-native-tool-integration.md. At the end of this phase:
+    - Metrics are written into per process databases via Profiler Hub. 
+    - However analysis scripts still access per-process databases directly and merge both SDK and `rocprofiler-compute-tool.so` into a per-pass database.
+2. Implementation of Python bindings for Profiler Hub. At the end of this phase:
+    - Python bindings are added to Profiler Hub library (directly in Profiler Hub project directory).
+    - Bindings are covered by unit tests which are run in CI.
+3. Integration of Profiler Hub in analysis scripts. At the end of this phase:
+    - Analysis scripts merge results from `rocprofiler-compute-tool.so` and `rocprofiler-sdk-tool.so` independently into two databases.
+    - Read/write of results from `rocprofiler-compute-tool.so` is performed only via Profiler Hub python bindings.
+
 
 ## Validation
 - Validation is done via existing functional tests, they all shall pass.

@@ -40,6 +40,10 @@
 - Describe proposed high-level design.
 - Clearly articulate architectural decisions, why you've made them and what are alternatives.
 
+## Implementation phases
+- Describe in what phases the designed feature could be developed.
+- Each phase should be defined as a "vertical slice", meaning it touches different part of the architecture stack and delivers an incremental value to the user.
+
 ## Validation, security and debuggability
 - Outline required types of tests (unit tests, functional, integration) and validation strategy.
 - Define relevant debugging capabilities to reduce maintenance cost such as logging, metrics, alerting, tracing strategy
