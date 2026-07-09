@@ -295,7 +295,8 @@ private:
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
-                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size);
+                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size,
+                           uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP));
   void resume_debug_queues(KfdProcess *proc);
   void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 
@@ -309,6 +310,7 @@ private:
   /// atomic read-modify-write.
   bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
                           bool is_atomic);
+  bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
 
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,

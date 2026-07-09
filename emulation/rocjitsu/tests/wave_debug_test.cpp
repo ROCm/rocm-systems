@@ -166,6 +166,32 @@ TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
   EXPECT_TRUE(wf->is_halted());
 }
 
+TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+  uint32_t illegal_count = 0;
+  fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
+    ++illegal_count;
+    wave.set_debug_halted(true);
+    return true;
+  });
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  fx.cu->step();
+  EXPECT_EQ(illegal_count, 1u);
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_EQ(wave->pc, kKernelAddr);
+}
+
+TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  fx.cu->step();
+  EXPECT_TRUE(wave->is_halted());
+}
+
 TEST(WaveDebugTest, DeclinedTrapAdvancesPcWithoutChangingWaveState) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, kSTrapSeven);
