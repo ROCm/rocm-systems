@@ -13155,11 +13155,12 @@ inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
+    inst.vdst.write_lane(
+        wf, lane,
+        static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(
+            static_cast<uint32_t>(static_cast<uint16_t>(inst.src0.read_lane(wf, lane))) *
+                static_cast<uint32_t>(static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
+            static_cast<uint32_t>(static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))))));
   }
 }
 
