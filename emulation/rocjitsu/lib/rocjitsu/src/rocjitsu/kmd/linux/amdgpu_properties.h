@@ -30,6 +30,49 @@ constexpr GfxIpVersion decode_gfx_target_version(uint32_t gfx_target_version) {
   };
 }
 
+/// @brief Packs a GC (graphics core) hardware IP version exactly like the
+/// amdgpu @c IP_VERSION() macro: @c (major<<24)|(minor<<16)|(rev<<8).
+///
+/// @details Producing the same packed representation the kernel uses lets the
+/// synthetic topology mirror the amdkfd driver's @c KFD_GC_VERSION comparisons
+/// (drivers/gpu/drm/amd/amdkfd/kfd_topology.c) bit-for-bit.
+constexpr uint32_t make_gc_ip_version(uint32_t major, uint32_t minor, uint32_t rev) {
+  return (major << 24) | (minor << 16) | (rev << 8);
+}
+
+/// @brief Maps a @c gfx_target_version (e.g. 90402 for gfx942) to the GC
+/// hardware IP version the amdkfd driver keys its capability logic on.
+///
+/// @details The two identifiers are not interchangeable for CDNA parts. The KFD
+/// device table (drivers/gpu/drm/amd/amdkfd/kfd_device.c) reports, for example,
+/// gfx90a (90010) as GC 9.4.2 and gfx942 (90402) as GC 9.4.3, so a plain
+/// major.minor.stepping decode would land on the wrong side of the driver's
+/// version thresholds (missing precise-memory support on gfx90a, or the
+/// gfx9.4.3 watch-address-mask values on gfx942). Only the parts whose encoding
+/// diverges from a direct decode are listed here; every other GPU -- all of
+/// gfx10/gfx11 and gfx12.0 -- decodes directly, which is exact for the
+/// thresholds the driver compares against.
+///
+/// \NPI add a case when a new GPU's gfx_target_version does not decode directly
+/// to its GC hardware IP version (see the KFD device table in
+/// drivers/gpu/drm/amd/amdkfd/kfd_device.c).
+constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_version) {
+  switch (gfx_target_version) {
+  case 90010: // Aldebaran / gfx90a  -> GC 9.4.2
+    return make_gc_ip_version(9, 4, 2);
+  case 90402: // MI300 / gfx942      -> GC 9.4.3
+    return make_gc_ip_version(9, 4, 3);
+  case 90500: // MI350 / gfx950      -> GC 9.5.0
+    return make_gc_ip_version(9, 5, 0);
+  case 120500: // gfx1250            -> GC 12.1.0
+    return make_gc_ip_version(12, 1, 0);
+  default: {
+    const GfxIpVersion ip = decode_gfx_target_version(gfx_target_version);
+    return make_gc_ip_version(ip.major, ip.minor, ip.stepping);
+  }
+  }
+}
+
 inline std::string gfx_target_name(uint32_t gfx_target_version) {
   auto ip = decode_gfx_target_version(gfx_target_version);
   constexpr char kHexDigits[] = "0123456789abcdef";

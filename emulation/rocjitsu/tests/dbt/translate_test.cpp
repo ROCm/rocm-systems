@@ -504,10 +504,11 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
                      });
 }
 
-std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+    const std::vector<uint32_t> &text_words = {0xBF810000u, 0xBF810000u}) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
-  constexpr uint64_t text_size = 8;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t rodata_size = 2 * kKernelDescriptorSize;
 
@@ -572,8 +573,6 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
   phdrs[1].p_align = load_align;
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
-  const std::array<uint32_t, 2> text_words = {kCdna4SEndpgm, kCdna4SEndpgm};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   std::vector<uint8_t> descriptors(rodata_size, 0);
@@ -2158,6 +2157,82 @@ void expect_cdna3_translated_descriptor_vgprs_at_least(const std::vector<uint8_t
   EXPECT_GE(infos[0].target_vgpr_count, expected_minimum);
 }
 
+uint32_t build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x47, sdst, 0);
+  default:
+    return rocjitsu::pack_sop1(0x1c, sdst, 0);
+  }
+}
+
+uint32_t build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x48, 0, ssrc0);
+  default:
+    return rocjitsu::pack_sop1(0x1d, 0, ssrc0);
+  }
+}
+
+uint32_t build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x49, sdst, ssrc0);
+  default:
+    return rocjitsu::pack_sop1(0x1e, sdst, ssrc0);
+  }
+}
+
+uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
+  constexpr uint32_t kSopkEncodingPrefix = 0xb;
+  constexpr uint32_t kSCallB64Opcode = 0x15;
+  return (kSopkEncodingPrefix << 28) | (kSCallB64Opcode << 23) | ((sdst & 0x7fu) << 16) |
+         static_cast<uint16_t>(simm16);
+}
+
+uint32_t build_s_trap(uint16_t simm16) {
+  // CDNA1-4 encode S_TRAP at SOPP opcode 0x12. This helper is intentionally
+  // local to the CDNA4->CDNA3 tests below; RDNA3+ uses a different SOPP opcode.
+  constexpr uint32_t kCdnaSoppTrapOpcode = 0x12;
+  return rocjitsu::pack_sopp(kCdnaSoppTrapOpcode, simm16);
+}
+
+uint32_t build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return rocjitsu::pack_sop2(0, sdst, ssrc0, ssrc1);
+}
+
+uint32_t build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return rocjitsu::pack_sop2(4, sdst, ssrc0, ssrc1);
+}
+
+std::vector<std::unique_ptr<rocjitsu::Instruction>>
+decode_text_instructions(const rocjitsu::Section &text, rj_code_arch_t arch) {
+  std::vector<std::unique_ptr<rocjitsu::Instruction>> decoded;
+  auto decoder = rocjitsu::Decoder::create(arch);
+  if (!decoder)
+    return decoded;
+
+  const auto *words = reinterpret_cast<const rj_code_binary_inst_t *>(text.data());
+  const size_t word_count = text.size() / sizeof(rj_code_binary_inst_t);
+  size_t word_offset = 0;
+  while (word_offset < word_count) {
+    std::unique_ptr<rocjitsu::Instruction> inst(
+        decoder->decode(words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
+    if (!inst)
+      break;
+    word_offset += static_cast<size_t>(inst->size()) / sizeof(rj_code_binary_inst_t);
+    decoded.push_back(std::move(inst));
+  }
+  return decoded;
+}
+
 // --- Synthetic BinaryTranslator integration tests ---
 TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_two_kernel_descriptors();
@@ -2221,6 +2296,48 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   std::ranges::sort(translated_descriptor_offsets);
   EXPECT_EQ(translated_entries, (std::vector<uint64_t>{0, sizeof(uint32_t)}));
   EXPECT_EQ(translated_descriptor_offsets, original_descriptor_offsets);
+}
+
+TEST(BinaryTranslatorE2E, DuplicatesSharedReachableBlocksPerKernel) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // kernel0: 0x00 -> helper 0x08.
+      rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4), // kernel1: 0x04 -> helper 0x08.
+      kCdna4SEndpgm,                                         // Shared source helper.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_two_kernel_descriptors(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+
+  rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto infos = parser.translate_image(result.elf_bytes, text->sectionOffset(), text->size(),
+                                            rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(infos.size(), 2u);
+  std::vector<uint64_t> translated_entries;
+  for (const auto &info : infos)
+    translated_entries.push_back(info.entry_text_offset);
+  std::ranges::sort(translated_entries);
+  ASSERT_EQ(translated_entries[0], 0u);
+  ASSERT_GT(translated_entries[1], 2 * sizeof(uint32_t));
+  ASSERT_LE(translated_entries[1] + 2 * sizeof(uint32_t), text->size());
+
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+  const uint64_t second_entry_word = translated_entries[1] / sizeof(uint32_t);
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], kCdna4SEndpgm);
+  EXPECT_EQ(target_words[second_entry_word], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[second_entry_word + 1], kCdna4SEndpgm);
 }
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3SemanticExpandRulesHaveTranslationFixtures) {
@@ -2318,7 +2435,8 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) {
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
   constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget = rocjitsu::pack_sopp(5, 4);
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> source 0x0c.
@@ -2346,15 +2464,15 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) 
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  // Without kernarg preload, the relocated body keeps only reachable blocks.
-  // Explicit branches are retargeted in that compact body while unreachable
-  // source gaps are removed.
+  // This kernel does not use the kernarg-preload compatibility entry path, so
+  // relocation emits only the reachable CFG body. Source gaps disappear and
+  // branch immediates are patched against the compact target layout.
   const std::vector<uint32_t> expected = {
       rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3),
       rocjitsu::pack_sopp(5, 1),
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3),
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3),
+      kCdna4SEndpgm,
   };
   for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
@@ -2369,6 +2487,15 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   words[72] = rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);    // Reachable target.
 
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = rocjitsu::find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
+      image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
@@ -2384,19 +2511,350 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   ASSERT_GE(text->size(), words.size() * sizeof(uint32_t));
 
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  // The final ELF section is tail-padded back to the original size, but the
-  // relocated body starts at the descriptor entry and keeps only reachable
-  // blocks. The source 0x100 and 0x120 targets therefore land immediately after
-  // their predecessor branches instead of remaining at the original words 64
-  // and 72.
-  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[1], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[64], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  // The synthesized preload launch window occupies words 0 and 64. The compact
+  // relocated body starts after that protected window, and the source 0x120
+  // target lands immediately after the source 0x100 branch instead of remaining
+  // at the original word 72.
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[64], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[65], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[66], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[67], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[72], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 
-TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
+TEST(BinaryTranslatorE2E, RewritesRecoveredSetpcTargetAfterRelocation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 20;
+  constexpr uint32_t kRelocatedGetpcDelta = 16;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),      // 0x04.
+      kOriginalGetpcDelta,                                     // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x10.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),      // 0x14 unreachable.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),      // 0x18 target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  // The recovered source target is 0x18, but the unreachable 0x14 word is not
+  // emitted in the compact body. The old PC builder must therefore be rewritten
+  // from getpc+20 to getpc+16 while preserving the indirect setpc consumer.
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RewritesRecoveredSwappcTargetAfterRelocation) {
+  constexpr uint16_t kPcSreg = 10;
+  constexpr uint16_t kReturnSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 24;
+  constexpr uint32_t kRelocatedGetpcDelta = 20;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),               // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),                 // 0x04.
+      kOriginalGetpcDelta,                                                // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0),            // 0x0c.
+      build_s_swappc_b64(kReturnSreg, kPcSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x10.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x14 fallthrough.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                 // 0x18 unreachable.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x1c target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], build_s_swappc_b64(kReturnSreg, kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[7], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, TranslatesDirectSCallWithSetpcReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x0c.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable gap.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable gap.
+      build_s_call_b64(kReturnSreg, 2),                         // 0x0c -> callee at 0x18.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 call continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x14 unreachable gap.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x18 callee return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1))
+      << "the direct call target must be recomputed after unreachable source gaps are compacted";
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[3], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 4u);
+  ASSERT_EQ(decoded[1]->mnemonic(), "s_call_b64");
+  ASSERT_TRUE(decoded[1]->branch_offset_bytes().has_value());
+  EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4)
+      << "translated call should branch from word 1 to the relocated return block at word 3";
+}
+
+TEST(BinaryTranslatorE2E, TranslatesDirectSCallWhenCalleeBranchesToSetpcReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x0c.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable gap.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable gap.
+      build_s_call_b64(kReturnSreg, 2),                         // 0x0c -> callee at 0x18.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 call continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x14 unreachable gap.
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 callee -> return.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x1c unreachable gap.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x20 callee return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1));
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[3], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[4], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, TranslatesSwappcCallWhenCalleeSetpcBranchesToReturn) {
+  constexpr uint16_t kCallTargetSreg = 10;
+  constexpr uint16_t kReturnTargetSreg = 12;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalCallTargetDelta = 28;
+  constexpr uint32_t kOriginalReturnTargetDelta = 20;
+  constexpr uint32_t kRelocatedCallTargetDelta = 20;
+  constexpr uint32_t kRelocatedReturnTargetDelta = 16;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA4),               // 0x00.
+      build_s_add_u32(kCallTargetSreg, kCallTargetSreg, kLiteralOperand),         // 0x04.
+      kOriginalCallTargetDelta,                                                   // 0x08.
+      build_s_addc_u32(kCallTargetSreg + 1, kCallTargetSreg + 1, kInlineInt0),    // 0x0c.
+      build_s_swappc_b64(kReturnSreg, kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x10.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                     // 0x14 continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                     // 0x18 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                     // 0x1c unreachable.
+      build_s_getpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA4),         // 0x20 callee.
+      build_s_add_u32(kReturnTargetSreg, kReturnTargetSreg, kLiteralOperand), // 0x24.
+      kOriginalReturnTargetDelta,                                             // 0x28.
+      build_s_addc_u32(kReturnTargetSreg + 1, kReturnTargetSreg + 1, kInlineInt0), // 0x2c.
+      build_s_setpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x30 -> return.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),             // 0x34 unreachable.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4),       // 0x38 return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[2], kRelocatedCallTargetDelta)
+      << "the swappc call target should relocate to the compact callee body";
+  EXPECT_EQ(target_words[4],
+            build_s_swappc_b64(kReturnSreg, kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], build_s_getpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[8], kRelocatedReturnTargetDelta)
+      << "the callee's recovered setpc edge is what reaches the return block";
+  EXPECT_EQ(target_words[10], build_s_setpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[11], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RewritesOneRecoveredBuilderUsedByTwoSetpcConsumers) {
+  constexpr uint16_t kPcSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 28;
+  constexpr uint32_t kRelocatedGetpcDelta = 24;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),      // 0x04.
+      kOriginalGetpcDelta,                                     // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c.
+      rocjitsu::pack_sopp(5, 1),                               // 0x10 -> second consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x14 first consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 carried consumer.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),      // 0x1c unreachable gap.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),      // 0x20 shared target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], rocjitsu::pack_sopp(5, 1));
+  EXPECT_EQ(target_words[5], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[7], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RelocatesDirectCallReturnAcrossShiftedOffsets) {
+  constexpr uint16_t kReturnSreg = 28;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(4, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x14.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x0c unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 unreachable.
+      build_s_call_b64(kReturnSreg, 6),                         // 0x14 -> callee at 0x30.
+      rocjitsu::build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 continuation -> 0x34.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x1c unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x20 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x24 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x28 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x2c unreachable.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x30 callee return.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x34 final continuation.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1))
+      << "source call target 0x30 should relocate to compact word 3";
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+      << "the call continuation branch should relocate to compact word 4";
+  EXPECT_EQ(target_words[3], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[4], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 5u);
+  ASSERT_TRUE(decoded[1]->branch_offset_bytes().has_value());
+  EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4);
+}
+
+TEST(BinaryTranslatorE2E, TrapTerminatesCfgBeforeFollowingFunction) {
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> trap block.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable gap.
+      build_s_trap(2),                                       // 0x08 terminates.
+      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),       // 0x0c next function body.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x10 unreachable.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_branch");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_trap");
+  // The real regression this covers is a bogus CFG fallthrough from S_TRAP into
+  // the following ELF function/padding bytes. If that edge is present, the
+  // unrecovered S_SETPC_B64 below the trap becomes reachable and translation
+  // fails with an indirect-branch diagnostic.
+  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
+                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+}
+
+TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {
   struct Case {
     const char *name;
     std::vector<uint32_t> words;
@@ -2404,9 +2862,12 @@ TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
   };
 
   const std::array<Case, 3> cases = {{
-      {"Setpc", {0xBE801D00u, 0x00000000u}, "s_setpc_b64"},
+      {"SetpcS0", {0xBE801D00u, 0x00000000u}, "s_setpc_b64"},
+      {"SetpcS30WithoutCall",
+       {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),
+        rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+       "s_setpc_b64"},
       {"Swappc", {0xBE801E00u, 0x00000000u}, "s_swappc_b64"},
-      {"Call", {0xBA800000u, 0x00000000u}, "s_call_b64"},
   }};
 
   for (const auto &test_case : cases) {

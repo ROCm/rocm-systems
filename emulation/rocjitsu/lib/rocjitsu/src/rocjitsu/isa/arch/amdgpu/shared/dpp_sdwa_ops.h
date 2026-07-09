@@ -30,12 +30,16 @@ namespace amdgpu {
 /// @brief VOP1/VOP2 src0 encoding values that indicate a DPP or SDWA suffix.
 constexpr uint32_t SRC_SDWA = 249;
 constexpr uint32_t SRC_DPP = 250;
-constexpr uint32_t SRC_DPP8_LO = 233;
-constexpr uint32_t SRC_DPP8_HI = 234;
+constexpr uint32_t SRC_DPP8_FI_0 = 233;
+constexpr uint32_t SRC_DPP8_FI_1 = 234;
+constexpr uint32_t SRC_DPP8_LO = SRC_DPP8_FI_0;
+constexpr uint32_t SRC_DPP8_HI = SRC_DPP8_FI_1;
 
 namespace dpp {
 
-inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_LO || src0 == SRC_DPP8_HI; }
+inline bool is_src_dpp8(uint32_t src0) { return src0 == SRC_DPP8_FI_0 || src0 == SRC_DPP8_FI_1; }
+
+inline uint32_t src_dpp8_fi(uint32_t src0) { return src0 == SRC_DPP8_FI_1 ? 1u : 0u; }
 
 /// Row size for DPP operations (16 lanes per row).
 constexpr int ROW_SIZE = 16;
@@ -52,14 +56,17 @@ enum DppCtrl : uint32_t {
   ROW_ROR1 = 0x121, // row rotate right 1..15
   ROW_ROR_MAX = 0x12F,
   WF_SHL1 = 0x130,
+  WF_ROL1 = 0x134, // wave rotate left 1
   WF_SRL1 = 0x138, // wave shift right 1
   WF_ROR1 = 0x13C, // wave rotate right 1
   ROW_MIRROR = 0x140,
   ROW_HALF_MIRROR = 0x141,
-  ROW_BCAST15 = 0x142,    // broadcast lane 15 of row
-  ROW_BCAST31 = 0x143,    // broadcast lane 31 of half-wave
-  ROW_XMASK_BASE = 0x150, // row_xmask (GFX10+)
-  ROW_XMASK_MAX = 0x15F,
+  ROW_BCAST15 = 0x142,    // broadcast lane 15 of each row to the following row
+  ROW_BCAST31 = 0x143,    // broadcast lane 31 to the upper half-wave
+  ROW_SHARE_BASE = 0x150, // row_share/row_newbcast: broadcast one lane within each row
+  ROW_SHARE_MAX = 0x15F,
+  ROW_XMASK_BASE = 0x160, // row_xmask (GFX10+)
+  ROW_XMASK_MAX = 0x16F,
 };
 
 /// @brief Compute the source lane index for a DPP permutation.
@@ -122,6 +129,11 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
     return src < wf_size ? src : lane;
   }
 
+  if (dpp_ctrl == WF_ROL1) {
+    // Wave rotate left 1: lane K reads from lane (K+1) % wf_size.
+    return (lane + 1) % wf_size;
+  }
+
   if (dpp_ctrl == WF_SRL1) {
     // Wave shift right 1: lane K reads from lane K-1.
     int src = lane - 1;
@@ -146,14 +158,29 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   }
 
   if (dpp_ctrl == ROW_BCAST15) {
-    // Broadcast lane 15 of the current row to all lanes in the row.
-    return row_num * ROW_SIZE + 15;
+    // Broadcast lane 15 of each row to the following row. Row 0 has invalid
+    // shared data.
+    if (lane < ROW_SIZE) {
+      out_of_bounds = true;
+      return lane;
+    }
+    return row_num * ROW_SIZE - 1;
   }
 
   if (dpp_ctrl == ROW_BCAST31) {
-    // Broadcast lane 31 of the current half-wave.
-    int half = (lane >= 32) ? 1 : 0;
-    return half * 32 + 31;
+    // Broadcast lane 31 to lanes 32-63. Lanes 0-31 have invalid shared data.
+    if (lane < 32 || wf_size <= 32) {
+      out_of_bounds = true;
+      return lane;
+    }
+    return 31;
+  }
+
+  if (dpp_ctrl >= ROW_SHARE_BASE && dpp_ctrl <= ROW_SHARE_MAX) {
+    // row_share/row_newbcast: broadcast one selected source lane within the
+    // destination row.
+    int lane_sel = dpp_ctrl - ROW_SHARE_BASE;
+    return row_num * ROW_SIZE + lane_sel;
   }
 
   if (dpp_ctrl >= ROW_XMASK_BASE && dpp_ctrl <= ROW_XMASK_MAX) {
@@ -185,11 +212,52 @@ inline bool dpp_lane_masked(int lane, uint32_t row_mask, uint32_t bank_mask) {
   return ((row_mask & (1u << row)) == 0) || ((bank_mask & (1u << bank)) == 0);
 }
 
+/// @brief Check if a DPP instruction writes the destination lane.
+///
+/// Row/bank masks always disable writes. When the DPP permutation has invalid
+/// shared data, BOUND_CTRL=0 disables the write and BOUND_CTRL=1 writes using a
+/// zero source value.
+inline bool dpp_lane_write_enabled(int lane, int wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                                   uint32_t bank_mask, uint32_t bound_ctrl) {
+  if (dpp_lane_masked(lane, row_mask, bank_mask))
+    return false;
+
+  bool oob = false;
+  (void)dpp_permute(dpp_ctrl, lane, wf_size, oob);
+  return !oob || bound_ctrl != 0;
+}
+
+/// @brief Compute the destination write mask for a DPP instruction.
+///
+/// Includes only lanes enabled by row_mask/bank_mask and, when the DPP
+/// permutation reads invalid shared data, only lanes whose BOUND_CTRL behavior
+/// still writes a zero source value.
+///
+/// @param wf_size Wavefront size in lanes.
+/// @param dpp_ctrl 9-bit DPP control value.
+/// @param row_mask 4-bit row mask.
+/// @param bank_mask 4-bit bank mask.
+/// @param bound_ctrl If 1, invalid shared data writes zero; if 0, write is disabled.
+/// @returns Bit mask with one bit per destination lane that should be written.
+inline uint64_t dpp_write_mask(uint32_t wf_size, uint32_t dpp_ctrl, uint32_t row_mask,
+                               uint32_t bank_mask, uint32_t bound_ctrl) {
+  uint64_t mask = 0;
+  for (uint32_t ln = 0; ln < wf_size; ++ln)
+    if (dpp_lane_write_enabled(static_cast<int>(ln), static_cast<int>(wf_size), dpp_ctrl, row_mask,
+                               bank_mask, bound_ctrl))
+      mask |= (1ULL << ln);
+  return mask;
+}
+
 /// @brief Apply a complete DPP read for one lane.
 ///
 /// Reads the permuted source value from a VGPR across the wavefront.
-/// Handles out-of-bounds (returns 0 if bound_ctrl=1, else returns old_val),
-/// and row/bank masking (returns old_val if masked).
+/// Handles row/bank masking (returns old_val if masked), out-of-bounds
+/// permutation (returns 0 if bound_ctrl=1, else returns old_val), and RDNA
+/// fetch-inactive mode (returns 0 for inactive source lanes when fi=0).
+/// Callers must still apply dpp_write_mask() after the ALU operation so lanes
+/// disabled by masks or BOUND_CTRL=0 invalid shared data keep their old
+/// destination values.
 ///
 /// @param src_data Array of wf_size source values (one per lane).
 /// @param lane Current lane index.
@@ -198,11 +266,13 @@ inline bool dpp_lane_masked(int lane, uint32_t row_mask, uint32_t bank_mask) {
 /// @param row_mask 4-bit row mask.
 /// @param bank_mask 4-bit bank mask.
 /// @param bound_ctrl If 1, out-of-bounds lanes read 0; if 0, unchanged.
+/// @param fi If 1, inactive source lanes still read GPRs; if 0, they read 0.
 /// @param old_val The lane's current value (used when masked/OOB with bound_ctrl=0).
+/// @param exec_mask EXEC value used to classify inactive source lanes.
 /// @returns The DPP-permuted source value for this lane.
 inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32_t dpp_ctrl,
-                         uint32_t row_mask, uint32_t bank_mask, uint32_t bound_ctrl,
-                         uint32_t old_val) {
+                         uint32_t row_mask, uint32_t bank_mask, uint32_t bound_ctrl, uint32_t fi,
+                         uint32_t old_val, uint64_t exec_mask) {
   if (dpp_lane_masked(lane, row_mask, bank_mask))
     return old_val;
 
@@ -211,6 +281,9 @@ inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32
 
   if (oob)
     return bound_ctrl ? 0u : old_val;
+
+  if (!fi && (exec_mask & (1ULL << src_lane)) == 0)
+    return 0u;
 
   return src_data[src_lane];
 }
@@ -226,20 +299,22 @@ inline uint32_t dpp_read(const uint32_t *src_data, int lane, int wf_size, uint32
 /// @param row_mask 4-bit row mask.
 /// @param bank_mask 4-bit bank mask.
 /// @param bound_ctrl Bound control (1 = zero OOB, 0 = preserve).
+/// @param fi Fetch-inactive control (1 = read inactive source lanes, 0 = zero).
 /// @param[out] storage Owning pointer for the DppOperand lifetime.
 /// @param wf Wavefront providing register state.
 inline void apply_dpp(Operand *&src0, uint32_t dpp_ctrl, uint32_t row_mask, uint32_t bank_mask,
-                      uint32_t bound_ctrl, std::unique_ptr<DppOperand> &storage,
+                      uint32_t bound_ctrl, uint32_t fi, std::unique_ptr<DppOperand> &storage,
                       amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
   uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
     raw[i] = cu.read_vgpr(vbase, i);
   for (uint32_t i = 0; i < ws; ++i)
     result[i] = dpp_read(raw, static_cast<int>(i), static_cast<int>(ws), dpp_ctrl, row_mask,
-                         bank_mask, bound_ctrl, raw[i]);
+                         bank_mask, bound_ctrl, fi, raw[i], exec_mask);
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
   src0 = storage.get();
 }
@@ -249,18 +324,27 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
-inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, std::unique_ptr<DppOperand> &storage,
-                       amdgpu::Wavefront &wf) {
+inline uint32_t dpp8_read(const uint32_t *src_data, uint32_t lane, uint32_t wf_size,
+                          uint32_t lane_sel, uint32_t fi, uint64_t exec_mask) {
+  uint32_t src_lane = dpp8_src_lane(lane, lane_sel);
+  if (src_lane >= wf_size)
+    return 0u;
+  if (!fi && (exec_mask & (1ULL << src_lane)) == 0)
+    return 0u;
+  return src_data[src_lane];
+}
+
+inline void apply_dpp8(Operand *&src0, uint32_t lane_sel, uint32_t fi,
+                       std::unique_ptr<DppOperand> &storage, amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t ws = wf.wf_size();
   uint32_t vbase = wf.vgpr_alloc().base + src0->encoding_value_;
+  uint64_t exec_mask = wf.exec();
   uint32_t raw[64], result[64];
   for (uint32_t i = 0; i < ws; ++i)
     raw[i] = cu.read_vgpr(vbase, i);
-  for (uint32_t lane = 0; lane < ws; ++lane) {
-    uint32_t src_lane = dpp8_src_lane(lane, lane_sel);
-    result[lane] = src_lane < ws ? raw[src_lane] : 0u;
-  }
+  for (uint32_t lane = 0; lane < ws; ++lane)
+    result[lane] = dpp8_read(raw, lane, ws, lane_sel, fi, exec_mask);
   storage = std::make_unique<DppOperand>(*src0, result, static_cast<int>(ws));
   src0 = storage.get();
 }

@@ -39,6 +39,7 @@ stress:
   Stress_printf_SharedMem: *level_2
   Stress_printf_SynchronizedPrintf: *level_2
   Stress_printf_AtomicCalc: *level_2
+  Stress_printf_HostcallListenerRace: *level_2
   Stress_hipStreamCreate_SyncTest: *level_2
   Stress_hipStreamCreatePriority_SyncTest: *level_2
   Stress_hipStreamCreateWithFlags_SyncTest: *level_2

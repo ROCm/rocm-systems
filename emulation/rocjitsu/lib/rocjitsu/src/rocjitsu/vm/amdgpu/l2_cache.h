@@ -32,7 +32,8 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// (HBM controller or memory-side cache) via the requester port.
 ///
 /// Mtype-aware behavior:
-///   - UC: Bypass L2, forward directly to backing store.
+///   - UC: Flush/invalidate any resident L2 line, then bypass L2 and
+///         forward directly to backing store.
 ///   - CC: Allocate in L2, MOESI coherence state tracking for CPU-GPU
 ///         shared memory. Write-through on CC stores.
 ///   - RW/WB: Allocate in L2, with functional-mode stores written through to
@@ -133,7 +134,7 @@ public:
     ensure_line(addr, vmid);
 
     uint32_t offset = CacheStore::line_offset(addr);
-    uint8_t *line = cache_.line_data_for_write(addr);
+    uint8_t *line = cache_.line_data_for_write(addr, vmid);
     assert(line != nullptr && "ensure_line must guarantee hit");
 
     fn(line, offset);
@@ -141,7 +142,7 @@ public:
     send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE, vmid);
 
     simdojo::CacheTag *ctag = nullptr;
-    cache_.lookup(addr, &ctag);
+    cache_.lookup(addr, &ctag, vmid);
     if (ctag) {
       ctag->coherence = simdojo::CoherenceState::MODIFIED;
       ctag->dirty = false;
@@ -159,12 +160,10 @@ public:
   /// @brief Invalidate all L2 lines.
   void invalidate_all() { cache_.invalidate_all(); }
 
-  /// @brief Invalidate L2 lines covering an address range.
-  /// @details Used after host/SDMA writes to ensure GPU reads reload from
-  /// backing store. No writeback — the backing store already has latest data.
-  void invalidate_range(uint64_t addr, uint32_t size);
-
   /// @brief Flush all dirty L2 lines to HBM and invalidate.
+  /// @param vmid Ignored. Each dirty line is written back under its own owning
+  /// vmid (recorded in the line tag), so a caller-supplied vmid cannot be
+  /// correct for a global flush. Retained only for call-site signature symmetry.
   void flush_all(uint32_t vmid = 0);
 
   /// @brief Create a completer port for a CU connection (one per CU).
