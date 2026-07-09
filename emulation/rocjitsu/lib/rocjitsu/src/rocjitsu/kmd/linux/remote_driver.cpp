@@ -584,6 +584,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_snapshot_count = dbg->queue_snapshot.num_queues;
         saved_dbg_snapshot_stride = dbg->queue_snapshot.entry_size;
         break;
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        saved_dbg_snapshot_ptr = dbg->query_exception_info.info_ptr;
+        saved_dbg_snapshot_count = 1;
+        saved_dbg_snapshot_stride = dbg->query_exception_info.info_size;
+        break;
       default:
         break;
       }
@@ -665,6 +670,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         inline_size = static_cast<size_t>(entries) * wire_stride;
         break;
       }
+      case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+        inline_size = dbg->query_exception_info.info_size;
+        break;
       default:
         break;
       }
@@ -831,6 +839,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
             resp->result = -EFAULT;
           break;
         }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+          dbg->query_exception_info.info_ptr = saved_dbg_snapshot_ptr;
+          break;
         default:
           break;
         }
@@ -936,6 +947,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           }
           break;
         }
+        case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+            copy_len = std::min(static_cast<size_t>(saved_dbg_snapshot_stride), extra);
+          }
+          break;
         default:
           break;
         }

@@ -85,18 +85,41 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
     break;
   }
   case AMDKFD_IOC_DBG_TRAP: {
+    // Every op the client reserves an inline tail for has to appear here, or
+    // the exact-length test below rejects a well-formed request and the
+    // connection is dropped. Keep this in step with the tail sizes
+    // RemoteDriver::send_ioctl() computes and the pointers
+    // reconstruct_embedded_pointers() repoints (rj_vm.cpp) -- all three must
+    // agree on the same set of ops.
     const auto *args = static_cast<const kfd_ioctl_dbg_trap_args *>(buffer);
-    if (args->op == KFD_IOC_DBG_TRAP_ENABLE) {
+    switch (args->op) {
+    case KFD_IOC_DBG_TRAP_ENABLE:
       inline_size =
           std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(kfd_runtime_info));
-    } else if (args->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT &&
-               !checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
-                                &inline_size)) {
-      return false;
-    } else if (args->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT &&
-               !checked_product(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size,
-                                &inline_size)) {
-      return false;
+      break;
+    case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+      if (!checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
+                           &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+      if (!checked_product(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size,
+                           &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+      inline_size = args->query_exception_info.info_size;
+      break;
+    case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+      if (!checked_product(args->suspend_queues.num_queues, sizeof(uint32_t), &inline_size))
+        return false;
+      break;
+    case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+      if (!checked_product(args->resume_queues.num_queues, sizeof(uint32_t), &inline_size))
+        return false;
+      break;
+    default:
+      break;
     }
     break;
   }
