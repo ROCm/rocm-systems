@@ -13304,10 +13304,9 @@ inline void execute_v_mad_u16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(::rocjitsu::amdgpu::mad_lo_u16(
+                             inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane),
+                             inst.src2.read_lane(wf, lane)))));
   }
 }
 

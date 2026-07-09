@@ -1033,6 +1033,39 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'inst.vdst.write_lane' not in true16_ternary
 
 
+def test_local_true16_vop3_probe_is_guarded_before_dpp_cleanup(tmp_path):
+    args = SimpleNamespace(
+        multi=[f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run_multi(args)
+
+    rdna4_vop3 = (tmp_path / 'rdna4' / 'vop3.cpp').read_text()
+    ceil_body = _generated_method_body(rdna4_vop3, 'VCeilF16Vop3', 'VTruncF16Vop3')
+
+    guard = (
+        'if (inst_.src0 != amdgpu::SRC_DPP && ' '!amdgpu::dpp::is_src_dpp8(inst_.src0))'
+    )
+    assert guard in ceil_body
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_body
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in ceil_body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in ceil_body
+    assert 'src0.clear_delegate();' in ceil_body
+    assert ceil_body.index(guard) < ceil_body.index(
+        'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
+    )
+    assert ceil_body.index(
+        'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
+    ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
+    assert ceil_body.index(
+        'write_vop3_true16_dst(vdst, wf, lane, opsel,'
+    ) < ceil_body.index('src0.clear_delegate();')
+
+
 def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
     rdna4_generated_root: Path,
 ):

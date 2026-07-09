@@ -12,6 +12,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
@@ -1895,6 +1896,66 @@ TEST(Rdna4True16Vop3Test, AddF16UsesSelectedHalvesAndPreservesDestinationHalf) {
 
     cu->reset_all_wf();
   }
+}
+
+TEST(Rdna4True16Vop3Test, AddF16DppPreservesMaskedDestinationHalf) {
+  ForceScalarGuard guard(false);
+  amdgpu::GpuMemory gpu_mem("rdna4_true16_add_f16_dpp_mem");
+  amdgpu::L2Cache l2("rdna4_true16_add_f16_dpp_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_true16_add_f16_dpp", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec((1ULL << wf->wf_size()) - 1ULL);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kSrc0 = 0;
+  constexpr uint32_t kSrc1 = 1;
+  constexpr uint32_t kDst = 2;
+
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vb + kSrc0, lane,
+                   pack16(0x1111u, util::f32_to_f16(static_cast<float>(lane + 10))));
+    cu->write_vgpr(vb + kSrc1, lane, pack16(0x2222u, util::f32_to_f16(0.5f)));
+    cu->write_vgpr(
+        vb + kDst, lane,
+        pack16(static_cast<uint16_t>(0x4000u + lane), static_cast<uint16_t>(0x7000u + lane)));
+  }
+
+  rdna4::Vop3VopDpp16MachineInst raw{};
+  raw.vdst = kDst;
+  raw.opsel = 0xBu;
+  raw.op = 0x132u;
+  raw.encoding = 0x35u;
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.src1 = 256u + kSrc1;
+  raw.vsrc0 = kSrc0;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.fi = 1;
+  raw.bound_ctrl = 0;
+  raw.bank_mask = 0xFu;
+  raw.row_mask = 0x1u;
+
+  rdna4::VAddF16Vop3 inst(reinterpret_cast<const rdna4::MachineInst *>(&raw));
+  ASSERT_EQ(std::string_view(inst.mnemonic()), "v_add_f16");
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + kDst, 0), pack16(0x4000u, 0x7000u));
+  EXPECT_EQ(cu->read_vgpr(vb + kDst, 1), pack16(0x4001u, util::f32_to_f16(10.5f)));
+  EXPECT_EQ(cu->read_vgpr(vb + kDst, 2), pack16(0x4002u, util::f32_to_f16(11.5f)));
+  EXPECT_EQ(cu->read_vgpr(vb + kDst, 16), pack16(0x4010u, 0x7010u));
+
+  cu->reset_all_wf();
 }
 
 TEST(Rdna4True16Vop3Test, FmacF16UsesSelectedAccumulatorHalfAndPreservesDestinationHalf) {
