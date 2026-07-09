@@ -716,6 +716,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_base(lds_base);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
+      wf->set_queue_id(entry.queue_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
       wf->set_cluster_info(entry.cluster_rank_for_local_wg(local_wg_id), entry.cluster_size());
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);

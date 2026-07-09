@@ -139,7 +139,7 @@ public:
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
   /// @retval false At least one wavefront is active.
-  virtual bool is_idle() const { return !has_active_wfs(); }
+  virtual bool is_idle() const { return !has_runnable_wfs(); }
 
   /// @brief Register a callback invoked when this CU becomes idle.
   ///
@@ -147,6 +147,17 @@ public:
   /// The command processor uses this to detect when all CUs are done.
   /// @param cb Callback to invoke when idle.
   void set_on_idle(std::function<void()> cb) { on_idle_ = std::move(cb); }
+
+  /// @brief Callback invoked when a wavefront executes an s_trap instruction.
+  /// @details Returns true if the debugger stopped the wave (it becomes
+  /// debug-halted and is skipped by the scheduler), false if there is no
+  /// attached debugger (the s_trap is then treated as a no-op). The command
+  /// processor wires this to the KFD debug controller; unit tests install it
+  /// directly. @param wf The trapping wavefront. @param trap_id s_trap immediate.
+  using TrapHandler = std::function<bool(Wavefront &wf, uint32_t trap_id)>;
+
+  /// @brief Install the s_trap handler (see @ref TrapHandler).
+  void set_trap_handler(TrapHandler cb) { trap_handler_ = std::move(cb); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -347,6 +358,19 @@ public:
     return false;
   }
 
+  /// @brief Check whether any wavefront can currently make forward progress.
+  /// @details A debug-halted wave occupies its slot (so @ref has_active_wfs
+  /// stays true and the wave is not retired) but cannot run, so it must not
+  /// keep the CU's event loop spinning. Idle detection uses this instead of
+  /// @ref has_active_wfs so the engine can quiesce while a wave is stopped at
+  /// a breakpoint. @retval true At least one non-halted, non-debug-halted wave.
+  bool has_runnable_wfs() const {
+    for (const auto &w : wfs_)
+      if (!w->is_halted() && !w->debug_halted())
+        return true;
+    return false;
+  }
+
   bool has_active_wfs_for_process(uint32_t process_id) const {
     for (const auto &w : wfs_)
       if (!w->is_halted() && w->process_id() == process_id)
@@ -518,6 +542,7 @@ protected:
   GlobalMemPipeline global_mem_pipeline_;
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
+  TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;

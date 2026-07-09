@@ -301,6 +301,7 @@ add_executable(
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     cdna3_predicate_mask_test.cpp
+    wave_debug_test.cpp
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
