@@ -59,6 +59,7 @@ typedef struct rj_vm_cmd_t {
   size_t buf_size;           ///< Total size of the arguments buffer.
   int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
   rj_handle_t shared_handle; ///< [out] Backing handle for shareable allocations, or -1.
+  rj_handle_t in_handle;     ///< [in] Client-provided fd (e.g. debugger notifier), or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.

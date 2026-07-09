@@ -60,12 +60,13 @@ mirage run --profile mi350x -- rocgdb --args ./my_hip_app
 
 ## 3. Status
 
-Attach and detach through `mirage run` work end to end: rocm-dbgapi attaches to
-the process, enumerates the emulated GPU agent, and ROCgdb stops at host
-breakpoints — `info agents` lists the synthetic `gfx950 / MI350X` agent. The
-wave-level stack (stop at a kernel breakpoint, read/step wave state, watchpoints,
-faults, private memory, multi-wave) is built on top of this in subsequent
-changes and tracked below.
+Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
+end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
+wave registers / PC / disassembly, and continues the kernel to correct
+completion. `info agents` lists the synthetic `gfx950 / MI350X` agent, and a
+breakpoint on a GPU kernel stops the trapping wave. The remaining wave-control
+features (single-step, watchpoints, faults, private memory, multi-wave) build on
+this and are tracked below.
 
 | Area | Status |
 |---|---|
@@ -77,9 +78,10 @@ changes and tracked below.
 | Debug sessions keyed by inferior pid (attach before connect) | done |
 | SET_EXCEPTIONS_ENABLED / SET_FLAGS / launch-mode/override (accept) | done |
 | Attach/detach lifecycle (clean detach after inferior exit) | done |
-| GET_QUEUE_SNAPSHOT (real queues) | pending |
-| Wave stop on `s_trap` + CWSR serialization | pending |
-| Debug events + register write-back + single-step | pending |
+| GET_QUEUE_SNAPSHOT (real queues) | done |
+| Wave stop on `s_trap` + CWSR serialization | done |
+| Debug events + register write-back (breakpoint stop end to end) | done |
+| Single-step / displaced stepping | pending |
 | Watchpoints / illegal-instruction / memory-violation | pending |
 | Private/scratch reads / multi-wave | pending |
 

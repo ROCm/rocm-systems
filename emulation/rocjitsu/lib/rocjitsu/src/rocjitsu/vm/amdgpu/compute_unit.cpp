@@ -463,8 +463,15 @@ bool ComputeUnitCore::step() {
   bool issued = false;
   for (auto &wf : wfs_) {
     if (wf->state() == WfState::RUNNING && !wf->debug_halted()) {
+      const bool single_step = wf->debug_single_step();
       issue_instruction(wf.get());
       issued = true;
+      // A single-stepped wave (rocm-dbgapi MODE.debug_en=1) executes exactly one
+      // instruction and then re-stops. If the stepped instruction did not itself
+      // trap (which already halts the wave), hand it to the debug controller to
+      // re-stop and report the completed step.
+      if (single_step && !wf->debug_halted() && single_step_handler_)
+        single_step_handler_(*wf);
     }
   }
   if (!issued)

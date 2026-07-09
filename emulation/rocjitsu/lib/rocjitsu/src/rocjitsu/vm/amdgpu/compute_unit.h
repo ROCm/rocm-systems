@@ -136,6 +136,13 @@ public:
   /// after dispatch_wf().
   virtual void activate() = 0;
 
+  /// @brief Thread-safe variant of @ref activate for use off the engine thread.
+  ///
+  /// @details The KFD debugger resumes a wave from an ioctl thread (not the
+  /// engine thread); this reschedules the CU via the engine's async event queue,
+  /// which also wakes the engine if it was idling with all waves halted.
+  virtual void activate_async() = 0;
+
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
   /// @retval false At least one wavefront is active.
@@ -158,6 +165,15 @@ public:
 
   /// @brief Install the s_trap handler (see @ref TrapHandler).
   void set_trap_handler(TrapHandler cb) { trap_handler_ = std::move(cb); }
+
+  /// @brief Callback invoked after a single-stepped wave executes one
+  /// instruction. The command processor wires this to the KFD debug controller
+  /// so the wave is re-stopped and reported. @param wf The stepped wavefront.
+  using SingleStepHandler = std::function<bool(Wavefront &wf)>;
+
+  /// @brief Install the single-step completion handler (see @ref
+  /// SingleStepHandler).
+  void set_single_step_handler(SingleStepHandler cb) { single_step_handler_ = std::move(cb); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -543,6 +559,8 @@ protected:
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
+  SingleStepHandler
+      single_step_handler_; ///< single-step completion handler; see set_single_step_handler.
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
@@ -598,6 +616,9 @@ public:
     auto now = this->engine()->context(this->partition_id()).current_tick();
     this->schedule_event(&work_event_, now + 1);
   }
+
+  /// @brief Thread-safe CU (re)activation via the engine's async event queue.
+  void activate_async() override { this->engine()->schedule_event_now(&work_event_); }
 
 private:
   simdojo::Event work_event_{this, simdojo::EventType::TIMER_CALLBACK,

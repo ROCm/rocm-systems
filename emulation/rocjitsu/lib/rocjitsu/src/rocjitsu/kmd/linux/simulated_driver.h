@@ -6,6 +6,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
@@ -19,6 +20,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -212,7 +214,20 @@ private:
   int debug_trap_ioctl(KfdProcess &caller, void *arg);
   int debug_device_snapshot(kfd_ioctl_dbg_trap_device_snapshot_args &args);
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
-  int debug_query_event(pid_t target_pid, kfd_ioctl_dbg_trap_query_debug_event_args &args);
+  int debug_query_event(pid_t target_pid, KfdProcess *target_proc,
+                        kfd_ioctl_dbg_trap_query_debug_event_args &args);
+  int debug_query_exception_info(pid_t target_pid,
+                                 kfd_ioctl_dbg_trap_query_exception_info_args &args);
+
+  /// @brief Raise a process-level debug exception (queue id 0) and wake the debugger.
+  void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
+
+  /// @brief The runtime-enable debugger handshake (KFD EC_PROCESS_RUNTIME).
+  /// @details Raises EC_PROCESS_RUNTIME so an attached debugger reads r_debug and
+  /// sets up code-object tracking, then blocks (bounded) until the debugger
+  /// acknowledges via SEND_RUNTIME_EVENT — so kernel breakpoints are inserted
+  /// before the inferior dispatches. No-op when not debugged.
+  void runtime_enable_debugger_handshake(pid_t target_pid);
 
   /// @brief s_trap handler installed on every compute unit's wavefronts.
   /// @details Runs on the engine thread when a wave executes s_trap. Returns
@@ -221,9 +236,32 @@ private:
   /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
   bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
 
+  /// @brief Single-step completion handler installed on every compute unit.
+  /// @details Runs on the engine thread after a wave rocm-dbgapi placed in
+  /// single-step mode (MODE.debug_en=1) has executed exactly one instruction.
+  /// Re-stops the wave and reports it, exactly as a trap would.
+  bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
                                    uint64_t ctx_base, uint32_t ctx_size);
+
+  /// @brief Serialize a queue's stopped waves, raise EC_QUEUE_WAVE_TRAP and wake
+  /// the debugger. Shared by the s_trap and single-step-completion paths.
+  void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size);
+
+  /// @brief Reload the target's stopped waves from their CWSR areas and unhalt
+  /// them (KFD_IOC_DBG_TRAP_RESUME_QUEUES).
+  void resume_debug_queues(KfdProcess *proc);
+
+  /// @brief Stop the target's running waves and refresh their CWSR areas
+  /// (KFD_IOC_DBG_TRAP_SUSPEND_QUEUES).
+  void suspend_debug_queues(KfdProcess *proc);
+
+  /// @brief Apply a wave's reloaded CWSR register state (the debugger's edits)
+  /// onto the live wave and set its run/single-step state.
+  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 
   /// @brief Record a debug exception on a queue and reflect it on the snapshot.
   void raise_debug_event(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
@@ -269,8 +307,11 @@ private:
   mutable std::mutex debug_events_mutex_;
   std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;
 
-  /// @brief Monotonic source of stable debugger wave ids (TTMP4:5).
-  std::atomic<uint64_t> next_debug_wave_id_{1};
+  /// @brief Runtime-enable handshake: the inferior's RUNTIME_ENABLE blocks here
+  /// until the debugger's SEND_RUNTIME_EVENT marks the target acknowledged.
+  mutable std::mutex runtime_handshake_mutex_;
+  std::condition_variable runtime_handshake_cv_;
+  std::unordered_set<pid_t> runtime_acked_;
 
   /// @brief Interrupt dispatch: process_id → EventState*.
   /// @details Protected by interrupt_mutex_. Decoupled from process_mutex_

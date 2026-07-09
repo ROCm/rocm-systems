@@ -130,6 +130,8 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
       args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
     else if (args->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
       args->queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+    else if (args->op == KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO)
+      args->query_exception_info.info_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
   default:
@@ -243,8 +245,25 @@ rj_status_t execute_impl(SimulatedDriver *driver, uint32_t process_id, rj_vm_cmd
   auto arg_size = _IOC_SIZE(cmd->cmd);
   reconstruct_embedded_pointers(cmd->cmd, cmd->buf, arg_size, cmd->buf_size);
 
+  // For DBG_TRAP ENABLE the debugger's notifier pipe arrives out-of-band as an
+  // SCM_RIGHTS fd (cmd->in_handle, already in the daemon's fd space). Substitute
+  // it for the client-side fd number in the payload so the driver signals the
+  // right pipe when a wave stops (the kernel receives the same fd via the
+  // ioctl). On success the debug session takes ownership (in_handle cleared so
+  // the transport does not close it); otherwise the transport reclaims it.
+  bool adopting_notifier = false;
+  if (cmd->cmd == AMDKFD_IOC_DBG_TRAP && cmd->in_handle >= 0) {
+    auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(cmd->buf);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE) {
+      dbg->enable.dbg_fd = static_cast<__u32>(cmd->in_handle);
+      adopting_notifier = true;
+    }
+  }
+
   cmd->result = driver->ioctl(process_id, cmd->cmd, cmd->buf);
   cmd->shared_handle = -1;
+  if (adopting_notifier && cmd->result == 0)
+    cmd->in_handle = -1;
 
   if (cmd->cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU && cmd->result == 0) {
     auto *alloc_args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(cmd->buf);

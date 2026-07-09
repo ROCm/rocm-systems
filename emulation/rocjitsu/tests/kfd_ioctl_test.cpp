@@ -429,25 +429,26 @@ TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &watch), -ENODEV);
 }
 
-TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
+TEST_F(KfdIoctlTest, DbgTrapAdmittedOpsBehaveAsSpecified) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
   en.enable.dbg_fd = KFD_INVALID_FD;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
-  // QUERY_DEBUG_EVENT is admitted by the gate ladder and reports EAGAIN (no
-  // raised exception) until the wave-level event channel is wired up.
+  // QUERY_DEBUG_EVENT is admitted by the gate ladder and reports EAGAIN when no
+  // wave/queue exception is pending.
   kfd_ioctl_dbg_trap_args q{};
   q.pid = static_cast<uint32_t>(getpid());
   q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -EAGAIN);
 
-  // SEND_RUNTIME_EVENT is admitted but not implemented yet.
+  // SEND_RUNTIME_EVENT acknowledges the runtime-enable handshake and succeeds
+  // even when no inferior is currently blocking on it.
   kfd_ioctl_dbg_trap_args ev{};
   ev.pid = static_cast<uint32_t>(getpid());
   ev.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ev), -ENOSYS);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &ev), 0);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapDeviceSnapshotEnumeratesAgent) {

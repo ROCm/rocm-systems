@@ -47,6 +47,11 @@ struct CwsrWaveState {
   uint32_t trap_id = 0;                ///< Trap id from the s_trap (TTMP6[25:28]).
   bool wave_stopped = true;            ///< Whether the wave is stopped (TTMP6[30]).
   bool saved_status_halt = false;      ///< Saved STATUS.HALT (TTMP6[29]).
+  /// Whether the SPI initialized the dispatch-bookkeeping TTMPs (group ids in
+  /// TTMP8-10, packet id in TTMP11). Mirrors kfd_runtime_info.ttmp_setup; when
+  /// false, TTMP6[31] (spi_ttmps_setup_disabled) is set and rocm-dbgapi skips
+  /// packet/workgroup correlation for the wave.
+  bool spi_ttmps_setup = false;
 
   uint32_t num_sgprs = 0; ///< Number of meaningful scalar registers in @ref sgprs.
   uint32_t num_vgprs = 0; ///< Number of meaningful vector registers in @ref vgprs.
@@ -86,6 +91,28 @@ struct CwsrLayout {
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32);
+
+/// @brief Read wave register state back from a serialized CWSR area.
+///
+/// @details The inverse of @ref serialize_queue_cwsr. rocm-dbgapi writes a
+/// stopped wave's registers (PC, EXEC, VCC, STATUS, MODE, SGPRs, VGPRs, and the
+/// TTMP6 run/stop and MODE.debug_en bits) straight into the CWSR area via
+/// /proc/<pid>/mem; on resume the driver reads them back to apply the debugger's
+/// edits to the live wave and to learn the requested run vs. single-step state.
+///
+/// @param ctx_base Context-save-restore GPU virtual address (from the queue).
+/// @param area_size Context-save-restore area size in bytes (from the queue).
+/// @param waves In: each element supplies the wave geometry (@ref
+///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs) and ordering
+///        used to reproduce the exact layout; Out: filled with the values
+///        currently stored in the area. The count and geometry must match the
+///        @ref serialize_queue_cwsr call that produced the area.
+/// @param read32 Callback that reads one dword from a GPU virtual address.
+/// @returns True on success; false if the waves do not fit the area (in which
+///          case @p waves is left unchanged).
+bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
+                            std::vector<CwsrWaveState> &waves,
+                            const std::function<uint32_t(uint64_t)> &read32);
 
 } // namespace kmd
 } // namespace rocjitsu

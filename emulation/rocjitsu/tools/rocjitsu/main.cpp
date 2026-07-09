@@ -173,6 +173,7 @@ static void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::sto
       cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
+      cmd.in_handle = -1; // legacy CLI daemon does not forward the debugger notifier fd
       rj_vm_execute_as(vm, process_id, &cmd);
 
       RpcHeader resp{};

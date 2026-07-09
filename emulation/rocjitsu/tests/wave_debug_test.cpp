@@ -100,6 +100,46 @@ TEST(WaveDebugTest, STrapBreakpointStopsWaveAndQuiescesCu) {
   EXPECT_TRUE(wf->is_halted());
 }
 
+// A single-stepped wave (rocm-dbgapi MODE.debug_en=1) executes exactly one
+// instruction and is then handed to the single-step completion handler, which
+// re-stops it. The engine must not run past that one instruction.
+TEST(WaveDebugTest, SingleStepExecutesOneInstructionThenReports) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xBF800000u);     // s_nop 0
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xBF800000u); // s_nop 0
+  fx.gpu_mem.write32(kKernelAddr + 8, kSEndpgm);
+
+  uint32_t step_count = 0;
+  fx.cu->set_single_step_handler([&](amdgpu::Wavefront &w) {
+    ++step_count;
+    w.set_debug_halted(true); // re-stop after the step, as the driver does
+    return true;
+  });
+
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_debug_single_step(true);
+
+  // One engine step runs exactly one instruction, then the handler re-stops it.
+  fx.cu->step();
+  EXPECT_EQ(step_count, 1u);
+  EXPECT_EQ(wf->pc, kKernelAddr + 4);
+  EXPECT_TRUE(wf->debug_halted());
+
+  // While halted, stepping the CU makes no further progress.
+  fx.cu->step();
+  EXPECT_EQ(step_count, 1u);
+  EXPECT_EQ(wf->pc, kKernelAddr + 4);
+
+  // Resuming single-step runs the next instruction and re-stops again.
+  wf->set_debug_halted(false);
+  wf->set_debug_single_step(true);
+  fx.cu->step();
+  EXPECT_EQ(step_count, 2u);
+  EXPECT_EQ(wf->pc, kKernelAddr + 8);
+  EXPECT_TRUE(wf->debug_halted());
+}
+
 // Without a debugger the s_trap is a no-op: the wave advances past it and runs
 // to completion. This keeps kernels that embed traps in unreached paths from
 // aborting the emulator when no debugger is attached.
@@ -304,6 +344,57 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
     for (uint32_t r = 0; r < in.num_vgprs; ++r)
       for (uint32_t l = 0; l < 64; ++l)
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
+  }
+}
+
+TEST(WaveDebugTest, CwsrDeserializeRecoversSerializedWaveState) {
+  // serialize_queue_cwsr followed by deserialize_queue_cwsr must round-trip the
+  // register state the resume path reads back (the debugger writes its edits
+  // straight into this area, and resume reloads them onto the live wave).
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000; // 256 KiB
+
+  std::map<uint64_t, uint32_t> mem;
+  auto write32 = [&](uint64_t va, uint32_t val) { mem[va] = val; };
+  auto read32 = [&](uint64_t va) -> uint32_t {
+    auto it = mem.find(va);
+    return it == mem.end() ? 0u : it->second;
+  };
+
+  std::vector<kmd::CwsrWaveState> in = {make_wave(0xBB01, 0x3000), make_wave(0xBB02, 0x3080)};
+  // Give the second wave MODE.debug_en set so the round-trip preserves it (the
+  // resume path uses this bit to select single-step).
+  in[1].mode = (1u << 11);
+
+  ASSERT_TRUE(kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, in, write32).ok);
+
+  // Reload: supply only the per-wave geometry (num_sgprs/num_vgprs) so the
+  // decoder reproduces the exact layout, then read the values back.
+  std::vector<kmd::CwsrWaveState> out;
+  for (const auto &w : in) {
+    kmd::CwsrWaveState g;
+    g.num_sgprs = w.num_sgprs;
+    g.num_vgprs = w.num_vgprs;
+    out.push_back(g);
+  }
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, out, read32));
+  ASSERT_EQ(out.size(), in.size());
+
+  for (size_t i = 0; i < in.size(); ++i) {
+    EXPECT_EQ(out[i].pc, in[i].pc) << "wave " << i;
+    EXPECT_EQ(out[i].exec, in[i].exec);
+    EXPECT_EQ(out[i].vcc, in[i].vcc);
+    EXPECT_EQ(out[i].status, in[i].status);
+    EXPECT_EQ(out[i].mode, in[i].mode);
+    EXPECT_EQ(out[i].m0, in[i].m0);
+    EXPECT_EQ(out[i].wave_id, in[i].wave_id);
+    EXPECT_EQ(out[i].wave_stopped, in[i].wave_stopped);
+    for (uint32_t s = 0; s < in[i].num_sgprs; ++s)
+      EXPECT_EQ(out[i].sgprs[s], in[i].sgprs[s]) << "wave " << i << " sgpr " << s;
+    for (uint32_t r = 0; r < in[i].num_vgprs; ++r)
+      for (uint32_t l = 0; l < 64; ++l)
+        EXPECT_EQ(out[i].vgprs[r * 64 + l], in[i].vgprs[r * 64 + l])
+            << "wave " << i << " vgpr " << r << " lane " << l;
   }
 }
 

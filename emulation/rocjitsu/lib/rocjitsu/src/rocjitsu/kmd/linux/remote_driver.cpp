@@ -362,6 +362,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
       else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
         saved_dbg_snapshot_ptr = dbg->queue_snapshot.snapshot_buf_ptr;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO)
+        saved_dbg_snapshot_ptr = dbg->query_exception_info.info_ptr;
       break;
     }
     default:
@@ -412,6 +414,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
         inline_size =
             static_cast<size_t>(dbg->queue_snapshot.num_queues) * dbg->queue_snapshot.entry_size;
+      else if (dbg->op == KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO)
+        inline_size = dbg->query_exception_info.info_size;
       // Output-only buffer: reserve zeroed space the daemon fills in place.
       if (inline_size > 0)
         buf.resize(buf.size() + inline_size);
@@ -432,8 +436,23 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   ireq->ioctl_cmd = static_cast<uint32_t>(request);
   ireq->args_bytes = static_cast<uint32_t>(buf.size() - prefix);
 
-  if (!rpc_send_exact(sock_, buf.data(), buf.size()))
+  // For DBG_TRAP ENABLE, hand the debugger's notifier pipe write-end to the
+  // daemon as an SCM_RIGHTS fd. The daemon writes it back into the ioctl's
+  // dbg_fd so the driver can wake the debugger when a wave stops — the same fd
+  // the real kernel would receive through the ioctl. KFD_INVALID_FD (0xffffffff)
+  // casts to -1 and is not sent.
+  int send_fd = -1;
+  if (request == AMDKFD_IOC_DBG_TRAP) {
+    auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE && static_cast<int>(dbg->enable.dbg_fd) >= 0)
+      send_fd = static_cast<int>(dbg->enable.dbg_fd);
+  }
+  if (send_fd >= 0) {
+    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0)
+      return -1;
+  } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
     return -1;
+  }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
@@ -478,6 +497,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
           dbg->device_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
         else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
           dbg->queue_snapshot.snapshot_buf_ptr = saved_dbg_snapshot_ptr;
+        else if (dbg->op == KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO)
+          dbg->query_exception_info.info_ptr = saved_dbg_snapshot_ptr;
         break;
       }
       default:
@@ -511,6 +532,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         else if (dbg->op == KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT)
           dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
         else if (dbg->op == KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT)
+          dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+        else if (dbg->op == KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO)
           dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
         if (dst != nullptr)
           std::memcpy(dst, payload.data() + arg_size, extra);
