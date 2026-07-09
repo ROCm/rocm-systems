@@ -118,6 +118,21 @@ public:
     uint64_t r_debug = 0;
   };
 
+  /// @brief Per-process debugger session state.
+  ///
+  /// @details Mirrors the debug fields the kernel keeps on kfd_process:
+  /// debug_trap_enabled, runtime_info.runtime_state, exception_enable_mask,
+  /// the debugger notification fd, and the attached debugger identity. Managed
+  /// by the AMDKFD_IOC_DBG_TRAP handler (kfd_ioctl_set_debug_trap in the real
+  /// driver). @ref runtime_state holds a @c kfd_dbg_runtime_state value.
+  struct DebugSession {
+    bool enabled = false;               ///< debug_trap_enabled.
+    uint32_t runtime_state = 0;         ///< kfd_dbg_runtime_state (see kfd_ioctl.h).
+    uint64_t exception_enable_mask = 0; ///< Exceptions raised to the debugger.
+    int dbg_fd = -1;                    ///< Debugger notification fd (poll target).
+    pid_t debugger_pid = 0;             ///< Attached debugger's Linux pid (ptrace parent).
+  };
+
   /// @brief Per-page translation entry, mirroring HW PTE fields.
   /// @details Stores the host pointer for VA→PA translation and the PTE MTYPE
   /// that the GPU MMU uses to override instruction-level caching. On real
@@ -190,6 +205,9 @@ public:
   std::unordered_map<uint64_t, SvmRange> svm_ranges_;
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
+
+  std::mutex debug_mutex_;
+  DebugSession debug_session_;
 
 private:
 };

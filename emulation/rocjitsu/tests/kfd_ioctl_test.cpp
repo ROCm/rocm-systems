@@ -339,4 +339,105 @@ TEST_F(KfdIoctlTest, OpenRefcountSurvivesDupThenPrimaryClose) {
   ASSERT_GE(driver_->open(), 0);
 }
 
+// --- AMDKFD_IOC_DBG_TRAP dispatch skeleton (self-debug in local mode) ---
+
+TEST_F(KfdIoctlTest, DbgTrapUnknownPidReturnsESRCH) {
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = 0x7fffffff; // a pid that maps to no emulated process
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -ESRCH);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapOpBeforeEnableReturnsEINVAL) {
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EINVAL);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
+  // ROCr's runtime-enable must have run for the session to report ENABLED.
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK | KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK;
+  rt.r_debug = 0xcafef00d;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  kfd_runtime_info info{};
+  info.runtime_state = 0xdeadbeef; // sentinel the driver must overwrite
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = 7;
+  args.enable.rinfo_ptr = reinterpret_cast<uint64_t>(&info);
+  args.enable.rinfo_size = sizeof(info);
+
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
+  EXPECT_EQ(args.enable.rinfo_size, sizeof(kfd_runtime_info));
+  EXPECT_EQ(info.runtime_state, static_cast<uint32_t>(DEBUG_RUNTIME_STATE_ENABLED));
+  EXPECT_EQ(info.r_debug, 0xcafef00dULL);
+  EXPECT_EQ(info.ttmp_setup, 1u);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(getpid());
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEINVAL) {
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EINVAL);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // SET_FLAGS is a DBG_HW_OP: it requires AMDKFD_IOC_RUNTIME_ENABLE first.
+  kfd_ioctl_dbg_trap_args flags{};
+  flags.pid = static_cast<uint32_t>(getpid());
+  flags.op = KFD_IOC_DBG_TRAP_SET_FLAGS;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &flags), -EPERM);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // Runtime is enabled, so the HW-op gate passes and the gpu-id check runs.
+  kfd_ioctl_dbg_trap_args watch{};
+  watch.pid = static_cast<uint32_t>(getpid());
+  watch.op = KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH;
+  watch.set_node_address_watch.gpu_id = 0xdeadbeef;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &watch), -ENODEV);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // QUERY_DEBUG_EVENT is not a HW-op, so the gate ladder admits it; the handler
+  // itself is added by a later change and currently reports not-implemented.
+  kfd_ioctl_dbg_trap_args q{};
+  q.pid = static_cast<uint32_t>(getpid());
+  q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -ENOSYS);
+}
+
 } // namespace
