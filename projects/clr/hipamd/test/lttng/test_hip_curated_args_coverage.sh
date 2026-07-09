@@ -22,16 +22,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Resolve each OUT arg's real C type (e.g. `hipStream_t *`) via a live
+# libclang parse of the installed HIP headers, so the harness can declare
+# a typed scratch slot rather than passing nullptr (which causes the API
+# to segfault before the curated emit can fire). There is no checked-in
+# signature cache to read anymore — lttng_curated_codegen.py's
+# --dump-resolved mode parses the real headers fresh on every run (same
+# mechanism the codegen itself uses to generate the curated headers).
+SIGS_JSON="$WORK/curated_apis_sigs.json"
+python3 shared/lttng/scripts/lttng_curated_codegen.py \
+    --provider hip --dump-resolved "$SIGS_JSON" \
+    --yaml "$YAML" \
+    --header /opt/rocm/include/hip/hip_runtime_api.h \
+    --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+    --extra-arg=-I/opt/rocm/include
+if [ ! -f "$SIGS_JSON" ]; then
+    echo "FAIL: could not resolve curated API signatures from installed HIP headers" >&2
+    exit 1
+fi
+
 # Generate harness from YAML (one call per API with placeholder args).
-# Reads the verifier sidecar JSON to learn each OUT arg's real C type
-# (e.g. `hipStream_t *`) so the harness can declare a typed scratch slot
-# rather than passing nullptr (which causes the API to segfault before
-# the curated emit can fire).
 python3 - <<PY > "$WORK/harness.hip.cpp"
 import sys, os, json
 sys.path.insert(0, 'shared/lttng/scripts')
 from lttng_curated_lib import parse_yaml_file
-SIDECAR = json.load(open('projects/clr/hipamd/scripts/curated_apis_sigs.json'))
+SIDECAR = json.load(open('$SIGS_JSON'))
 def header_c_type(api_name, arg_name):
     """Return libclang-resolved C type for (api, arg) from sidecar."""
     for entry in SIDECAR.get(api_name, []):

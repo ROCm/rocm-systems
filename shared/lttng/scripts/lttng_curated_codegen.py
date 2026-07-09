@@ -1,35 +1,54 @@
 #!/usr/bin/env python3
-"""Codegen: curated_apis.yaml (+ curated_apis_sigs.json) -> the two generated
-LTTng curated-args headers:
+"""Codegen: curated_apis.yaml (+ real HIP/HSA header signatures) -> the two
+generated LTTng curated-args headers:
 
   - rocm_<provider>_curated_tp.h        (LTTNG_UST_TRACEPOINT_EVENT defs)
   - rocm_trace_emit_curated.h           (per-API static-inline emit helpers)
 
+Signatures for OUT-handle helper generation come from a live libclang
+parse of the real headers (--header, may repeat; --extra-arg for clang
+flags) — the same parsing/duplicate-resolution logic lttng_curated_verify.py
+uses for its drift gate, reused here rather than duplicated. `--sigs
+<path>` (a pre-computed {api: [{name, c_type}, ...]} JSON file) is also
+accepted as an alternative signature source, mainly for tests/synthetic
+fixtures that don't want to depend on libclang; exactly one of --sigs or
+--header must be given.
+
 Usage (HIP):
     python3 lttng_curated_codegen.py \\
         --provider hip \\
-        --yaml     projects/clr/hipamd/scripts/curated_apis.yaml \\
-        --sigs     projects/clr/hipamd/scripts/curated_apis_sigs.json \\
-        --tp-out   projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \\
-        --emit-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+        --yaml       projects/clr/hipamd/scripts/curated_apis.yaml \\
+        --header     projects/hip/include/hip/hip_runtime_api.h \\
+        --extra-arg=-D__HIP_PLATFORM_AMD__=1 \\
+        --tp-out     projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \\
+        --emit-out   projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
 
 Usage (HSA):
     python3 lttng_curated_codegen.py \\
         --provider hsa \\
-        --yaml     projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \\
-        --sigs     projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json \\
-        --tp-out   projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \\
-        --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
+        --yaml       projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \\
+        --header     projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h \\
+        --header     projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h \\
+        --header     projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h \\
+        --tp-out     projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \\
+        --emit-out   projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
 
 CI / pre-commit usage — verify the checked-in headers are still exactly
-what the generator produces from the checked-in YAML + sigs cache:
+what the generator produces from the checked-in YAML + the real headers:
 
     python3 lttng_curated_codegen.py --provider hip --check \\
-        --yaml ... --sigs ... --tp-out ... --emit-out ...
+        --yaml ... --header ... [--extra-arg ...] --tp-out ... --emit-out ...
 
 `--check` generates in memory, diffs the result against the on-disk
 `--tp-out` / `--emit-out` files, prints a unified diff on mismatch, and
 exits 1. It never overwrites the target files.
+
+`--dump-resolved <path>` writes the live-resolved signature sidecar JSON
+({api: [{name, c_type}, ...]}) to `path` and exits, without generating
+tp.h/emit.h. This is the mechanism other consumers (e.g. the HIP curated
+coverage test harness, which needs each OUT arg's real C type to declare
+correctly-typed scratch slots) use instead of reading a checked-in JSON
+cache. Requires --yaml and --header (not --sigs).
 """
 import argparse
 import dataclasses
@@ -45,6 +64,8 @@ import textwrap
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lttng_curated_lib import parse_yaml_file
+from lttng_curated_verify import (parse_headers, compute_sidecar,
+                                  AmbiguousDeclarationError)
 
 # Repo root, used to locate the clang-format style file for HIP's emit.h
 # post-process pass. shared/lttng/scripts -> shared/lttng -> shared -> root.
@@ -408,26 +429,46 @@ static inline bool rocm_trace_disabled(void) {{
 # ---------------------------------------------------------------------------
 # Banners
 # ---------------------------------------------------------------------------
-def _regen_cmd(cfg, yaml_path, sigs_path, tp_out, emit_out):
+def _regen_cmd(cfg, yaml_path, tp_out, emit_out, sigs_path=None,
+               header_paths=None, extra_args=None):
     """Render the exact regeneration command with paths relative to the
     repo root. Normalizing here (rather than echoing back whatever the
     caller passed verbatim) keeps the embedded banner command stable
     across absolute-path vs. relative-path invocations of the generator
     itself — otherwise --check would report spurious "drift" any time
-    the tool was re-run from a different working directory."""
+    the tool was re-run from a different working directory.
+
+    Exactly one signature source is rendered: `sigs_path` (file-based,
+    mainly for tests) XOR `header_paths`/`extra_args` (live libclang
+    parse — the normal, production path)."""
     def rel(p):
         try:
             return os.path.relpath(os.path.abspath(p), REPO_ROOT)
         except ValueError:
             return p
-    return [
-        "python3 shared/lttng/scripts/lttng_curated_codegen.py \\",
-        f"    --provider {cfg.key} \\",
-        f"    --yaml {rel(yaml_path)} \\",
-        f"    --sigs {rel(sigs_path)} \\",
-        f"    --tp-out {rel(tp_out)} \\",
-        f"    --emit-out {rel(emit_out)}",
-    ]
+    def rel_extra_arg(e):
+        # Normalize `-I<path>` args the same way header/yaml/sigs paths
+        # are normalized, so the displayed banner stays stable regardless
+        # of whether the caller passed an absolute or relative -I path
+        # (only -I is a path-shaped clang flag among the ones this
+        # project uses; other flags like -D... pass through unchanged).
+        if e.startswith('-I') and len(e) > 2:
+            return f"-I{rel(e[2:])}"
+        return e
+    parts = [f"--provider {cfg.key}", f"--yaml {rel(yaml_path)}"]
+    if sigs_path is not None:
+        parts.append(f"--sigs {rel(sigs_path)}")
+    else:
+        for h in header_paths or []:
+            parts.append(f"--header {rel(h)}")
+        for e in extra_args or []:
+            parts.append(f"--extra-arg={rel_extra_arg(e)}")
+    parts.append(f"--tp-out {rel(tp_out)}")
+    parts.append(f"--emit-out {rel(emit_out)}")
+    lines = ["python3 shared/lttng/scripts/lttng_curated_codegen.py \\"]
+    for i, p in enumerate(parts):
+        lines.append(f"    {p}" + (" \\" if i < len(parts) - 1 else ""))
+    return lines
 
 
 def _comment_block(lines):
@@ -491,18 +532,29 @@ def _clang_format(text, style_file):
     return r.stdout
 
 
+def load_sigs_by_api(yaml_path, sigs_path, header_paths, extra_args):
+    """Resolve the {api: [{name, c_type}, ...]} signature map from
+    exactly one source: a pre-computed JSON file (`sigs_path`, mainly
+    for tests) or a live libclang parse of `header_paths` (production
+    path — reuses lttng_curated_verify.py's parse_headers() +
+    compute_sidecar(), the one place duplicate-declaration resolution
+    happens)."""
+    if sigs_path is not None:
+        with open(sigs_path) as f:
+            return json.load(f)
+    apis = parse_yaml_file(yaml_path)
+    header_decls = parse_headers(header_paths, extra_args)
+    return compute_sidecar(apis, header_decls)
+
+
 # ---------------------------------------------------------------------------
 # Top-level generation entry point (shared by normal mode and --check mode)
 # ---------------------------------------------------------------------------
-def generate(cfg, yaml_path, sigs_path, tp_out_path, emit_out_path):
+def generate(cfg, yaml_path, tp_out_path, emit_out_path, sigs_by_api, regen_cmd):
     """Return (tp_text, emit_text)."""
     apis = parse_yaml_file(yaml_path)
     with open(yaml_path, 'rb') as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
-    with open(sigs_path) as f:
-        sigs_by_api = json.load(f)
-
-    regen_cmd = _regen_cmd(cfg, yaml_path, sigs_path, tp_out_path, emit_out_path)
 
     tp_text = emit_tp_h(cfg, apis, tp_banner(cfg, apis, yaml_path, sha256, regen_cmd))
     emit_text = emit_emit_h(cfg, apis, emit_banner(cfg, yaml_path, sha256, regen_cmd),
@@ -526,21 +578,64 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--provider', required=True, choices=sorted(PROVIDERS))
     ap.add_argument('--yaml', required=True)
-    ap.add_argument('--sigs', required=True,
-                    help='Verifier signature sidecar JSON '
-                         '({api: [{name, c_type}, ...]}) — required in '
-                         'Phase 1; provides provider-correct OUT-handle '
-                         'helper signatures and real C parameter types.')
-    ap.add_argument('--tp-out', required=True)
-    ap.add_argument('--emit-out', required=True)
+    ap.add_argument('--sigs', default=None,
+                    help='Signature sidecar JSON ({api: [{name, c_type}, '
+                         '...]}) loaded from a file, rather than live-parsed. '
+                         'Mutually exclusive with --header; intended for '
+                         'tests/synthetic fixtures that should not depend on '
+                         'libclang. Production use should prefer --header.')
+    ap.add_argument('--header', action='append', default=[],
+                    help='Header file to live-parse via libclang for '
+                         'provider-correct OUT-handle signatures (may be '
+                         'repeated, e.g. HSA needs hsa.h + hsa_ext_amd.h + '
+                         'hsa_api_trace.h). Mutually exclusive with --sigs.')
+    ap.add_argument('--extra-arg', action='append', default=[],
+                    help='Extra clang arg for --header parsing (e.g. '
+                         '-I/path/to/include, -D__HIP_PLATFORM_AMD__=1).')
+    ap.add_argument('--dump-resolved', default=None,
+                    help='Write the live-resolved signature sidecar JSON to '
+                         'this path and exit, without generating tp.h/emit.h. '
+                         'Requires --yaml and --header (not --sigs).')
+    ap.add_argument('--tp-out')
+    ap.add_argument('--emit-out')
     ap.add_argument('--check', action='store_true',
                     help='Do not write output. Generate to memory, diff '
                          'against the existing --tp-out/--emit-out files, '
                          'print a unified diff and exit 1 on any mismatch.')
     args = ap.parse_args()
 
+    if args.sigs and args.header:
+        ap.error('--sigs and --header are mutually exclusive')
+    if not args.sigs and not args.header:
+        ap.error('one of --sigs or --header is required')
+
     cfg = PROVIDERS[args.provider]
-    tp_text, emit_text = generate(cfg, args.yaml, args.sigs, args.tp_out, args.emit_out)
+
+    if args.dump_resolved:
+        if not args.header:
+            ap.error('--dump-resolved requires --header (live parse), not --sigs')
+        try:
+            sidecar = load_sigs_by_api(args.yaml, None, args.header, args.extra_arg)
+        except AmbiguousDeclarationError as e:
+            sys.exit(f"ERROR: {e}")
+        os.makedirs(os.path.dirname(args.dump_resolved) or '.', exist_ok=True)
+        with open(args.dump_resolved, 'w') as f:
+            json.dump(sidecar, f, indent=2, sort_keys=True)
+        print(f"wrote {args.dump_resolved} ({len(sidecar)} APIs)", file=sys.stderr)
+        return
+
+    if not args.tp_out or not args.emit_out:
+        ap.error('--tp-out and --emit-out are required unless --dump-resolved is given')
+
+    try:
+        sigs_by_api = load_sigs_by_api(args.yaml, args.sigs, args.header, args.extra_arg)
+    except AmbiguousDeclarationError as e:
+        sys.exit(f"ERROR: {e}")
+    regen_cmd = _regen_cmd(cfg, args.yaml, args.tp_out, args.emit_out,
+                           sigs_path=args.sigs, header_paths=args.header,
+                           extra_args=args.extra_arg)
+    tp_text, emit_text = generate(cfg, args.yaml, args.tp_out, args.emit_out,
+                                  sigs_by_api, regen_cmd)
 
     if args.check:
         rc = 0

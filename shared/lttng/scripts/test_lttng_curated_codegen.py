@@ -1,16 +1,25 @@
 """Tests for lttng_curated_codegen.py — the curated-args header generator.
 
-Two kinds of coverage:
+Three kinds of coverage:
   1. Golden-file regression: the generator, run against the REAL checked-in
-     curated_apis.yaml + curated_apis_sigs.json for both HIP and HSA, must
-     reproduce the REAL checked-in generated headers exactly (--check mode,
-     rc=0). This is the regression guard against future accidental hand
-     edits to the generated headers (or drift between the YAML/sigs and
-     the headers they're supposed to produce).
+     curated_apis.yaml plus a LIVE libclang parse of the real HIP/HSA
+     headers (--header, not a cached sidecar JSON), must reproduce the
+     REAL checked-in generated headers exactly (--check mode, rc=0). This
+     is the regression guard against future accidental hand edits to the
+     generated headers (or drift between the YAML/real headers and the
+     headers they're supposed to produce).
   2. Type-mapping unit tests: small synthetic YAML+sigs fixtures exercise
      each DSL type (including bool, dim3, dim3_packed, cstring, the HSA
      `.handle` OUT-deref pattern, and the HIP double-pointer OUT-deref
      pattern) in isolation and assert on the exact generated substrings.
+     These use --sigs (a small hand-written JSON dict), not --header —
+     --sigs remains supported specifically for fixtures like these that
+     shouldn't need to depend on libclang.
+  3. Live-header duplicate-declaration resolution: a synthetic fixture
+     header mirroring HIP's real hipMallocAsync shape (a plain extern
+     declaration plus a later `static inline` overload with an extra
+     parameter) exercises resolve_declaration()'s preference logic and
+     its loud-failure path for genuinely ambiguous cases.
 """
 import json
 import os
@@ -25,27 +34,49 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 CODEGEN = os.path.join(HERE, 'lttng_curated_codegen.py')
 
 HIP_YAML = os.path.join(REPO_ROOT, 'projects/clr/hipamd/scripts/curated_apis.yaml')
-HIP_SIGS = os.path.join(REPO_ROOT, 'projects/clr/hipamd/scripts/curated_apis_sigs.json')
 HIP_TP_OUT = os.path.join(REPO_ROOT, 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h')
 HIP_EMIT_OUT = os.path.join(REPO_ROOT, 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h')
+# Same real header + flags used to (re)generate the checked-in HIP headers
+# (see the regen command embedded in their banners).
+HIP_HEADER = os.path.join(REPO_ROOT, 'projects/hip/include/hip/hip_runtime_api.h')
+HIP_EXTRA_ARGS = ['-D__HIP_PLATFORM_AMD__=1',
+                  f'-I{os.path.join(REPO_ROOT, "projects/hip/include")}']
 
 HSA_YAML = os.path.join(
     REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml')
-HSA_SIGS = os.path.join(
-    REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json')
 HSA_TP_OUT = os.path.join(
     REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h')
 HSA_EMIT_OUT = os.path.join(
     REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h')
+_HSA_INC = os.path.join(REPO_ROOT, 'projects/rocr-runtime/runtime/hsa-runtime/inc')
+HSA_HEADERS = [os.path.join(_HSA_INC, h)
+              for h in ('hsa.h', 'hsa_ext_amd.h', 'hsa_api_trace.h')]
+HSA_EXTRA_ARGS = [f'-I{_HSA_INC}']
+
+# Synthetic YAML+sigs fixture for the type-mapping unit tests below.
+MINIMAL_SIGS = os.path.join(HERE, 'testdata', 'curated_minimal_sigs.json')
+
+# Fixture header mirroring HIP's real hipMallocAsync duplicate-declaration
+# shape, for the live-header resolution tests.
+FAKE_OVERLOADS_HEADER = os.path.join(HERE, 'testdata', 'fake_hip_overloads.h')
 
 
 def _run(args):
     return subprocess.run(['python3', CODEGEN] + args, capture_output=True, text=True)
 
 
-def _generate(provider, yaml_path, sigs_path, tp_out, emit_out):
-    r = _run(['--provider', provider, '--yaml', yaml_path, '--sigs', sigs_path,
-              '--tp-out', tp_out, '--emit-out', emit_out])
+def _generate(provider, yaml_path, tp_out, emit_out, sigs_path=None,
+             header_paths=None, extra_args=None):
+    args = ['--provider', provider, '--yaml', yaml_path,
+            '--tp-out', tp_out, '--emit-out', emit_out]
+    if sigs_path is not None:
+        args += ['--sigs', sigs_path]
+    else:
+        for h in header_paths:
+            args += ['--header', h]
+        for e in (extra_args or []):
+            args.append(f'--extra-arg={e}')
+    r = _run(args)
     assert r.returncode == 0, f"generation failed: {r.stderr}"
     with open(tp_out) as f:
         tp_text = f.read()
@@ -55,23 +86,30 @@ def _generate(provider, yaml_path, sigs_path, tp_out, emit_out):
 
 
 # ---------------------------------------------------------------------------
-# 1. Golden-file regression against the real checked-in HIP/HSA artifacts.
+# 1. Golden-file regression against the real checked-in HIP/HSA artifacts,
+#    with signatures resolved via a live libclang parse of the real
+#    headers (no checked-in sidecar JSON).
 # ---------------------------------------------------------------------------
 def test_hip_check_mode_matches_checked_in_headers():
-    """The generator, run against the real HIP YAML + sigs, must reproduce
-    the real checked-in rocm_hip_curated_tp.h and rocm_trace_emit_curated.h
-    exactly (--check mode exits 0)."""
+    """The generator, run against the real HIP YAML + a live parse of the
+    real HIP header, must reproduce the real checked-in
+    rocm_hip_curated_tp.h and rocm_trace_emit_curated.h exactly (--check
+    mode exits 0)."""
     r = _run(['--provider', 'hip', '--check',
-              '--yaml', HIP_YAML, '--sigs', HIP_SIGS,
+              '--yaml', HIP_YAML, '--header', HIP_HEADER,
+              *[f'--extra-arg={a}' for a in HIP_EXTRA_ARGS],
               '--tp-out', HIP_TP_OUT, '--emit-out', HIP_EMIT_OUT])
     assert r.returncode == 0, f"HIP headers drifted from generator output:\n{r.stderr}"
 
 
 def test_hsa_check_mode_matches_checked_in_headers():
     """Same as above for HSA."""
-    r = _run(['--provider', 'hsa', '--check',
-              '--yaml', HSA_YAML, '--sigs', HSA_SIGS,
-              '--tp-out', HSA_TP_OUT, '--emit-out', HSA_EMIT_OUT])
+    args = ['--provider', 'hsa', '--check', '--yaml', HSA_YAML]
+    for h in HSA_HEADERS:
+        args += ['--header', h]
+    args += [f'--extra-arg={a}' for a in HSA_EXTRA_ARGS]
+    args += ['--tp-out', HSA_TP_OUT, '--emit-out', HSA_EMIT_OUT]
+    r = _run(args)
     assert r.returncode == 0, f"HSA headers drifted from generator output:\n{r.stderr}"
 
 
@@ -81,15 +119,124 @@ def test_check_mode_detects_injected_drift():
     with tempfile.TemporaryDirectory() as d:
         tp_out = os.path.join(d, 'rocm_hip_curated_tp.h')
         emit_out = os.path.join(d, 'rocm_trace_emit_curated.h')
-        _generate('hip', HIP_YAML, HIP_SIGS, tp_out, emit_out)
+        _generate('hip', HIP_YAML, tp_out, emit_out,
+                  header_paths=[HIP_HEADER], extra_args=HIP_EXTRA_ARGS)
         # Hand-corrupt the tp.h the generator just wrote.
         with open(tp_out, 'a') as f:
             f.write("\n/* hand edit that must be detected as drift */\n")
         r = _run(['--provider', 'hip', '--check',
-                  '--yaml', HIP_YAML, '--sigs', HIP_SIGS,
+                  '--yaml', HIP_YAML, '--header', HIP_HEADER,
+                  *[f'--extra-arg={a}' for a in HIP_EXTRA_ARGS],
                   '--tp-out', tp_out, '--emit-out', emit_out])
         assert r.returncode == 1
         assert 'DRIFT' in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# 1b. CLI validation + live-header duplicate-declaration resolution.
+# ---------------------------------------------------------------------------
+def test_sigs_and_header_are_mutually_exclusive():
+    r = _run(['--provider', 'hip', '--yaml', HIP_YAML,
+              '--sigs', MINIMAL_SIGS, '--header', HIP_HEADER,
+              '--tp-out', '/tmp/unused_tp.h', '--emit-out', '/tmp/unused_emit.h'])
+    assert r.returncode != 0
+    assert 'mutually exclusive' in (r.stdout + r.stderr).lower()
+
+
+def test_sigs_or_header_is_required():
+    r = _run(['--provider', 'hip', '--yaml', HIP_YAML,
+              '--tp-out', '/tmp/unused_tp.h', '--emit-out', '/tmp/unused_emit.h'])
+    assert r.returncode != 0
+    assert 'required' in (r.stdout + r.stderr).lower()
+
+
+def test_dump_resolved_writes_sidecar_json():
+    """--dump-resolved writes the {api: [{name, c_type}, ...]} sidecar
+    JSON from a live header parse and exits without needing --tp-out/
+    --emit-out — the mechanism external consumers (e.g. the HIP curated
+    coverage test harness) use instead of a checked-in JSON cache."""
+    yaml_text = """\
+- api: hipMemcpyAsync
+  category: memory
+  args:
+    - {name: dst,       type: ptr,    dir: IN}
+    - {name: src,       type: ptr,    dir: IN}
+    - {name: sizeBytes, type: size,   dir: IN}
+    - {name: kind,      type: enum,   dir: IN}
+    - {name: stream,    type: handle, dir: IN}
+"""
+    with tempfile.TemporaryDirectory() as d:
+        yaml_path = os.path.join(d, 'y.yaml')
+        _write(yaml_path, yaml_text)
+        out_json = os.path.join(d, 'resolved.json')
+        r = _run(['--provider', 'hip', '--dump-resolved', out_json,
+                  '--yaml', yaml_path, '--header', HIP_HEADER,
+                  *[f'--extra-arg={a}' for a in HIP_EXTRA_ARGS]])
+        assert r.returncode == 0, f"--dump-resolved failed:\n{r.stderr}"
+        with open(out_json) as f:
+            data = json.load(f)
+    names = [e['name'] for e in data['hipMemcpyAsync']]
+    assert names == ['dst', 'src', 'sizeBytes', 'kind', 'stream']
+
+
+def test_dump_resolved_requires_header_not_sigs():
+    r = _run(['--provider', 'hip', '--dump-resolved', '/tmp/unused.json',
+              '--yaml', HIP_YAML, '--sigs', MINIMAL_SIGS])
+    assert r.returncode != 0
+    assert 'requires --header' in (r.stdout + r.stderr)
+
+
+def test_live_header_prefers_extern_over_static_inline_overload():
+    """Regression test for the real hipMallocAsync bug: a header that
+    declares both a plain extern function and a later `static inline`
+    overload with an extra parameter (fakeMallocAsync mirrors
+    hipMallocAsync's dev_ptr/size/[mem_pool]/stream shape) must resolve
+    to the extern declaration when the YAML's arg names are satisfied by
+    it — NOT silently pick whichever declaration libclang walked last."""
+    yaml_text = """\
+- api: fakeMallocAsync
+  category: memory
+  args:
+    - {name: dev_ptr, type: ptr,    dir: OUT}
+    - {name: size,    type: size,   dir: IN}
+    - {name: stream,  type: handle, dir: IN}
+"""
+    with tempfile.TemporaryDirectory() as d:
+        yaml_path = os.path.join(d, 'y.yaml')
+        _write(yaml_path, yaml_text)
+        out_json = os.path.join(d, 'resolved.json')
+        r = _run(['--provider', 'hip', '--dump-resolved', out_json,
+                  '--yaml', yaml_path, '--header', FAKE_OVERLOADS_HEADER])
+        assert r.returncode == 0, f"--dump-resolved failed:\n{r.stderr}"
+        with open(out_json) as f:
+            data = json.load(f)
+    names = [e['name'] for e in data['fakeMallocAsync']]
+    assert names == ['dev_ptr', 'size', 'stream'], \
+        f"expected the 3-arg extern signature (no mem_pool), got {names}"
+
+
+def test_live_header_ambiguous_declaration_fails_loudly():
+    """Two non-static overloads that both satisfy the YAML's arg names
+    can't be disambiguated automatically — must fail loudly (naming the
+    API and listing candidates), not silently pick one."""
+    yaml_text = """\
+- api: fakeAmbiguousApi
+  category: memory
+  args:
+    - {name: a, type: ptr,    dir: IN}
+    - {name: b, type: size,   dir: IN}
+    - {name: c, type: handle, dir: IN}
+"""
+    with tempfile.TemporaryDirectory() as d:
+        yaml_path = os.path.join(d, 'y.yaml')
+        _write(yaml_path, yaml_text)
+        out_json = os.path.join(d, 'resolved.json')
+        r = _run(['--provider', 'hip', '--dump-resolved', out_json,
+                  '--yaml', yaml_path, '--header', FAKE_OVERLOADS_HEADER])
+    assert r.returncode != 0, "expected failure on genuinely ambiguous declaration"
+    combined = r.stdout + r.stderr
+    assert 'fakeAmbiguousApi' in combined
+    assert 'ambiguous' in combined.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +255,8 @@ def test_curated_minimal_fixture_generates():
     sigs_path = os.path.join(HERE, 'testdata', 'curated_minimal_sigs.json')
     with tempfile.TemporaryDirectory() as d:
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
 
     # hipMemcpyAsync: ptr/ptr/size/enum/handle, all IN.
     assert ('LTTNG_UST_TP_ARGS(uint64_t, dst, uint64_t, src, uint64_t, sizeBytes, '
@@ -152,8 +299,8 @@ def test_bool_maps_to_uint32_not_uint64():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert 'LTTNG_UST_TP_ARGS(uint32_t, flag)' in tp_text
     assert 'uint64_t' not in tp_text.split('fakeBoolApi_args')[1].split(')')[0] \
         or True  # (see explicit field-macro assertion below; this is belt&suspenders)
@@ -178,8 +325,8 @@ def test_dim3_expands_to_three_fields():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert ('LTTNG_UST_TP_ARGS(uint32_t, blockDim_x, uint32_t, blockDim_y, '
             'uint32_t, blockDim_z)') in tp_text
     assert 'lttng_ust_field_integer(uint32_t, blockDim_x, blockDim_x)' in tp_text
@@ -206,8 +353,8 @@ def test_cstring_uses_field_string_macro():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert 'lttng_ust_field_string(name, name)' in tp_text
     assert '(name ? name : "")' in emit_text
 
@@ -229,8 +376,8 @@ def test_hsa_out_handle_uses_struct_field_deref():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hsa', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hsa', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert 'hsa_signal_t * signal_out_ptr' in emit_text
     assert '(signal_out_ptr->handle)' in emit_text
     assert '*signal_out_ptr' not in emit_text
@@ -253,8 +400,8 @@ def test_hsa_out_double_pointer_derefs_one_level():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hsa', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hsa', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert 'hsa_queue_t ** queue_out_ptr' in emit_text
     assert '(uint64_t)(uintptr_t)(*queue_out_ptr)' in emit_text
     assert '->handle' not in emit_text
@@ -277,8 +424,8 @@ def test_hip_out_handle_derefs_typedef_pointer():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert 'hipStream_t* stream_out_ptr' in emit_text
     assert '(uint64_t)(uintptr_t)(*stream_out_ptr)' in emit_text
 
@@ -300,8 +447,8 @@ def test_all_in_api_marks_status_unused():
         _write(yaml_path, yaml_text)
         _write(sigs_path, json.dumps(sigs))
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert '/* unused: all-IN API */' in emit_text
     assert 'corr_id' not in tp_text
     assert 'corr_id' not in emit_text
@@ -318,8 +465,8 @@ def test_banner_has_correct_sha256_and_regen_command():
         real_sha256 = hashlib.sha256(f.read()).hexdigest()
     with tempfile.TemporaryDirectory() as d:
         tp_text, emit_text = _generate(
-            'hip', yaml_path, sigs_path,
-            os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'))
+            'hip', yaml_path, os.path.join(d, 'tp.h'), os.path.join(d, 'emit.h'),
+            sigs_path=sigs_path)
     assert real_sha256 in tp_text
     assert real_sha256 in emit_text
     assert 'lttng_curated_codegen.py' in tp_text

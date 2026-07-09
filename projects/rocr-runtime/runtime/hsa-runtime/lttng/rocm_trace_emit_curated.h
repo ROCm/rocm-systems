@@ -12,7 +12,10 @@
  *   python3 shared/lttng/scripts/lttng_curated_codegen.py \
  *       --provider hsa \
  *       --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
- *       --sigs projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json \
+ *       --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h \
+ *       --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h \
+ *       --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h \
+ *       --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime/inc \
  *       --tp-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
  *       --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h
  */

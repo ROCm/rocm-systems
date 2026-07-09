@@ -1,13 +1,22 @@
 # LTTng curated parameter-capture: verifier gate.
 #
 # Per spec §9.3 this gate runs on every PR that touches the curated
-# YAML, the verifier scripts, or this workflow itself. The verifier
-# (libclang) confirms that the YAML signatures match the actual
-# HIP/HSA header signatures, AND regenerating the sidecar JSON yields
-# byte-identical output to the checked-in copy. Catches header-side
-# type changes for OUT-handle params (per debate-review C10 fix --
-# a missed sidecar update would mis-generate helper signatures
-# without this check).
+# YAML, the curated-args codegen/verifier scripts, the generated
+# headers, or this workflow itself. Two checks:
+#   1. lttng_curated_verify.py (libclang) confirms the YAML signatures
+#      match the actual HIP/HSA header declarations in this checkout.
+#   2. lttng_curated_codegen.py --check confirms the checked-in
+#      generated headers (rocm_*_curated_tp.h / rocm_trace_emit_curated.h)
+#      are exactly what the generator produces from the YAML + a live
+#      libclang parse of those same headers. Catches header-side type
+#      changes for OUT-handle params (per debate-review C10 fix -- a
+#      header change that alters an OUT-handle's resolved C type would
+#      mis-generate the helper signature without this check) as well as
+#      any hand-edit of the generated headers.
+#
+# Signatures are resolved by a fresh libclang parse on every run (no
+# checked-in JSON signature cache) -- see lttng_curated_verify.py's
+# parse_headers()/resolve_declaration().
 #
 name: LTTng Curated Gates
 
@@ -15,10 +24,17 @@ on:
   pull_request:
     paths:
       - 'projects/clr/hipamd/scripts/curated_apis.yaml'
-      - 'projects/clr/hipamd/scripts/curated_apis_sigs.json'
+      - 'projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h'
+      - 'projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h'
+      - 'projects/hip/include/hip/hip_runtime_api.h'
       - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml'
-      - 'projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h'
+      - 'projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h'
       - 'shared/lttng/scripts/lttng_curated_verify.py'
+      - 'shared/lttng/scripts/lttng_curated_codegen.py'
       - 'shared/lttng/scripts/lttng_curated_lib.py'
       - '.github/workflows/lttng-curated-gates.yml'
   push:
@@ -29,20 +45,19 @@ permissions:
 
 jobs:
   verify-gate:
-    name: Verifier (libclang vs YAML) + sidecar drift
+    name: Verifier (libclang vs YAML) + codegen drift
     runs-on: ubuntu-latest
-    container:
-      # Use the project's standard ROCm image so HIP headers are present
-      # at /opt/rocm/include for libclang to parse. Adjust to whichever
-      # ROCm image the project's other CI jobs use.
-      image: rocm/dev-ubuntu-24.04:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/clr/hipamd/scripts
+            projects/clr/hipamd/src/lttng
+            projects/hip/include
             projects/rocr-runtime/runtime/hsa-runtime/scripts
+            projects/rocr-runtime/runtime/hsa-runtime/lttng
+            projects/rocr-runtime/runtime/hsa-runtime/inc
             shared/lttng/scripts
             .github/workflows
 
@@ -56,33 +71,46 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pyyaml libclang
 
-      - name: Verify HIP YAML against headers + diff sidecar
-        # Verifier rewrites the sidecar JSON; if a header changed in a
-        # way that affects an OUT-handle's libclang-resolved C type, the
-        # sidecar diff catches it.
+      - name: Verify HIP YAML against real headers
         run: |
           python3 shared/lttng/scripts/lttng_curated_verify.py \
             --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
-            --header /opt/rocm/include/hip/hip_runtime_api.h \
+            --header projects/hip/include/hip/hip_runtime_api.h \
             --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
-            --extra-arg=-I/opt/rocm/include \
-            --out-sidecar projects/clr/hipamd/scripts/curated_apis_sigs.json
-          git diff --exit-code -- \
-            projects/clr/hipamd/scripts/curated_apis_sigs.json
+            --extra-arg=-Iprojects/hip/include
 
-      - name: Verify HSA YAML against headers + diff sidecar
-        # Same shape as the HIP verify step above but with three --header
-        # args (Task 4.5 multi-header support): hsa.h + hsa_ext_amd.h +
-        # hsa_api_trace.h (the third declares hsa_amd_queue_intercept_create
-        # per Task 15a). The --out-sidecar + diff catches header-side
-        # OUT-handle type changes per the C10 fix.
+      - name: Verify HSA YAML against real headers
+        # Three --header args (Task 4.5 multi-header support): hsa.h +
+        # hsa_ext_amd.h + hsa_api_trace.h (the third declares
+        # hsa_amd_queue_intercept_create per Task 15a).
         run: |
           python3 shared/lttng/scripts/lttng_curated_verify.py \
             --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
-            --header /opt/rocm/include/hsa/hsa.h \
-            --header /opt/rocm/include/hsa/hsa_ext_amd.h \
-            --header /opt/rocm/include/hsa/hsa_api_trace.h \
-            --extra-arg=-I/opt/rocm/include \
-            --out-sidecar projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json
-          git diff --exit-code -- \
-            projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis_sigs.json
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h \
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h \
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h \
+            --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime/inc
+
+      - name: HIP generated headers match codegen output
+        # Fresh libclang parse of the real headers feeds the generator
+        # directly (no checked-in signature cache) -- this is also the
+        # drift gate for the generated tp.h/emit.h pair.
+        run: |
+          python3 shared/lttng/scripts/lttng_curated_codegen.py --provider hip --check \
+            --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
+            --header projects/hip/include/hip/hip_runtime_api.h \
+            --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+            --extra-arg=-Iprojects/hip/include \
+            --tp-out projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
+            --emit-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
+
+      - name: HSA generated headers match codegen output
+        run: |
+          python3 shared/lttng/scripts/lttng_curated_codegen.py --provider hsa --check \
+            --yaml projects/rocr-runtime/runtime/hsa-runtime/scripts/curated_apis.yaml \
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h \
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_ext_amd.h \
+            --header projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h \
+            --extra-arg=-Iprojects/rocr-runtime/runtime/hsa-runtime/inc \
+            --tp-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_hsa_curated_tp.h \
+            --emit-out projects/rocr-runtime/runtime/hsa-runtime/lttng/rocm_trace_emit_curated.h

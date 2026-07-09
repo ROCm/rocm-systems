@@ -9,7 +9,9 @@
  *   python3 shared/lttng/scripts/lttng_curated_codegen.py \
  *       --provider hip \
  *       --yaml projects/clr/hipamd/scripts/curated_apis.yaml \
- *       --sigs projects/clr/hipamd/scripts/curated_apis_sigs.json \
+ *       --header projects/hip/include/hip/hip_runtime_api.h \
+ *       --extra-arg=-D__HIP_PLATFORM_AMD__=1 \
+ *       --extra-arg=-Iprojects/hip/include \
  *       --tp-out projects/clr/hipamd/src/lttng/rocm_hip_curated_tp.h \
  *       --emit-out projects/clr/hipamd/src/lttng/rocm_trace_emit_curated.h
  */

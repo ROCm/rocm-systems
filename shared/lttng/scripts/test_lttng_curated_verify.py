@@ -2,11 +2,15 @@
 import os, sys, subprocess, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+from lttng_curated_verify import resolve_declaration, AmbiguousDeclarationError
 
 VERIFY = os.path.join(HERE, 'lttng_curated_verify.py')
 HEADER = os.path.join(HERE, 'testdata', 'fake_hip_header.h')
 HSA_BASE = os.path.join(HERE, 'testdata', 'fake_hsa_base.h')
 HSA_EXT  = os.path.join(HERE, 'testdata', 'fake_hsa_ext.h')
+# Mirrors HIP's real hipMallocAsync duplicate-declaration shape (extern
+# decl + static-inline mem_pool overload) plus a genuinely-ambiguous case.
+OVERLOADS_HEADER = os.path.join(HERE, 'testdata', 'fake_hip_overloads.h')
 
 def _run_verify(yaml_text, expect_pass, extra_cmd=None):
     """Write yaml_text to a temp file, invoke verifier, return (rc, output)."""
@@ -158,6 +162,104 @@ def test_sidecar_emission():
             f"expected void** for ptr arg, got {params[0]['c_type']!r}"
     finally:
         os.unlink(sidecar_path)
+
+def test_resolve_declaration_prefers_extern_over_static_inline():
+    """Unit test for the hipMallocAsync duplicate-declaration bug fix:
+    given a plain extern candidate and a `static inline` overload with
+    an extra param, resolve_declaration() must pick the extern one when
+    the requested arg names fit it — not whichever was seen last."""
+    candidates = [
+        (False, (('dev_ptr', 'void **', 'void **', False),
+                 ('size', 'size_t', 'unsigned long', False),
+                 ('stream', 'hipStream_t', 'ihipStream_t *', False))),
+        (True, (('dev_ptr', 'void **', 'void **', False),
+                ('size', 'size_t', 'unsigned long', False),
+                ('mem_pool', 'hipMemPool_t', 'hipMemPool_t', False),
+                ('stream', 'hipStream_t', 'ihipStream_t *', False))),
+    ]
+    resolved = resolve_declaration('hipMallocAsync', candidates,
+                                   ['dev_ptr', 'size', 'stream'])
+    assert [p[0] for p in resolved] == ['dev_ptr', 'size', 'stream']
+
+
+def test_resolve_declaration_ambiguous_raises():
+    """Two non-static candidates that both fit the requested arg names
+    can't be disambiguated automatically — must raise, not silently
+    pick one."""
+    candidates = [
+        (False, (('a', 'void*', 'void*', False),
+                 ('b', 'size_t', 'unsigned long', False),
+                 ('c', 'int', 'int', False))),
+        (False, (('a', 'void*', 'void*', False),
+                 ('b', 'size_t', 'unsigned long', False),
+                 ('c', 'hipStream_t', 'ihipStream_t*', False))),
+    ]
+    try:
+        resolve_declaration('fakeAmbiguous', candidates, ['a', 'b', 'c'])
+        assert False, "expected AmbiguousDeclarationError"
+    except AmbiguousDeclarationError as e:
+        assert 'fakeAmbiguous' in str(e)
+
+
+def test_verify_resolves_duplicate_declaration_to_extern():
+    """End-to-end: verify.py against a header with HIP's real
+    hipMallocAsync duplicate-declaration shape (extern decl + static
+    inline mem_pool overload) resolves cleanly and the sidecar reflects
+    the 3-arg extern signature, not the 4-arg overload."""
+    import json
+    yaml_text = """
+- api: fakeMallocAsync
+  category: memory
+  args:
+    - {name: dev_ptr, type: ptr,    dir: OUT}
+    - {name: size,    type: size,   dir: IN}
+    - {name: stream,  type: handle, dir: IN}
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text)
+        yaml_path = f.name
+    sidecar_path = yaml_path + '.sidecar.json'
+    try:
+        cmd = ['python3', VERIFY, '--yaml', yaml_path,
+               '--header', OVERLOADS_HEADER, '--out-sidecar', sidecar_path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0, f"verifier failed:\n{r.stderr}"
+        with open(sidecar_path) as f:
+            data = json.load(f)
+        names = [a['name'] for a in data['fakeMallocAsync']]
+        assert names == ['dev_ptr', 'size', 'stream'], \
+            f"expected the 3-arg extern signature (no mem_pool), got {names}"
+    finally:
+        os.unlink(yaml_path)
+        if os.path.exists(sidecar_path):
+            os.unlink(sidecar_path)
+
+
+def test_verify_fails_loudly_on_ambiguous_declaration():
+    """End-to-end: verify.py against a header with two non-static
+    overloads that both fit the YAML's arg names must fail with a clear
+    'ambiguous' error naming the API, not crash or silently pass."""
+    yaml_text = """
+- api: fakeAmbiguousApi
+  category: memory
+  args:
+    - {name: a, type: ptr,    dir: IN}
+    - {name: b, type: size,   dir: IN}
+    - {name: c, type: handle, dir: IN}
+"""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(yaml_text)
+        yaml_path = f.name
+    try:
+        cmd = ['python3', VERIFY, '--yaml', yaml_path, '--header', OVERLOADS_HEADER]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        assert r.returncode != 0
+        combined = r.stdout + r.stderr
+        assert 'fakeAmbiguousApi' in combined
+        assert 'ambiguous' in combined.lower()
+    finally:
+        os.unlink(yaml_path)
+
 
 def _run_verify_multi(yaml_text, headers, expect_pass):
     """Like _run_verify but accepts multiple --header arguments."""

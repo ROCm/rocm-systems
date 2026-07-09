@@ -144,8 +144,9 @@ def _is_compatible(c_type, dsl_type, canonical_type=None, is_enum=False):
 
 
 def parse_headers(header_paths, extra_args):
-    """Parse one or more headers; return a unioned
-    {api_name: [(name, c_type, canonical_type, is_enum), ...]}.
+    """Parse one or more headers; return RAW (unresolved) declarations:
+    {api_name: [(is_static, (param, ...)), ...]}, where each param is
+    (name, c_type, canonical_type, is_enum).
 
     We capture the typedef spelling (c_type), the canonical spelling
     (canonical_type, e.g. `ihipStream_t *` for `hipStream_t`), and an
@@ -157,8 +158,21 @@ def parse_headers(header_paths, extra_args):
     the type-compat checker since libclang strips the `enum` keyword
     from typedef'd enums.
 
-    On duplicate api_name across headers (shouldn't happen for HSA, but
-    defend against it), the LATER header wins and a warning is emitted.
+    Real headers commonly declare the same function name more than
+    once — e.g. HIP's hipMallocAsync has a plain extern declaration
+    plus a later `static inline` convenience overload with an extra
+    `mem_pool` parameter — and the same name can appear (identically or
+    not) across multiple `--header` files. This function does NOT pick
+    a winner among duplicates; every DISTINCT (is_static, params)
+    signature observed is kept as a candidate (deduplicated by exact
+    content, so an identical redeclaration across headers doesn't
+    produce a spurious extra candidate). Use resolve_declaration() /
+    resolve_signatures() to pick the authoritative signature for a
+    specific API once the caller knows which arg names it actually
+    needs — silently keeping "whichever was seen last" here is exactly
+    the bug this two-step design avoids (it used to make hipMallocAsync
+    resolve to its 4-arg `mem_pool` overload instead of the real 3-arg
+    extern API).
     """
     try:
         from clang import cindex
@@ -166,7 +180,7 @@ def parse_headers(header_paths, extra_args):
         sys.exit("ERROR: libclang Python bindings not installed. Try: pip install libclang")
     args = ['-x', 'c++', '-std=c++17'] + list(extra_args)
     idx = cindex.Index.create()
-    union = {}
+    candidates = {}
     for hp in header_paths:
         tu = idx.parse(hp, args=args)
         for n in tu.cursor.walk_preorder():
@@ -183,11 +197,106 @@ def parse_headers(header_paths, extra_args):
                     if pointee.kind == cindex.TypeKind.ENUM:
                         is_enum = True
                 params.append((arg.spelling, ct.spelling, canon.spelling, is_enum))
-            if n.spelling in union and union[n.spelling] != params:
-                print(f"WARN: {n.spelling}: declaration in {hp} differs from "
-                      f"earlier header; using {hp}", file=sys.stderr)
-            union[n.spelling] = params
-    return union
+            is_static = n.storage_class == cindex.StorageClass.STATIC
+            entry = (is_static, tuple(params))
+            lst = candidates.setdefault(n.spelling, [])
+            if entry not in lst:
+                lst.append(entry)
+    return candidates
+
+
+class AmbiguousDeclarationError(Exception):
+    """Raised when an API has multiple candidate declarations (see
+    parse_headers()) and resolve_declaration() cannot automatically
+    determine which one is authoritative."""
+
+
+def _candidate_sig_str(name, is_static, params):
+    args_str = ', '.join(f"{ct} {pn}" for pn, ct, _c, _e in params)
+    return f"{'static ' if is_static else ''}{name}({args_str})"
+
+
+def resolve_declaration(name, candidates, yaml_arg_names):
+    """Pick the single authoritative declaration for `name` out of the
+    candidates parse_headers() found, given the arg names the YAML/DSL
+    actually references for this API.
+
+    Resolution order:
+      1. Exactly one candidate -> trivially authoritative.
+      2. Candidates whose parameter names are a superset of the YAML's
+         arg names ("eligible") are preferred over ones that are
+         missing a name the YAML needs; if none are eligible, every
+         candidate stays in play (so the ambiguity error below still
+         has something to report against).
+      3. Among the remaining candidates, prefer the sole non-`static`
+         one. A `static inline` overload is an opt-in convenience
+         wrapper layered on top of the real (extern) API, not the API
+         itself — e.g. HIP's hipMallocAsync has a 3-arg extern
+         declaration plus a later 4-arg `static inline` `mem_pool`
+         overload; naive "last declaration wins" logic used to resolve
+         to the overload, which is wrong.
+      4. If exactly one candidate remains after that narrowing, it
+         wins. Otherwise the choice is genuinely ambiguous: fail loudly
+         with every candidate signature listed so a human can resolve
+         it, rather than silently picking whichever libclang happened
+         to walk last.
+    """
+    if not candidates:
+        raise AmbiguousDeclarationError(f"{name}: no declarations found")
+    if len(candidates) == 1:
+        return list(candidates[0][1])
+
+    yaml_names = set(yaml_arg_names)
+    eligible = [c for c in candidates if yaml_names <= {p[0] for p in c[1]}]
+    search_space = eligible or candidates
+    non_static = [c for c in search_space if not c[0]]
+
+    winner = None
+    if len(non_static) == 1:
+        winner = non_static[0]
+    elif len(search_space) == 1:
+        winner = search_space[0]
+
+    if winner is not None:
+        return list(winner[1])
+
+    lines = [f"{name}: ambiguous declaration — {len(candidates)} candidate "
+             f"signatures found for YAML args {sorted(yaml_names)} and none "
+             f"can be preferred automatically:"]
+    for is_static, params in candidates:
+        lines.append(f"  {_candidate_sig_str(name, is_static, params)}")
+    raise AmbiguousDeclarationError('\n'.join(lines))
+
+
+def resolve_signatures(apis, header_decls):
+    """Resolve every YAML api present in header_decls to its single
+    winning declaration's param list. Returns {api_name: params}. Apis
+    not found in header_decls are silently skipped — callers that need
+    "must be declared somewhere" hard-error semantics (i.e. verify())
+    check that separately, since it's a distinct error class.
+
+    Raises AmbiguousDeclarationError if any api's candidates can't be
+    resolved automatically (see resolve_declaration())."""
+    resolved = {}
+    for api in apis:
+        name = api['api']
+        if name not in header_decls:
+            continue
+        yaml_names = [a['name'] for a in api['args']]
+        resolved[name] = resolve_declaration(name, header_decls[name], yaml_names)
+    return resolved
+
+
+def compute_sidecar(apis, header_decls):
+    """Build the {api: [{name, c_type}, ...]} signature sidecar
+    structure lttng_curated_codegen.py needs for provider-correct
+    OUT-handle helper generation. Shared by lttng_curated_verify.py's
+    --out-sidecar (CI drift gate) and lttng_curated_codegen.py's
+    --header / --dump-resolved live-parsing mode — this is the one
+    place duplicate-declaration resolution happens."""
+    resolved = resolve_signatures(apis, header_decls)
+    return {name: [{'name': nm, 'c_type': ct} for nm, ct, _canon, _is_enum in params]
+            for name, params in resolved.items()}
 
 
 def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
@@ -208,8 +317,13 @@ def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
         if name not in header_decls:
             errors.append(f"{name}: not declared in any of {header_paths}")
             continue
-        hdr_params = header_decls[name]
         yaml_args = api['args']
+        try:
+            hdr_params = resolve_declaration(
+                name, header_decls[name], [a['name'] for a in yaml_args])
+        except AmbiguousDeclarationError as e:
+            errors.append(str(e))
+            continue
         # Spec §4.4 explicitly allows omitting low-value header params as a
         # field-budget mitigation. Match by NAME, not by count/position.
         hdr_by_name = {hname: (htype, canon, is_enum)
@@ -275,12 +389,12 @@ def verify(yaml_path, header_paths, extra_args, out_sidecar=None):
     if out_sidecar:
         # Sidecar uses the typedef spelling (c_type) as that is what
         # codegen needs to emit provider-correct OUT-handle helpers
-        # (e.g. `hipStream_t*`, not the typedef-stripped form).
-        sidecar = {
-            a['api']: [{'name': nm, 'c_type': ct}
-                       for nm, ct, _canon, _is_enum in header_decls[a['api']]]
-            for a in apis if a['api'] in header_decls
-        }
+        # (e.g. `hipStream_t*`, not the typedef-stripped form). Built
+        # via compute_sidecar() so duplicate-declaration resolution
+        # (resolve_declaration()) is applied here too — every api in
+        # this loop already resolved cleanly above (an ambiguous one
+        # would have added to `errors` and returned before this point).
+        sidecar = compute_sidecar(apis, header_decls)
         os.makedirs(os.path.dirname(out_sidecar) or '.', exist_ok=True)
         with open(out_sidecar, 'w') as f:
             json.dump(sidecar, f, indent=2, sort_keys=True)
