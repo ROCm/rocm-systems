@@ -487,8 +487,9 @@ hsa_status_t DmaBufClose(int* dmabuf) {
 }
 
 int DmaBufDup(int dmabuf) {
-  (void)dmabuf;
-  return -1;
+  /* DMA-BUF is not supported on Windows; preserve pre-dup behavior by returning the caller fd. */
+  if (dmabuf < 0) return -1;
+  return dmabuf;
 }
 
 bool ProtectMemory(void* va, size_t size, MemProt perms) {
