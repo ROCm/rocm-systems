@@ -287,7 +287,7 @@ read_file(const std::string& path)
 
     input.seekg(0, std::ios::end);
     auto size = input.tellg();
-    if(size < 0) return std::nullopt;
+    if(size <= 0) return std::nullopt;
     if(static_cast<uint64_t>(size) > MAX_TARGET_ELF_SIZE)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Refusing to read unusually large target ELF "

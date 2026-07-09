@@ -252,6 +252,9 @@ validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
     {
         if(ec)
         {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
             ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
                          << tool_lib_path << "' at " << target_path.string()
                          << " from the target process mount namespace: " << ec.message();
@@ -270,6 +273,9 @@ validate_target_tool_path(pid_t pid, const std::string& tool_lib_path)
     {
         if(ec)
         {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
             ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
                          << tool_lib_path << "' at " << target_path.string()
                          << " from the target process mount namespace: " << ec.message();
