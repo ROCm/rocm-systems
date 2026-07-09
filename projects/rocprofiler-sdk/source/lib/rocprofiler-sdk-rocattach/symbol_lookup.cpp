@@ -407,7 +407,7 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    auto load_bias = std::optional<uint64_t>{};
+    auto candidates = std::vector<uint64_t>{};
 
     for(const auto& mapping : object.mappings)
     {
@@ -426,23 +426,59 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
                 return std::nullopt;
             }
 
-            if(load_bias && *load_bias != *candidate)
+            if(std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
             {
-                ROCP_ERROR << "[rocprofiler-sdk-rocattach] Inconsistent target load-bias "
-                              "candidates for "
-                           << object.path << ": 0x" << std::hex << *load_bias << " and 0x"
-                           << *candidate << std::dec;
-                return std::nullopt;
+                candidates.emplace_back(*candidate);
             }
-            load_bias = candidate;
         }
     }
 
-    if(load_bias)
+    auto best_bias  = std::optional<uint64_t>{};
+    auto best_score = size_t{0};
+    auto is_tied    = false;
+    for(auto candidate : candidates)
+    {
+        auto score = size_t{0};
+        for(const auto& segment : elf.load_segments)
+        {
+            auto segment_file_page    = align_down(segment.p_offset, page_size);
+            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
+            auto expected_start       = checked_add(candidate, segment_virtual_page);
+            if(!expected_start) continue;
+
+            auto mapping_itr = std::find_if(
+                object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
+                    return mapping.file_offset == segment_file_page &&
+                           static_cast<uint64_t>(mapping.start) == *expected_start;
+                });
+            if(mapping_itr != object.mappings.end()) ++score;
+        }
+
+        if(score > best_score)
+        {
+            best_bias  = candidate;
+            best_score = score;
+            is_tied    = false;
+        }
+        else if(score == best_score && score > 0)
+        {
+            is_tied = true;
+        }
+    }
+
+    if(best_bias && !is_tied)
     {
         ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
-                   << " as 0x" << std::hex << *load_bias << std::dec;
-        return load_bias;
+                   << " as 0x" << std::hex << *best_bias << std::dec << " using " << best_score
+                   << " PT_LOAD mapping matches";
+        return best_bias;
+    }
+
+    if(is_tied)
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Ambiguous target load-bias candidates for "
+                   << object.path;
+        return std::nullopt;
     }
 
     ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not match target mappings for " << object.path

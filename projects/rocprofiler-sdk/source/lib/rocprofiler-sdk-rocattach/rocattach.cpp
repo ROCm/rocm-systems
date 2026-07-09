@@ -299,6 +299,25 @@ setup(int pid)
                   "for pid "
                << pid;
 
+    auto status = ROCATTACH_STATUS_SUCCESS;
+
+    // Build the tool library path before ptrace setup so invalid absolute paths
+    // fail before modifying target process state. Do not honor the user-controllable
+    // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
+    // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
+    // helper to inject an arbitrary library.
+    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
+                                        ? std::string{"librocprofiler-sdk-tool.so"}
+                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
+                                                                "librocprofiler-sdk-tool.so");
+    const char* tool_lib_path     = tool_lib_path_env.c_str();
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
+    status = validate_target_tool_path(pid, tool_lib_path_env);
+    if(status != ROCATTACH_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     auto*      sessions = CHECK_NOTNULL(get_sessions());
     session_t* session;
     {
@@ -328,7 +347,6 @@ setup(int pid)
         sessions->emplace(pid, target_tid);
         session = &(sessions->at(pid).session);
     }
-    auto status = ROCATTACH_STATUS_SUCCESS;
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting attachment to pid " << pid;
     status = session->attach();
@@ -350,22 +368,7 @@ setup(int pid)
         return status;
     }
 
-    // Build and write tool library path to target process. Do not honor the
-    // user-controllable ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution
-    // context (setuid/setgid, file capabilities, etc.), so an unprivileged user
-    // cannot cause a privileged attach helper to inject an arbitrary library.
-    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
-                                        ? std::string{"librocprofiler-sdk-tool.so"}
-                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
-                                                                "librocprofiler-sdk-tool.so");
-    const char* tool_lib_path     = tool_lib_path_env.c_str();
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
-    status = validate_target_tool_path(pid, tool_lib_path_env);
-    if(status != ROCATTACH_STATUS_SUCCESS)
-    {
-        return status;
-    }
-
+    // Build and write tool library path to target process.
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
 
