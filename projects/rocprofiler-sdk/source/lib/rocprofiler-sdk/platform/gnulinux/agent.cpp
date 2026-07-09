@@ -66,6 +66,24 @@ using ::rocprofiler::agent::get_agent_available_properties;
 using ::rocprofiler::agent::update_agent_runtime_visibility;
 using ::rocprofiler::agent::uuid_view_t;
 
+constexpr rocprofiler_agent_firmware_info_v0_t
+make_default_firmware_info(uint32_t default_value = ROCPROFILER_FIRMWARE_VERSION_NONE)
+{
+    return rocprofiler_agent_firmware_info_v0_t{.mec2_version     = default_value,
+                                                .mec_version      = default_value,
+                                                .rlc_version      = default_value,
+                                                .rlc_srlc_version = default_value,
+                                                .rlc_srlg_version = default_value,
+                                                .rlc_srls_version = default_value,
+                                                .sdma2_version    = default_value,
+                                                .sdma_version     = default_value,
+                                                .smc_version      = default_value,
+                                                .sos_version      = default_value,
+                                                .ta_ras_version   = default_value,
+                                                .ta_xgmi_version  = default_value,
+                                                .vcn_version      = default_value};
+}
+
 // Random per-process offset applied to rocprofiler_agent_id_t.handle so that
 // agent IDs are not stable integers across runs. Helps catch consumers that
 // accidentally hard-code an ID instead of looking it up via the agent table.
@@ -398,6 +416,55 @@ read_property(const MapT& data, const std::string& label, Tp& value)
     }
 }
 
+uint32_t
+read_fw_info(std::string_view fname, uint32_t drm_render_minor)
+{
+    auto fw_path =
+        fmt::format("/sys/class/drm/renderD{}/device/fw_version/{}", drm_render_minor, fname);
+    auto fw_file = std::ifstream{fw_path};
+    if(!fw_file)
+    {
+        ROCP_WARNING << "Failed to open firmware version file: " << fw_path;
+        return ROCPROFILER_FIRMWARE_VERSION_NONE;
+    }
+
+    auto fw_value = std::string{};
+    if(!std::getline(fw_file, fw_value))
+    {
+        ROCP_WARNING << "Failed to read firmware version from file: " << fw_path;
+        return ROCPROFILER_FIRMWARE_VERSION_NONE;
+    }
+
+    if(fw_value.empty())
+    {
+        ROCP_WARNING << "Firmware version file is empty: " << fw_path;
+        return ROCPROFILER_FIRMWARE_VERSION_NONE;
+    }
+
+    auto tokens = sdk::parse::tokenize(fw_value, " \t\n\r");
+    if(tokens.size() != 1)
+    {
+        ROCP_WARNING << fmt::format(
+            "Unexpected content in firmware version file '{}': '{}'", fw_path, fw_value);
+        return ROCPROFILER_FIRMWARE_VERSION_NONE;
+    }
+
+    try
+    {
+        const auto& token = tokens.at(0);
+        if(token.find("0x") == 0 || token.find("0X") == 0)
+            return static_cast<uint32_t>(std::stoul(token, nullptr, 0));
+        return sdk::parse::from_string<uint32_t>(token);
+    } catch(const std::exception& e)
+    {
+        ROCP_WARNING << fmt::format("Failed to parse firmware version '{}' from file '{}': {}",
+                                    fw_value,
+                                    fw_path,
+                                    e.what());
+    }
+    return ROCPROFILER_FIRMWARE_VERSION_NONE;
+}
+
 // Candidate locations for the KFD sysfs topology root, in priority order.
 // Env-var overrides come first so a test fixture or alternate mount can
 // supersede the canonical /sys paths without rebuilding. Returned by value;
@@ -584,6 +651,8 @@ enumerate()
         agent_info.product_name = "";
         agent_info.vendor_name  = "";
         memset(&agent_info.uuid.bytes, 0, sizeof(agent_info.uuid.bytes));
+        agent_info.fw_info = make_default_firmware_info();
+
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             constexpr auto workgrp_max = 1024;
@@ -639,6 +708,34 @@ enumerate()
             };
 
             agent_info.uuid = static_cast<rocprofiler_uuid_t>(_uuid);
+
+            agent_info.fw_info.mec2_version =
+                read_fw_info("mec2_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.mec_version =
+                read_fw_info("mec_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.rlc_version =
+                read_fw_info("rlc_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.rlc_srlc_version =
+                read_fw_info("rlc_srlc_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.rlc_srlg_version =
+                read_fw_info("rlc_srlg_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.rlc_srls_version =
+                read_fw_info("rlc_srls_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.sdma2_version =
+                read_fw_info("sdma2_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.sdma_version =
+                read_fw_info("sdma_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.smc_version =
+                read_fw_info("smc_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.sos_version =
+                read_fw_info("sos_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.ta_ras_version =
+                read_fw_info("ta_ras_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.ta_xgmi_version =
+                read_fw_info("ta_xgmi_fw_version", agent_info.drm_render_minor);
+            agent_info.fw_info.vcn_version =
+                read_fw_info("vcn_fw_version", agent_info.drm_render_minor);
+
             if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
             {
                 ROCP_TRACE << fmt::format(

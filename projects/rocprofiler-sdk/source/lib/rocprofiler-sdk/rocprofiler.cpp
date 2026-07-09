@@ -121,6 +121,9 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION,
                           "rocprofiler-register version is incompatible. "
                           "Late-start profiling requires ROCm 7.0+")
+ROCPROFILER_STATUS_STRING(
+    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_FIRMWARE,
+    "The requested service is incompatible with the installed firmware version")
 
 template <size_t Idx, size_t... Tail>
 const char*
