@@ -167,6 +167,12 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
       if (args->queue_snapshot.num_queues > 0 && args->queue_snapshot.snapshot_buf_ptr != 0)
         args->queue_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
       break;
+    case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+      if (args->query_exception_info.info_size > inline_size)
+        return false;
+      if (args->query_exception_info.info_size > 0 && args->query_exception_info.info_ptr != 0)
+        args->query_exception_info.info_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
     default:
       break;
     }

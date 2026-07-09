@@ -588,11 +588,43 @@ TEST_F(KfdIoctlTest, DbgTrapQueryDebugEventReportsIdle) {
   q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -EAGAIN);
 
-  // SEND_RUNTIME_EVENT remains intentionally unwired in this stack.
+  // SEND_RUNTIME_EVENT acknowledges the runtime-enable debugger handshake.
   kfd_ioctl_dbg_trap_args event{};
   event.pid = static_cast<uint32_t>(getpid());
   event.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &event), -ENOSYS);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &event), 0);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapQueryRuntimeExceptionInfoClampsAndPopulates) {
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK | KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK;
+  runtime.r_debug = 0x123456789abcdef0ULL;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = make_debug_fd();
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  std::array<uint8_t, sizeof(kfd_runtime_info) + 8> buffer;
+  buffer.fill(0xA5);
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO;
+  query.query_exception_info.exception_code = EC_PROCESS_RUNTIME;
+  query.query_exception_info.info_ptr = reinterpret_cast<uint64_t>(buffer.data());
+  query.query_exception_info.info_size = sizeof(kfd_runtime_info);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), 0);
+  EXPECT_EQ(query.query_exception_info.info_size, sizeof(kfd_runtime_info));
+
+  kfd_runtime_info info{};
+  std::memcpy(&info, buffer.data(), sizeof(info));
+  EXPECT_EQ(info.r_debug, runtime.r_debug);
+  EXPECT_EQ(info.runtime_state, static_cast<uint32_t>(DEBUG_RUNTIME_STATE_ENABLED));
+  EXPECT_EQ(info.ttmp_setup, 1u);
+  EXPECT_TRUE(std::all_of(buffer.begin() + sizeof(info), buffer.end(),
+                          [](uint8_t byte) { return byte == 0xA5; }));
 }
 
 TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
@@ -655,12 +687,12 @@ TEST_F(KfdIoctlTest, DbgTrapAttachDetachConfigOpsValidateAndResetState) {
   std::array<uint32_t, 2> queue_ids{17, 23};
   queues.suspend_queues.queue_array_ptr = reinterpret_cast<uint64_t>(queue_ids.data());
   queues.suspend_queues.num_queues = queue_ids.size();
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 0);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 2);
   EXPECT_EQ(queue_ids, (std::array<uint32_t, 2>{17, 23}));
   queues.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   queues.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(queue_ids.data());
   queues.resume_queues.num_queues = queue_ids.size();
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 0);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &queues), 2);
   EXPECT_EQ(queue_ids, (std::array<uint32_t, 2>{17, 23}));
 
   kfd_ioctl_dbg_trap_args dis{};

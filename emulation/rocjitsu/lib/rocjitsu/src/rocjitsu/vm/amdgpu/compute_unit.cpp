@@ -36,6 +36,14 @@ uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
   return cu_.read_vgpr(vgpr_alloc_.base + reg, lane);
 }
 
+void Wavefront::debug_write_sgpr(uint32_t reg, uint32_t value) {
+  cu_.write_sgpr(sgpr_alloc_.base + reg, value);
+}
+
+void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
+  cu_.write_vgpr(vgpr_alloc_.base + reg, lane, value);
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
@@ -485,7 +493,10 @@ bool ComputeUnitCore::step() {
 
   for (auto &wf : wfs_) {
     if (wf->state() == WfState::RUNNING && !wf->debug_halted()) {
+      const bool single_step = wf->debug_single_step();
       issue_instruction(wf.get());
+      if (single_step && !wf->debug_halted() && single_step_handler_)
+        single_step_handler_(*wf);
     }
   }
 

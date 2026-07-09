@@ -1,9 +1,9 @@
 # Debugging emulated GPU kernels with ROCgdb
 
 rocjitsu emulates the AMD KFD closely enough that **real ROCgdb / rocm-dbgapi**
-can attach to a workload running on the emulated GPU and enumerate its agent —
-no physical AMD GPU required. This document explains how the pieces fit
-together, how to launch a workload under ROCgdb, and tracks what is implemented.
+can attach to a workload running on the emulated GPU and debug its kernels — no
+physical AMD GPU required. This document explains how the pieces fit together,
+how to debug your own kernel, and tracks what is implemented.
 
 All KFD debug behaviour is mirrored from the real driver source
 (`amd/amdkfd/{kfd_chardev.c,kfd_debug.c,kfd_topology.c}`, amdgpu-6.16.13),
@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 Local (in-process) mode cannot host ROCgdb: the debugger and inferior would each
-get a private `SimulatedKfd`, so the debugger's dbgapi would never see the
+get a private `SimulatedDriver`, so the debugger's dbgapi would never see the
 inferior's process table. **Daemon mode is mandatory**, and `mirage run` drives
 it in one command — it starts the session daemon, runs ROCgdb under the
 interposer connected to that session, and ROCgdb launches the inferior into the
@@ -44,7 +44,7 @@ same session:
 mirage run --profile mi350x -- rocgdb --args ./my_hip_app
 ```
 
-## 2. Launching your workload under ROCgdb
+## 2. Debugging your own kernel
 
 1. Compile with device debug info, matching the mirage profile's arch
    (`mi350x` = `gfx950`):
@@ -55,17 +55,18 @@ mirage run --profile mi350x -- rocgdb --args ./my_hip_app
    ```bash
    mirage run --profile mi350x -- rocgdb --args ./app
    ```
-3. Host debugging and `info agents` work in this stack. GPU kernel breakpoints,
-   wave state, and stepping require the pending wave-level support listed below.
+3. In ROCgdb: `set breakpoint pending on` (the kernel symbol resolves only after
+   the code object loads at dispatch), `break <kernel>`, `run`.
 
 ## 3. Status
 
-Attach and detach through `mirage run` work end to end: rocm-dbgapi attaches to
-the process, enumerates the emulated GPU agent, and ROCgdb stops at host
-breakpoints — `info agents` lists the synthetic `gfx950 / MI350X` agent. The
-wave-level stack (stop at a kernel breakpoint, read/step wave state, watchpoints,
-faults, private memory, multi-wave) is built on top of this in subsequent
-changes and tracked below.
+Real ROCgdb, driven by `mirage run`, **debugs an emulated GPU kernel end to
+end**: it attaches, enumerates the GPU agent, stops at a kernel breakpoint, reads
+wave registers / PC / disassembly, and continues the kernel to correct
+completion. `info agents` lists the synthetic `gfx950 / MI350X` agent, and a
+breakpoint on a GPU kernel stops the trapping wave. The remaining wave-control
+features (single-step, watchpoints, faults, private memory, multi-wave) build on
+this and are tracked below.
 
 | Area | Status |
 |---|---|
@@ -76,10 +77,11 @@ changes and tracked below.
 | Real ptrace authorization + daemon transport | done |
 | Debug sessions keyed by inferior pid (attach before connect) | done |
 | SET_EXCEPTIONS_ENABLED / SET_FLAGS / launch-mode/override (accept) | done |
-| Attach/detach lifecycle (including exited-inferior cleanup) | done |
+| Attach/detach lifecycle (clean detach after inferior exit) | done |
 | GET_QUEUE_SNAPSHOT (real queues) | done |
-| Wave stop on `s_trap` + CWSR serialization | pending |
-| Debug events + register write-back + single-step | pending |
+| Wave stop on `s_trap` + CWSR serialization | done |
+| Debug events + register write-back (breakpoint stop end to end) | done |
+| Single-step / displaced stepping | pending |
 | Watchpoints / illegal-instruction / memory-violation | pending |
 | Private/scratch reads / multi-wave | pending |
 

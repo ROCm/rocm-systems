@@ -33,6 +33,10 @@ namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
 }
+
+namespace kmd {
+struct CwsrWaveState;
+}
 /// @brief 128-bit IPC share handle key, matching the kernel's random handle.
 struct IpcHandleKey {
   uint32_t words[4];
@@ -277,6 +281,10 @@ private:
   int debug_queue_snapshot(KfdProcess *target, kfd_ioctl_dbg_trap_queue_snapshot_args &args);
   int debug_query_event(pid_t target_pid, uint64_t enabled_mask,
                         kfd_ioctl_dbg_trap_query_debug_event_args &args);
+  int debug_query_exception_info(pid_t target_pid,
+                                 kfd_ioctl_dbg_trap_query_exception_info_args &args);
+  void raise_process_debug_event(pid_t target_pid, uint64_t exception_mask);
+  void runtime_enable_debugger_handshake(pid_t target_pid);
 
   /// @brief s_trap handler installed on every compute unit's wavefronts.
   /// @details Runs on the engine thread when a wave executes s_trap. Returns
@@ -284,6 +292,12 @@ private:
   /// serialized the queue's stopped waves into its CWSR area and raised an
   /// EC_QUEUE_WAVE_TRAP event to the debugger; false otherwise.
   bool on_wave_trap(amdgpu::Wavefront &wf, uint32_t trap_id);
+
+  bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
+  void report_wave_stopped(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
+                           uint32_t gpu_id, uint64_t ctx_base, uint32_t ctx_size);
+  void resume_debug_queues(KfdProcess *proc);
+  void apply_cwsr_to_wave(amdgpu::Wavefront &wf, const kmd::CwsrWaveState &state);
 
   /// @brief Serialize all debug-halted waves of a queue into its CWSR area.
   void serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id, uint32_t gpu_id,
@@ -369,6 +383,10 @@ private:
   };
   mutable std::mutex debug_events_mutex_;
   std::unordered_map<pid_t, std::unordered_map<uint32_t, DebugQueueException>> debug_events_;
+
+  mutable std::mutex runtime_handshake_mutex_;
+  std::condition_variable runtime_handshake_cv_;
+  std::unordered_set<pid_t> runtime_acked_;
 
   /// @brief Monotonic source of stable debugger wave ids (TTMP4:5).
   std::atomic<uint64_t> next_debug_wave_id_{1};

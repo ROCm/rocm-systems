@@ -494,6 +494,12 @@ public:
   /// @brief Read one allocated VGPR lane for debugger state capture.
   uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
 
+  /// @brief Write one allocated SGPR from debugger state restore.
+  void debug_write_sgpr(uint32_t reg, uint32_t value);
+
+  /// @brief Write one allocated VGPR lane from debugger state restore.
+  void debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value);
+
   /// @brief Stop this wave in the debugger (models the trap handler entry).
   /// @param trap_id Trap id from the s_trap immediate (breakpoint = 1).
   /// @details Records the trap id and halts the wave for debugger inspection.

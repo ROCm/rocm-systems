@@ -69,7 +69,16 @@ uint32_t encode_ttmp6(const CwsrWaveState &w) {
   if (w.saved_status_halt)
     v |= 1u << 29;
   v |= (w.trap_id & 0xFu) << 25;
-  // bit 31 (spi_ttmps_setup_disabled) stays clear: TTMPs are set up.
+  // bit 31 (spi_ttmps_setup_disabled) reflects whether the SPI initialized the
+  // dispatch bookkeeping TTMPs (group ids in ttmp8-10, packet id in ttmp11).
+  // When the process runtime-enabled without ttmp-save (kfd_runtime_info
+  // ttmp_setup == 0), those registers are not meaningful, so mark the wave
+  // accordingly. rocm-dbgapi (>= r_debug v10) then skips packet/workgroup
+  // correlation and uses its dummy dispatch instead of validating a packet id
+  // against the queue's read/write dispatch ids (rocdbgapi architecture.cpp
+  // spi_ttmps_setup_enabled, queue.cpp get_os_queue_packet_id).
+  if (!w.spi_ttmps_setup)
+    v |= 1u << 31;
   return v;
 }
 
@@ -224,6 +233,79 @@ CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
   layout.wave_state_size = static_cast<uint32_t>(wave_state_size);
   layout.ok = true;
   return layout;
+}
+
+bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
+                            std::vector<CwsrWaveState> &waves,
+                            const std::function<uint32_t(uint64_t)> &read32) {
+  if (waves.empty())
+    return false;
+
+  // Reproduce the exact geometry serialize_queue_cwsr chose (see that function).
+  // The wave count and per-wave sgpr/vgpr counts must match, so the register
+  // block addresses computed below land on the same dwords that were written.
+  uint32_t max_vgprs = 0;
+  for (const auto &w : waves)
+    max_vgprs = std::max(max_vgprs, w.num_vgprs);
+  const uint32_t vgpr_count = std::max<uint32_t>(round_up(max_vgprs, 8), 8);
+  const uint32_t sgpr_count = 112;
+  const uint32_t vcc_lo_slot = std::min(kArchScalars, sgpr_count) - 2;
+
+  const uint32_t hwreg_bytes = kHwregCount * sizeof(uint32_t);
+  const uint32_t sgpr_bytes = sgpr_count * sizeof(uint32_t);
+  const uint32_t vgpr_bytes = vgpr_count * kVgprLaneBytes;
+  const uint32_t per_wave = 64u + hwreg_bytes + sgpr_bytes + vgpr_bytes;
+
+  const uint32_t num_waves = static_cast<uint32_t>(waves.size());
+  const uint32_t wave_state_size = per_wave * num_waves;
+  const uint32_t control_stack_words = 2u + 1u + num_waves;
+  const uint32_t control_stack_size = control_stack_words * sizeof(uint32_t);
+  const uint32_t control_stack_offset = 0x100u;
+  const uint32_t wave_area_begin = control_stack_offset + control_stack_size;
+  const uint32_t wave_state_offset = wave_area_begin + wave_state_size;
+  if (wave_state_offset > area_size)
+    return false;
+
+  uint64_t last_wave_area = ctx_base + wave_state_offset;
+  for (uint32_t i = 0; i < num_waves; ++i) {
+    CwsrWaveState &w = waves[i];
+    const uint64_t save_area_addr = last_wave_area - 64;
+    const uint64_t hwregs_addr = save_area_addr - hwreg_bytes;
+    const uint64_t ttmps_addr = save_area_addr - kTtmpCount * sizeof(uint32_t);
+    const uint64_t sgprs_addr = hwregs_addr - sgpr_bytes;
+    const uint64_t vgprs_addr = sgprs_addr - vgpr_bytes;
+
+    w.m0 = read32(hwregs_addr + 0 * 4);
+    w.pc = static_cast<uint64_t>(read32(hwregs_addr + 1 * 4)) |
+           (static_cast<uint64_t>(read32(hwregs_addr + 2 * 4)) << 32);
+    w.exec = static_cast<uint64_t>(read32(hwregs_addr + 3 * 4)) |
+             (static_cast<uint64_t>(read32(hwregs_addr + 4 * 4)) << 32);
+    w.status = read32(hwregs_addr + 5 * 4);
+    w.trapsts = read32(hwregs_addr + 6 * 4);
+    w.mode = read32(hwregs_addr + 9 * 4);
+
+    const uint32_t ttmp4 = read32(ttmps_addr + 4 * 4);
+    const uint32_t ttmp5 = read32(ttmps_addr + 5 * 4);
+    w.wave_id = static_cast<uint64_t>(ttmp4) | (static_cast<uint64_t>(ttmp5) << 32);
+    const uint32_t ttmp6 = read32(ttmps_addr + 6 * 4);
+    w.wave_stopped = (ttmp6 & (1u << 30)) != 0;
+    w.saved_status_halt = (ttmp6 & (1u << 29)) != 0;
+
+    w.sgprs.resize(w.num_sgprs);
+    for (uint32_t s = 0; s < w.num_sgprs; ++s)
+      w.sgprs[s] = read32(sgprs_addr + s * 4);
+    const uint32_t vcc_lo = read32(sgprs_addr + vcc_lo_slot * 4);
+    const uint32_t vcc_hi = read32(sgprs_addr + (vcc_lo_slot + 1) * 4);
+    w.vcc = static_cast<uint64_t>(vcc_lo) | (static_cast<uint64_t>(vcc_hi) << 32);
+
+    w.vgprs.resize(static_cast<size_t>(w.num_vgprs) * 64);
+    for (uint32_t r = 0; r < w.num_vgprs; ++r)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        w.vgprs[r * 64 + lane] = read32(vgprs_addr + r * kVgprLaneBytes + lane * 4);
+
+    last_wave_area = vgprs_addr;
+  }
+  return true;
 }
 
 } // namespace kmd

@@ -2134,3 +2134,52 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             "bin/hip_cvt_narrow_test"
     )
 endif()
+
+# --- rocgdb wave-debugging smoke test (requires rocgdb + hipcc + mirage) ---
+# Drives real ROCgdb through `mirage run` to set a GPU kernel breakpoint, stop,
+# inspect wave registers, and continue to a correct result (see
+# tests/rocgdb/debug_kernel.sh). Gated on the debugger and HIP compiler being
+# present; the harness itself skips (printing "SKIP:") if mirage is not found.
+find_program(
+    ROCGDB_EXECUTABLE
+    NAMES rocgdb
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+find_program(
+    HIPCC_EXECUTABLE
+    NAMES hipcc
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES bin
+)
+find_program(
+    MIRAGE_EXECUTABLE
+    NAMES mirage
+    HINTS
+        "${CMAKE_SOURCE_DIR}/../mirage/target/release"
+        "${CMAKE_SOURCE_DIR}/../mirage/target/debug"
+    PATH_SUFFIXES bin
+)
+if(ROCGDB_EXECUTABLE AND HIPCC_EXECUTABLE)
+    set(_rocgdb_demo_env "")
+    if(MIRAGE_EXECUTABLE)
+        list(APPEND _rocgdb_demo_env "MIRAGE_BIN=${MIRAGE_EXECUTABLE}")
+    endif()
+    rj_add_test(
+        NAME "RocgdbDebug.KernelBreakpoint"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/rocgdb/debug_kernel.sh"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 300
+        ENVIRONMENT ${_rocgdb_demo_env}
+        SKIP_REGULAR_EXPRESSION "SKIP:"
+    )
+    message(
+        STATUS
+        "rocgdb debug smoke test enabled (found ${ROCGDB_EXECUTABLE})"
+    )
+else()
+    message(
+        STATUS
+        "rocgdb debug smoke test disabled (rocgdb or hipcc not found)"
+    )
+endif()

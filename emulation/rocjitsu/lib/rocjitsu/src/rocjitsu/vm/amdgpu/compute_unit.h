@@ -152,6 +152,9 @@ public:
   /// Called from dispatch_wf() and the cpl_ port handler.
   virtual void schedule_work() = 0;
 
+  /// @brief Thread-safe scheduling for debugger resume from an ioctl thread.
+  virtual void schedule_work_async() = 0;
+
   /// @brief Check whether this CU has no runnable wavefronts.
   /// @retval true No wavefront can currently execute.
   /// @retval false At least one wavefront can execute.
@@ -177,6 +180,11 @@ public:
 
   /// @brief Install the s_trap handler (see @ref TrapHandler).
   void set_trap_handler(TrapHandler cb) { trap_handler_ = std::move(cb); }
+
+  /// @brief Callback after a single-stepped wave executes one instruction.
+  using SingleStepHandler = std::function<bool(Wavefront &wf)>;
+
+  void set_single_step_handler(SingleStepHandler cb) { single_step_handler_ = std::move(cb); }
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
@@ -611,6 +619,7 @@ protected:
   LocalMemPipeline local_mem_pipeline_;
   std::function<void()> on_idle_; ///< Callback invoked when CU becomes idle.
   TrapHandler trap_handler_;      ///< s_trap handler (KFD debugger); see set_trap_handler.
+  SingleStepHandler single_step_handler_;
   CommandProcessor *cp_ = nullptr;
 
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
@@ -718,6 +727,11 @@ public:
     executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
     this->schedule_event(&tick_event_, now + 1);
+  }
+
+  void schedule_work_async() override {
+    if (this->engine())
+      this->engine()->schedule_event_now(&tick_event_);
   }
 
 private:
