@@ -6,6 +6,8 @@ add_executable(
     ${target}
     test_rocprofiler_compute_tool.h
     test_rocprofiler_compute_tool.cpp
+    test_pc_sampling_feature.h
+    test_pc_sampling_feature.cpp
     test_sdk_callbacks.h
     test_sdk_callbacks.cpp
     test_environ_cache.h
