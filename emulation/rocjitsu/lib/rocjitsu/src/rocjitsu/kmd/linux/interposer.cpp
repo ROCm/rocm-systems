@@ -94,7 +94,7 @@ namespace {
 /// @param r Driver result: `>= 0` on success, `-errno` on failure.
 /// @returns @p r unchanged when non-negative; otherwise `-1` with `errno` set to
 ///          `-r`.
-inline int kfd_ioctl_ret(int r) {
+int kfd_ioctl_ret(int r) {
   if (r < 0) {
     errno = -r;
     return -1;
