@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL-Validate-MI455X-AllReduce-Smoke",
-    "description": "Smoke config derived from mi455_ainic_roce_perf: AllReduce only (12 datatypes, 1B-512M), 1 cycle x 1 iteration, warmup 20."
+    "description": "Smoke config derived from mi455_ainic_roce_perf: AllReduce, float only (1B-512M), 1 cycle x 1 iteration, warmup 20, HSA_HOTSWAP_DISABLE=1."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -15,7 +15,8 @@
     "RCCL_USE_AMD_SMI_LIB": "0",
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "RCCL_MSCCL_ENABLE": "0",
-    "NCCL_DEBUG": "VERSION"
+    "NCCL_DEBUG": "VERSION",
+    "HSA_HOTSWAP_DISABLE": "1"
   },
   "mpi_args": [
     "--mca pml ob1",
@@ -66,72 +67,17 @@
       "binary": "all_reduce_perf",
       "tests": [
         {
-          "name": "AllReduce_int8",
-          "description": "AllReduce perf, datatype int8",
-          "command_args": "-d int8"
-        },
-        {
-          "name": "AllReduce_uint8",
-          "description": "AllReduce perf, datatype uint8",
-          "command_args": "-d uint8"
-        },
-        {
-          "name": "AllReduce_int32",
-          "description": "AllReduce perf, datatype int32",
-          "command_args": "-d int32"
-        },
-        {
-          "name": "AllReduce_uint32",
-          "description": "AllReduce perf, datatype uint32",
-          "command_args": "-d uint32"
-        },
-        {
-          "name": "AllReduce_int64",
-          "description": "AllReduce perf, datatype int64",
-          "command_args": "-d int64"
-        },
-        {
-          "name": "AllReduce_uint64",
-          "description": "AllReduce perf, datatype uint64",
-          "command_args": "-d uint64"
-        },
-        {
-          "name": "AllReduce_half",
-          "description": "AllReduce perf, datatype half",
-          "command_args": "-d half"
-        },
-        {
           "name": "AllReduce_float",
           "description": "AllReduce perf, datatype float",
           "command_args": "-d float"
-        },
-        {
-          "name": "AllReduce_double",
-          "description": "AllReduce perf, datatype double",
-          "command_args": "-d double"
-        },
-        {
-          "name": "AllReduce_bfloat16",
-          "description": "AllReduce perf, datatype bfloat16",
-          "command_args": "-d bfloat16"
-        },
-        {
-          "name": "AllReduce_fp8_e4m3",
-          "description": "AllReduce perf, datatype fp8_e4m3",
-          "command_args": "-d fp8_e4m3"
-        },
-        {
-          "name": "AllReduce_fp8_e5m2",
-          "description": "AllReduce perf, datatype fp8_e5m2",
-          "command_args": "-d fp8_e5m2"
         }
       ]
     }
   },
   "test_suites": [
     {
-      "name": "Perf - AllReduce (datatype sweep)",
-      "description": "rccl-tests AllReduce perf sweep across 12 datatypes (1B-4G), 1 cycle x 1 iteration",
+      "name": "Perf - AllReduce (float)",
+      "description": "rccl-tests AllReduce, float only (1B-512M), 1 cycle x 1 iteration",
       "config": "all_reduce_perf",
       "enabled": true
     }
