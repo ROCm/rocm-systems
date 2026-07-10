@@ -308,8 +308,7 @@ def create_df_pmc(
     if kernel_verbose >= 0:
         kernel_name_shortener(df, kernel_verbose)
 
-    # per_kernel denom; added before the caller's imputation.
-    utils_analysis.add_per_kernel_denom_column(df)
+    utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
         console_debug(f"pmc_raw_data final_single_df {df.info}")

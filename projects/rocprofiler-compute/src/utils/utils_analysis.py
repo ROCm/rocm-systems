@@ -17,7 +17,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
+from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
 
@@ -608,13 +608,9 @@ def is_workload_empty(path: str) -> None:
             break
 
 
-def add_per_kernel_denom_column(df: pd.DataFrame) -> None:
-    """Add the per_kernel denom column in place: 1 per dispatch, so SUM == N.
-
-    Call before imputation so nullified (undersampled) kernels drop out of the
-    denominator too, keeping Avg consistent across the DB and CLI/WebUI/TUI paths.
-    """
-    df[PER_KERNEL_DENOM_COL] = 1
+def add_unit_counter(df: pd.DataFrame) -> None:
+    """Add the UNIT_COUNTER column in place: 1 per dispatch, so SUM == N."""
+    df[UNIT_COUNTER] = 1
 
 
 def impute_counters_iteration_multiplex(

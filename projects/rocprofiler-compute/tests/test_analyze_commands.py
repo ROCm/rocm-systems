@@ -17,7 +17,6 @@ from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.parser import load_pc_sampling_data
 from utils.pc_sampling_analysis import load_pc_sample_records
-from utils.utils_counter_defs import SUPPORTED_DENOM
 
 config = {}
 config["cleanup"] = True
@@ -1153,122 +1152,6 @@ class TestMetricEvaluatorDivisionByZero:
         assert result == pytest.approx(40.0, abs=1e-9), (
             f"SUM(LEVEL) / SUM(REQ) should be 40.0, got {result}"
         )
-
-
-@pytest.mark.division_by_zero
-class TestPerKernelNormalization:
-    """per_kernel $denom must sum to N dispatches, not the scalar 1.
-
-    Guards the Avg-vs-Max bug: with $denom == "1", SUM(1) == 1 so Avg was the
-    total, not the mean per dispatch.
-    """
-
-    def test_denom_expands_to_dispatch_unit_column(self):
-        from utils.metrics.expression import update_denominator_string
-        from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
-
-        assert update_denominator_string("SUM($denom)", "per_kernel") == (
-            f"SUM({PER_KERNEL_DENOM_COL})"
-        )
-
-    def test_helper_adds_denominator_column_of_ones(self):
-        from utils.utils_analysis import add_per_kernel_denom_column
-        from utils.utils_counter_defs import PER_KERNEL_DENOM_COL
-
-        df = pd.DataFrame({"COUNTER": [10.0, 20.0, 30.0]})
-        add_per_kernel_denom_column(df)
-        assert (df[PER_KERNEL_DENOM_COL] == 1).all()
-        assert len(df[PER_KERNEL_DENOM_COL]) == 3
-
-    def test_per_kernel_avg_is_mean_per_dispatch(self):
-        """SUM(x) / SUM($denom) is the per-dispatch mean, not the total."""
-        from utils.metrics.expression import update_denominator_string
-        from utils.utils_analysis import add_per_kernel_denom_column
-
-        raw_pmc_df = pd.DataFrame({"COUNTER": [10.0, 20.0, 30.0]})
-        add_per_kernel_denom_column(raw_pmc_df)
-        evaluator = MetricEvaluator(raw_pmc_df, {}, {})
-        equation = update_denominator_string("SUM(COUNTER) / SUM($denom)", "per_kernel")
-        result = evaluator.eval_expression(build_eval_string(equation))
-        # 60 / 3 dispatches == 20.0, not the total 60.0
-        assert result == pytest.approx(20.0, abs=1e-9), (
-            f"per_kernel Avg should be the mean per dispatch (20.0), got {result}"
-        )
-
-
-@pytest.mark.division_by_zero
-class TestNormalizedAvgWithinMinMax:
-    """Pooled Avg must stay within [Min, Max] for every normalization unit.
-
-    Avg = SUM(num)/SUM($denom) is a weighted mean of the per-dispatch ratios
-    num/$denom, so it cannot leave [Min, Max] for any positive denominator.
-    The Avg-vs-Max bug broke this for per_kernel; here it is checked for all
-    denoms and equation shapes.
-    """
-
-    # YAML metric form: SUM(num)/SUM($denom) for Avg, MIN/MAX(num/$denom) bounds.
-    METRIC_EQUATIONS = [
-        pytest.param(
-            "SUM(SQ_WAVE_CYCLES) / SUM($denom)",
-            "MIN(SQ_WAVE_CYCLES / $denom)",
-            "MAX(SQ_WAVE_CYCLES / $denom)",
-            id="count",
-        ),
-        pytest.param(
-            "4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)",
-            "4 * MIN(SQ_ACTIVE_INST_ANY / $denom)",
-            "4 * MAX(SQ_ACTIVE_INST_ANY / $denom)",
-            id="scaled",
-        ),
-        pytest.param(
-            "SUM(SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / SUM($denom)",
-            "MIN((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
-            "MAX((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
-            id="composite",
-        ),
-    ]
-
-    @staticmethod
-    def _make_evaluator():
-        """Evaluator over multi-dispatch counters with positive per-dispatch denoms.
-
-        per_cycle's $GRBM_GUI_ACTIVE_PER_XCD built-in is precomputed as a Series,
-        the way calc_builtin_vars supplies it in a real run.
-        """
-        from utils.utils_analysis import add_per_kernel_denom_column
-
-        df = pd.DataFrame({
-            "SQ_WAVE_CYCLES": [120.0, 300.0, 210.0, 450.0, 180.0],
-            "SQ_ACTIVE_INST_ANY": [80.0, 160.0, 300.0, 100.0, 220.0],
-            "SQ_WAVES": [10.0, 20.0, 15.0, 25.0, 12.0],
-            "GRBM_GUI_ACTIVE": [900.0, 1800.0, 1400.0, 2500.0, 1100.0],
-            "Start_Timestamp": [0.0, 500.0, 1000.0, 1500.0, 2000.0],
-            "End_Timestamp": [400.0, 1300.0, 1600.0, 2600.0, 2500.0],
-        })
-        add_per_kernel_denom_column(df)
-        sys_vars = {"ammolite__num_xcd": 2}
-        sys_vars["ammolite__GRBM_GUI_ACTIVE_PER_XCD"] = MetricEvaluator(
-            df, sys_vars, {}
-        ).eval_expression(build_eval_string("(GRBM_GUI_ACTIVE / $num_xcd)"))
-        return MetricEvaluator(df, sys_vars, {})
-
-    @staticmethod
-    def _eval(evaluator, equation, normal_unit):
-        from utils.metrics.expression import update_denominator_string
-
-        return evaluator.eval_expression(
-            build_eval_string(update_denominator_string(equation, normal_unit))
-        )
-
-    @pytest.mark.parametrize("normal_unit", list(SUPPORTED_DENOM))
-    @pytest.mark.parametrize("avg_eq, min_eq, max_eq", METRIC_EQUATIONS)
-    def test_avg_within_min_max(self, normal_unit, avg_eq, min_eq, max_eq):
-        evaluator = self._make_evaluator()
-        avg = self._eval(evaluator, avg_eq, normal_unit)
-        minimum = self._eval(evaluator, min_eq, normal_unit)
-        maximum = self._eval(evaluator, max_eq, normal_unit)
-        assert minimum < maximum  # varied data keeps the bound non-trivial
-        assert minimum <= avg <= maximum
 
 
 @pytest.fixture

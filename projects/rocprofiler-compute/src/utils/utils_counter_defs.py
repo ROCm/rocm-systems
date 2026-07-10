@@ -36,15 +36,15 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # ---------------------------------------------------------------------------
 
 # per_kernel denom column, injected at pmc load with 1 per dispatch so
-# SUM($denom) == N and Avg is the mean per dispatch, not the total.
-PER_KERNEL_DENOM_COL = "Dispatch_Unit"
+# SUM($denom) == N and Avg is the mean per dispatch.
+UNIT_COUNTER = "Dispatch_Unit"
 
 SUPPORTED_DENOM: dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
-    # A column, not a scalar, so SUM($denom) == N.
-    "per_kernel": PER_KERNEL_DENOM_COL,
+    # A vector, not a scalar, so SUM($denom) == N.
+    "per_kernel": UNIT_COUNTER,
 }
 
 

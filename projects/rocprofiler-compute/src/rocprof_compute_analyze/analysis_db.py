@@ -345,9 +345,7 @@ class db_analysis(OmniAnalyze_Base):
                 pd.read_csv(Path(workload_path) / "pmc_perf.csv")
             )
 
-            # per_kernel denom; before imputation so nullified kernels drop
-            # from the denominator too (matches create_df_pmc).
-            utils_analysis.add_per_kernel_denom_column(pmc_df)
+            utils_analysis.add_unit_counter(pmc_df)
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
