@@ -120,17 +120,41 @@ public:
 
   /// @brief Per-process debugger session state.
   ///
-  /// @details Mirrors the debug fields the kernel keeps on kfd_process:
-  /// debug_trap_enabled, runtime_info.runtime_state, exception_enable_mask,
-  /// the debugger notification fd, and the attached debugger identity. Managed
-  /// by the AMDKFD_IOC_DBG_TRAP handler (kfd_ioctl_set_debug_trap in the real
-  /// driver). @ref runtime_state holds a @c kfd_dbg_runtime_state value.
+  /// @details Mirrors the debug-related fields the kernel maintains on
+  /// @c struct @c kfd_process in
+  /// @c drivers/gpu/drm/amd/amdkfd/kfd_priv.h.
+  /// Managed by the @c AMDKFD_IOC_DBG_TRAP ioctl handler
+  /// (@c kfd_ioctl_set_debug_trap in the real driver).
+  ///
+  /// Field mapping to @c kfd_priv.h:
+  /// | DebugSession field     | kfd_process field                               |
+  /// |------------------------|-------------------------------------------------|
+  /// | @ref enabled           | @c bool @c debug_trap_enabled                   |
+  /// | @ref runtime_state     | @c kfd_runtime_info @c runtime_info.runtime_state (kfd_ioctl.h) |
+  /// | @ref exception_enable_mask | @c uint64_t @c exception_enable_mask        |
+  /// | @ref dbg_fd            | @c struct @c file* @c dbg_ev_file (flattened to fd) |
+  /// | @ref debugger_pid      | @c struct @c kfd_process* @c debugger_process (stored as pid) |
   struct DebugSession {
-    bool enabled = false;               ///< debug_trap_enabled.
-    uint32_t runtime_state = 0;         ///< kfd_dbg_runtime_state (see kfd_ioctl.h).
-    uint64_t exception_enable_mask = 0; ///< Exceptions raised to the debugger.
-    int dbg_fd = -1;                    ///< Debugger notification fd (poll target).
-    pid_t debugger_pid = 0;             ///< Attached debugger's Linux pid (ptrace parent).
+    /// @brief Mirrors @c kfd_process::debug_trap_enabled.
+    /// Set when the device process is debug-attached with a reserved VMID.
+    bool enabled = false;
+
+    /// @brief Mirrors @c kfd_process::runtime_info.runtime_state.
+    /// Holds a @c kfd_dbg_runtime_state value (see @c kfd_ioctl.h).
+    uint32_t runtime_state = 0;
+
+    /// @brief Mirrors @c kfd_process::exception_enable_mask.
+    /// Bitmask of exception classes that are forwarded to the debugger.
+    uint64_t exception_enable_mask = 0;
+
+    /// @brief Mirrors @c kfd_process::dbg_ev_file (flattened from @c struct @c file* to fd).
+    /// File descriptor used as the debugger notification / poll target.
+    /// -1 when no debugger is attached.
+    int dbg_fd = -1;
+
+    /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
+    /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
+    pid_t debugger_pid = 0;
   };
 
   /// @brief Per-page translation entry, mirroring HW PTE fields.

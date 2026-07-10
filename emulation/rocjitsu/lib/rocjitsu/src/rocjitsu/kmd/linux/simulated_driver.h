@@ -153,9 +153,11 @@ private:
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
 
-  /// @brief Look up a KfdProcess by its client (Linux) pid. Returns nullptr if
-  /// none matches. Used by AMDKFD_IOC_DBG_TRAP to resolve the debug target,
-  /// mirroring the kernel's kfd_lookup_process_by_pid().
+  /// @brief Look up a KfdProcess by its client (Linux) pid. Used by
+  /// AMDKFD_IOC_DBG_TRAP to resolve the debug target, mirroring the kernel's
+  /// kfd_lookup_process_by_pid().
+  /// @param pid Client (Linux) pid of the target process.
+  /// @return The matching KfdProcess, or nullptr if none matches.
   std::shared_ptr<KfdProcess> find_process_by_client_pid(pid_t pid) const;
 
   /// @brief Look up a GpuDevice by gpu_id. Returns nullptr if not found.
