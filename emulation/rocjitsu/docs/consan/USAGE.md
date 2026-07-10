@@ -618,6 +618,26 @@ This runs the focused record/replay, inline-shadow, and sampled race controls,
 plus record/replay and inline-shadow barrier-order clean controls. The script
 uses `ctest -j8`.
 
+Full tiered matrix:
+
+```sh
+export ROCJITSU_BUILD_DIR=/path/to/rocjitsu-build
+export IREE_BUILD_DIR=/path/to/iree-build
+export HIP_MOI_BUILD_DIR=/path/to/hip-moi-build
+export ROCM_DIST_DIR=/path/to/rocm
+
+"$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" tier0
+"$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" tier1
+"$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" tier2
+# Or run the fail-fast sequence:
+"$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" all
+```
+
+Tier0 proves focused implementation and live GPU behavior. Tier1 adds the
+independent semantic controls and selected LDS-heavy IREE workloads under all
+four profiles. Tier2 is broad compatibility/non-corruption evidence; it is not
+a claim that every loaded code object contained a supported patched site.
+
 Selected hip-moi smoke:
 
 ```sh

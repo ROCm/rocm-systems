@@ -183,8 +183,8 @@ flowchart LR
   I2["I2: Inline Diagnostics"]:::done
   I3["I3: Barrier And<br/>Atomic Semantics"]:::done
   S2["S2: In-Kernel<br/>Sampled Checking"]:::done
-  T1A["T1A: Test Tiers<br/>And Harness"]:::partial
-  T1B["T1B: MOI Parity<br/>Qualification Runs"]:::todo
+  T1A["T1A: Test Tiers<br/>And Harness"]:::done
+  T1B["T1B: MOI Parity<br/>Qualification Runs"]:::active
   T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::partial
   M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::target
   D1["D1: Team Snapshot Docs"]:::todo
@@ -1441,7 +1441,7 @@ Dependency split:
 - Passing `T1B` reaches the `T1` milestone. `M0` is then an acceptance review
   of that evidence, not a prerequisite for generating it.
 
-### T1A: Test Tiers And Harness - PARTIAL
+### T1A: Test Tiers And Harness - DONE
 
 Work:
 
@@ -1462,6 +1462,24 @@ Done criteria:
 - A teammate can run one command per tier and know what a pass means.
 - A failed or timed-out GPU test cannot silently leave a later tier looking
   successful.
+
+Landed state:
+
+- `tests/dbi/consan_test_matrix.sh` exposes `tier0`, `tier1`, `tier2`, and
+  fail-fast `all` commands. It validates every required path before running,
+  defaults GPU fanout to eight, and applies 30/60/120-second per-test limits.
+- Tier0 is 183 focused unit tests plus 37 live gfx1201 feature controls. Tier1
+  is the independent 189-test hip-moi semantic suite plus TileAndFuse and
+  scan/softmax under SuperCollider and all three standard MOI profiles. Tier2
+  is the broad IREE ROCm e2e inventory under those same four profiles.
+- `set -euo pipefail` and sequential tier/profile execution ensure any failed
+  or timed-out row stops the matrix before a later pass can mask it.
+- The architecture table in `LOCAL_TESTING.md` distinguishes gfx1201 live
+  evidence from unavailable gfx942/gfx950/gfx1250 hardware and synthetic-only
+  coverage. Those unavailable rows remain A1, not a gfx1201 gate.
+
+Qualification evidence: the new tier0 command passes 183/183 unit tests and
+37/37 live tests on gfx1201.
 
 ### T1B: MOI Parity Qualification Runs - TODO
 

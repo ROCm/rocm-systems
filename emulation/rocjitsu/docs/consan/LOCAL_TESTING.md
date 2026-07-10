@@ -325,6 +325,26 @@ Known local result:
 - 189/189 passed on `gfx1201`, covering reference kernels, attention/WMMA,
   barriers, atomics/fences, positive race diagnostics, and tutorial cases.
 
+## Repeatable Tier Matrix
+
+`tests/dbi/consan_test_matrix.sh` is the authoritative fail-fast entry point.
+It requires `ROCJITSU_BUILD_DIR`, `IREE_BUILD_DIR`, `HIP_MOI_BUILD_DIR`, and
+`ROCM_DIST_DIR`; pass `tier0`, `tier1`, `tier2`, or `all`. See `USAGE.md` for
+the exact invocation and the meaning of each tier.
+
+Current architecture evidence:
+
+| Target | Live hardware | Tier evidence | Status |
+| --- | --- | --- | --- |
+| gfx942 | unavailable locally | no current native ConSan tier | deferred to A1 |
+| gfx950 | unavailable locally | no current native ConSan tier | deferred to A1 |
+| gfx1201 | yes | tier0 183 unit + 37 live; tier1/tier2 recorded below | active qualification target |
+| gfx1250 | unavailable locally | decoder/encoder sources and synthetic dispatch coverage only | deferred to A1 |
+
+The harness uses 30-second focused-GPU, 60-second IREE, and 120-second hip-moi
+per-test limits. A failure or timeout terminates the current profile and all
+later tiers; it cannot be overwritten by a later green summary.
+
 ## rocjitsu-test-corpus
 
 Current local status:
