@@ -460,6 +460,39 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   return gpus;
 }
 
+/// @brief Reject implicit host selection when more than one GPU has the host ISA.
+///
+/// @details The launcher, GuestKfd, and HSA tools hook discover the host through
+/// separate views of KFD and ROCR. Selecting the first ISA match independently
+/// is only well-defined when that match is unique. On a multi-GPU host, require
+/// the config to name the shared KFD gpu_id so every layer routes to the same
+/// physical GPU.
+bool has_unambiguous_host_gpu(const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+  if (dbt_guest.host_gpu_id != 0)
+    return true;
+
+  std::optional<uint32_t> target_version =
+      rocjitsu::kmd::gfx_target_version_from_name(dbt_guest.host_isa);
+  if (!target_version)
+    return true;
+
+  std::vector<uint32_t> matching_gpu_ids;
+  for (const KfdGpuOrdinal &gpu : real_kfd_gpu_ordinals()) {
+    if (gpu.gfx_target_version == *target_version)
+      matching_gpu_ids.push_back(gpu.gpu_id);
+  }
+  if (matching_gpu_ids.size() <= 1)
+    return true;
+
+  std::cerr << std::format(
+      "rocjitsu: dbt_guest.host_isa '{}' matches {} host GPUs; set host_gpu_id to one of:",
+      dbt_guest.host_isa, matching_gpu_ids.size());
+  for (uint32_t gpu_id : matching_gpu_ids)
+    std::cerr << ' ' << gpu_id;
+  std::cerr << '\n';
+  return false;
+}
+
 bool append_unique(std::vector<std::string> *tokens, std::string token) {
   if (token.empty())
     return false;
@@ -646,6 +679,8 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: dbt_guest requires guest_isa and host_isa\n";
       return 1;
     }
+    if (!has_unambiguous_host_gpu(dbt_guest_config))
+      return 1;
     hooks_path = find_hooks_lib();
     if (hooks_path.empty()) {
       std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";

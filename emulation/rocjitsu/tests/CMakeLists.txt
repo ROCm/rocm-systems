@@ -561,28 +561,6 @@ endif()
 set(RJ_HAS_GFX1201_GPU FALSE)
 if("120001" IN_LIST RJ_KFD_GFX_TARGET_VERSIONS)
     set(RJ_HAS_GFX1201_GPU TRUE)
-else()
-    find_program(
-        ROCM_AGENT_ENUM
-        rocm_agent_enumerator
-        HINTS "${ROCM_PATH}"
-        PATH_SUFFIXES bin
-    )
-    if(ROCM_AGENT_ENUM)
-        execute_process(
-            COMMAND ${ROCM_AGENT_ENUM}
-            OUTPUT_VARIABLE _agents
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-            RESULT_VARIABLE _agent_rc
-        )
-        if(
-            _agent_rc EQUAL 0
-            AND _agents MATCHES "(^|[\r\n; ])gfx1201($|[\r\n; ])"
-        )
-            set(RJ_HAS_GFX1201_GPU TRUE)
-        endif()
-    endif()
 endif()
 
 set(RJ_KMD_PRELOAD_ENV
