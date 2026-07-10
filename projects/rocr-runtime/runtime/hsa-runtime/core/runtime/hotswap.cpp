@@ -302,11 +302,13 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
-    return RewriteDecision{
-        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
-        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
-        false,
-        false};
+    RewriteDecision decision;
+    decision.source_isa =
+        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
+    decision.target_isa =
+        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0);
+    decision.rewrite_required = true;
+    return decision;
   }
 
   const bool request_entry_trampolines =
@@ -319,9 +321,12 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
     return std::nullopt;
   }
 
-  RewriteDecision decision{source_isa, source_isa,
-                           request_entry_trampolines,
-                           request_strict_mode};
+  RewriteDecision decision;
+  decision.source_isa = source_isa;
+  decision.target_isa = source_isa;
+  decision.request_entry_trampolines = request_entry_trampolines;
+  decision.request_strict_mode = request_strict_mode;
+  decision.rewrite_required = request_strict_mode;
   if (source_gfx == kGfx1250) {
     decision.source_isa =
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
@@ -381,12 +386,12 @@ void LogRewrittenCodeObjectLoadFailure(hsa_status_t status) {
 }
 
 void LogRequiredRewriteFailure() {
-  HOTSWAP_LOG("hotswap: required strict-mode rewrite failed, not falling back to original "
+  HOTSWAP_LOG("hotswap: required rewrite failed, not falling back to original "
               "code object\n");
 }
 
 void LogRequiredRewrittenLoadFailure(hsa_status_t status) {
-  HOTSWAP_LOG("hotswap: required strict-mode rewritten load failed (status=%d), not falling "
+  HOTSWAP_LOG("hotswap: required rewritten load failed (status=%d), not falling "
               "back to original code object\n",
               static_cast<int>(status));
 }
@@ -503,16 +508,17 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
                                    decision->request_entry_trampolines,
                                    decision->request_strict_mode);
   }
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d "
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d required=%d "
               "in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
               decision->request_entry_trampolines, decision->request_strict_mode,
-              code_object.size, rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
+              decision->rewrite_required, code_object.size, rewritten ? *out_elf_size : 0,
+              rewritten ? 1 : 0);
   if (rewritten) {
     return {RetargetCodeObjectStatus::kRewritten,
-            decision->request_strict_mode};
+            decision->rewrite_required};
   }
-  if (decision->request_strict_mode) {
+  if (decision->rewrite_required) {
     return {RetargetCodeObjectStatus::kRequiredRewriteFailed, true};
   }
   return {};
@@ -556,7 +562,7 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
       RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
       return status;
     }
-    if (retarget_result.strict_mode_required) {
+    if (retarget_result.rewrite_required) {
       LogRequiredRewrittenLoadFailure(status);
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }

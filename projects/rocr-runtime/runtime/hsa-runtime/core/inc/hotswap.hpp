@@ -75,6 +75,7 @@ struct RewriteDecision {
   std::string target_isa;
   bool request_entry_trampolines = false;
   bool request_strict_mode = false;
+  bool rewrite_required = false;
 };
 
 enum class RetargetCodeObjectStatus {
@@ -85,7 +86,7 @@ enum class RetargetCodeObjectStatus {
 
 struct RetargetCodeObjectResult {
   RetargetCodeObjectStatus status = RetargetCodeObjectStatus::kSkipped;
-  bool strict_mode_required = false;
+  bool rewrite_required = false;
 };
 
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(
