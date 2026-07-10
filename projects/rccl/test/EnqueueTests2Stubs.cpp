@@ -142,7 +142,14 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int red, ncclDataTy
 bool IsArchMatch(char const* arch, char const* target) { return false; }
 const char* ncclGetEnv(const char* name) { return nullptr; }
 int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache, int8_t* noCache) { if (cache) *cache = deftVal; return deftVal; }
-void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, size_t align) { return nullptr; }
+void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, size_t align) {
+  // Host-only test allocator: satisfy each request with a fresh aligned block.
+  // The blocks are intentionally leaked; the test process is short lived.
+  void* p = nullptr;
+  if (align < sizeof(void*)) align = sizeof(void*);
+  if (posix_memalign(&p, align, size) != 0) return nullptr;
+  return p;
+}
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) { return nullptr; }
 void ncclOsAlignedFree(void* ptr) {}
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes, int numPipeOps, float* time) { if (time) *time = 0.0f; return ncclSuccess; }
