@@ -70,10 +70,17 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
     {
       int in_fds[1] = {-1};
       size_t num_in_fds = 1;
-      if (rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds) <= 0)
-        break;
+      ssize_t hdr_bytes = rpc_recv_msg(client_fd, &hdr, sizeof(hdr), in_fds, &num_in_fds);
       if (num_in_fds > 0)
         in_fd = in_fds[0];
+      // A short read means the peer truncated the header (or closed); drop the
+      // connection instead of acting on a partial header, reclaiming any fd that
+      // arrived with it. (rpc_recv_exact did this implicitly; recvmsg does not.)
+      if (hdr_bytes != static_cast<ssize_t>(sizeof(hdr))) {
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
     }
 
     switch (hdr.opcode) {

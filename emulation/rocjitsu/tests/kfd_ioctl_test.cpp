@@ -479,6 +479,55 @@ TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -ENOSYS);
 }
 
+// Local mode borrows the debugger's own fd (the session does not own it), so
+// DISABLE must leave it open for the debugger to close. Only daemon mode, which
+// dup'd the fd via SCM_RIGHTS, releases it on teardown.
+TEST_F(KfdIoctlTest, DbgTrapLocalDisableLeavesDebuggerFdOpen) {
+  const int fd = make_debug_fd();
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = fd;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(getpid());
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+
+  EXPECT_NE(fcntl(fd, F_GETFD), -1) << "local-mode DISABLE must not close the debugger's fd";
+}
+
+// The kernel copies min(user_size, sizeof(runtime_info)) bytes back and reports
+// the full struct size. An undersized buffer must truncate the copy — never
+// writing past the caller's buffer — while still reporting sizeof(kfd_runtime_info).
+TEST_F(KfdIoctlTest, DbgTrapEnableUndersizedRuntimeInfoTruncates) {
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  rt.r_debug = 0xcafef00d;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  // Buffer smaller than kfd_runtime_info, backed by a full-size array so an
+  // overrunning copy is caught by the sentinel check below.
+  constexpr uint32_t kSmall = 8;
+  static_assert(kSmall < sizeof(kfd_runtime_info));
+  constexpr uint8_t kSentinel = 0xCD;
+  std::array<uint8_t, sizeof(kfd_runtime_info)> buf;
+  buf.fill(kSentinel);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(getpid());
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = make_debug_fd();
+  en.enable.rinfo_ptr = reinterpret_cast<uint64_t>(buf.data());
+  en.enable.rinfo_size = kSmall;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  EXPECT_EQ(en.enable.rinfo_size, sizeof(kfd_runtime_info)); // full size reported
+  for (size_t i = kSmall; i < buf.size(); ++i)
+    EXPECT_EQ(buf[i], kSentinel) << "runtime-info copy overran the undersized buffer at byte " << i;
+}
+
 // Exercises the RemoteDriver client stub against an in-process server that runs
 // the real daemon-mode handler. A debugger may hand kfd_dbg_trap_enable a
 // runtime-info buffer larger than kfd_runtime_info; the handler fills only
@@ -832,6 +881,38 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   rd.close(); // sends RPC_CLOSE so the server loop exits
   server.join();
   ::close(notifier);
+}
+
+// A debug session belongs to the debugger that enabled it: a *different* client
+// may not drive it (kernel: EPERM). Only the resolved target itself (self-debug)
+// or the registered debugger passes the permission gate.
+TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
+  // Client A (kClientPid) self-enables debug, becoming its own debugger.
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+  ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
+
+  // A second, unrelated client B.
+  constexpr rj_client_pid_t kOtherPid = 5555;
+  uint32_t other_pid = 0;
+  ASSERT_EQ(rj_vm_device_open(vm_, kOtherPid, &other_pid), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(other_pid, 0u);
+
+  // B targets A's session with a non-DISABLE op: rejected with -EPERM.
+  kfd_ioctl_dbg_trap_args op{};
+  op.pid = static_cast<uint32_t>(kClientPid); // target = A
+  op.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  rj_vm_cmd_t cmd{};
+  cmd.cmd = AMDKFD_IOC_DBG_TRAP;
+  cmd.buf = &op;
+  cmd.buf_size = sizeof(op);
+  cmd.shared_handle = -1;
+  cmd.in_handle = -1;
+  rj_vm_execute_as(vm_, other_pid, &cmd); // caller = B
+  EXPECT_EQ(cmd.result, -EPERM);
+
+  rj_vm_device_close(vm_, other_pid);
+  EXPECT_EQ(disable(), 0); // A tears down its session (closes the notifier)
 }
 
 } // namespace
