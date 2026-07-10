@@ -59,7 +59,7 @@ def db_session():
     Database._engine = None
 
 
-def _add_kernel_with_durations(
+def add_kernel_with_durations(
     session, workload: Workload, name: str, durations: list[int]
 ) -> Kernel:
     """Add a kernel to *workload* with one dispatch per entry in *durations*."""
@@ -96,7 +96,7 @@ def test_kernel_view_median(db_session, durations, expected_median):
     """The kernel view computes median duration for odd/even/single counts."""
     workload = Workload(name="w", sub_name="s")
     db_session.add(workload)
-    _add_kernel_with_durations(db_session, workload, "k", durations)
+    add_kernel_with_durations(db_session, workload, "k", durations)
     Database.create_views()
     db_session.commit()
 
@@ -110,7 +110,7 @@ def test_kernel_view_aggregates(db_session):
     """The kernel view reports count/sum/min/max/mean over dispatch durations."""
     workload = Workload(name="w", sub_name="s")
     db_session.add(workload)
-    _add_kernel_with_durations(db_session, workload, "k", [10, 20, 30])
+    add_kernel_with_durations(db_session, workload, "k", [10, 20, 30])
     Database.create_views()
     db_session.commit()
 
