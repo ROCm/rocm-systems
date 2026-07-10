@@ -213,6 +213,11 @@ int SimulatedKfd::open() {
   }
   uint32_t pid = next_process_id_++;
   auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
+  // client_pid_ caches getpid() at open() time; DBG_TRAP uses it to resolve a
+  // self-debug target, so it must match the caller's live pid. A fork() child
+  // inherits this cache stale, but the interposer's reset_after_fork() drops the
+  // driver so the child re-open()s (and re-caches here) before any ioctl —
+  // DBG_TRAP self-resolution therefore requires a post-fork re-open.
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
   for (auto &g : gpus_) {
