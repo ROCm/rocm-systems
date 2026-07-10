@@ -130,6 +130,10 @@ extern int ncclCudaDriverVersionCache;
 extern bool ncclCudaLaunchBlocking; // initialized by ncclCudaLibraryInit()
 
 // Checks whether the given stream is the legacy null stream.
+// [RCCL] Guard against redefinition when both cudawrap.h and rocmwrap.h are
+// pulled into the same translation unit (e.g. via alloc.h on HIP builds).
+#ifndef NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
+#define NCCL_CUDA_STREAM_IS_LEGACY_NULL_DEFINED
 inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLegacy) {
 #if CUDART_VERSION >= 12000
   unsigned long long nullStreamId, legacyNullStreamId;
@@ -142,6 +146,7 @@ inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLega
 #endif
   return ncclSuccess;
 }
+#endif
 
 // [RCCL] Guard against redefinition when both cudawrap.h and rocmwrap.h are
 // pulled into the same translation unit (e.g. via alloc.h on HIP builds).

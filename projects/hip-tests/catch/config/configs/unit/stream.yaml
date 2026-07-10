@@ -53,6 +53,8 @@ stream:
     tags: [callback]
   Unit_hipStreamAttachMemAsync_Negative:
     <<: *level_2
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [asan]
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
     <<: *level_2
@@ -102,6 +104,19 @@ stream:
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_2
+    tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_ChildWorkload:
+    <<: *level_2
+    # Internal helper, only invoked by the parent test via re-exec (by exact
+    # name, which still runs hidden [.] cases). Disabled everywhere so it does
+    # not run as a standalone no-op in the regular suite.
+    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    tags: [lifecycle]
+  Unit_hipStreamPriorityAqlLog_TraceReportsPriority:
+    <<: *level_2
+    # Verifies AQL packet trace reports stream priority next to HWq; relies on
+    # AMD_LOG AQL output, so AMD/Linux only.
+    disabled: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
     tags: [lifecycle]
   Unit_hipStreamDestroy_Default:
     <<: *level_2
@@ -424,3 +439,15 @@ stream:
   Unit_hipStreamValue_Wait_Blocking:
     <<: *level_2
     tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Decrement_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]
+  Unit_hipStreamWriteValue_Increment_Default:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipStreamWriteValue_Increment_MultiStream_MultiDevice:
+    <<: *level_2
+    tags: [synchronization, multigpu]

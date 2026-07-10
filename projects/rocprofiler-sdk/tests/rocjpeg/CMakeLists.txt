@@ -29,15 +29,15 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocJPEG)
+find_package(rocjpeg)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(rocJPEG_IMAGE_DIR "${rocJPEG_ROOT_DIR}/share/rocjpeg/images")
-if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
+set(rocjpeg_IMAGE_DIR "${rocjpeg_ROOT_DIR}/share/rocjpeg/images")
+if(TARGET rocjpeg-demo AND NOT EXISTS "${rocjpeg_IMAGE_DIR}")
     message(
-        WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+        WARNING "Unable to find image directory for rocjpeg tests: ${rocjpeg_IMAGE_DIR}")
     set(IS_DISABLED ON)
 endif()
 
@@ -49,7 +49,7 @@ rocprofiler_add_integration_execute_test(
     rocjpeg-tracing
     COMMAND
         $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<$<TARGET_EXISTS:rocjpeg-demo>:$<TARGET_FILE:rocjpeg-demo>>,${CMAKE_COMMAND}>
-        -i ${rocJPEG_IMAGE_DIR}
+        -i ${rocjpeg_IMAGE_DIR}
     DEPENDS rocjpeg-demo
     TIMEOUT 45
     LABELS "integration-tests"

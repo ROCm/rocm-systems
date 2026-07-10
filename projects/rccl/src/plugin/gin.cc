@@ -15,7 +15,6 @@
 #include <errno.h>
 #include <mutex>
 //Temporary stubs
-#include "nccl_merge_stubs.h"
 
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
@@ -241,7 +240,9 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-  ginPluginLibs[pluginCounter].ncclGin = getNcclGin_v12_internal(&ncclGinIbProxy);
+  // ncclGinIbProxy is an ncclGin_t (v13) instance, so register it directly
+  // instead of adapting through getNcclGin_v12_internal.
+  ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
   ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
   ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;

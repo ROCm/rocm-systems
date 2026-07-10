@@ -64,6 +64,13 @@ def main():
                 if args.verbose:
                     print("Exiting: RCCL build failed")
                 sys.exit(1)
+            # Build rccl-tests (perf binaries) if the config provides a
+            # rccl_tests_build_configuration section; no-op otherwise.
+            if not executor.build_rccl_tests():
+                print("ERROR: rccl-tests build failed")
+                if args.verbose:
+                    print("Exiting: rccl-tests build failed")
+                sys.exit(1)
         else:
                 print("SKIP: Build step skipped (--no-build)")
 
@@ -110,6 +117,11 @@ def main():
         if not args.coverage_report:
             print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
         executor.generate_coverage_report()
+
+        # Emit structured results for the dashboard (no-op unless
+        # --emit-results / --db-push was passed). Coverage is emitted too when a
+        # report was generated above.
+        executor.emit_results()
 
         # Return based on results
         if executor.test_results:

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/amd_smi/device_backend.hpp"
 #include "core/config.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
@@ -28,16 +27,18 @@ using ::rocprofsys::pmc::device_type;
  * Defines types, constants, and customization points for the base collector template
  * to work with GPU devices via AMD SMI.
  *
- * @tparam Backend The AMD SMI backend type (real or mock for testing)
+ * @tparam BackendProvider Device provider type.
+ * @tparam DeviceType      Concrete device type; exposes @c backend_type so traits
+ *                         stay decoupled from the AMD SMI backend headers.
  */
-template <typename BackendProvider>
+template <typename BackendProvider, typename DeviceType>
 struct gpu_traits
 {
     // Required type aliases for base::collector
     using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using backend_t         = ::rocprofsys::backends::amd_smi::device_backend;
-    using device_t          = device<backend_t>;
+    using backend_t         = DeviceType::backend_type;
+    using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
 
@@ -110,7 +111,7 @@ struct gpu_traits
                                                const enabled_metrics_t& enabled,
                                                std::uint64_t            timestamp)
     {
-        return device->get_gpu_metrics(enabled, timestamp);
+        return device->get_metrics(enabled, timestamp);
     }
 
     // Device enumeration
@@ -154,7 +155,7 @@ struct gpu_traits
             return entries;
         }
 
-        auto devices = provider->template get_gpu_devices<device_t, backend_t>();
+        auto devices = provider->template get_gpu_devices<device_t>();
 
         for(auto& device : devices)
         {

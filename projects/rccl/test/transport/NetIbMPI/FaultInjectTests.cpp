@@ -8,6 +8,8 @@
 #include "NetIbCastInspect.hpp"
 #include "NetIbFaultInject.hpp"
 
+#include <cerrno>  // EAGAIN
+
 #if defined(MPI_TESTS_ENABLED) && defined(ENABLE_FAULT_INJECTION)
 
 // IB WC status codes used by FailoverErrorCodeWhitelist test.
@@ -53,7 +55,9 @@ static constexpr int kFaultResultMpiTag = 9881;  // FaultInjectResult from Fault
 // so all assertions run on rank 0 (the only rank with GTest listeners).
 struct FaultInjectResult {
     int  sendRet;       // ncclResult_t from PostSend (cast to int)
+    int  recvRet;       // ncclResult_t from PostRecv/Test on the recv side (cast to int)
     int  fatalCount;    // ncclIbCastFaultGetFatalCount result
+    int  phase2FatalCount;  // fatal count after a finite injection budget is spent
     int  clearRet;      // ncclResult_t from ncclIbCastFaultClear (cast to int)
     int  setErrRet;     // first non-Success from ncclIbCastFaultSetQpError, or ncclSuccess
     int  actualNqps;    // number of QPs armed with the error fault
@@ -2474,6 +2478,749 @@ TEST_F(NetIbMPITest, RecoveryUdTimeoutExhaustsAttempts) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == 0 && !phase1RecvDone)
         DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsPostSendErrno
+//
+// Ops-overload path: arms the shimmed ibv_post_send to return EAGAIN, so the
+// fault fires at the real libibverbs boundary (unlike the pre-call intercept in
+// FaultInjCastQpErrorIsFatal).
+//
+// Verifies: isend returns an error OR fatalErrorCount > 0 when post_send fails.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); no other setup.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPostSendErrno) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Warmup so WRR scheduler state is initialised before arming the fault.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/700, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    static constexpr int kEagain = EAGAIN;
+    FaultInjectResult r1 = {};
+    r1.actualNqps = actualNqps;
+    if (rank == 1) {
+        r1.setErrRet = static_cast<int>(ncclSuccess);
+        for (int q = 0; q < actualNqps; ++q) {
+            ncclResult_t ret = ncclIbCastFaultOpsSetPostSendError(sendComm, q, kEagain);
+            if (ret != ncclSuccess && r1.setErrRet == static_cast<int>(ncclSuccess))
+                r1.setErrRet = static_cast<int>(ret);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {701};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+        for (int poll = 0; poll < 100; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+    } else {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 701, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 200; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+                if (done || fatalCount > 0) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        r1.sendRet   = static_cast<int>(sendRet);
+        r1.fatalCount = fatalCount;
+        // Disarm before teardown so close paths are clean.
+        r1.clearRet  = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&r1, sizeof(r1), MPI_BYTE, 0, kFaultResultMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&r1, sizeof(r1), MPI_BYTE, 1, kFaultResultMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(r1.setErrRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsSetPostSendError failed with " << r1.setErrRet;
+        EXPECT_EQ(r1.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << r1.clearRet;
+
+        bool isendFailed = (r1.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || r1.fatalCount > 0)
+            << "rank 1: expected isend to fail OR fatalErrorCount > 0 after arming all "
+            << r1.actualNqps << " CAST QPs with ops-level post_send EAGAIN; "
+            << "isend returned " << r1.sendRet << ", fatalCount=" << r1.fatalCount;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsPollCqFlushNonFatal
+//
+// Ops-overload path, poll_cq STATUS-REWRITE mode: rewrites real completions on
+// sender QP 0 to the whitelisted (recoverable) IBV_WC_WR_FLUSH_ERR, so the
+// resiliency layer fails over to the surviving device.
+//
+// Verifies: transfer fails over to the surviving device with fatalErrorCount == 0
+//           and data intact.
+// Requires: NCCL_IB_RESILIENCY_PORT_FAILOVER=1 and NIC Fusion ndevs >= 2 (else SKIP).
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPollCqFlushNonFatal) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Failover requires NIC Fusion (ndevs >= 2). "
+                     << "Found " << totalDevs << " physical devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 8192;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/710, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct ncclIbCastResiliencyState resState = {};
+    struct FailoverResult {
+        int sendRet;
+        int fatalCount;
+        int devState0;
+        int armRet;
+        int clearRet;
+    };
+    static constexpr int kOpsFailoverMpiTag = 9887;
+    FailoverResult fr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {711};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Rewrite mode: status of real completions on QP 0 becomes WR_FLUSH_ERR.
+        ncclResult_t armRet = ncclIbCastFaultOpsSetPollCqError(
+            sendComm, /*qpIdx=*/0, kWcWrFlushErr, /*injectCount=*/-1, /*injectWhenIdle=*/false);
+        fr.armRet = static_cast<int>(armRet);
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 711, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+        ncclIbCastGetResiliencyState(sendComm, &resState);
+
+        fr.sendRet    = static_cast<int>(sendRet);
+        fr.fatalCount = fatalCount;
+        fr.devState0  = resState.devState[0];
+        fr.clearRet   = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&fr, sizeof(fr), MPI_BYTE, 0, kOpsFailoverMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&fr, sizeof(fr), MPI_BYTE, 1, kOpsFailoverMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(fr.armRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsSetPollCqError failed with " << fr.armRet;
+        EXPECT_EQ(fr.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << fr.clearRet;
+        EXPECT_EQ(fr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via surviving device after ops-level CQE rewrite";
+        EXPECT_EQ(fr.fatalCount, 0)
+            << "WR_FLUSH_ERR is whitelisted — no fatal error expected";
+        EXPECT_NE(fr.devState0, 0)
+            << "Device 0 should not be Ok after the injected flush error (got "
+            << fr.devState0 << ")";
+        if (recvDone) {
+            EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kMsgSize), 0)
+                << "Data corruption after ops-level failover";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsPollCqSynthFatal
+//
+// Ops-overload path, poll_cq SYNTHESIZE mode: on an idle CQ fabricates a
+// non-whitelisted IBV_WC_REM_ACCESS_ERR completion. Single device, so there is
+// no surviving link to fail over to.
+//
+// Verifies: isend fails OR fatalErrorCount > 0 (fatal, non-recoverable).
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); single device.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPollCqSynthFatal) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/720, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    FaultInjectResult r1 = {};
+    r1.actualNqps = actualNqps;
+    if (rank == 1) {
+        // Synthesize mode: fabricate a single REM_ACCESS_ERR completion when idle.
+        ncclResult_t ret = ncclIbCastFaultOpsSetPollCqError(
+            sendComm, /*qpIdx=*/0, kWcRemAccessErr, /*injectCount=*/1, /*injectWhenIdle=*/true);
+        r1.setErrRet = static_cast<int>(ret);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {721};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+        for (int poll = 0; poll < 100; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+    } else {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 721, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+                if (done || fatalCount > 0) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        r1.sendRet   = static_cast<int>(sendRet);
+        r1.fatalCount = fatalCount;
+        r1.clearRet  = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&r1, sizeof(r1), MPI_BYTE, 0, kFaultResultMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&r1, sizeof(r1), MPI_BYTE, 1, kFaultResultMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(r1.setErrRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsSetPollCqError failed with " << r1.setErrRet;
+        EXPECT_EQ(r1.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << r1.clearRet;
+
+        bool isendFailed = (r1.sendRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(isendFailed || r1.fatalCount > 0)
+            << "rank 1: expected isend to fail OR fatalErrorCount > 0 after synthesizing a "
+            << "non-whitelisted REM_ACCESS_ERR completion; isend returned " << r1.sendRet
+            << ", fatalCount=" << r1.fatalCount;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsPostRecvErrno
+//
+// Ops-overload path, RECEIVER side: the symmetric counterpart of
+// FaultInjCastOpsPostSendErrno. Arms the shimmed ibv_post_recv to return EAGAIN
+// on every receiver QP, exercising shimPostRecv's errno path (no other test
+// reaches it).
+//
+// Verifies: the receiver reports a PostRecv error when post_recv is faulted on
+//           all receiver QPs.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); arms all recv QPs.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPostRecvErrno) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Warmup so the connection/QPs are fully established before arming.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/730, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    static constexpr int kEagain = EAGAIN;
+    FaultInjectResult r0 = {};
+    r0.actualNqps = actualNqps;
+
+    // Arm post_recv EAGAIN on every receiver QP (rank 0 owns recvComm).
+    if (rank == 0) {
+        r0.setErrRet = static_cast<int>(ncclSuccess);
+        for (int q = 0; q < actualNqps; ++q) {
+            ncclResult_t ret = ncclIbCastFaultOpsSetPostRecvError(recvComm, q, kEagain);
+            if (ret != ncclSuccess && r0.setErrRet == static_cast<int>(ncclSuccess))
+                r0.setErrRet = static_cast<int>(ret);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {731};
+        void*  handles[1] = {mhandle};
+        ncclResult_t recvRet = PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq);
+        r0.recvRet = static_cast<int>(recvRet);
+        if (recvRet == ncclSuccess && recvReq != nullptr) {
+            for (int poll = 0; poll < 200; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(recvReq, &done, &sz) != ncclSuccess) {
+                    r0.recvRet = static_cast<int>(ncclSystemError);
+                    break;
+                }
+                if (done) { recvDone = true; break; }
+                usleep(kPollIntervalUs);
+            }
+        }
+        // Disarm before teardown so the close path is clean.
+        r0.clearRet = static_cast<int>(ncclIbCastFaultOpsClear(recvComm));
+    } else {
+        // Sender: best-effort send; do not assert here (rank 0 holds listeners).
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 731, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 200; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(sendReq, &done, &sz) != ncclSuccess) break;
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+    }
+
+    // Rank 0 already has the result locally; no inter-rank ship needed because
+    // the assertions are recv-side (rank 0).
+    if (rank == 0) {
+        EXPECT_EQ(r0.setErrRet, static_cast<int>(ncclSuccess))
+            << "rank 0: ncclIbCastFaultOpsSetPostRecvError failed with " << r0.setErrRet;
+        EXPECT_EQ(r0.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 0: ncclIbCastFaultOpsClear failed with " << r0.clearRet;
+
+        // post_recv EAGAIN on all receiver QPs: the receive must NOT complete
+        // cleanly — either PostRecv/Test reported an error, or it never finished.
+        // Positive signal: post_recv EAGAIN on every receiver QP forces a
+        // synchronous error, so recv must actually error — a mere "didn't
+        // finish" (which any timeout satisfies) would let a dead shim pass.
+        bool recvErrored = (r0.recvRet != static_cast<int>(ncclSuccess));
+        EXPECT_TRUE(recvErrored)
+            << "rank 0: expected recv to error after arming all "
+            << r0.actualNqps << " receiver QPs with ops-level post_recv EAGAIN; "
+            << "recv post/test returned " << r0.recvRet << ", recvDone=" << recvDone;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsPollCqInjectCountFinite
+//
+// Ops-overload path, poll_cq REWRITE mode with a FINITE injectCount: arms a
+// bounded budget of whitelisted WR_FLUSH_ERR per QP, exercising the shim's
+// "pollInjectCount > 0 → decrement" branch (the unlimited/idle tests miss it).
+// CAST rotates QP per request as (id + qpIndex) % nqps, so Phase 1 drives
+// actualNqps+1 transfers to drain every armed QP before Phase 2 checks recovery.
+//
+// Verifies: the fault stops after the per-QP budget is spent and a follow-up
+//           transfer completes cleanly with no new fatal error.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); arms all QPs.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/740, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    FaultInjectResult r1 = {};
+    r1.actualNqps = actualNqps;
+    if (rank == 1) {
+        // Rewrite mode, FINITE budget per QP, whitelisted status so the connection
+        // survives and we can verify the post-budget clean path. Arm EVERY QP (not
+        // just QP 0): a small message rides a single WRR-chosen QP that may not be
+        // QP 0, so arming all QPs guarantees a real completion gets its status
+        // rewritten and the finite pollInjectCount>0 decrement branch is exercised.
+        r1.setErrRet = static_cast<int>(ncclSuccess);
+        for (int q = 0; q < actualNqps; ++q) {
+            ncclResult_t ret = ncclIbCastFaultOpsSetPollCqError(
+                sendComm, q, kWcWrFlushErr, /*injectCount=*/1, /*injectWhenIdle=*/false);
+            if (ret != ncclSuccess && r1.setErrRet == static_cast<int>(ncclSuccess))
+                r1.setErrRet = static_cast<int>(ret);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ---- Phase 1: drain the per-QP fault budget on EVERY QP ----
+    // CAST selects the QP per request as (req->id + qpIndex) % nqps
+    // (IbCastCommBaseGetQpForRequest in common_cast.h), so a single transfer
+    // spends only ONE QP's injectCount=1 budget. We armed every QP, so we must
+    // drive at least actualNqps sequential transfers — their rotating request
+    // ids hit each QP at least once — before the budget is fully exhausted.
+    // Driving fewer would leave some QPs armed, and Phase 2 could still land on
+    // an unspent QP and see another injected WR_FLUSH_ERR (the flakiness this
+    // structure removes). The extra round guards against a transfer that splits
+    // across two QPs and leaves one budget unspent.
+    const int drainRounds = actualNqps + 1;
+    for (int i = 0; i < drainRounds; ++i) {
+        const int tag = 741 + i;
+        if (rank == 0) {
+            void*  bufs[1]    = {buf};
+            size_t sizes[1]   = {kMsgSize};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            void*  recvReq    = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+            bool done1 = false;
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+                if (done) { done1 = true; break; }
+                usleep(kPollIntervalUs);
+            }
+            if (!done1) DrainRecvRequest(recvReq);
+        } else {
+            void* sendReq = nullptr;
+            ncclResult_t sendRet = ncclSuccess;
+            for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+                sendRet = PostSend(sendComm, buf, kMsgSize, tag, mhandle, &sendReq);
+                if (sendRet != ncclSuccess || sendReq != nullptr) break;
+                usleep(kPollIntervalUs);
+            }
+            if (sendRet == ncclSuccess && sendReq != nullptr) {
+                for (int poll = 0; poll < 300; poll++) {
+                    int done = 0, sz = 0;
+                    if (TestRequest(sendReq, &done, &sz) != ncclSuccess) break;
+                    if (done) break;
+                    usleep(kPollIntervalUs);
+                }
+            }
+            if (sendRet != ncclSuccess && r1.sendRet == static_cast<int>(ncclSuccess))
+                r1.sendRet = static_cast<int>(sendRet);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // ---- Phase 2: after the budget is spent, a clean transfer must pass ----
+    bool phase2RecvDone = false;
+    void* recvReq2 = nullptr;
+    int phase2Fatal = 0;
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {800};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq2), ncclSuccess);
+        for (int poll = 0; poll < 300; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq2, &done, &sz) != ncclSuccess) break;
+            if (done) { phase2RecvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+    } else {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 800, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(sendReq, &done, &sz) != ncclSuccess) break;
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+        ncclIbCastFaultGetFatalCount(sendComm, &phase2Fatal);
+        r1.phase2FatalCount = phase2Fatal;
+        r1.clearRet = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&r1, sizeof(r1), MPI_BYTE, 0, kFaultResultMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&r1, sizeof(r1), MPI_BYTE, 1, kFaultResultMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+        EXPECT_EQ(r1.setErrRet, static_cast<int>(ncclSuccess))
+            << "rank 1: arming finite-count poll_cq fault failed with " << r1.setErrRet;
+        // Phase 2 (after the per-QP injectCount=1 budget is spent) must be clean:
+        // the receive completes and no fatal error is recorded on the sender.
+        EXPECT_TRUE(phase2RecvDone)
+            << "phase 2 receive did not complete after the finite fault budget was spent";
+        EXPECT_EQ(r1.phase2FatalCount, 0)
+            << "phase 2 sender saw fatalCount=" << r1.phase2FatalCount
+            << " after the finite WR_FLUSH_ERR budget should have been exhausted";
+        EXPECT_EQ(r1.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << r1.clearRet;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !phase2RecvDone) DrainRecvRequest(recvReq2);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: FaultInjCastOpsApiInvalidArgs
+//
+// Unit-style coverage of the ops-fault API guard branches: NULL comm and the
+// install/registration lookups that the functional tests never hit (they always
+// pass a live, shimmed connection). Calls each API with NULL, then re-arms/clears
+// on a live connection to confirm the success guards.
+//
+// Verifies: each API returns ncclInvalidArgument on NULL comm and ncclSuccess
+//           on a live connection.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); no data transfer.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    static constexpr int kEagain = EAGAIN;
+
+    // ---- NULL comm: every Ops API must reject with ncclInvalidArgument ----
+    EXPECT_EQ(ncclIbCastFaultOpsSetPostSendError(nullptr, 0, kEagain), ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsSetPostRecvError(nullptr, 0, kEagain), ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(nullptr, 0, kWcWrFlushErr, -1, false),
+              ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsClear(nullptr), ncclInvalidArgument);
+
+    // ---- Live connection: success guards (registered context) ----
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> buf(kMsgSize, 0);
+    void* comm    = (MPIEnvironment::world_rank == 0) ? recvComm : sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.data(), kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Establish QPs so the context is shimmed/registered.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf.data(), kMsgSize,
+                                         /*tag=*/750, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    if (MPIEnvironment::world_rank == 1) {
+        // Arm then clear on a registered context: both must succeed.
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostSendError(sendComm, 0, kEagain), ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(sendComm, 0, kWcWrFlushErr, 1, false),
+                  ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsClear(sendComm), ncclSuccess);
+        // Clear again (already cleared) must still succeed (idempotent).
+        EXPECT_EQ(ncclIbCastFaultOpsClear(sendComm), ncclSuccess);
+    } else {
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostRecvError(recvComm, 0, kEagain), ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsClear(recvComm), ncclSuccess);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 

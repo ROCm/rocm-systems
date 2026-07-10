@@ -1,0 +1,58 @@
+# Use a base image
+FROM ubuntu:22.04
+
+# Update package list and install prerequisites
+RUN apt-get update && apt-get install -y \
+    curl software-properties-common cmake locales git \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update
+
+# Generate the desired locale
+RUN locale-gen en_US.UTF-8
+
+# Install Python 3.12 and pip (use non-interactive to avoid timezone prompt)
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y python3.12 python3.12-venv python3.12-dev python3-pip libsqlite3-dev
+
+# Install ROCm + PyTorch from the unified multi-arch nightly index. GFX_ARCH
+# selects the device kernels via the [device-*] extra (e.g. gfx942 = MI300X/
+# MI300A, or "all" for every arch). torch's device extra auto-pulls the matching
+# rocm-sdk core/libraries/device packages; the rocm[profiler,devel] extras add
+# the rocprofiler tools and headers needed to build rocprofiler-compute. Pin a
+# dated nightly via ROCM_VERSION for reproducibility; bump it manually to update.
+# Browse versions at https://rocm.nightlies.amd.com/whl-multi-arch/rocm/
+ARG ROCM_VERSION=<rocm_version>
+ARG GFX_ARCH=<gfx_arch>
+RUN rm -rf /rocm-venv && python3.12 -m venv /rocm-venv && \
+    /rocm-venv/bin/pip install --upgrade pip && \
+    /rocm-venv/bin/pip install \
+        --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+        "rocm[profiler,devel,libraries,device-${GFX_ARCH}]==${ROCM_VERSION}" \
+        "torch[device-${GFX_ARCH}]" \
+        "torchvision[device-${GFX_ARCH}]" \
+        torchaudio
+
+# Expand the devel tree and link the per-GPU device kernels (.kpack) into it.
+RUN /rocm-venv/bin/rocm-sdk init
+
+# Set ROCm environment variables pointing at the devel root, which is the
+# complete merged tree (bin/include/lib + linked device kernels).
+ENV ROCM_PATH="/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel" \
+    HIP_PATH="/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel" \
+    HIP_DEVICE_LIB_PATH="/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/llvm/amdgcn/bitcode" \
+    PATH="/rocm-venv/bin:/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin:${PATH}" \
+    LD_LIBRARY_PATH="/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib:/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH}"
+
+# Install any rocprofiler-compute dependencies specified in requirements.txt
+COPY projects/rocprofiler-compute/requirements.txt /app/projects/rocprofiler-compute/requirements.txt
+COPY projects/rocprofiler-compute/requirements-test.txt /app/projects/rocprofiler-compute/requirements-test.txt
+COPY projects/rocprofiler-compute/requirements-development.txt /app/projects/rocprofiler-compute/requirements-development.txt
+RUN /rocm-venv/bin/pip install -r /app/projects/rocprofiler-compute/requirements.txt -r /app/projects/rocprofiler-compute/requirements-test.txt -r /app/projects/rocprofiler-compute/requirements-development.txt
+
+# Set the working directory
+WORKDIR /app/projects/rocprofiler-compute
+
+# Allows running git commands in /app
+RUN git config --global --add safe.directory /app
+
+# Run interactive bash shell
+CMD ["/bin/bash"]

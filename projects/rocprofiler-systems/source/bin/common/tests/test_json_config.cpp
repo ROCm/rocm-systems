@@ -10,6 +10,7 @@
 #include <string>
 
 using namespace rocprofsys::json_config;
+namespace env_vars = rocprofsys::env_vars;
 
 class json_config_test : public ::testing::Test
 {};
@@ -26,9 +27,9 @@ TEST_F(json_config_test, resolves_tracing_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB"), "2048");
-    EXPECT_EQ(result.at("ROCPROFSYS_PERFETTO_FILL_POLICY"), "ring_buffer");
+    EXPECT_EQ(result.at(env_vars::TRACE), "true");
+    EXPECT_EQ(result.at(env_vars::PERFETTO_BUFFER_SIZE_KB), "2048");
+    EXPECT_EQ(result.at(env_vars::PERFETTO_FILL_POLICY), "ring_buffer");
 }
 
 TEST_F(json_config_test, resolves_profiling_section)
@@ -42,8 +43,8 @@ TEST_F(json_config_test, resolves_profiling_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_PROFILE"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_FLAT_PROFILE"), "true");
+    EXPECT_EQ(result.at(env_vars::PROFILE), "true");
+    EXPECT_EQ(result.at(env_vars::FLAT_PROFILE), "true");
 }
 
 TEST_F(json_config_test, resolves_sampling_section)
@@ -60,11 +61,11 @@ TEST_F(json_config_test, resolves_sampling_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_SAMPLING"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_SAMPLING_TIMER"), "realtime");
-    EXPECT_EQ(result.at("ROCPROFSYS_SAMPLING_FREQ"), "200");
-    EXPECT_EQ(result.at("ROCPROFSYS_SAMPLING_CPUS"), "0-3");
-    EXPECT_EQ(result.at("ROCPROFSYS_SAMPLING_DELAY"), std::to_string(1.5));
+    EXPECT_EQ(result.at(env_vars::USE_SAMPLING), "true");
+    EXPECT_EQ(result.at(env_vars::SAMPLING_TIMER), "realtime");
+    EXPECT_EQ(result.at(env_vars::SAMPLING_FREQ), "200");
+    EXPECT_EQ(result.at(env_vars::SAMPLING_CPUS), "0-3");
+    EXPECT_EQ(result.at(env_vars::SAMPLING_DELAY), std::to_string(1.5));
 }
 
 // Test new schema format - domains.gpu section
@@ -86,14 +87,14 @@ TEST_F(json_config_test, resolves_gpu_domain)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_AMD_SMI"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_PROCESS_SAMPLING"), "true");
+    EXPECT_EQ(result.at(env_vars::USE_AMD_SMI), "true");
+    EXPECT_EQ(result.at(env_vars::USE_PROCESS_SAMPLING), "true");
     // Order might vary, but should contain temp and power
-    auto metrics = result.at("ROCPROFSYS_AMD_SMI_METRICS");
+    auto metrics = result.at(env_vars::AMD_SMI_METRICS);
     EXPECT_NE(metrics.find("temp"), std::string::npos);
     EXPECT_NE(metrics.find("power"), std::string::npos);
     EXPECT_EQ(metrics.find("busy"), std::string::npos);  // busy is disabled
-    EXPECT_EQ(result.at("ROCPROFSYS_AMD_SMI_FREQ"), "10");
+    EXPECT_EQ(result.at(env_vars::AMD_SMI_FREQ), "10");
 }
 
 // Test new schema format - domains.rocm section
@@ -113,7 +114,7 @@ TEST_F(json_config_test, resolves_rocm_domain)
 
     auto result = resolve_config(j);
 
-    auto domains = result.at("ROCPROFSYS_ROCM_DOMAINS");
+    auto domains = result.at(env_vars::ROCM_DOMAINS);
     EXPECT_NE(domains.find("hip_runtime_api"), std::string::npos);
     EXPECT_NE(domains.find("kernel_dispatch"), std::string::npos);
     EXPECT_EQ(domains.find("memory_copy"), std::string::npos);
@@ -136,9 +137,9 @@ TEST_F(json_config_test, resolves_parallel_domain)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_MPIP"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_OMPT"), "true");
-    EXPECT_EQ(result.count("ROCPROFSYS_USE_KOKKOSP"), 0u);
+    EXPECT_EQ(result.at(env_vars::USE_MPIP), "true");
+    EXPECT_EQ(result.at(env_vars::USE_OMPT), "true");
+    EXPECT_EQ(result.count(env_vars::USE_KOKKOSP), 0u);
 }
 
 // Test new schema format - output section
@@ -147,6 +148,7 @@ TEST_F(json_config_test, resolves_output_section)
     auto j = nlohmann::json::parse(R"({
         "output": {
             "path": {"value": "/tmp/my-traces"},
+            "unified_memory_output_path": {"value": "/tmp/my-ump"},
             "time_output": {"enabled": false},
             "file_output": {"enabled": true}
         }
@@ -154,10 +156,11 @@ TEST_F(json_config_test, resolves_output_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_OUTPUT_PATH"), "/tmp/my-traces");
+    EXPECT_EQ(result.at(env_vars::OUTPUT_PATH), "/tmp/my-traces");
+    EXPECT_EQ(result.at(env_vars::UNIFIED_MEMORY_OUTPUT_PATH), "/tmp/my-ump");
     // time_output and file_output are resolved when the enabled field is present
-    EXPECT_EQ(result.count("ROCPROFSYS_TIME_OUTPUT"), 1u);
-    EXPECT_EQ(result.count("ROCPROFSYS_FILE_OUTPUT"), 1u);
+    EXPECT_EQ(result.count(env_vars::TIME_OUTPUT), 1u);
+    EXPECT_EQ(result.count(env_vars::FILE_OUTPUT), 1u);
 }
 
 // Test new schema format - hardware_counters section
@@ -173,8 +176,8 @@ TEST_F(json_config_test, rasolves_hw_counters_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_EVENTS"), "VALUUtilization,Occupancy");
-    EXPECT_EQ(result.at("ROCPROFSYS_PAPI_EVENTS"), "PAPI_TOT_CYC,PAPI_TOT_INS");
+    EXPECT_EQ(result.at(env_vars::ROCM_EVENTS), "VALUUtilization,Occupancy");
+    EXPECT_EQ(result.at(env_vars::PAPI_EVENTS), "PAPI_TOT_CYC,PAPI_TOT_INS");
 }
 
 // Test new schema format - causal section
@@ -191,10 +194,10 @@ TEST_F(json_config_test, resolves_causal_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_CAUSAL"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_CAUSAL_MODE"), "function");
-    EXPECT_EQ(result.at("ROCPROFSYS_CAUSAL_BACKEND"), "perf");
-    EXPECT_EQ(result.at("ROCPROFSYS_CAUSAL_BINARY_SCOPE"), "%MAIN%");
+    EXPECT_EQ(result.at(env_vars::USE_CAUSAL), "true");
+    EXPECT_EQ(result.at(env_vars::CAUSAL_MODE), "function");
+    EXPECT_EQ(result.at(env_vars::CAUSAL_BACKEND), "perf");
+    EXPECT_EQ(result.at(env_vars::CAUSAL_BINARY_SCOPE), "%MAIN%");
 }
 
 // Test new schema format - advanced section
@@ -211,11 +214,11 @@ TEST_F(json_config_test, resolves_advanced_configuration_section)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_MAX_DEPTH"), "100");
-    EXPECT_EQ(result.at("ROCPROFSYS_VERBOSE"), "2");
-    EXPECT_EQ(result.at("ROCPROFSYS_DEBUG"), "true");
+    EXPECT_EQ(result.at(env_vars::MAX_DEPTH), "100");
+    EXPECT_EQ(result.at(env_vars::VERBOSE), "2");
+    EXPECT_EQ(result.at(env_vars::DEBUG_MODE), "true");
     // collapse_threads is resolved when the enabled field is present
-    EXPECT_EQ(result.count("ROCPROFSYS_COLLAPSE_THREADS"), 1u);
+    EXPECT_EQ(result.count(env_vars::COLLAPSE_THREADS), 1u);
 }
 
 // Test combined sections
@@ -233,11 +236,11 @@ TEST_F(json_config_test, combines_multiple_sections)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_PROFILE"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_SAMPLING"), "true");
-    EXPECT_EQ(result.at("ROCPROFSYS_SAMPLING_FREQ"), "50");
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_AMD_SMI"), "true");
+    EXPECT_EQ(result.at(env_vars::TRACE), "true");
+    EXPECT_EQ(result.at(env_vars::PROFILE), "true");
+    EXPECT_EQ(result.at(env_vars::USE_SAMPLING), "true");
+    EXPECT_EQ(result.at(env_vars::SAMPLING_FREQ), "50");
+    EXPECT_EQ(result.at(env_vars::USE_AMD_SMI), "true");
 }
 
 // Test empty JSON returns empty map
@@ -295,7 +298,7 @@ TEST_F(json_config_test, resolves_rocpd_output)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_USE_ROCPD"), "true");
+    EXPECT_EQ(result.at(env_vars::USE_ROCPD), "true");
 }
 
 // Test advanced.network_interface resolution
@@ -309,7 +312,7 @@ TEST_F(json_config_test, resolves_network_interface)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_NETWORK_INTERFACE"), "eth0");
+    EXPECT_EQ(result.at(env_vars::NETWORK_INTERFACE), "eth0");
 }
 
 // Test advanced.trace_periods resolution
@@ -323,7 +326,7 @@ TEST_F(json_config_test, resolves_trace_periods)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_TRACE_PERIODS"), "0:10,20:30");
+    EXPECT_EQ(result.at(env_vars::TRACE_PERIODS), "0:10,20:30");
 }
 
 // Test hardware_counters.papi_multiplexing resolution
@@ -338,7 +341,7 @@ TEST_F(json_config_test, resolves_papi_multiplexing)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_PAPI_MULTIPLEXING"), "true");
+    EXPECT_EQ(result.at(env_vars::PAPI_MULTIPLEXING_ENABLED), "true");
 }
 
 // Test domains.rocm.enabled top-level flag
@@ -354,7 +357,7 @@ TEST_F(json_config_test, resolves_rocm_enabled_flag)
 
     auto result = resolve_config(j);
 
-    EXPECT_EQ(result.at("ROCPROFSYS_TRACE"), "true");
+    EXPECT_EQ(result.at(env_vars::TRACE), "true");
 }
 
 // Test env_vars_to_json_schema with non-numeric env var values
@@ -383,6 +386,7 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
 {
     std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_USE_ROCPD", "true" },
+        { "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", "/tmp/my-ump" },
         { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },
         { "ROCPROFSYS_TRACE_PERIODS", "1:5,10:20" },
         { "ROCPROFSYS_PAPI_MULTIPLEXING", "true" },
@@ -391,6 +395,7 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
     auto j = env_vars_to_json_schema(env_vars);
 
     EXPECT_EQ(j["output"]["rocpd_output"]["enabled"], true);
+    EXPECT_EQ(j["output"]["unified_memory_output_path"]["value"], "/tmp/my-ump");
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
@@ -399,13 +404,13 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
 // Test env_vars constants match expected string values
 TEST_F(json_config_test, validate_env_var_constants)
 {
-    EXPECT_EQ(rocprofsys::env_vars::TRACE, "ROCPROFSYS_TRACE");
-    EXPECT_EQ(rocprofsys::env_vars::PROFILE, "ROCPROFSYS_PROFILE");
-    EXPECT_EQ(rocprofsys::env_vars::USE_SAMPLING, "ROCPROFSYS_USE_SAMPLING");
-    EXPECT_EQ(rocprofsys::env_vars::USE_AMD_SMI, "ROCPROFSYS_USE_AMD_SMI");
-    EXPECT_EQ(rocprofsys::env_vars::ROCM_DOMAINS, "ROCPROFSYS_ROCM_DOMAINS");
-    EXPECT_EQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
-    EXPECT_EQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
-    EXPECT_EQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");
-    EXPECT_EQ(rocprofsys::env_vars::VERBOSE, "ROCPROFSYS_VERBOSE");
+    EXPECT_STREQ(rocprofsys::env_vars::TRACE, "ROCPROFSYS_TRACE");
+    EXPECT_STREQ(rocprofsys::env_vars::PROFILE, "ROCPROFSYS_PROFILE");
+    EXPECT_STREQ(rocprofsys::env_vars::USE_SAMPLING, "ROCPROFSYS_USE_SAMPLING");
+    EXPECT_STREQ(rocprofsys::env_vars::USE_AMD_SMI, "ROCPROFSYS_USE_AMD_SMI");
+    EXPECT_STREQ(rocprofsys::env_vars::ROCM_DOMAINS, "ROCPROFSYS_ROCM_DOMAINS");
+    EXPECT_STREQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
+    EXPECT_STREQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
+    EXPECT_STREQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");
+    EXPECT_STREQ(rocprofsys::env_vars::VERBOSE, "ROCPROFSYS_VERBOSE");
 }

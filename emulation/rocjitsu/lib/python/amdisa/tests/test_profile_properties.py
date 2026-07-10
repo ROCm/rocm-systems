@@ -169,6 +169,30 @@ class TestRdna3Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
+    def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
+        generator = CodeGenerator(
+            SimpleNamespace(
+                arch_name='rdna3',
+                opnd_selectors=[],
+                operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+                profile=Rdna3Profile(),
+            ),
+            str(tmp_path),
+        )
+
+        generator.gen_operand()
+        operand_cpp = (tmp_path / 'rdna3' / 'operand.cpp').read_text()
+
+        assert (
+            'if (opr_type == OperandType::OPR_SIMM32)\n'
+            '    return static_cast<uint64_t>(static_cast<uint32_t>(ev));'
+        ) in operand_cpp
+        assert 'return read_immediate64(opr_type_, ev);' in operand_cpp
+        assert 'return read_immediate64(opr_type_, encoding_value_);' in operand_cpp
+
 
 class TestRdna4Profile:
     def setup_method(self):
@@ -189,6 +213,9 @@ class TestRdna4Profile:
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
+    def test_has_vopd3_false(self):
+        assert self.p.has_vopd3 is False
+
 
 class TestGfx1250Profile:
     def setup_method(self):
@@ -199,6 +226,9 @@ class TestGfx1250Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_has_vopd3(self):
+        assert self.p.has_vopd3 is True
 
     def test_generated_arch_name(self):
         assert self.p.generated_arch_name == 'gfx1250'
@@ -309,7 +339,7 @@ class TestGfx1250Profile:
         )
 
         assert chunks[:2] == [
-            ('vop3_support_1', ['support-one']),
+            ('vop3_support', ['support-one']),
             ('vop3_support_2', ['support-two']),
         ]
 
@@ -324,7 +354,7 @@ class TestGfx1250Profile:
                 [
                     _SourceImplUnit('alu', ['first']),
                     _SourceImplUnit('alu', ['second']),
-                    _SourceImplUnit('alu_1', ['third']),
+                    _SourceImplUnit('alu_2', ['third']),
                 ],
                 max_bytes=len('first\n\nsecond\n\n') - 1,
                 chunk_overhead=0,

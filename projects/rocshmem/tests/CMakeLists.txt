@@ -92,6 +92,11 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
         set(BUILD_UNIT_TESTS_SUBDIRS "# Unit tests not built")
     endif()
 
+    # Ensure USE_SLR_LAUNCHER has a default value if not set by functional_tests
+    if(NOT DEFINED USE_SLR_LAUNCHER)
+        set(USE_SLR_LAUNCHER OFF)
+    endif()
+
     # Generate and install top-level CTestTestfile.cmake
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/CTestInstallRoot.cmake.in
