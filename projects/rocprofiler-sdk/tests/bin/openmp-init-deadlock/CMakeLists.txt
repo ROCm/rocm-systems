@@ -63,7 +63,7 @@ openmp_init_deadlock_add_omp_library(openmp-init-deadlock-blas-stub blas_stub.cp
 
 # models a rocprofiler-sdk client tool: exports rocprofiler_configure and depends on the
 # blas-stub so its own DT_INIT is still pending when discovery runs
-openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client configure_client.cpp)
+openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client client.cpp)
 target_link_libraries(
     openmp-init-deadlock-client
     PRIVATE rocprofiler-sdk::rocprofiler-sdk
