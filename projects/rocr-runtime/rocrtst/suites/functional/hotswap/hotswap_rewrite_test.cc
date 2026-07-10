@@ -241,7 +241,7 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
   return revision;
 }
 
-TEST(HotswapRewriteDecision, A0RetargetsThroughStrictModeRegardlessOfOptions) {
+TEST(HotswapRewriteDecision, A0RetargetsWithoutStrictModeRegardlessOfOptions) {
   const rocr::hotswap::RewriteOptions options[] = {{}, {false}};
   for (const auto& option : options) {
     SCOPED_TRACE(option.gfx12_5_rewrite_enabled ? "entry trampolines enabled"
@@ -253,23 +253,40 @@ TEST(HotswapRewriteDecision, A0RetargetsThroughStrictModeRegardlessOfOptions) {
     EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
     EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
     EXPECT_FALSE(decision->request_entry_trampolines);
-    EXPECT_TRUE(decision->request_strict_mode);
+    EXPECT_FALSE(decision->request_strict_mode);
   }
 }
 
-TEST(HotswapRewriteDecision, StrictModeDisabledBlocksA0Retarget) {
+TEST(HotswapRewriteDecision, StrictModeDisabledDoesNotBlockA0Retarget) {
   rocr::hotswap::RewriteOptions options;
   options.strict_mode_enabled = false;
 
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa, options);
 
-  EXPECT_FALSE(decision.has_value());
+  ASSERT_TRUE(decision.has_value());
+  EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
+  EXPECT_EQ(decision->target_isa, kGfx1250A0Isa);
+  EXPECT_FALSE(decision->request_strict_mode);
 }
 
 TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
       MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {});
+
+  ASSERT_TRUE(decision.has_value());
+  EXPECT_EQ(decision->source_isa, kGfx1250Isa);
+  EXPECT_EQ(decision->target_isa, kGfx1250Isa);
+  EXPECT_TRUE(decision->request_entry_trampolines);
+  EXPECT_FALSE(decision->request_strict_mode);
+}
+
+TEST(HotswapRewriteDecision, StrictModeEnabledRoutesNonA0Gfx1250Strict) {
+  rocr::hotswap::RewriteOptions options;
+  options.strict_mode_enabled = true;
+
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, options);
 
   ASSERT_TRUE(decision.has_value());
   EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
@@ -278,15 +295,30 @@ TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
   EXPECT_TRUE(decision->request_strict_mode);
 }
 
-TEST(HotswapRewriteDecision, EntryTrampolinesDisabledKeepsNonA0Gfx1250Strict) {
+TEST(HotswapRewriteDecision, EntryTrampolinesDisabledKeepsNonA0Gfx1250StrictWhenEnabled) {
+  rocr::hotswap::RewriteOptions options;
+  options.gfx12_5_rewrite_enabled = false;
+  options.strict_mode_enabled = true;
+
   const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
-      MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {false});
+      MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, options);
 
   ASSERT_TRUE(decision.has_value());
   EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
   EXPECT_EQ(decision->target_isa, kGfx1250B0Isa);
   EXPECT_FALSE(decision->request_entry_trampolines);
   EXPECT_TRUE(decision->request_strict_mode);
+}
+
+TEST(HotswapRewriteDecision, NonA0Gfx1250NoDecisionWhenEntryAndStrictDisabled) {
+  rocr::hotswap::RewriteOptions options;
+  options.gfx12_5_rewrite_enabled = false;
+  options.strict_mode_enabled = false;
+
+  const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
+      MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, options);
+
+  EXPECT_FALSE(decision.has_value());
 }
 
 TEST(HotswapRewriteDecision, EntryTrampolinesRouteGfx12_5Family) {
@@ -462,13 +494,34 @@ TEST(HotswapRewrite, RuntimeLoadNonA0UsesDefaultEntryTrampolines) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadNonA0UsesStrictWhenEntryTrampolinesAreZero) {
+TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesAreZeroAndStrictUnset) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "0";
   LoadRecorder load;
   const hsa_executable_t executable = MakeTestExecutable(0x503);
+
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
+  EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+}
+
+TEST(HotswapRewrite, RuntimeLoadNonA0UsesStrictModeEnvWhenEntryTrampolinesAreZero) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  g_fake_hsa_env.asic_revision = 1;
+  g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "0";
+  g_fake_env_vars["HSA_HOTSWAP_STRICT_MODE"] = "1";
+  LoadRecorder load;
+  const hsa_executable_t executable = MakeTestExecutable(0x504);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
@@ -490,7 +543,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0UsesStrictWhenEntryTrampolinesAreZero) {
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesEntryTrampolinesUnlessEnvIsZero) {
   if (!ComgrHotswapOptionsApiAvailable()) return;
   const char* const env_values[] = {"false", ""};
-  uint64_t executable_handle = 0x504;
+  uint64_t executable_handle = 0x505;
   for (const char* env_value : env_values) {
     SCOPED_TRACE(env_value);
     ResetRuntimeTestEnv();
@@ -584,6 +637,8 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewriteFailureFallsBackToOriginal) {
 TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewriteFailureReturnsError) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
+  g_fake_hsa_env.asic_revision = 1;
+  g_fake_env_vars["HSA_HOTSWAP_STRICT_MODE"] = "1";
   rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(true);
   LoadRecorder load;
   const hsa_executable_t executable = MakeTestExecutable(0x509);
@@ -624,6 +679,8 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal)
 TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
+  g_fake_hsa_env.asic_revision = 1;
+  g_fake_env_vars["HSA_HOTSWAP_STRICT_MODE"] = "1";
   LoadRecorder load;
   load.rewritten_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   const hsa_executable_t executable = MakeTestExecutable(0x511);

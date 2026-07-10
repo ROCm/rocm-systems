@@ -67,7 +67,7 @@ struct CodeObjectView {
 
 struct RewriteOptions {
   bool gfx12_5_rewrite_enabled = true;
-  bool strict_mode_enabled = true;
+  bool strict_mode_enabled = false;
 };
 
 struct RewriteDecision {

@@ -105,6 +105,10 @@ bool IsGfx12_5RewriteRequested() {
   return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
 }
 
+bool IsStrictModeRequested() {
+  return IsEnvFlagEnabled("HSA_HOTSWAP_STRICT_MODE");
+}
+
 bool IsVerboseLoggingEnabled() {
   static const bool verbose = IsEnvFlagEnabled("HSA_HOTSWAP_VERBOSE");
   return verbose;
@@ -281,7 +285,8 @@ std::string WithGfx1250SteppingFeature(const std::string& isa_name,
 
 bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
-  return (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
+  return IsHotswapSupportedGfxRevision(gfx) ||
+         (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
          (options.gfx12_5_rewrite_enabled &&
           IsGfx12_5Target(gfx.gfx_target));
 }
@@ -297,14 +302,11 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
-    if (!options.strict_mode_enabled) {
-      return std::nullopt;
-    }
     return RewriteDecision{
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
         WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
         false,
-        true};
+        false};
   }
 
   const bool request_entry_trampolines =
@@ -473,6 +475,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
   RewriteOptions options;
   options.gfx12_5_rewrite_enabled = IsGfx12_5RewriteRequested();
+  options.strict_mode_enabled = IsStrictModeRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return {};
   }
