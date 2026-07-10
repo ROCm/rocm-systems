@@ -54,9 +54,9 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(fork-test.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(fork_test.cpp PROPERTIES LANGUAGE HIP)
 add_executable(fork-test)
-target_sources(fork-test PRIVATE fork-test.cpp)
+target_sources(fork-test PRIVATE fork_test.cpp)
 target_compile_options(fork-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
