@@ -1,0 +1,63 @@
+[profiling] PC sampling only mode -- skipping counter collection setup
+Rocprofiler-Compute version: 3.8.0
+Profiler choice: rocprofiler-sdk
+Output directory: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1
+Target: MI300X_A1
+Command: tests/vcopy -n 16777216 -b 256 -i 3
+Kernel Selection: None
+Dispatch Selection: None
+Filtered sections: ['21']
+[profiling] No performance counters to collect -- PC sampling only mode
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Generating native tool project using command: cmake -S /app/projects/rocprofiler-compute/src/lib -B /app/projects/rocprofiler-compute/src/lib/_build
+-- HIP: Using hipcc from relative path: /rocm/bin/hipcc
+-- {fmt} version: 12.1.0
+-- Build type:
+-- Using the multi-header code from /app/projects/rocprofiler-compute/src/lib/external/json/include/
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /app/projects/rocprofiler-compute/src/lib/_build
+Building native tool using command: cmake --build /app/projects/rocprofiler-compute/src/lib/_build --parallel
+Consolidate compiler generated dependencies of target fmt
+[  0%] Built target gsl_assert
+[  0%] Built target synchronized
+[ 16%] Built target fmt
+Consolidate compiler generated dependencies of target pc-sampling-collector
+[ 55%] Built target pc-sampling-collector
+Consolidate compiler generated dependencies of target rocprofiler-compute-tool
+[100%] Built target rocprofiler-compute-tool
+Searching /app/projects/rocprofiler-compute/src by lib/_build/lib/librocprofiler-compute-tool.so for native collector
+Using native collector: /app/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+Using native counter collection tool: /app/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+[profiling] Iteration multiplexing: Disabled
+Using native counter collection tool: /app/projects/rocprofiler-compute/src/lib/_build/lib/librocprofiler-compute-tool.so
+[Run 1/1][PC sampling profile run]
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.3.2 (1.3.2)
+   |-> [rocprofiler-sdk] W0710 07:31:41.915296 1429079 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.001587 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   |-> [rocprofiler-sdk] W0710 07:31:41.915374 1429079 simple_timer.cpp:55] [rocprofv3] 'tests/vcopy -n 16777216 -b 256 -i 3' ::     0.000000 sec
+   |-> [rocprofiler-sdk] W0710 07:31:42.140335 1429079 tool.cpp:3172] HSA version 1.21.0 initialized (instance=0)
+   |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprofiler-sdk] Total threads: 16777216, Grid Size: 65536 block Size:256, Wavefronts:262144:
+   |-> [rocprofiler-sdk] Launching the  kernel on the GPU
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished executing kernel
+   |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprofiler-sdk] Releasing GPU memory
+   |-> [rocprofiler-sdk] Releasing CPU memory
+   |-> [rocprofiler-sdk] W0710 07:31:42.431337 1429079 simple_timer.cpp:55] [rocprofv3] 'tests/vcopy -n 16777216 -b 256 -i 3' ::     0.515962 sec
+   |-> [rocprofiler-sdk] E0710 07:31:42.453102 1429079 output_stream.cpp:111] Opened result file: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1/ps_file_results.json
+   |-> [rocprofiler-sdk] W0710 07:31:42.478500 1429079 simple_timer.cpp:55] [rocprofv3] output generation ::     0.035814 sec
+   |-> [rocprofiler-sdk] W0710 07:31:42.478706 1429079 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.038550 sec
+   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   |-> [rocprofiler-sdk] [rocprofiler-compute] [flush] Code object data has been written to: "/app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1/1429079_code_obj_info.json"
+[roofline] Skipping roofline

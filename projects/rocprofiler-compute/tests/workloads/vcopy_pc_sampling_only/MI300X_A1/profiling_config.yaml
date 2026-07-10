@@ -1,9 +1,10 @@
 attach_duration_msec: null
 attach_pid: null
+bench_only: false
 config_dir: /app/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs
 device: 0
 dispatch: null
-experimental: false
+experimental: true
 filter_blocks:
 - '21'
 format_rocprof_output: rocpd
@@ -15,23 +16,26 @@ list_available_metrics: false
 list_blocks: null
 list_metrics: null
 list_sets: false
-loglevel: 10
+loglevel: 20
 membw_analysis: false
+ml_api_trace: false
 mode: profile
-name: null
+name: vcopy_pcsampling
 no_native_tool: false
 no_roof: false
-output_directory: vcopy
-pc_sampling_interval: 1048576
+output_directory: /app/projects/rocprofiler-compute/workloads/vcopy_pcsampling/MI300X_A1
+overwrite: false
+pc_sampling: true
+pc_sampling_interval: 65536
 pc_sampling_method: stochastic
 quiet: false
-remaining: tests/vcopy -n 1048576 -b 256 -i 3
+remaining: tests/vcopy -n 16777216 -b 256 -i 3
 retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
 set_selected: null
-spatial_multiplexing: null
 specs: false
 target: null
 torch_trace: false
-verbose: 1
+triton_trace: false
+verbose: 0
