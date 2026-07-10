@@ -22,21 +22,24 @@ What works on WSL2
 
 * **API tracing** (HIP, HSA, kernel dispatch, memory copy/allocation, marker
   / ROCTx): works as on native Linux.
-* **Hardware counter collection**: a single performance counter is collected
-  with correct, non-zero, per-instance values through the DXG vendor-packet
-  path (see :ref:`wsl-vendor-packet` below).
+* **Hardware counter collection**: performance counters are collected with
+  correct, non-zero, per-instance values through the DXG vendor-packet path
+  (see :ref:`wsl-vendor-packet` below). Both single-counter and multi-counter
+  collection are supported. Multi-counter collection previously hit a per-queue
+  PM4 command-buffer frame-size limit in libhsakmt; that limit is now computed
+  from the device geometry instead of a fixed bound, so multi-counter passes
+  fit. This was verified on a gfx11-class GPU under WSL2 with a four-counter
+  collection (``SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU``): all four
+  counters were reported with no PM4 command-buffer overflow.
 
 Known limitations
 ==================
 
-* **Multi-counter collection**: collecting several counters in one pass can
-  exceed the per-queue PM4 command-buffer frame in libhsakmt and currently
-  fails to arm. This is a libhsakmt frame-size limit, tracked separately.
 * **PC sampling and Advanced Thread Trace (ATT)**: the software/decode layers
   build and pass their unit tests, but the end-to-end paths require KFD
   features that are not available on WSL2 and are therefore disabled.
-* **SPM (Streaming Performance Monitor)**: not available; the gfx1150 counter
-  database does not expose SPM-capable counters.
+* **SPM (Streaming Performance Monitor)**: not available; the gfx11-class
+  counter database does not expose SPM-capable counters.
 
 .. _wsl-build-macro:
 
@@ -48,14 +51,15 @@ Build-time macro
    (``librocdxg``) shim, which is the native-Windows build path (it links
    ``gdi32`` and a matching KMD). On the WSL2 / Linux build this macro is left
    **undefined**, so the shim calls compile out and the WSL agent enumerator
-   seeds documented ``gfx1150`` defaults for the gfx target name/version and the
+   seeds documented gfx11-class defaults for the gfx target name/version and the
    compute-unit topology (DXCore cannot read them, and tools such as
    ``rocprofv3-avail`` query agents before the HSA runtime is up). Once the HSA
    runtime is initialized, ``construct_agent_cache()`` refines those fields
    (topology, ``num_xcc``, ``domain``, ``family_id``, firmware versions,
    workgroup/grid limits, and — unless ``ROCPROFILER_FORCE_GFX`` is set — the gfx
-   target name/version) from the HSA runtime, so non-``gfx1150`` GPUs report
-   correct values at runtime. Most WSL2 users build with the macro undefined.
+   target name/version) from the HSA runtime, so GPUs whose target differs from
+   the seeded default report correct values at runtime. Most WSL2 users build
+   with the macro undefined.
 
 Environment variables
 ======================
@@ -74,17 +78,16 @@ Environment variables
 
 ``ROCPROFILER_FORCE_GFX``
    Overrides the GPU's ``gfx`` target name used to look up the counter
-   definitions (``config.yaml`` is keyed by gfx target, for example
-   ``gfx1150``). DXCore on WSL2 does not expose the gfx target, so the enumerator
-   defaults to ``gfx1150`` (RDNA 3.5) at agent-creation time and, once the HSA
-   runtime is up, refines the name/version from the HSA runtime
-   (``HSA_AGENT_INFO_NAME``) in ``construct_agent_cache()``. Set this variable to
-   force a specific target; an explicit value wins over the HSA-derived one (and
-   is the way to get a correct target for pre-HSA tools such as
-   ``rocprofv3-avail`` on non-``gfx1150`` GPUs). The value is validated and must
-   be of the form ``gfx<NNN>`` with at least three decimal digits (for example
-   ``gfx1151``); a malformed value is ignored with a warning and the default is
-   used.
+   definitions (``config.yaml`` is keyed by gfx target). DXCore on WSL2 does not
+   expose the gfx target, so the enumerator defaults to a documented gfx11-class
+   target at agent-creation time and, once the HSA runtime is up, refines the
+   name/version from the HSA runtime (``HSA_AGENT_INFO_NAME``) in
+   ``construct_agent_cache()``. Set this variable to force a specific target; an
+   explicit value wins over the HSA-derived one (and is the way to get a correct
+   target for pre-HSA tools such as ``rocprofv3-avail`` on GPUs whose target
+   differs from the default). The value is validated and must be of the form
+   ``gfx<NNN>`` with at least three decimal digits; a malformed value is ignored
+   with a warning and the default is used.
 
 .. note::
 
