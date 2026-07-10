@@ -31,7 +31,7 @@ public:
   /// @brief Resolve the real libc functions from the next dynamic object.
   void resolve();
 
-  int openat(int dirfd, const char *path, int flags, mode_t mode);
+  int openat(int dirfd, const char *path, int flags, mode_t mode = 0);
   int close(int fd);
   ssize_t read(int fd, void *buf, size_t count);
   ssize_t write(int fd, const void *buf, size_t count);

@@ -120,9 +120,7 @@ int LibcPassthrough::memfd_create(const char *name, unsigned int flags) {
 
 int LibcPassthrough::dup(int oldfd) { return resolve(dup_, "dup")(oldfd); }
 
-int LibcPassthrough::dup2(int oldfd, int newfd) {
-  return resolve(dup2_, "dup2")(oldfd, newfd);
-}
+int LibcPassthrough::dup2(int oldfd, int newfd) { return resolve(dup2_, "dup2")(oldfd, newfd); }
 
 int LibcPassthrough::dup3(int oldfd, int newfd, int flags) {
   return resolve(dup3_, "dup3")(oldfd, newfd, flags);
@@ -148,13 +146,9 @@ FILE *LibcPassthrough::freopen(const char *path, const char *mode, FILE *stream)
   return resolve(freopen_, "freopen")(path, mode, stream);
 }
 
-DIR *LibcPassthrough::opendir(const char *name) {
-  return resolve(opendir_, "opendir")(name);
-}
+DIR *LibcPassthrough::opendir(const char *name) { return resolve(opendir_, "opendir")(name); }
 
-struct dirent *LibcPassthrough::readdir(DIR *dirp) {
-  return resolve(readdir_, "readdir")(dirp);
-}
+struct dirent *LibcPassthrough::readdir(DIR *dirp) { return resolve(readdir_, "readdir")(dirp); }
 
 int LibcPassthrough::closedir(DIR *dirp) { return resolve(closedir_, "closedir")(dirp); }
 
