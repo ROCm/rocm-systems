@@ -363,7 +363,14 @@ struct ConSanPatchInfo {
   std::vector<uint64_t> owner_descriptor_file_offsets;
 };
 
+enum class ConSanResourceSiteKind : uint8_t {
+  Access,
+  Barrier,
+  Atomic,
+};
+
 struct ConSanCandidateResourcePlan {
+  ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
   size_t candidate_index = 0;
   uint64_t text_offset = 0;
   std::vector<uint64_t> owner_descriptor_file_offsets;
@@ -377,6 +384,17 @@ struct ConSanCandidateResourcePlan {
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
+};
+
+struct ConSanResourcePlanSummary {
+  size_t explicit_plans = 0;
+  size_t dead_plans = 0;
+  size_t descriptor_growth_plans = 0;
+  size_t spill_plans = 0;
+  size_t unsupported_plans = 0;
+  size_t planned_spill_slot_bytes = 0;
+  size_t emitted_spill_patches = 0;
+  size_t emitted_spill_slot_bytes = 0;
 };
 
 struct ConSanResult {
@@ -400,6 +418,7 @@ struct ConSanResult {
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanMoiCandidate> moi_candidates;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
+  ConSanResourcePlanSummary resource_plan_summary;
   std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;

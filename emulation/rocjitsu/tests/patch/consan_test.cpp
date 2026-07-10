@@ -1778,6 +1778,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_TRUE(result.resource_plans.front().owner_descriptor_file_offsets.empty());
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
+  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 1u);
 }
 
 TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
@@ -2380,6 +2381,7 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
   EXPECT_EQ(plan.max_referenced_vgpr_count, 3);
   EXPECT_EQ(plan.scratch_vgpr, 4);
   EXPECT_EQ(plan.required_vgpr_count, 7);
+  EXPECT_EQ(result.resource_plan_summary.descriptor_growth_plans, 1u);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().scratch_vgpr, 4);
 
@@ -2544,6 +2546,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   EXPECT_EQ(result.patches.front().original_size, 142u * sizeof(uint32_t));
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 8u);
+  EXPECT_EQ(result.resource_plan_summary.explicit_plans, 1u);
 
   std::vector<uint32_t> expected_words = {
       0xD8340000u,
@@ -4118,6 +4121,67 @@ TEST(ConSanMoi, BarrierRecordPatchStoresDescriptorWorkgroupIds) {
   EXPECT_TRUE(contains_subsequence(trampoline_words, expected_z));
 }
 
+TEST(ConSanMoi, BarrierRecordAutomaticallyPlansScratchAndScalarState) {
+  constexpr uint32_t kBarrierWait = 0xBF940000u;
+  const std::array<uint32_t, 2> text_words = {
+      kBarrierWait,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_barriers = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  EXPECT_GT(*patch->scratch_vgpr, 0u);
+  const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
+    return item.site_kind == ConSanResourceSiteKind::Barrier;
+  });
+  ASSERT_NE(plan, result.resource_plans.end());
+  EXPECT_EQ(plan->scratch_vgpr, patch->scratch_vgpr);
+  EXPECT_EQ(result.resource_plan_summary.dead_plans, 1u);
+}
+
+TEST(ConSanMoi, BarrierRecordForcedSpillUsesPlannedPrivateWindow) {
+  constexpr uint32_t kBarrierWait = 0xBF940000u;
+  const std::array<uint32_t, 2> text_words = {
+      kBarrierWait,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_barriers = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 6u);
+  EXPECT_GT(patch->required_private_segment_size, 0u);
+  EXPECT_EQ(result.resource_plan_summary.spill_plans, 1u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+}
+
 TEST(ConSanMoi, InlineShadowBarrierEpochPatchTrampolinesBarrierAndIncrementsEpoch) {
   constexpr uint32_t kBarrierWait = 0xBF940000u;
   const std::array<uint32_t, 4> text_words = {
@@ -4267,6 +4331,56 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
                                         2u, *options.scratch_vgpr)));
 }
 
+TEST(ConSanMoi, AtomicRecordAutomaticallyPlansScratch) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  ASSERT_TRUE(patch->scratch_vgpr);
+  EXPECT_GE(*patch->scratch_vgpr, 4u);
+  const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
+    return item.site_kind == ConSanResourceSiteKind::Atomic;
+  });
+  ASSERT_NE(plan, result.resource_plans.end());
+  EXPECT_EQ(plan->scratch_vgpr, patch->scratch_vgpr);
+  EXPECT_EQ(result.resource_plan_summary.dead_plans, 1u);
+}
+
+TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_atomics = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 3u);
+  EXPECT_GT(patch->required_private_segment_size, 0u);
+  EXPECT_EQ(result.resource_plan_summary.spill_plans, 1u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 12u);
+}
+
 TEST(ConSanMoi, InlineAtomicOrderingPatchPublishesAndImportsReleaseSlot) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
@@ -4275,7 +4389,7 @@ TEST(ConSanMoi, InlineAtomicOrderingPatchPublishesAndImportsReleaseSlot) {
   options.moi_engine = ConSanMoiEngine::InlineShadow;
   options.moi_track_atomics = true;
   options.scratch_vgpr = 8;
-  options.moi_exec_save_sgpr = 94;
+  options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 13;
   options.moi_epoch_vgpr = 14;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -4395,12 +4509,17 @@ TEST(ConSanMoi, InlineAtomicOrderingPatchPublishesAndImportsReleaseSlot) {
   const auto restore_exec =
       build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
   const auto save_scc = build_s_cselect_b32(
-      /*sdst=*/104, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+      /*sdst=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u),
+      scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  const auto save_vcc = build_s_mov_b64(
+      /*sdst=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u), kRdna4VccLo,
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto save_vcc = build_s_mov_b64(/*sdst=*/102, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/102, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(
+      kRdna4VccLo, /*ssrc0=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 8u),
+      ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_scc = build_s_cmp_lg_u32(
-      /*ssrc0=*/104, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+      /*ssrc0=*/static_cast<uint16_t>(*options.moi_exec_save_sgpr + 10u),
+      scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(import_epoch);
   ASSERT_TRUE(restore_exec);
   ASSERT_TRUE(save_scc);
@@ -4414,6 +4533,38 @@ TEST(ConSanMoi, InlineAtomicOrderingPatchPublishesAndImportsReleaseSlot) {
   EXPECT_TRUE(contains_subsequence(acquire_words, std::array<uint32_t, 2>{*save_scc, *save_vcc}));
   EXPECT_TRUE(contains_subsequence(
       acquire_words, std::array<uint32_t, 3>{*restore_exec, *restore_vcc, *restore_scc}));
+}
+
+TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
+  const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_atomics = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
+                                  }),
+            2u);
+  EXPECT_EQ(std::ranges::count_if(result.resource_plans,
+                                  [](const auto &plan) {
+                                    return plan.site_kind == ConSanResourceSiteKind::Atomic &&
+                                           plan.scratch_vgpr;
+                                  }),
+            2u);
 }
 
 TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingLdsAddress) {

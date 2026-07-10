@@ -1917,7 +1917,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1967,7 +1966,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1984,7 +1982,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -2001,10 +1998,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
-                    "RJ_CONSAN_MOI_OWNER_VGPR=100"
-                    "RJ_CONSAN_MOI_EPOCH_VGPR=101"
-                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )

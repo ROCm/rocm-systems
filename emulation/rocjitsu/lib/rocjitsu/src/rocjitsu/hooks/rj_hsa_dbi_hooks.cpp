@@ -188,6 +188,35 @@ struct HookConfig {
   return "unknown";
 }
 
+[[nodiscard]] const char *moi_resource_site_kind_name(rocjitsu::ConSanResourceSiteKind site_kind) {
+  switch (site_kind) {
+  case rocjitsu::ConSanResourceSiteKind::Access:
+    return "access";
+  case rocjitsu::ConSanResourceSiteKind::Barrier:
+    return "barrier";
+  case rocjitsu::ConSanResourceSiteKind::Atomic:
+    return "atomic";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] const char *
+moi_resource_source_name(rocjitsu::ConSanRegisterAllocationSource source) {
+  switch (source) {
+  case rocjitsu::ConSanRegisterAllocationSource::Unsupported:
+    return "unsupported";
+  case rocjitsu::ConSanRegisterAllocationSource::Explicit:
+    return "explicit";
+  case rocjitsu::ConSanRegisterAllocationSource::LivenessDead:
+    return "dead";
+  case rocjitsu::ConSanRegisterAllocationSource::DescriptorGrowth:
+    return "descriptor-growth";
+  case rocjitsu::ConSanRegisterAllocationSource::SpillRequired:
+    return "spill";
+  }
+  return "unknown";
+}
+
 [[nodiscard]] const char *delay_mode_name(rocjitsu::ConSanDelayMode mode) {
   switch (mode) {
   case rocjitsu::ConSanDelayMode::Nop:
@@ -2457,17 +2486,57 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     candidate.raw_scope ? std::to_string(*candidate.raw_scope).c_str() : "-",
                     candidate.raw_th ? std::to_string(*candidate.raw_th).c_str() : "-");
       }
+      const rocjitsu::ConSanResourcePlanSummary &resource_summary =
+          patch_result.resource_plan_summary;
+      log_message(kLogInfo,
+                  "ConSan MOI resources reader=%llu explicit=%zu dead=%zu "
+                  "descriptor_growth=%zu spill=%zu unsupported=%zu "
+                  "planned_spill_slot_bytes=%zu emitted_spill_patches=%zu "
+                  "emitted_spill_slot_bytes=%zu",
+                  static_cast<unsigned long long>(code_object_reader.handle),
+                  resource_summary.explicit_plans, resource_summary.dead_plans,
+                  resource_summary.descriptor_growth_plans, resource_summary.spill_plans,
+                  resource_summary.unsupported_plans, resource_summary.planned_spill_slot_bytes,
+                  resource_summary.emitted_spill_patches,
+                  resource_summary.emitted_spill_slot_bytes);
       for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
+        constexpr size_t kMaxLoggedResourceOwners = 8;
+        std::string owner_names;
+        size_t logged_owners = 0;
+        for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+          if (logged_owners == kMaxLoggedResourceOwners)
+            break;
+          const auto kernel = std::ranges::find_if(
+              patch_result.kernels, [descriptor_offset](const rocjitsu::ConSanKernelInfo &item) {
+                return item.descriptor_file_offset == descriptor_offset;
+              });
+          if (kernel == patch_result.kernels.end())
+            continue;
+          if (!owner_names.empty())
+            owner_names += ',';
+          owner_names += kernel->name;
+          ++logged_owners;
+        }
+        if (plan.owner_descriptor_file_offsets.size() > logged_owners) {
+          if (!owner_names.empty())
+            owner_names += ',';
+          owner_names +=
+              "+" + std::to_string(plan.owner_descriptor_file_offsets.size() - logged_owners);
+        }
+        if (owner_names.empty())
+          owner_names = "-";
         log_message(
             kLogInfo,
-            "ConSan MOI resource reader=%llu candidate=%zu text_offset=0x%llx "
-            "source=%u reason=%u owners=%zu scratch_vgpr=%s scratch_count=%u "
+            "ConSan MOI resource reader=%llu site=%s candidate=%zu text_offset=0x%llx "
+            "source=%s reason=%u owners=%zu owner_names=%s scratch_vgpr=%s scratch_count=%u "
             "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
             "current_sgprs=%u max_referenced_sgprs=%u "
             "private_bytes=%u",
-            static_cast<unsigned long long>(code_object_reader.handle), plan.candidate_index,
-            static_cast<unsigned long long>(plan.text_offset), static_cast<unsigned>(plan.source),
-            static_cast<unsigned>(plan.reason), plan.owner_descriptor_file_offsets.size(),
+            static_cast<unsigned long long>(code_object_reader.handle),
+            moi_resource_site_kind_name(plan.site_kind), plan.candidate_index,
+            static_cast<unsigned long long>(plan.text_offset),
+            moi_resource_source_name(plan.source), static_cast<unsigned>(plan.reason),
+            plan.owner_descriptor_file_offsets.size(), owner_names.c_str(),
             plan.scratch_vgpr ? std::to_string(*plan.scratch_vgpr).c_str() : "-",
             plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
             plan.required_vgpr_count, plan.current_sgpr_count, plan.max_referenced_sgpr_count,
