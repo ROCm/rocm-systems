@@ -83,6 +83,8 @@ struct ConSanOptions {
   bool force_vgpr_spill = false;
   /// Test-only substring filter for selecting MOI candidates from one kernel.
   std::string test_kernel_name_filter;
+  /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
+  bool automatic_moi_persistent_vgprs = false;
   uint32_t fault_barrier_index = 0;
   ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
   uint16_t delay_var_ssrc = 106;
@@ -365,6 +367,9 @@ struct ConSanResult {
   bool modified = false;
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
+  std::optional<uint16_t> resolved_moi_owner_vgpr;
+  std::optional<uint16_t> resolved_moi_epoch_vgpr;
+  bool moi_persistent_vgprs_automatic = false;
   size_t input_size = 0;
   std::string target_name;
   std::string arch_name;

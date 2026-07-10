@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, and direct-kernel sites can preserve a live victim window through gfx1201 private scratch when the kernel already has a private segment. | Extend the shared planner through persistent state, scalar/special state, shared functions, and zero-private flat-scratch activation. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, direct-kernel sites can preserve a live victim window through gfx1201 private scratch when the kernel already has a private segment, and inline shadow automatically assigns dedicated owner/epoch VGPRs when capacity exists. | Add the descriptor-full persistent fallback, scalar/special state, shared functions, and zero-private flat-scratch activation. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -263,8 +263,13 @@ Current register policy:
   private size. A zero-private kernel is left unmodified with a precise warning
   because descriptor/metadata edits do not synthesize its missing flat-scratch
   entry setup.
-- Dynamic, barrier, atomic, inline-shadow, owner/epoch, and EXEC-save paths
-  still rely on explicit env knobs.
+- Dynamic, barrier, atomic, inline-shadow scratch/diagnostic, and EXEC-save
+  paths still rely on explicit env knobs.
+- Inline shadow is the exception for persistent vector state: when no explicit
+  owner/epoch pair is supplied, it places a dedicated pair above guest
+  references and the selected scratch window, replans scratch with that pair
+  forbidden, and injects a kernel-entry initializer. This automatic path is
+  currently direct-kernel only and requires spare VGPR-file capacity.
 - A standalone gfx1201 spill backend allocates stable slots through
   `SpillManager`, emits address-free `scratch_store/load_b32` batches with
   conservative split waits, and grows only the selected descriptor's fixed
@@ -747,12 +752,12 @@ What it does not mean:
 
 ## Immediate Engineering Gaps
 
-The non-spill scratch policy and the first complete gfx1201 spill-backed access
-slice are now in place for static record/replay and sampled probes. The
-immediate gap is persistent owner/epoch placement. Descriptor-full fallback
-also has to establish flat-scratch entry state for kernels compiled with no
-private segment; changing the descriptor and metadata alone was tested on
-gfx1201 and is not sufficient.
+The non-spill scratch policy, the first complete gfx1201 spill-backed access
+slice, and spare-capacity persistent owner/epoch placement are now in place.
+The immediate gap is descriptor-full persistent state. Its private-backed
+fallback also has to establish flat-scratch entry state for kernels compiled
+with no private segment; changing the descriptor and metadata alone was tested
+on gfx1201 and is not sufficient.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:

@@ -90,6 +90,20 @@ Known local result:
 - The forced tier and kernel selector are internal CTest controls, not public
   ConSan configuration.
 
+Automatic inline-shadow persistent VGPR checks:
+
+```sh
+ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+  -R '^ConSanInlineShadowTest\.Dbi(ReportsCrossWaveRace|BarrierEpochOrdersCrossWaveAccesses)$' \
+  --parallel 2 --output-on-failure
+```
+
+Known local result:
+
+- 2/2 passed without owner/epoch VGPR numbers or
+  `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`. Scratch and the diagnostic EXEC-save SGPR
+  remain explicit in this R1E slice.
+
 ## SuperCollider Coverage
 
 Broad IREE e2e compatibility:

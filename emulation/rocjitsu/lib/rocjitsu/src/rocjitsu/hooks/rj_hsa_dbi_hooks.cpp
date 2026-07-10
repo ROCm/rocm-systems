@@ -2174,6 +2174,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
             plan.required_vgpr_count, plan.original_private_segment_size);
       }
+      if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr) {
+        log_message(kLogInfo,
+                    "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s automatic=%s",
+                    static_cast<unsigned long long>(code_object_reader.handle),
+                    patch_result.resolved_moi_owner_vgpr
+                        ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
+                        : "-",
+                    patch_result.resolved_moi_epoch_vgpr
+                        ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
+                        : "-",
+                    patch_result.moi_persistent_vgprs_automatic ? "true" : "false");
+      }
     }
     size_t candidate_kernel_count = 0;
     size_t skipped_kernel_count = 0;

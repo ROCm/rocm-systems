@@ -927,6 +927,59 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   EXPECT_TRUE(contains_subsequence(text_words, expected_publish_prefix));
 }
 
+TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  EXPECT_EQ(result.resolved_moi_owner_vgpr, 15);
+  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 16);
+  ASSERT_EQ(result.patches.size(), 2u);
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  });
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::TrampolineMoiExactShadowStore;
+                                  }),
+            1);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_GE(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                            kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            4u);
+
+  std::vector<uint32_t> prologue_words(prologue->trampoline_size / sizeof(uint32_t));
+  std::memcpy(prologue_words.data(),
+              patched.text_sections().front()->data() + prologue->trampoline_offset,
+              prologue->trampoline_size);
+  const auto owner_init =
+      build_v_lshrrev_b32_e32(15, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(owner_init);
+  ASSERT_GE(prologue_words.size(), 2u);
+  EXPECT_EQ(prologue_words[0], *owner_init);
+  EXPECT_EQ(prologue_words[1],
+            build_v_mov_b32_e32(16, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
   const std::array<uint32_t, 3> input_words = {
       0xDB7C0000u,

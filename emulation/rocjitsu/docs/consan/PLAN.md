@@ -764,6 +764,21 @@ Work:
 - Do not add shared-function persistent state until `R1G` can require a
   compatible assignment across every owner.
 
+Current progress:
+
+- Inline shadow now assigns a common dedicated owner/epoch VGPR pair
+  automatically when no explicit pair is supplied. The pair is above every
+  direct candidate scope's guest references and planned scratch window;
+  scratch planning is then rerun with the pair forbidden.
+- The existing entry prologue initializes that pair, including wave32/wave64
+  owner derivation, and automatic mode grows and redirects only direct kernels
+  that actually receive an inline access/barrier patch. Shared-function sites
+  remain excluded until `R1G`.
+- Live racy-access and barrier-ordering tests pass without owner/epoch register
+  numbers or the explicit prologue-init flag.
+- Descriptor-full private-backed state and zero-private flat-scratch entry
+  setup remain the open part of this node.
+
 Done criteria:
 
 - Inline shadow targeted tests run without explicit owner or epoch VGPRs on
