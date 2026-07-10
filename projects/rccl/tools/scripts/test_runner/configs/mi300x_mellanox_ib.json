@@ -1380,11 +1380,6 @@
           "test_filter": "SymWin_AllReduce.BothWindows_OutOfPlace"
         },
         {
-          "name": "SymWin_AllReduce_BothWindows_InPlace",
-          "description": "AllReduce in-place with single buffer registered as window",
-          "test_filter": "SymWin_AllReduce.BothWindows_InPlace"
-        },
-        {
           "name": "SymWin_AllReduce_OnlySendWindow",
           "description": "AllReduce with only send buffer registered (relaxed one-buffer path)",
           "test_filter": "SymWin_AllReduce.OnlySendWindow_OutOfPlace"

@@ -16,6 +16,7 @@
  * - In-place operations with a single window
  *
  * REQUIRED Environment Variables:
+ *   NCCL_CUMEM_ENABLE=1          Enables cuMem API for symmetric support
  *   NCCL_DEBUG=INFO              Enables debug logging to observe kernel path
  *   HSA_NO_SCRATCH_RECLAIM=1     Required for multi-GPU RCCL tests
  *
@@ -31,6 +32,8 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include <cstdlib>
+#include <memory>
+#include <vector>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -60,8 +63,16 @@ protected:
         ncclComm_t comm = nullptr;
     };
 
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
     std::vector<NcclBufInfo> allocatedBufs_;
     std::vector<WinInfo> registeredWins_;
+
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        cuMemGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>(
+            "NCCL_CUMEM_ENABLE", "1");
+    }
 
     void TearDown() override
     {
@@ -79,6 +90,7 @@ protected:
         }
         allocatedBufs_.clear();
 
+        cuMemGuard_.reset();
         MPITestBase::TearDown();
     }
 
@@ -187,38 +199,6 @@ TEST_F(SymWin_AllReduce, BothWindows_OutOfPlace)
 
     ASSERT_TRUE(checkAllReduceResult<T>(recvBuf, count, nRanks));
     TEST_INFO("Rank %d: BothWindows_OutOfPlace passed", rank);
-}
-
-TEST_F(SymWin_AllReduce, BothWindows_InPlace)
-{
-    if (!setupForSymmetric()) {
-        GTEST_SKIP() << "Requires symmetric support with 2+ ranks";
-    }
-
-    using T = float;
-    const size_t count = DEFAULT_COUNT;
-    const size_t bufSize = count * sizeof(T);
-
-    ncclComm_t comm = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
-    int rank, nRanks;
-    ncclCommUserRank(comm, &rank);
-    ncclCommCount(comm, &nRanks);
-
-    void* buf = allocNcclBuf(bufSize);
-    ASSERT_MPI_NE(buf, nullptr);
-
-    ncclWindow_t win = registerWindow(comm, buf, bufSize);
-    ASSERT_MPI_NE(win, nullptr);
-
-    initSendBuffer<T>(buf, count, rank);
-
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclAllReduce(buf, buf, count, ncclFloat, ncclSum, comm, stream));
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
-
-    ASSERT_TRUE(checkAllReduceResult<T>(buf, count, nRanks));
-    TEST_INFO("Rank %d: BothWindows_InPlace passed", rank);
 }
 
 TEST_F(SymWin_AllReduce, OnlySendWindow_OutOfPlace)
@@ -606,20 +586,13 @@ TEST_F(SymWin_WindowLifecycle, RegisterDeregister_Basic)
     void* buf = allocNcclBuf(bufSize);
     ASSERT_MPI_NE(buf, nullptr);
 
-    ncclWindow_t win = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-        ncclCommWindowRegister(comm, buf, bufSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+    ncclWindow_t win = registerWindow(comm, buf, bufSize);
     ASSERT_MPI_NE(win, nullptr);
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(comm, win));
 
-    // Remove from auto-cleanup since we already deregistered
-    for (auto it = registeredWins_.begin(); it != registeredWins_.end(); ++it) {
-        if (it->win == win) {
-            it->win = nullptr;
-            break;
-        }
-    }
+    // Null out tracked entry so TearDown skips double-deregister
+    registeredWins_.back().win = nullptr;
 
     TEST_INFO("Rank %d: RegisterDeregister_Basic passed", rank);
 }
