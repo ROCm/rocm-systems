@@ -184,9 +184,9 @@ flowchart LR
   I3["I3: Barrier And<br/>Atomic Semantics"]:::done
   S2["S2: In-Kernel<br/>Sampled Checking"]:::done
   T1A["T1A: Test Tiers<br/>And Harness"]:::done
-  T1B["T1B: MOI Parity<br/>Qualification Runs"]:::active
-  T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::partial
-  M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::target
+  T1B["T1B: MOI Parity<br/>Qualification Runs"]:::done
+  T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::done
+  M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::active
   D1["D1: Team Snapshot Docs"]:::todo
   A1["A1: Multi-Architecture Native Targets<br/>(outside current local window)"]:::deferred
 
@@ -1412,7 +1412,7 @@ Qualification evidence:
   must remain an explicit likely-policy choice rather than being conflated
   with the IREE native-DS path.
 
-## T1: Team Test Matrix - PARTIAL
+## T1: Team Test Matrix - DONE
 
 Goal: maintain a small but meaningful ConSan test corpus that can run in a
 developer session and a broader corpus for confidence.
@@ -1481,7 +1481,7 @@ Landed state:
 Qualification evidence: the new tier0 command passes 183/183 unit tests and
 37/37 live tests on gfx1201.
 
-### T1B: MOI Parity Qualification Runs - TODO
+### T1B: MOI Parity Qualification Runs - DONE
 
 Work:
 
@@ -1501,6 +1501,20 @@ Done criteria:
 - MOI no longer has only smoke/targeted coverage where SuperCollider has broad
   compatibility coverage, and no resource-induced hang remains hidden behind
   a timeout.
+
+Qualification result (gfx1201):
+
+| Tier | SuperCollider | Record/replay | Sampled | Inline shadow |
+| --- | ---: | ---: | ---: | ---: |
+| tier0 focused implementation/live controls | reference rows included | 183 unit + 37 live matrix passed | same matrix | same matrix |
+| tier1 selected IREE LDS-heavy rows | 8/8 | 8/8 | 8/8 | 8/8 |
+| tier2 broad IREE ROCm e2e | 209/209 | 209/209 | 209/209 | 209/209 |
+
+The independent hip-moi semantic oracle/control suite passed 189/189 once in
+tier1. No row timed out. Tier0 contains non-vacuity guards and explicit logs
+for dead/growth/spill allocation, access/barrier/atomic records, inline and
+sampled diagnostics, overflow, and unsupported skips. Tier1/tier2 are
+compatibility evidence, not a claim that every object was instrumented.
 
 ## D1: Team Snapshot Docs - TODO
 

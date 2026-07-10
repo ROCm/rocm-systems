@@ -345,6 +345,20 @@ The harness uses 30-second focused-GPU, 60-second IREE, and 120-second hip-moi
 per-test limits. A failure or timeout terminates the current profile and all
 later tiers; it cannot be overwritten by a later green summary.
 
+Current gfx1201 snapshot (2026-07-10):
+
+| Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
+| --- | ---: | ---: | ---: | ---: |
+| tier0 | included in 183 unit + 37 live | passed | passed | passed |
+| tier1 selected IREE | 8/8 | 8/8 | 8/8 | 8/8 |
+| tier2 broad IREE | 209/209 | 209/209 | 209/209 | 209/209 |
+
+The tier1 semantic control run was 189/189. There were no timeouts. The tier0
+guards are the non-vacuity evidence: they require patches/records/diagnostics
+where appropriate and cover spill, overflow, ordering, and unsupported-site
+reporting. Tier1 and tier2 establish output compatibility and absence of
+resource-induced hangs; they do not imply every loaded object was patchable.
+
 ## rocjitsu-test-corpus
 
 Current local status:
