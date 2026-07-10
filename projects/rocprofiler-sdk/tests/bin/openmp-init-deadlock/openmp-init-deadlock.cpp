@@ -35,10 +35,22 @@
 // means no deadlock occurred.
 
 #include <cstdio>
+#include <cstdlib>
+
+#include <omp.h>
+
+extern "C" int
+lib_get_num_places();
 
 int
 main()
 {
     printf("reached main: no OMPT-init deadlock\n");
-    return 0;
+
+    int _omp_num_places = omp_get_num_places();
+    int _lib_num_places = lib_get_num_places();
+    printf("Number of places via OpenMP call:  %d\n", _omp_num_places);
+    printf("Number of places via library call: %d\n", _lib_num_places);
+
+    return (_omp_num_places == _lib_num_places) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
