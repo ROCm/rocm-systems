@@ -109,12 +109,7 @@ bool
 thread_trace_parameter_pack::are_params_valid() const
 {
     // Guard against the most common misconfigurations before touching HSA state
-    // so we can fail early with a descriptive message. These checks validate
-    // caller-supplied (user) input, so a failure must NOT be fatal: report a
-    // clear error and return false so the caller receives
-    // ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT and can reject the input
-    // cleanly. Using a fatal log here (e.g. under ROCPROFILER_CI) aborts the
-    // process on a mere bad parameter.
+    // so we can fail early with a descriptive message.
     if(shader_cb_fn == nullptr)
     {
         ROCP_ERROR << "Thread trace shader callback cannot be null";
