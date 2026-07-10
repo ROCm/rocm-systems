@@ -148,6 +148,10 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   if (sgpr_gran != 0)
     return true;
 
+  /*
+   * \NPI new ISA family: classify the new arch for CP-visible behavior here \
+   * (RDNA-style encodings return false; CDNA-style fall through to the default).
+   */
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA1:
   case ROCJITSU_CODE_ARCH_RDNA2:

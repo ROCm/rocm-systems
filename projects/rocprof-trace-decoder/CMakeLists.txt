@@ -56,9 +56,37 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
+set(BUILD_PYTHON
+    "AUTO"
+    CACHE STRING "Install Python API: AUTO, ON, or OFF")
+set_property(CACHE BUILD_PYTHON PROPERTY STRINGS AUTO ON OFF)
 option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
 add_subdirectory(source)
+
+if(BUILD_PYTHON)
+    set(Python3_FIND_UNVERSIONED_NAMES LAST)
+    if(BUILD_PYTHON STREQUAL "AUTO")
+        find_package(Python3 3.8 COMPONENTS Interpreter QUIET)
+    else()
+        find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
+    endif()
+
+    if(Python3_FOUND)
+        set(ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR
+            "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}/site-packages"
+            CACHE PATH "Install directory for the rocprof-trace-decoder Python API")
+
+        install(
+            DIRECTORY python/rocprof_trace_decoder
+            DESTINATION ${ROCPROF_TRACE_DECODER_PYTHON_INSTALL_DIR}
+            COMPONENT runtime
+            PATTERN "__pycache__" EXCLUDE
+            PATTERN "*.pyc" EXCLUDE)
+    else()
+        message(STATUS "Skipping Python API install: Python 3.8+ interpreter not found")
+    endif()
+endif()
 
 if(BUILD_TESTS)
     enable_testing()
@@ -67,9 +95,10 @@ endif()
 
 include(packaging)
 
-# Format target: runs clang-format and cmake-format
+# Format target: runs clang-format, cmake-format, and autopep8.
 find_program(CLANG_FORMAT NAMES clang-format-14)
 find_program(CMAKE_FORMAT cmake-format)
+find_program(AUTOPEP8 NAMES autopep8 DOC "Path to autopep8 Python formatter")
 
 set(FORMAT_COMMANDS)
 
@@ -96,6 +125,19 @@ if(CMAKE_FORMAT)
     file(GLOB CMAKE_MODULES ${CMAKE_SOURCE_DIR}/cmake/*.cmake)
     list(APPEND ALL_CMAKE_FILES ${CMAKE_MODULES})
     list(APPEND FORMAT_COMMANDS COMMAND ${CMAKE_FORMAT} -i ${ALL_CMAKE_FILES})
+endif()
+
+if(AUTOPEP8)
+    file(
+        GLOB_RECURSE
+        ALL_PYTHON_SOURCES
+        CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/python/*.py
+        ${CMAKE_SOURCE_DIR}/samples/*.py
+        ${CMAKE_SOURCE_DIR}/test/*.py)
+    list(FILTER ALL_PYTHON_SOURCES EXCLUDE REGEX ".*/build.*/.*")
+    list(APPEND FORMAT_COMMANDS COMMAND ${AUTOPEP8} --in-place --max-line-length 100 --ignore E402
+                                ${ALL_PYTHON_SOURCES})
 endif()
 
 if(FORMAT_COMMANDS)
