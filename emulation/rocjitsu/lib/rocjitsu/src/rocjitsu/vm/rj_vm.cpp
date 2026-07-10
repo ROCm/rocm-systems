@@ -118,6 +118,20 @@ void reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     args->kfd_process_device_apertures_ptr = reinterpret_cast<uint64_t>(extra);
     break;
   }
+  case AMDKFD_IOC_DBG_TRAP: {
+    auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
+    switch (args->op) {
+    case KFD_IOC_DBG_TRAP_ENABLE:
+      args->enable.rinfo_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+      args->device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(extra);
+      break;
+    default:
+      break;
+    }
+    break;
+  }
   default:
     break;
   }
