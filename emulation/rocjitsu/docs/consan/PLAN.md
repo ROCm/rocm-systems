@@ -78,6 +78,14 @@ flowchart TD
 
   M0["M0: MOI Broad Turn-On Readiness"]:::active
   R1["R1: Register And Spill Policy"]:::active
+  R1A["R1A: Kernel Scope And Resource Model"]:::active
+  R1B["R1B: Automatic Non-Spill Allocation"]:::todo
+  R1C["R1C: gfx1201 VGPR Spill Backend"]:::todo
+  R1D["R1D: Spill-Backed Access Probes"]:::todo
+  R1E["R1E: Persistent Owner And Epoch State"]:::todo
+  R1F["R1F: Scalar And Special-State Policy"]:::todo
+  R1G["R1G: Shared-Function Resource Plans"]:::todo
+  R1H["R1H: MOI Resource Parity Rollout"]:::todo
   O1["O1: MOI Operational Defaults"]:::todo
   R2["R2: Patch Placement And Caves"]:::todo
   A1["A1: Multi-Architecture Native Targets"]:::todo
@@ -105,15 +113,24 @@ flowchart TD
   M0 --> T1
   M0 --> D1
 
-  R1 --> I1
-  R1 --> I2
-  R1 --> I3
-  R1 --> S2
+  R1 --> R1A
+  R1A --> R1B
+  R1A --> R1C
+  R1B --> R1D
+  R1C --> R1D
+  R1D --> R1E
+  R1D --> R1F
+  R1D --> R1G
+  R1D --> R1H
+  R1E --> R1H
+  R1F --> R1H
+  R1G --> R1H
+  R1H --> I1
+  R1H --> I2
+  R1H --> I3
+  R1H --> S2
   R2 --> I1
   R2 --> S2
-  A1 --> I1
-  A1 --> S2
-  A1 --> T1
   F1 --> I1
   F1 --> S2
   I1 --> I2
@@ -135,21 +152,28 @@ flowchart TD
 
 1. `M0`: keep the explicit checklist of why MOI is not yet a broad
    turn-on-everything mode, and update it as each blocker closes.
-2. `R1`: settle how ConSan obtains scratch SGPR/VGPRs without relying on
-   caller-chosen registers forever. Start from Kunwar's confirmed VGPR spilling
-   support in `text-relocation-land`.
-3. `O1`: remove prototype command-line burden: report-buffer sizing, default
+2. `R1A` and `R1B`: establish kernel ownership and automatic dead/fresh
+   register allocation without changing the spill ABI yet.
+3. `R1C` and `R1D`: add the bounded gfx1201 ordinary-VGPR spill backend and
+   land the first record/replay and sampled vertical slices.
+4. `R1E`, `R1F`, `R1G`, and `R1H`: place persistent MOI state, settle scalar
+   preservation, handle shared functions, and remove register recipes from the
+   standard engine profiles.
+5. `O1`: remove prototype command-line burden: report-buffer sizing, default
    per-engine resource profiles, and clear unsupported/overflow failures.
-4. `A1`: separate current gfx1201 implementation details from the intended
-   native target set: `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`.
-5. `I1`: expand inline-shadow beyond native dword LDS so it can cover the IREE
+6. `I1`: expand inline-shadow beyond native dword LDS so it can cover the IREE
    and hip-moi-style sites that matter.
-6. `I2` and `I3`: make inline-shadow diagnostics and ordering semantics
+7. `I2` and `I3`: make inline-shadow diagnostics and ordering semantics
    credible enough for team-facing use.
-7. `S1` and `S2`: turn sampled from static-site publication into a real
+8. `S1` and `S2`: turn sampled from static-site publication into a real
    low-overhead sanitizer option.
-8. `F1`: harden flat/generic LDS classification as coverage expands.
-9. `T1` and `D1`: keep the external snapshot honest as the feature set grows.
+9. `F1`: harden flat/generic LDS classification as coverage expands.
+10. `T1` and `D1`: keep the external snapshot honest as the feature set grows.
+
+`A1` remains in the full project DAG, but it is intentionally outside the
+current local execution window while only `gfx1201` hardware is available. It
+is a parallel target-expansion track, not a prerequisite for completing and
+testing the gfx1201 slices of `I1`, `S2`, or `T1`.
 
 The most important design dependency is `R1`. Current ConSan works by manually
 selecting owner, epoch, scratch VGPRs, and sometimes explicit SGPR pairs. That
@@ -272,6 +296,13 @@ Current state:
   functions. Private spill storage is descriptor-owned, so the first spill
   implementation must remain kernel-scoped; a shared function may only use it
   after every owning kernel and call path is known and updated.
+- The retained dump from the broad inline-shadow scan failure contains
+  `_scan_dim1_inclusive_sum_large_configured_vector_distribute_dispatch_0_scan_64x256xf32`,
+  a wave64 gfx1201 kernel with 256 VGPRs, 5,304 bytes of existing private
+  scratch, and 1,335 compiler VGPR spills. Descriptor-only VGPR growth is
+  impossible for that kernel, and a manual high VGPR window is unsafe without
+  liveness proof. This is the first real-workload forced-pressure regression
+  target for R1; it is not yet proven to be the sole cause of the earlier hang.
 
 Current MOI resource demand, before any future probe simplification:
 
@@ -289,6 +320,28 @@ cannot hold owner or epoch state across the kernel. Persistent state needs a
 dedicated descriptor-backed register or a private-memory representation that
 is materialized at each probe.
 
+Minimum spilling capability required for the current gfx1201 parity push:
+
+- Spill only ordinary contiguous VGPR windows used as ephemeral probe scratch.
+  The current windows are 3, 5, 6, 7, 8, or 9 dwords wide.
+- Use address-free gfx1201 `scratch_store_b32` / `scratch_load_b32` first. They
+  are 96-bit VSCRATCH instructions with a signed 24-bit immediate and need no
+  address VGPR, kernarg payload, or new SGPR. Wider B64/B96/B128 forms are an
+  optimization after the dword path is proven.
+- Save under the original EXEC mask, preserve the original instruction, and
+  restore the same active lanes before returning. Use `s_wait_storecnt 0` and
+  `s_wait_loadcnt 0` according to the gfx1201 counter model.
+- Append spill slots above each owning kernel's existing
+  `private_segment_fixed_size`, set the descriptor private-segment enable bit,
+  and reject a last dword offset outside the signed 24-bit positive range.
+- Start with candidates directly owned by a kernel descriptor and the current
+  appended-cave placement path. Shared functions and scalar preservation are
+  separate nodes below.
+
+The first spill slice does not require AccVGPR spilling, arbitrary whole-live-
+set preservation, general SGPR spilling, kernarg extension, sidecars, virtual
+LDS, cross-ISA translation, or any `A1` work.
+
 Dependencies:
 
 - `origin/users/Groverkss/text-relocation-land` is the first implementation
@@ -301,6 +354,23 @@ Dependencies:
 - `R2` owns the general placement cleanup. R1 may use the existing appended
   cave path for its first forced-spill probe, but must account for the larger
   save/probe/restore sequence in placement and branch-range checks.
+
+Reuse boundary:
+
+| Component | R1 action | Reason |
+| --- | --- | --- |
+| Mainline `LivenessAnalysis` | Reuse; port Kunwar's aligned-run and filtered-snapshot refinements as isolated changes. | The kernel-scoped dataflow and SGPR/VGPR queries already exist locally. |
+| Mainline DBT kernel-scope/call-edge helpers | Factor into shared analysis code or expose a narrow API. | They already compute reachable per-kernel blocks and context-sensitive call/return liveness edges; ConSan currently does not use them. |
+| Kunwar `SemanticScratchRequest`, lease, failure, and victim-selection policy | Adapt into a DBT/DBI-neutral allocator. | The policy is useful, but the current code is coupled to DBT `TranslationContext`. |
+| Mainline `SpillManager` | Reuse for stable per-register dword slots in the first backend. | It already handles aligned growth, capacity, rollback, and descriptor high-water accounting. Emit B32 operations so slot contiguity is not assumed. |
+| Kunwar `SemanticSpillFrame` | Defer unless persistent or simultaneous anonymous ranges require it. | Reusing stable B32 slots is a smaller first integration; transient-frame reuse and wide operations can follow without blocking correctness. |
+| Kunwar `Cdna3ScratchEmitter` | Use as an interface and testing pattern only. | Its encodings, offset limit, and wait instruction are wrong for gfx1201. |
+| Mainline `CodeObjectPatcher` and descriptor helpers | Reuse and extend narrowly for per-kernel private size/enablement. | ConSan already commits modified text transactionally through a private patcher copy. |
+| Kunwar binary-translator, kernarg, sidecar, virtual-LDS, and broad relocation changes | Do not import for R1. | They solve translation or persistent-runtime-payload problems not needed by the first ConSan spill path. |
+
+Do not cherry-pick Kunwar's branch wholesale. Its useful scratch work is part of
+a much larger DBT commit. Port or factor the small allocator/liveness pieces,
+write the gfx1201 emitter locally, and keep each change independently testable.
 
 Allocation policy:
 
@@ -329,30 +399,12 @@ Allocation policy:
   ambiguous. Log the reason instead of patching a descriptor-incompatible
   shared function.
 
-Implementation stages:
-
-1. **R1a - shared planning.** Add a per-kernel resource context and a
-   `ConSanScratchPlan`-style result. Build kernel-scoped liveness once, map each
-   selected MOI site to its kernel, centralize forbidden ranges, and report
-   whether each resource is explicit, dead, descriptor-grown, or spilled.
-2. **R1b - automatic non-spilling allocation.** Move record/replay and sampled
-   access probes onto the planner first, then barrier/atomic probes. Add
-   persistent owner/epoch allocation for inline shadow. Ordinary runs should no
-   longer require register environment variables when a dead or fresh window
-   exists.
-3. **R1c - RDNA4 VGPR spilling.** Share or adapt Kunwar's scratch request,
-   lease, and transient-frame model; use `SpillManager` for per-kernel offsets;
-   add RDNA4 `scratch_store`/`scratch_load` emission and required waits; wrap a
-   probe with save/original-access/instrumentation/restore; and raise
-   `private_segment_fixed_size` plus the descriptor private-segment enable bit
-   transactionally.
-4. **R1d - persistent-state fallback.** Materialize owner/epoch from persistent
-   private slots when no whole-kernel VGPRs are available. Make barrier epoch
-   updates use the same representation. Decide from measured corpus failures,
-   not anticipation, whether a minimal SGPR spill path is necessary.
-5. **R1e - parity rollout.** Enable forced-spill tests, then remove manual
-   register recipes from record/replay and sampled broad runs. Advance inline
-   shadow only after its owner/epoch and scalar-state paths are automatic.
+R1 is split below into independently completable nodes. `R1A` through `R1D`
+form the first vertical slice: safe per-kernel analysis, non-spill allocation,
+the gfx1201 spill backend, and spill-backed access probes. `R1E`, `R1F`, and
+`R1G` cover the distinct persistent, scalar, and shared-function problems.
+`R1H` is integration and parity evidence, not a place to hide unfinished
+allocator work.
 
 Correctness requirements:
 
@@ -416,6 +468,286 @@ LD_LIBRARY_PATH=/path/to/rocm/lib \
 emulation/rocjitsu/build/tests/rocjitsu_tests \
   '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*:SpillManager.*:LivenessAnalysis.*'
 ```
+
+## R1A: Kernel Scope And Resource Model - ACTIVE
+
+Goal: give ConSan a read-only, per-kernel analysis model that can answer which
+descriptor owns a site, which registers are live there, and which resource
+changes a proposed probe would require before any bytes are modified.
+
+Work:
+
+- Extract or expose the current DBT helpers for reachable kernel blocks and
+  scoped call/return liveness edges instead of rebuilding a weaker ConSan-only
+  CFG walk.
+- Decode the code object once and construct one `LivenessAnalysis` per kernel
+  scope. Port Kunwar's aligned VGPR-run query and filtered instruction snapshot
+  option as small independent liveness changes.
+- Map each direct kernel candidate to its instruction, kernel descriptor,
+  descriptor VGPR/SGPR allocation, maximum referenced registers, original
+  private size, and reachable function set.
+- Introduce a resource-plan result that distinguishes explicit override,
+  liveness-dead, descriptor-grown, spill-required, and unsupported outcomes.
+  Include forbidden register ranges, required descriptor counts, spill width,
+  and a reason code.
+- Keep planning read-only. Probe construction and ELF mutation must consume a
+  completed plan rather than recomputing ownership or register choices.
+- Record all kernel owners for function blocks, but do not automatically patch
+  shared-function candidates until `R1G`.
+
+Done criteria:
+
+- Synthetic single-kernel, multi-kernel, direct-call, and shared-helper tests
+  produce the expected kernel scopes and instruction-level liveness.
+- A direct MOI candidate receives exactly one owning descriptor and a typed
+  resource outcome without changing the input ELF.
+- An ambiguous or unreachable function candidate is reported explicitly.
+- Existing DBT liveness and relocation tests remain unchanged in behavior.
+
+## R1B: Automatic Non-Spill Allocation - TODO
+
+Goal: eliminate manual scratch-register choices whenever a probe can use dead
+or genuinely new descriptor-backed registers.
+
+Work:
+
+- Adapt Kunwar's scratch request/lease/victim policy into a DBT/DBI-neutral
+  allocator. Keep register count, alignment, forbidden set, allocation source,
+  and optional preferred base explicit in the request/result.
+- Search liveness-dead windows inside the current descriptor allocation first.
+  Then search a fresh window above all guest references and grow only the owning
+  descriptor when the architecture permits it.
+- Validate explicit env overrides through the same forbidden-range and
+  descriptor checks. Overrides remain debugging controls, not a safety bypass.
+- Replace the global `ConSanOptions::scratch_vgpr` assumption in probe builders
+  with a per-site resource lease, while retaining a compatibility path for
+  existing tests.
+- Integrate static record/replay access probes first, then sampled access
+  probes. Multiple sites may choose different windows; descriptor growth is the
+  per-kernel maximum of their plans.
+- Keep spill-required sites unmodified with a typed reason until `R1D`.
+
+Done criteria:
+
+- Unit tests cover existing-allocation, descriptor-growth, forbidden-overlap,
+  alignment, full-register-file, and explicit-override cases.
+- Record/replay and sampled targeted runs no longer need `RJ_CONSAN_TMP_VGPR`
+  when dead or fresh registers exist.
+- Only descriptors owning selected sites grow; unrelated kernels remain
+  byte-for-byte unchanged.
+- A 256-VGPR site returns `spill-required` rather than selecting an unproven
+  high register or pretending that descriptor growth succeeded.
+
+## R1C: gfx1201 VGPR Spill Backend - TODO
+
+Goal: provide a standalone, tested backend that can preserve an ordinary VGPR
+window through per-lane private scratch on the local gfx1201 target.
+
+Work:
+
+- Add gfx1201 builders for address-free `scratch_store_b32` and
+  `scratch_load_b32`, plus `s_wait_storecnt 0` and `s_wait_loadcnt 0`. Validate
+  their 96-bit encodings against LLVM assembly and rocJITsu decoding.
+- Define the positive signed-24-bit offset policy and reject a spill whose last
+  dword is unencodable.
+- Use `SpillManager` to allocate stable dword slots above the original private
+  segment. Emit one B32 operation per lease register initially so correctness
+  does not depend on slot contiguity.
+- Emit save and restore batches under the caller-provided EXEC state. The save
+  batch must complete before its slots are reused; the restore batch must
+  complete before guest code resumes.
+- Start with conservative zero-threshold waits and document that they also
+  drain older wave stores/loads. If that perturbation becomes material, change
+  the schedule only with an ISA-backed same-address scratch ordering test.
+- Add a narrow per-kernel descriptor helper that raises
+  `private_segment_fixed_size`, enables the private segment, preserves all
+  unrelated fields, and works for kernels whose original private size is zero
+  or nonzero.
+- Keep the emitter independent of MOI record layouts and probe semantics.
+  B64/B96/B128 coalescing is a later optimization after B32 correctness and
+  hardware execution are proven.
+- Detect kernels that use a dynamic private stack when metadata exposes it and
+  skip them in the first backend until appending a fixed spill zone is proven
+  not to overlap their stack convention.
+
+Done criteria:
+
+- Encoding/decode tests cover several VGPRs and offsets, including the maximum
+  accepted dword and the first rejected offset.
+- Spill-layout tests cover zero and nonzero original private sizes, stable
+  offsets, capacity failure, and rollback.
+- Descriptor tests prove private-size growth and enablement without changing
+  register counts, entry offsets, or unrelated kernels.
+- A focused gfx1201 hardware smoke saves a deliberately live VGPR, clobbers it,
+  restores it, and produces the uninstrumented result.
+
+## R1D: Spill-Backed Access Probes - TODO
+
+Goal: land one complete ConSan vertical slice that uses `R1A`/`R1B` planning and
+`R1C` preservation when no dead or fresh VGPR window exists.
+
+Work:
+
+- Start with the three-VGPR static record/replay access probe. Add sampled's
+  five-VGPR window only after the first slice passes hardware tests.
+- Select a contiguous victim window inside the allocated VGPR file that avoids
+  the anchor instruction's full `InstDefUse` set and all persistent ConSan
+  state. Save the whole window for the first implementation.
+- Build one transaction in this order: branch to cave, save victim window,
+  execute the original access, emit instrumentation, restore victim window,
+  return to the original fallthrough.
+- Include save/restore bytes in placement preflight. Use the existing appended
+  cave path first and report branch-range or cave failures distinctly from
+  resource failures.
+- Add a test-only force-spill control in `ConSanOptions`; do not add a public env
+  knob unless hardware triage genuinely needs one.
+- Initially accept only direct kernel candidates. Preserve current explicit
+  debug behavior for functions, but never apply an automatic spill plan without
+  an owning descriptor.
+- Use the descriptor-full IREE scan kernel as the first real pressure case with
+  a timeout and process-cleanup strategy.
+
+Done criteria:
+
+- Synthetic tests decode the exact save/original/probe/restore/return shape.
+- A focused HIP test keeps every victim VGPR live across the patched LDS access
+  and verifies application output plus a visible MOI record.
+- The descriptor-full scan case either runs correctly with a spill-backed probe
+  or fails quickly with a precise non-spill blocker; it must not hang or silently
+  clobber `v240+`.
+- Record/replay and sampled access probes can reach the spill tier without a
+  caller-selected VGPR.
+
+## R1E: Persistent Owner And Epoch State - TODO
+
+Goal: place inline-shadow owner and epoch state safely across an entire kernel,
+which cannot be solved by a site-local scratch lease.
+
+Work:
+
+- Prefer a dedicated whole-kernel VGPR pair above every guest reference, grow
+  only the owning descriptor, and initialize it in the existing entry prologue.
+- For descriptor-full kernels, compare two bounded fallbacks:
+  - derive owner at each probe and keep only epoch in persistent private
+    storage; or
+  - keep both values in persistent private slots and materialize them through
+    an ephemeral `R1D` lease at each access.
+- Reserve persistent slots separately from ephemeral victim slots. Barrier
+  epoch updates and access probes must use the same representation.
+- Preserve wave32/wave64 descriptor behavior and keep owner semantics separate
+  from the resource-allocation mechanism.
+- Do not add shared-function persistent state until `R1G` can require a
+  compatible assignment across every owner.
+
+Done criteria:
+
+- Inline shadow targeted tests run without explicit owner or epoch VGPRs on
+  kernels with spare descriptor capacity.
+- A descriptor-full synthetic kernel initializes, reads, updates, and reuses
+  private-backed epoch state without corrupting an ephemeral spill lease.
+- Barrier tests prove that the chosen epoch representation advances and is
+  observed by subsequent access probes.
+
+## R1F: Scalar And Special-State Policy - TODO
+
+Goal: remove manual SGPR windows while preserving EXEC, VCC, SCC, and other
+special state required by dynamic record, barrier, diagnostic, and atomic
+probes.
+
+Current demand:
+
+- Dynamic record/replay and barrier records need one EXEC-save SGPR pair.
+- Inline diagnostics and inline atomic acquire can use up to four temporary
+  SGPR pairs.
+- The `hw_id` owner source needs one scalar temporary in the entry prologue.
+
+Work:
+
+- First allocate liveness-dead or genuinely fresh descriptor-backed SGPRs per
+  kernel. Keep even-pair and architectural SGPR limits in the request.
+- Audit every affected probe for EXEC, VCC, and SCC effects. Liveness does not
+  model those registers, so preservation must be explicit in the probe plan.
+- Keep the basic record/replay, sampled, and inline-shadow paths independent of
+  this node where they do not need scalar temporaries.
+- Add SGPR borrowing only if the descriptor-full corpus proves it necessary.
+  The bounded fallback is to use an already preserved VGPR pair to copy a live
+  SGPR pair to private scratch, guard EXEC-zero, borrow the scalar pair, restore
+  EXEC, reload through VGPRs, and `v_readfirstlane_b32` the original scalar
+  values before restoring the VGPR lease.
+- Do not generalize that fallback into an arbitrary SGPR stack unless more than
+  one current probe family actually needs it.
+
+Done criteria:
+
+- Standard dynamic record/barrier and inline diagnostic recipes do not require
+  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` when safe dead or fresh pairs exist.
+- Tests cover EXEC-zero, wave32/wave64 masks, nested predicate narrowing, VCC
+  restoration, and SCC behavior.
+- A descriptor-full scalar failure is visible and bounded; if a borrow path is
+  implemented, a deliberately live SGPR pair survives it on hardware.
+
+## R1G: Shared-Function Resource Plans - TODO
+
+Goal: instrument a helper reached by multiple kernels without giving shared
+text incompatible register or private-scratch assumptions.
+
+Work:
+
+- Use `R1A` owner sets and per-owner liveness. A dead window must be dead in all
+  owner scopes; a fresh window must be legal and descriptor-backed in all
+  owners.
+- For spill-backed helpers, choose one common immediate spill layout above the
+  maximum aligned original private size of all owners, then grow every owning
+  descriptor to cover that layout.
+- Require one register assignment and one persistent-state representation for
+  the shared instruction bytes. Do not emit per-owner assumptions into shared
+  text.
+- Reject unresolved indirect ownership or incompatible descriptors with a
+  specific reason. A clear skip is acceptable until ownership is proven; an
+  orphan descriptor update is not.
+
+Done criteria:
+
+- A synthetic two-kernel shared-helper object passes dead, fresh, spill, and
+  incompatible-plan tests.
+- Every descriptor that can reach a spill-backed helper receives the same
+  sufficient private layout, and unrelated descriptors remain unchanged.
+- Broad logs distinguish unsupported shared ownership from ordinary
+  no-candidate and allocation failures.
+
+## R1H: MOI Resource Parity Rollout - TODO
+
+Goal: integrate the completed R1 resource paths into standard MOI profiles and
+demonstrate that register configuration is no longer the reason MOI trails
+SuperCollider on real gfx1201 workloads.
+
+Work:
+
+- Add bounded result counters for explicit, dead, descriptor-grown, spilled,
+  and unsupported plans, including spill bytes and owning kernel names when
+  logging is enabled.
+- Move record/replay, sampled, inline-shadow access, barrier, and atomic probes
+  through the common planner in that order. Remove duplicated global descriptor
+  growth and overlap checks as each family migrates.
+- Coordinate with `O1`: standard profiles choose behavior, while register env
+  variables remain optional debug overrides.
+- Run focused rocJITsu tests, hip-moi controls, IREE TileAndFuse, the scan and
+  softmax regressions, and then broad IREE e2e for every engine with GPU
+  parallelism around `8` and explicit timeouts.
+- Update `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and `LOCAL_TESTING.md` as each
+  engine stops requiring manual registers. Keep unsupported shared or scalar
+  cases explicit until their nodes are complete.
+
+Done criteria:
+
+- Standard record/replay, sampled, and targeted inline-shadow commands contain
+  no scratch, owner, epoch, or SGPR register numbers.
+- The broad gfx1201 compatibility tier finishes without a resource-induced hang
+  and includes at least one observed spill-backed patch.
+- Guards distinguish no candidate, unsupported candidate, allocation failure,
+  spill/descriptor failure, successful instrumentation, and race diagnostics.
+- Remaining MOI parity gaps belong to other named DAG nodes rather than hidden
+  manual-register assumptions.
 
 ## O1: MOI Operational Defaults - TODO
 
