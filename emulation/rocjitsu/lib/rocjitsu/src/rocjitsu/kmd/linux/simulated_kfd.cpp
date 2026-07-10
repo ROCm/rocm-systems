@@ -1741,6 +1741,16 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::lock_guard<std::mutex> lk(target->debug_mutex_);
   auto &sess = target->debug_session_;
 
+  // Cross-process authorization is by-pid only: a non-self caller is admitted
+  // solely when it is the debugger already attached to this session
+  // (sess.debugger_pid, set by a prior successful ENABLE). This gate therefore
+  // only re-admits re-entrant ops from an already-attached debugger. Because a
+  // fresh session has debugger_pid == 0, it structurally rejects the *first*
+  // cross-process ENABLE with EPERM: cross-process attach is intentionally
+  // closed until it is implemented (#8364). Self-debug (local mode, the only
+  // supported path today) and DISABLE are exempt. The real kernel instead gates
+  // the first attach on a live ptrace relationship, which is deferred with the
+  // rest of cross-process support.
   if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
       sess.debugger_pid != caller.client_pid())
     return -EPERM;
