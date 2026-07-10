@@ -22,6 +22,7 @@ on:
     branches: [main, develop]
     paths:
       - 'projects/rccl/**'
+      - '.github/workflows/rccl_perf_regression.yml'
   # Allow manual dispatch for testing the pipeline before the workflow is on develop.
   # Inputs mirror what a PR run would supply; omit them to use the defaults
   # (A=A detect: ref == cand == current built lib, expects 0 regressions).
