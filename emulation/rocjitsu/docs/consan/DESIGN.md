@@ -165,10 +165,11 @@ The gap is not one feature. It is a set of concrete blockers:
   for LDS races, not a global-memory sanitizer. Broad operation needs barrier
   and selected atomic semantics that match the `record_replay` oracle closely
   enough for the MVP corpus.
-- **Diagnostics.** `inline_shadow` currently emits a compact first-conflict
-  diagnostic. Team-facing broad operation needs bounded diagnostics that include
-  instruction offsets, access kinds, owners, epoch, LDS byte range, lane/EXEC
-  information when practical, and overflow signals.
+- **Diagnostics.** `inline_shadow` emits bounded first-N diagnostics with
+  instruction offsets, access kinds, owners, epoch, LDS byte ranges, the
+  current conflict EXEC mask, and visible overflow. The prior writer's lane
+  mask is unavailable in the compact exact-shadow word and is reported as
+  unknown/zero.
 - **Runtime sampling policy.** `sampled` currently does deterministic static
   site throttling plus host-side scan. To become the broad low-overhead engine,
   it needs runtime sampling/generation policy and eventually in-kernel sampled
@@ -579,12 +580,13 @@ Current implementation:
 
 Current diagnostic shape:
 
-- writes `diagnostic_count=1`;
-- overwrites the first diagnostic record;
+- atomically reserves one slot per conflicting wave and writes up to the
+  configured diagnostic capacity;
 - records kind, backend, generation, owners, access kinds, instruction offsets,
   and epoch when configured;
-- does not yet fill all range and lane-mask fields;
-- intentionally favors a basic report over a complicated ABI.
+- records both LDS ranges and the current conflict EXEC mask; the prior lane
+  mask remains unknown because it is not present in the exact-shadow word;
+- reports count-over-capacity as dropped diagnostics.
 
 Important current simplifications:
 
@@ -594,7 +596,7 @@ Important current simplifications:
 - `hw_id` owner source makes owner wave-uniform and automatically receives a
   fresh scalar temporary when the kernel has capacity.
 - The atomic ordering path has one release slot.
-- Diagnostics are first-conflict style, not rich multi-record reporting.
+- Diagnostics are bounded first-N records, not an unbounded trace.
 
 Intended role:
 
@@ -706,7 +708,6 @@ The code intentionally contains several prototype mechanisms:
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
 - one-slot inline atomic release state;
-- sparse inline diagnostic records;
 - `inline_shadow` feature/non-vacuity coverage limited to targeted tests even
   though its broad compatibility sweep is now clean;
 - deterministic or scalar-source delay instead of randomized sampling policy;

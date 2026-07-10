@@ -1652,16 +1652,20 @@ private:
     const uint32_t diagnostic_sample_count = std::min<uint32_t>(visible_diagnostics, 4u);
     for (uint32_t i = 0; i < diagnostic_sample_count; ++i) {
       const rocjitsu::ConSanMoiDiagnosticRecord &record = diagnostics[i];
-      log_message(kLogInfo,
-                  "ConSan MOI auto diagnostic reader=%llu index=%u backend=%u kind=%u "
-                  "generation=%llu epoch=%u first_owner=%u second_owner=%u first_inst=0x%x "
-                  "second_inst=0x%x first_kind=%u second_kind=%u second_lds=[%u,%u)",
-                  static_cast<unsigned long long>(entry.reader), i, record.backend, record.kind,
-                  static_cast<unsigned long long>(record.generation), record.epoch,
-                  record.first_owner_id, record.second_owner_id, record.first_instruction_offset,
-                  record.second_instruction_offset, record.first_access_kind,
-                  record.second_access_kind, record.second_lds_byte_offset,
-                  record.second_lds_byte_offset + record.second_lds_byte_count);
+      log_message(
+          kLogInfo,
+          "ConSan MOI auto diagnostic reader=%llu index=%u backend=%u kind=%u "
+          "generation=%llu epoch=%u first_owner=%u second_owner=%u first_inst=0x%x "
+          "second_inst=0x%x first_kind=%u second_kind=%u first_lanes=0x%llx "
+          "second_lanes=0x%llx first_lds=[%u,%u) second_lds=[%u,%u)",
+          static_cast<unsigned long long>(entry.reader), i, record.backend, record.kind,
+          static_cast<unsigned long long>(record.generation), record.epoch, record.first_owner_id,
+          record.second_owner_id, record.first_instruction_offset, record.second_instruction_offset,
+          record.first_access_kind, record.second_access_kind,
+          static_cast<unsigned long long>(record.first_lane_mask),
+          static_cast<unsigned long long>(record.second_lane_mask), record.first_lds_byte_offset,
+          record.first_lds_byte_offset + record.first_lds_byte_count, record.second_lds_byte_offset,
+          record.second_lds_byte_offset + record.second_lds_byte_count);
     }
     for (uint32_t i = 0; i < std::min<size_t>(visible_exact_shadow.size(), 4u); ++i) {
       const ExactShadowEntry &shadow_entry = visible_exact_shadow[i];

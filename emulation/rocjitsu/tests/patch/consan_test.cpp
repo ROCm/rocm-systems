@@ -1483,10 +1483,7 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   std::vector<uint32_t> text_words(text_section->size() / sizeof(uint32_t));
   std::memcpy(text_words.data(), text_section->data(), text_section->size());
 
-  const ConSanMoiReportBufferLayout layout =
-      consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
   const uint64_t report_base = *options.moi_report_buffer_address;
-  const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
 
   const auto save_scc = build_s_cselect_b32(
       /*sdst=*/40, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
@@ -1564,32 +1561,52 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   expected_conflict_predicate.push_back(*narrow_same_epoch);
   EXPECT_TRUE(contains_subsequence(text_words, expected_conflict_predicate));
 
-  const auto diagnostic_count_store = make_expected_literal_store_words(
-      report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), 1u, *options.scratch_vgpr);
-  ASSERT_FALSE(diagnostic_count_store.empty());
-  EXPECT_TRUE(contains_subsequence(text_words, diagnostic_count_store));
-  const auto diagnostic_kind_store = make_expected_literal_store_words(
-      diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, kind),
-      static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict), *options.scratch_vgpr);
-  ASSERT_FALSE(diagnostic_kind_store.empty());
-  EXPECT_TRUE(contains_subsequence(text_words, diagnostic_kind_store));
-  const auto current_owner_for_store = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift), /*vsrc1=*/10,
+  const auto count_address_lo = build_v_mov_b32_e64_literal(
+      /*vdst=*/8,
+      static_cast<uint32_t>(report_base + offsetof(ConSanMoiReportHeader, diagnostic_count)),
       ROCJITSU_CODE_ARCH_RDNA4);
-  const auto current_owner_for_store_mask = build_v_and_b32_e32_literal(
-      /*vdst=*/12, consan_moi_exact_shadow::max_owner, /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(current_owner_for_store);
-  ASSERT_TRUE(current_owner_for_store_mask);
-  std::vector<uint32_t> second_owner_store = {*current_owner_for_store};
-  second_owner_store.insert(second_owner_store.end(), current_owner_for_store_mask->begin(),
-                            current_owner_for_store_mask->end());
-  const auto second_owner_value_store = make_expected_vgpr_store_words(
-      diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, second_owner_id), /*value_vgpr=*/12,
-      *options.scratch_vgpr);
-  second_owner_store.insert(second_owner_store.end(), second_owner_value_store.begin(),
-                            second_owner_value_store.end());
-  ASSERT_FALSE(second_owner_store.empty());
-  EXPECT_TRUE(contains_subsequence(text_words, second_owner_store));
+  const auto count_address_hi = build_v_mov_b32_e64_literal(
+      /*vdst=*/9,
+      static_cast<uint32_t>((report_base + offsetof(ConSanMoiReportHeader, diagnostic_count)) >>
+                            32u),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto count_one = build_v_mov_b32_e64_literal(/*vdst=*/11, 1u, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto count_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/8, /*vsrc=*/11, /*vdst=*/11, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto count_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(count_address_lo);
+  ASSERT_TRUE(count_address_hi);
+  ASSERT_TRUE(count_one);
+  ASSERT_TRUE(count_add);
+  ASSERT_TRUE(count_wait);
+  std::vector<uint32_t> expected_slot_reservation;
+  expected_slot_reservation.insert(expected_slot_reservation.end(), count_address_lo->begin(),
+                                   count_address_lo->end());
+  expected_slot_reservation.insert(expected_slot_reservation.end(), count_address_hi->begin(),
+                                   count_address_hi->end());
+  expected_slot_reservation.insert(expected_slot_reservation.end(), count_one->begin(),
+                                   count_one->end());
+  expected_slot_reservation.insert(expected_slot_reservation.end(), count_add->begin(),
+                                   count_add->end());
+  expected_slot_reservation.push_back(*count_wait);
+  EXPECT_TRUE(contains_subsequence(text_words, expected_slot_reservation));
+
+  const auto slot_times_16 = build_v_lshlrev_b32_e32(
+      /*vdst=*/9, scalar_positive_inline_u32(4), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto slot_times_64 = build_v_lshlrev_b32_e32(
+      /*vdst=*/8, scalar_positive_inline_u32(6), /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto slot_times_80 = build_v_add_nc_u32_e32(
+      /*vdst=*/9, vector_source_vgpr(8), /*vsrc1=*/9, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(slot_times_16);
+  ASSERT_TRUE(slot_times_64);
+  ASSERT_TRUE(slot_times_80);
+  const std::array<uint32_t, 3> expected_slot_stride = {
+      *slot_times_16,
+      *slot_times_64,
+      *slot_times_80,
+  };
+  EXPECT_TRUE(contains_subsequence(text_words, expected_slot_stride));
 
   const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, /*ssrc0=*/38, ROCJITSU_CODE_ARCH_RDNA4);
@@ -1701,15 +1718,6 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsLoadAndSuppressesReadRead) {
   expected_read_kind_filter.push_back(*kind_ne);
   expected_read_kind_filter.push_back(*narrow_kind_conflict);
   EXPECT_TRUE(contains_subsequence(text_words, expected_read_kind_filter));
-
-  const auto second_kind_store = make_expected_literal_store_words(
-      options.moi_report_buffer_address.value() +
-          consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size)
-              .diagnostic_records_offset +
-          offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
-      static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read), *options.scratch_vgpr);
-  ASSERT_FALSE(second_kind_store.empty());
-  EXPECT_TRUE(contains_subsequence(text_words, second_kind_store));
 }
 
 TEST(ConSanMoi, InlineShadowProbeRejectsSmallExactShadowCapacity) {

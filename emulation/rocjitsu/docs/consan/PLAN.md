@@ -138,8 +138,8 @@ flowchart LR
 
   subgraph BEHAVIOR["Engine behavior"]
     direction LR
-    I2["I2: Inline Diagnostics"]:::active
-    I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
+    I2["I2: Inline Diagnostics"]:::done
+    I3["I3: Barrier And<br/>Atomic Semantics"]:::active
     S1["S1: Sampling Policy"]:::todo
     S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
 
@@ -180,8 +180,8 @@ flowchart LR
 flowchart LR
   B0["B0: Baseline"]:::done
   O1{"O1: Operational<br/>Defaults Ready"}:::todo
-  I2["I2: Inline Diagnostics"]:::active
-  I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
+  I2["I2: Inline Diagnostics"]:::done
+  I3["I3: Barrier And<br/>Atomic Semantics"]:::active
   S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
   T1A["T1A: Test Tiers<br/>And Harness"]:::partial
   T1B["T1B: MOI Parity<br/>Qualification Runs"]:::todo
@@ -315,7 +315,8 @@ Blocking reasons to close:
 - Patch placement is not yet stress-tested for broad multi-probe MOI growth.
 - Flat/generic LDS provenance is still partly heuristic.
 - Barrier and atomic ordering are present but narrow.
-- Inline diagnostics are basic first-conflict records.
+- Inline diagnostics are bounded first-N records with range, owner, epoch,
+  instruction, and current conflict-lane evidence.
 - Sampled mode lacks runtime sampling/generation policy and in-kernel checking.
 - The test matrix does not yet require MOI parity with SuperCollider.
 
@@ -1156,7 +1157,7 @@ Tests:
 - IREE TileAndFuse RDNA4 matmul subset with
   `RJ_CONSAN_MOI_ENGINE=inline_shadow`.
 
-## I2: Inline Diagnostics ABI - TODO
+## I2: Inline Diagnostics ABI - DONE
 
 Goal: make inline-shadow diagnostics useful to a teammate, not just a test
 guard.
@@ -1165,13 +1166,16 @@ Position in the DAG: wait for `R1` so the richer diagnostic path has safe
 automatic VGPR/SGPR resources, and for `O1A` so bounded append and overflow
 reporting build on the common buffer/failure contract.
 
-Current state:
+Landed state:
 
-- The first inline diagnostic writes `diagnostic_count=1` and overwrites the
-  first diagnostic slot.
-- It records backend, kind, generation, epoch, owners, instruction offsets, and
-  access kinds.
-- It does not yet fill LDS byte range, lane mask, or multiple diagnostics.
+- A conflicting wave atomically reserves one slot and bounded first-N capture
+  preserves multiple diagnostics up to capacity.
+- Records contain backend, kind, generation, epoch, owners, instruction
+  offsets, access kinds, both LDS byte ranges, and the current conflict EXEC
+  mask. The prior lane mask remains zero because the compact exact-shadow word
+  does not encode it.
+- Count-over-capacity is reported as dropped diagnostics and participates in
+  the O1A overflow warning/guard.
 
 Work:
 
@@ -1188,6 +1192,16 @@ Done criteria:
 - A failing inline-shadow run prints a diagnostic that names at least access
   kinds, owner ids, epoch, instruction offsets, and LDS byte range.
 - Overflow is visible and does not silently look like "no races."
+
+Landed evidence:
+
+- Synthetic patch tests verify atomic slot reservation and 80-byte indexed
+  diagnostic addressing.
+- The live cross-wave race prints owner/epoch/instruction/access fields,
+  `second_lanes=0x10001`, and `[0,4)` first/second LDS ranges; it also exercises
+  visible diagnostic overflow at the default four-record capacity.
+- The 99-test `ConSanMoi` suite, 25-test live resource/behavior tier, and
+  209-test inline-shadow IREE compatibility sweep pass.
 
 ## I3: Inline Barrier And Atomic Semantics - TODO
 

@@ -1653,6 +1653,12 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MAX_PATCHES=4"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
+            set_tests_properties(
+                "ConSanInlineShadowTest.DbiReportsCrossWaveRace"
+                PROPERTIES
+                    PASS_REGULAR_EXPRESSION
+                        "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+            )
             rj_add_test(
                 NAME "ConSanInlineShadowTest.DbiReportsCrossWaveRaceHwIdOwnerSource"
                 COMMAND

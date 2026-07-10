@@ -1237,6 +1237,85 @@ append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t 
   return true;
 }
 
+[[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,
+                                                            uint64_t field_address,
+                                                            uint16_t slot_vgpr,
+                                                            uint16_t scratch_vgpr,
+                                                            rj_code_arch_t arch) {
+  const uint16_t address_lo_vgpr = scratch_vgpr;
+  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
+  const uint16_t scaled_slot_vgpr = address_hi_vgpr;
+  const auto slot_times_16 =
+      build_v_lshlrev_b32_e32(scaled_slot_vgpr, scalar_positive_inline_u32(4), slot_vgpr, arch);
+  const auto slot_times_64 =
+      build_v_lshlrev_b32_e32(address_lo_vgpr, scalar_positive_inline_u32(6), slot_vgpr, arch);
+  const auto slot_times_80 = build_v_add_nc_u32_e32(
+      scaled_slot_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
+  const auto mov_address_lo =
+      build_v_mov_b32_e64_literal(address_lo_vgpr, static_cast<uint32_t>(field_address), arch);
+  const auto mov_address_hi = build_v_mov_b32_e64_literal(
+      address_hi_vgpr, static_cast<uint32_t>(field_address >> 32u), arch);
+  const auto address_with_slot = build_v_add_nc_u32_e32(
+      address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
+  if (!slot_times_16 || !slot_times_64 || !slot_times_80 || !mov_address_lo || !mov_address_hi ||
+      !address_with_slot)
+    return false;
+  words.push_back(*slot_times_16);
+  words.push_back(*slot_times_64);
+  words.push_back(*slot_times_80);
+  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
+  words.push_back(*address_with_slot);
+  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
+  return true;
+}
+
+[[nodiscard]] bool append_dynamic_diagnostic_store_u32_vgpr(std::vector<uint32_t> &words,
+                                                            uint64_t field_address,
+                                                            uint16_t value_vgpr, uint16_t slot_vgpr,
+                                                            uint16_t scratch_vgpr,
+                                                            rj_code_arch_t arch) {
+  const auto store = build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, arch);
+  if (!store || !append_dynamic_diagnostic_record_address(words, field_address, slot_vgpr,
+                                                          scratch_vgpr, arch))
+    return false;
+  words.insert(words.end(), store->begin(), store->end());
+  return true;
+}
+
+[[nodiscard]] bool append_dynamic_diagnostic_store_u32_literal(std::vector<uint32_t> &words,
+                                                               uint64_t field_address,
+                                                               uint32_t value, uint16_t slot_vgpr,
+                                                               uint16_t scratch_vgpr,
+                                                               rj_code_arch_t arch) {
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  if (!append_dynamic_diagnostic_record_address(words, field_address, slot_vgpr, scratch_vgpr,
+                                                arch))
+    return false;
+  const auto mov_value = build_v_mov_b32_e64_literal(value_vgpr, value, arch);
+  const auto store = build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, arch);
+  if (!mov_value || !store)
+    return false;
+  words.insert(words.end(), mov_value->begin(), mov_value->end());
+  words.insert(words.end(), store->begin(), store->end());
+  return true;
+}
+
+[[nodiscard]] bool
+append_dynamic_diagnostic_store_u32_scalar_src(std::vector<uint32_t> &words, uint64_t field_address,
+                                               uint16_t scalar_src, uint16_t slot_vgpr,
+                                               uint16_t scratch_vgpr, rj_code_arch_t arch) {
+  const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 4u);
+  if (!append_dynamic_diagnostic_record_address(words, field_address, slot_vgpr, scratch_vgpr,
+                                                arch))
+    return false;
+  words.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch));
+  const auto store = build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, arch);
+  if (!store)
+    return false;
+  words.insert(words.end(), store->begin(), store->end());
+  return true;
+}
+
 [[nodiscard]] bool append_dynamic_access_store_u32_literal(std::vector<uint32_t> &words,
                                                            uint64_t field_address, uint32_t value,
                                                            uint16_t slot_vgpr,
@@ -3118,7 +3197,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t old_value_vgpr,
-    uint16_t old_value_hi_vgpr, uint16_t current_value_vgpr, uint16_t current_field_vgpr) {
+    uint16_t old_value_hi_vgpr, uint16_t current_value_vgpr, uint16_t current_field_vgpr,
+    uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count) {
   if (!options.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
 
@@ -3194,43 +3274,79 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     words.push_back(*narrow_kind_conflict);
   }
 
-  if (!append_store_u32_literal(words,
-                                report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), 1u,
-                                *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, kind),
-                                static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict),
-                                *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(
-          words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, backend),
-          static_cast<uint32_t>(ConSanMoiEngine::InlineShadow), *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(words,
-                                diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, generation),
-                                1u, *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(words,
-                                diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, generation) +
-                                    sizeof(uint32_t),
-                                0u, *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(
-          words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
-          static_cast<uint32_t>(candidate.text_offset), *options.scratch_vgpr, arch) ||
-      !append_store_u32_literal(
-          words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
-          static_cast<uint32_t>(current_kind), *options.scratch_vgpr, arch)) {
+  const uint16_t slot_vgpr = current_field_vgpr;
+  constexpr uint16_t kScalarInlineMinusOne = 0xC1;
+  const auto save_conflict_exec =
+      build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
+  const auto mbcnt_lo = build_v_mbcnt_lo_u32_b32(tmp_vgpr, kScalarInlineMinusOne,
+                                                 scalar_positive_inline_u32(0), arch);
+  const auto mbcnt_hi =
+      build_v_mbcnt_hi_u32_b32(tmp_vgpr, kScalarInlineMinusOne, vector_source_vgpr(tmp_vgpr), arch);
+  const auto first_active_lane =
+      build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
+  const auto narrow_representative = build_s_and_saveexec_b64(
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+  if (!save_conflict_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_representative)
     return false;
-  }
+  words.push_back(*save_conflict_exec);
+  words.insert(words.end(), mbcnt_lo->begin(), mbcnt_lo->end());
+  words.insert(words.end(), mbcnt_hi->begin(), mbcnt_hi->end());
+  words.push_back(*first_active_lane);
+  words.push_back(*narrow_representative);
+
+  if (!append_atomic_fetch_add_one_u32(
+          words, report_base + offsetof(ConSanMoiReportHeader, diagnostic_count), slot_vgpr,
+          *options.scratch_vgpr, arch))
+    return false;
+  const auto mov_capacity = build_v_mov_b32_e64_literal(tmp_vgpr, layout.diagnostic_capacity, arch);
+  const auto slot_in_capacity =
+      build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch);
+  const auto narrow_capacity = build_s_and_saveexec_b64(
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+  if (!mov_capacity || !slot_in_capacity || !narrow_capacity)
+    return false;
+  words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
+  words.push_back(*slot_in_capacity);
+  words.push_back(*narrow_capacity);
+
+  const auto store_literal = [&](size_t offset, uint32_t value) {
+    return append_dynamic_diagnostic_store_u32_literal(words, diagnostic_base + offset, value,
+                                                       slot_vgpr, *options.scratch_vgpr, arch);
+  };
+  const auto store_vgpr = [&](size_t offset, uint16_t value_vgpr) {
+    return append_dynamic_diagnostic_store_u32_vgpr(words, diagnostic_base + offset, value_vgpr,
+                                                    slot_vgpr, *options.scratch_vgpr, arch);
+  };
+  const auto store_scalar = [&](size_t offset, uint16_t scalar_src) {
+    return append_dynamic_diagnostic_store_u32_scalar_src(
+        words, diagnostic_base + offset, scalar_src, slot_vgpr, *options.scratch_vgpr, arch);
+  };
+  if (!store_literal(offsetof(ConSanMoiDiagnosticRecord, kind),
+                     static_cast<uint32_t>(ConSanMoiDiagnosticKind::AccessConflict)) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, backend),
+                     static_cast<uint32_t>(ConSanMoiEngine::InlineShadow)) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, generation), 1u) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, generation) + sizeof(uint32_t), 0u) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_instruction_offset),
+                     static_cast<uint32_t>(candidate.text_offset)) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_access_kind),
+                     static_cast<uint32_t>(current_kind)) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask), 0u) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lane_mask) + sizeof(uint32_t), 0u) ||
+      !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask),
+                    static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u)) ||
+      !store_scalar(offsetof(ConSanMoiDiagnosticRecord, second_lane_mask) + sizeof(uint32_t),
+                    static_cast<uint16_t>(*options.moi_exec_save_sgpr + 3u)))
+    return false;
 
   if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, arch) ||
-      !append_store_u32_vgpr(words,
-                             diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, first_owner_id),
-                             tmp_vgpr, *options.scratch_vgpr, arch) ||
+      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_owner_id), tmp_vgpr) ||
       !append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, arch) ||
-      !append_store_u32_vgpr(words,
-                             diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, second_owner_id),
-                             tmp_vgpr, *options.scratch_vgpr, arch)) {
+      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_owner_id), tmp_vgpr)) {
     return false;
   }
 
@@ -3243,26 +3359,36 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   if (!prior_inst_shift || !prior_kind)
     return false;
   words.push_back(*prior_inst_shift);
-  if (!append_store_u32_vgpr(
-          words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset),
-          tmp_vgpr, *options.scratch_vgpr, arch)) {
+  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_instruction_offset), tmp_vgpr)) {
     return false;
   }
   words.insert(words.end(), prior_kind->begin(), prior_kind->end());
-  if (!append_store_u32_vgpr(
-          words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, first_access_kind), tmp_vgpr,
-          *options.scratch_vgpr, arch)) {
+  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_access_kind), tmp_vgpr)) {
     return false;
   }
   if (has_epoch) {
     if (!append_extract_exact_shadow_field(words, tmp_vgpr, current_value_vgpr,
                                            consan_moi_exact_shadow::epoch_shift,
                                            consan_moi_exact_shadow::max_epoch, arch) ||
-        !append_store_u32_vgpr(words, diagnostic_base + offsetof(ConSanMoiDiagnosticRecord, epoch),
-                               tmp_vgpr, *options.scratch_vgpr, arch)) {
+        !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, epoch), tmp_vgpr)) {
       return false;
     }
   }
+
+  uint16_t diagnostic_offset_vgpr = lds_byte_offset_vgpr;
+  if (static_byte_offset != 0) {
+    if (!append_compute_effective_lds_byte_offset(words, current_value_vgpr, lds_byte_offset_vgpr,
+                                                  static_byte_offset, arch))
+      return false;
+    diagnostic_offset_vgpr = current_value_vgpr;
+  }
+  if (!store_vgpr(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_offset),
+                  diagnostic_offset_vgpr) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, first_lds_byte_count), byte_count) ||
+      !store_vgpr(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_offset),
+                  diagnostic_offset_vgpr) ||
+      !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count))
+    return false;
 
   const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
   if (!restore_exec)
@@ -3412,7 +3538,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
       words.push_back(kWaitLoadcnt0);
       if (!append_inline_shadow_diagnostic_words(
               words, candidate, options, arch, layout, old_value_vgpr,
-              static_cast<uint16_t>(old_value_vgpr + 1u), low_vgpr, high_vgpr)) {
+              static_cast<uint16_t>(old_value_vgpr + 1u), low_vgpr, high_vgpr,
+              *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode diagnostic stores");
         return std::nullopt;
       }
