@@ -11,8 +11,10 @@ architecture. This file describes the open lines of work from here.
 
 - `DONE`: baseline work already exists and is committed.
 - `ACTIVE`: recommended current focus.
+- `TARGET`: current program outcome, reached only through its incoming edges.
 - `TODO`: not started in this plan.
 - `PARTIAL`: useful committed subset exists, with remaining work listed.
+- `DEFERRED`: intentionally outside the current execution window.
 - `BLOCKED`: cannot proceed without external state or a design decision.
 
 Project rules:
@@ -72,12 +74,17 @@ The useful committed baseline is:
 
 ## DAG Overview
 
-```mermaid
-flowchart TD
-  B0["B0: Current ConSan Baseline"]:::done
+The DAG is drawn in three panels to avoid long arrows crossing unrelated
+tracks. Repeated boundary nodes such as `B0`, `R1`, `O1`, `I2`, `I3`, and `S2`
+refer to the same work item, not duplicate work. The union of the three panels
+is the project DAG, and every solid arrow retains the prerequisite meaning
+defined below.
 
-  M0["M0: MOI Broad Turn-On Readiness"]:::active
-  R1["R1: Register And Spill Policy"]:::active
+### R1 resource path
+
+```mermaid
+flowchart LR
+  B0["B0: Current ConSan Baseline"]:::done
   R1A["R1A: Kernel Scope And Resource Model"]:::active
   R1B["R1B: Automatic Non-Spill Allocation"]:::todo
   R1C["R1C: gfx1201 VGPR Spill Backend"]:::todo
@@ -86,104 +93,192 @@ flowchart TD
   R1F["R1F: Scalar And Special-State Policy"]:::todo
   R1G["R1G: Shared-Function Resource Plans"]:::todo
   R1H["R1H: MOI Resource Parity Rollout"]:::todo
-  O1["O1: MOI Operational Defaults"]:::todo
-  R2["R2: Patch Placement And Caves"]:::todo
-  A1["A1: Multi-Architecture Native Targets"]:::todo
+  R1{"R1: Register/Spill Policy Ready"}:::active
 
-  I1["I1: Inline-Shadow LDS Coverage"]:::todo
-  I2["I2: Inline Diagnostics ABI"]:::todo
-  I3["I3: Inline Barrier And Atomic Semantics"]:::todo
-
-  S1["S1: Sampling Policy"]:::todo
-  S2["S2: In-Kernel Sampled Checking"]:::todo
-
-  F1["F1: Flat Provenance Hardening"]:::todo
-  T1["T1: Team Test Matrix"]:::partial
-  D1["D1: Team Snapshot Docs"]:::todo
-
-  B0 --> M0
-
-  M0 --> R1
-  M0 --> O1
-  M0 --> R2
-  M0 --> A1
-  M0 --> I1
-  M0 --> S1
-  M0 --> F1
-  M0 --> T1
-  M0 --> D1
-
-  R1 --> R1A
+  B0 --> R1A
+  B0 --> R1C
   R1A --> R1B
-  R1A --> R1C
   R1B --> R1D
   R1C --> R1D
+  R1B --> R1F
   R1D --> R1E
-  R1D --> R1F
   R1D --> R1G
-  R1D --> R1H
   R1E --> R1H
   R1F --> R1H
   R1G --> R1H
-  R1H --> I1
-  R1H --> I2
-  R1H --> I3
-  R1H --> S2
-  R2 --> I1
-  R2 --> S2
-  F1 --> I1
-  F1 --> S2
-  I1 --> I2
-  I1 --> I3
-  S1 --> S2
-  I2 --> T1
-  I3 --> T1
-  S2 --> T1
-  T1 --> D1
+  R1H --> R1
 
-  classDef done fill:#d9ead3,stroke:#38761d,color:#000;
-  classDef active fill:#fff2cc,stroke:#bf9000,color:#000;
-  classDef partial fill:#d9eaf7,stroke:#3d85c6,color:#000;
-  classDef todo fill:#eeeeee,stroke:#777777,color:#000;
-  classDef blocked fill:#f4cccc,stroke:#cc0000,color:#000;
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#ffd966,stroke:#7f6000,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+```
+
+### Feature closure after R1
+
+```mermaid
+flowchart LR
+  B0["B0: Baseline"]:::done
+  R1{"R1: Register/Spill<br/>Policy Ready"}:::active
+
+  subgraph INLINE["Inline-shadow coverage"]
+    direction LR
+    R2["R2: Patch Placement"]:::todo
+    F1["F1: Flat Provenance"]:::todo
+    I1A["I1A: Native DS<br/>Multi-Cell"]:::todo
+    I1B["I1B: Likely-Group<br/>Flat Coverage"]:::todo
+    I1{"I1: LDS Coverage Ready"}:::todo
+
+    R2 --> I1B
+    F1 --> I1B
+    I1A --> I1B
+    I1B --> I1
+  end
+
+  subgraph BEHAVIOR["Engine behavior"]
+    direction LR
+    I2["I2: Inline Diagnostics"]:::todo
+    I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
+    S1["S1: Sampling Policy"]:::todo
+    S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
+
+    S1 --> S2
+  end
+
+  subgraph OPS["Operational profile"]
+    direction LR
+    O1A["O1A: Buffer And<br/>Failure Defaults"]:::todo
+    O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::todo
+    O1{"O1: Operational<br/>Defaults Ready"}:::todo
+
+    O1A --> O1B
+    O1B --> O1
+  end
+
+  B0 --> R2
+  B0 --> F1
+  B0 --> O1A
+  R1 --> I1A
+  R1 --> I2
+  R1 --> I3
+  R1 --> S1
+  R1 --> O1B
+  O1A --> I2
+  I1 --> O1B
+  I3 --> O1B
+  S1 --> O1B
+
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#ffd966,stroke:#7f6000,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+```
+
+### Qualification, acceptance, and deferred target breadth
+
+```mermaid
+flowchart LR
+  B0["B0: Baseline"]:::done
+  O1{"O1: Operational<br/>Defaults Ready"}:::todo
+  I2["I2: Inline Diagnostics"]:::todo
+  I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
+  S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
+  T1A["T1A: Test Tiers<br/>And Harness"]:::partial
+  T1B["T1B: MOI Parity<br/>Qualification Runs"]:::todo
+  T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::partial
+  M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::target
+  D1["D1: Team Snapshot Docs"]:::todo
+  A1["A1: Multi-Architecture Native Targets<br/>(outside current local window)"]:::deferred
+
+  B0 --> T1A
+  T1A --> T1B
+  O1 --> T1B
+  I2 --> T1B
+  I3 --> T1B
+  S2 --> T1B
+  T1B --> T1
+  T1 --> M0
+  M0 --> D1
+
+  B0 --> A1
+
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+  classDef partial fill:#6fa8dc,stroke:#073763,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef deferred fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000,stroke-dasharray: 6 4;
+```
+
+### Color legend
+
+```mermaid
+flowchart LR
+  L_DONE["DONE<br/>committed baseline"]:::done
+  L_ACTIVE["ACTIVE<br/>current focus"]:::active
+  L_TARGET{"TARGET<br/>acceptance outcome"}:::target
+  L_PARTIAL["PARTIAL<br/>useful subset exists"]:::partial
+  L_TODO["TODO<br/>not started"]:::todo
+  L_DEFERRED["DEFERRED<br/>outside current window"]:::deferred
+  L_BLOCKED["BLOCKED<br/>external decision/state needed"]:::blocked
+
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#ffd966,stroke:#7f6000,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+  classDef partial fill:#6fa8dc,stroke:#073763,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef deferred fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000,stroke-dasharray: 6 4;
+  classDef blocked fill:#e06666,stroke:#660000,stroke-width:2px,color:#000;
 ```
 
 ## Recommended Execution Order
 
-1. `M0`: keep the explicit checklist of why MOI is not yet a broad
-   turn-on-everything mode, and update it as each blocker closes.
-2. `R1A` and `R1B`: establish kernel ownership and automatic dead/fresh
-   register allocation without changing the spill ABI yet.
-3. `R1C` and `R1D`: add the bounded gfx1201 ordinary-VGPR spill backend and
-   land the first record/replay and sampled vertical slices.
-4. `R1E`, `R1F`, `R1G`, and `R1H`: place persistent MOI state, settle scalar
-   preservation, handle shared functions, and remove register recipes from the
-   standard engine profiles.
-5. `O1`: remove prototype command-line burden: report-buffer sizing, default
-   per-engine resource profiles, and clear unsupported/overflow failures.
-6. `I1`: expand inline-shadow beyond native dword LDS so it can cover the IREE
-   and hip-moi-style sites that matter.
-7. `I2` and `I3`: make inline-shadow diagnostics and ordering semantics
-   credible enough for team-facing use.
-8. `S1` and `S2`: turn sampled from static-site publication into a real
-   low-overhead sanitizer option.
-9. `F1`: harden flat/generic LDS classification as coverage expands.
-10. `T1` and `D1`: keep the external snapshot honest as the feature set grows.
+Every arrow is a hard execution prerequisite: `A --> B` means the remaining
+scope of `B` should not start until `A` is complete. An arrow does not mean
+"contains", "is related to", or merely "would be nice to do first". Diamonds
+are completion or acceptance milestones; work flows into them, never out of
+them as though the milestone created its prerequisites.
+
+The current autonomous priority order within that DAG is:
+
+1. Complete `R1A` and then `R1B`. `R1C` is independently ready from `B0` and
+   may be interleaved, but neither analysis nor encoding is presented as a
+   prerequisite of the other.
+2. Once `R1B` and `R1C` are both complete, land `R1D`, the first forced-spill
+   record/replay and sampled vertical slice.
+3. Complete `R1E` and `R1G` after that vertical slice. `R1F` becomes ready
+   earlier, after `R1B`, because dead/fresh scalar allocation does not require
+   the VGPR spill emitter.
+4. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
+   register/spill policy, rather than only its first backend, is ready.
+5. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
+   branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
+6. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
+   taken in bounded slices when they unblock the main path. Freeze profiles in
+   `O1B` only after the engine behavior and automatic resource choices named
+   by its incoming edges are stable.
+7. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
+   and sampled checking paths are ready. Passing it reaches the `T1` parity
+   milestone and permits the final `M0` broad-turn-on acceptance review.
+8. Refresh the durable team snapshot in `D1` after `M0` is accepted.
 
 `A1` remains in the full project DAG, but it is intentionally outside the
-current local execution window while only `gfx1201` hardware is available. It
-is a parallel target-expansion track, not a prerequisite for completing and
-testing the gfx1201 slices of `I1`, `S2`, or `T1`.
+current local execution window while only `gfx1201` hardware is available. Its
+only incoming edge is the existing baseline; it neither gates nor is gated by
+the gfx1201 `M0` path.
 
 The most important design dependency is `R1`. Current ConSan works by manually
 selecting owner, epoch, scratch VGPRs, and sometimes explicit SGPR pairs. That
 is acceptable for a prototype, but it is the main reason broader instrumentation
 coverage is risky.
 
-## M0: MOI Broad Turn-On Readiness - ACTIVE
+## M0: MOI Broad Turn-On Readiness - TARGET
 
 Goal: remove the remaining reasons why MOI cannot be run over the same broad
 test corpus as SuperCollider with only a top-level flavor and engine choice.
+
+Position in the DAG: `M0` is the acceptance milestone at the end of the
+gfx1201 readiness path, not an umbrella parent at its beginning. The
+implementation and qualification work below must converge at `T1` before this
+milestone can be accepted. `A1` tracks later native-target breadth separately
+and is not part of this local acceptance gate.
 
 Target operator experience:
 
@@ -229,16 +324,19 @@ Blocking reasons to close:
 - Barrier and atomic ordering are present but narrow.
 - Inline diagnostics are basic first-conflict records.
 - Sampled mode lacks runtime sampling/generation policy and in-kernel checking.
-- Non-gfx1201 architecture dispatch is not validated.
 - The test matrix does not yet require MOI parity with SuperCollider.
+
+Non-gfx1201 architecture dispatch remains an important project gap, but it is
+tracked by the deliberately deferred `A1` branch rather than being presented
+as a blocker for gfx1201 `M0` acceptance.
 
 Work:
 
 - Keep this section synchronized with `DESIGN.md`'s "MOI Broad Enablement Gap".
 - As each blocker moves to a dedicated implementation node, record that
   dependency here instead of leaving it implicit.
-- Define a standard MOI command profile for each engine. Explicit debug knobs
-  may remain, but should not be required for ordinary corpus runs.
+- Accept `O1`'s standard MOI command profile for each engine. Explicit debug
+  knobs may remain, but should not be required for ordinary corpus runs.
 - Treat a broad corpus hang, timeout, or silent no-record run as a product bug,
   not just a test inconvenience.
 
@@ -399,12 +497,13 @@ Allocation policy:
   ambiguous. Log the reason instead of patching a descriptor-incompatible
   shared function.
 
-R1 is split below into independently completable nodes. `R1A` through `R1D`
-form the first vertical slice: safe per-kernel analysis, non-spill allocation,
-the gfx1201 spill backend, and spill-backed access probes. `R1E`, `R1F`, and
-`R1G` cover the distinct persistent, scalar, and shared-function problems.
-`R1H` is integration and parity evidence, not a place to hide unfinished
-allocator work.
+R1 is split below into independently completable nodes. `R1A` unlocks `R1B`,
+while the ISA-local `R1C` backend can be built directly from the baseline.
+`R1B` and `R1C` converge at `R1D`, the first spill-backed vertical slice.
+Persistent state (`R1E`) and shared functions (`R1G`) require that slice;
+scalar allocation (`R1F`) needs only the resource model and non-spill
+allocator. `R1H` integrates the completed paths, and only then is the `R1`
+milestone reached. This ordering is also encoded literally in the DAG.
 
 Correctness requirements:
 
@@ -765,6 +864,20 @@ Current state:
 - The current broad inline-shadow IREE sweep can timeout/hang, so standard
   recipes also need failure containment.
 
+Dependency split:
+
+- `O1A` is independent of register spilling and can start from the current
+  baseline. It owns report-buffer sizing, overflow visibility, and the
+  distinction between ordinary runs and instrumentation-proof guards.
+- `O1B` freezes the user-facing engine profiles. It waits for `O1A`, automatic
+  resources (`R1`), complete inline LDS coverage (`I1`), stable inline ordering
+  behavior (`I3`), and the runtime sampling policy (`S1`) so it does not
+  standardize knobs that the implementation immediately changes.
+- Completing `O1B` reaches the `O1` milestone because all of `O1A` is already
+  an incoming prerequisite.
+
+### O1A: Buffer And Failure Defaults - TODO
+
 Work:
 
 - Add per-engine default auto-buffer sizing when
@@ -772,6 +885,23 @@ Work:
   buffer.
 - Prefer capacity estimates derived from candidate counts where practical.
 - Make buffer overflow visible in logs, guards, and diagnostics.
+- Separate "prove instrumentation happened" guards from ordinary compatibility
+  runs so teammates know when to use each.
+- Add timeout/hang triage notes to local testing until the underlying
+  inline-shadow broad issue is fixed.
+
+Done criteria:
+
+- A teammate can run each MOI engine without a buffer-size knob for ordinary
+  tier0 and tier1 tests.
+- Default buffer sizes are conservative enough for those tiers, and overflows
+  are reported as overflows.
+- Guarded demo recipes remain available but are clearly optional.
+
+### O1B: Freeze Standard Engine Profiles - TODO
+
+Work:
+
 - Define standard engine profiles:
   - `record_replay`: reference/debug, host replay enabled, enough records for
     ordinary compatibility sweeps.
@@ -780,23 +910,23 @@ Work:
   - `inline_shadow`: exact profile with automatic owner/epoch/scratch once R1
     is ready.
 - Keep explicit env overrides for debugging.
-- Separate "prove instrumentation happened" guards from ordinary compatibility
-  runs so teammates know when to use each.
-- Add timeout/hang triage notes to local testing until the underlying
-  inline-shadow broad issue is fixed.
 
 Done criteria:
 
 - A teammate can run each MOI engine with `RJ_CONSAN_FLAVOR=moi` plus
-  `RJ_CONSAN_MOI_ENGINE=...` and no buffer-size knob for ordinary tests.
-- Default buffer sizes are conservative enough for tier0 and tier1.
-- Overflows are reported as overflows.
-- Guarded demo recipes remain available but are clearly optional.
+  `RJ_CONSAN_MOI_ENGINE=...` and no resource-selection or buffer-size knobs for
+  ordinary tests.
+- Each profile corresponds to the stable engine behavior named by its DAG
+  prerequisites; explicit overrides remain debugging controls.
 
-## A1: Multi-Architecture Native Targets - TODO
+## A1: Multi-Architecture Native Targets - DEFERRED
 
 Goal: make ConSan's current gfx1201 focus an implementation detail, not an
 implicit design limit.
+
+This branch is deliberately outside the current autonomous execution window.
+It resumes when suitable non-gfx1201 hardware or an explicitly requested
+synthetic-only slice is available; it does not gate gfx1201 `M0`.
 
 Current state:
 
@@ -873,21 +1003,52 @@ Current state:
 - It does not cover native B64/B128/two-address/d16 forms or likely-group flat
   accesses.
 
+Dependency split:
+
+- `I1A` starts after `R1` so broadening inline instrumentation cannot re-create
+  unsafe manual-register assumptions. It generalizes exact-shadow publication
+  from one dword to an explicit LDS cell range and applies that machinery to
+  native DS forms.
+- `I1B` consumes that cell-range interface for flat/VFLAT accesses. It also
+  waits for `F1` to establish the provenance/address-normalization contract
+  and for `R2` to make the composed native/flat placement mapping reliable.
+- Completing `I1B` reaches the `I1` coverage milestone because `I1A` is an
+  incoming prerequisite.
+
+### I1A: Native DS Multi-Cell Coverage - TODO
+
 Work:
 
+- Generalize exact-shadow publication around an LDS byte/cell range rather
+  than a hard-coded single dword.
 - Extend exact-shadow cell-range handling to multi-cell native DS forms:
   `ds_load/store_b64`, `ds_load/store_b128`, and two-address loads.
 - Decide whether d16 forms should publish one rounded 4-byte cell first, or
   carry byte masks into the inline predicate.
-- Add likely-group flat/VFLAT inline-shadow support only after `F1` clarifies
-  provenance and address normalization.
-- Keep native DS coverage ahead of flat coverage for IREE.
 
 Done criteria:
 
 - Inline-shadow can instrument representative IREE TileAndFuse native DS sites
   without limiting to one dword access.
 - Race controls exercise at least one multi-cell access.
+
+### I1B: Likely-Group Flat Coverage - TODO
+
+Work:
+
+- Add likely-group flat/VFLAT inline-shadow publication using `F1`'s strict
+  provenance classification and normalized LDS byte address.
+- Reuse `I1A`'s cell-range contract rather than creating a flat-only shadow
+  layout.
+- Keep global-memory race detection out of scope; a candidate that cannot be
+  classified as group memory must be skipped visibly.
+
+Done criteria:
+
+- At least one strongly classified hip-moi-style flat LDS control is checked
+  inline and reports the same conflict/clean result as the record/replay
+  oracle.
+- `MaybeGroup` policy and provenance-based skips are visible in logs.
 
 Tests:
 
@@ -899,6 +1060,10 @@ Tests:
 
 Goal: make inline-shadow diagnostics useful to a teammate, not just a test
 guard.
+
+Position in the DAG: wait for `R1` so the richer diagnostic path has safe
+automatic VGPR/SGPR resources, and for `O1A` so bounded append and overflow
+reporting build on the common buffer/failure contract.
 
 Current state:
 
@@ -929,6 +1094,9 @@ Done criteria:
 Goal: make inline-shadow ordering semantics match the record/replay oracle well
 enough for LDS MVP use.
 
+Position in the DAG: wait for `R1`, which owns the persistent epoch and scalar
+special-state resources that these probes must stop selecting manually.
+
 Current state:
 
 - Barrier patching can increment a configured epoch VGPR after supported
@@ -958,6 +1126,10 @@ Done criteria:
 Goal: turn sampled mode from static-site throttling into a real low-overhead
 sanitizer option.
 
+Position in the DAG: wait for `R1` before adding runtime probe state or
+conditions, so the policy is implemented on automatic resources rather than a
+new manual-register recipe.
+
 Current state:
 
 - `RJ_CONSAN_MOI_ENGINE=sampled` writes compact sampled entries directly from
@@ -985,6 +1157,9 @@ Done criteria:
 ## S2: In-Kernel Sampled Checking - TODO
 
 Goal: let sampled mode report conflicts without waiting for host teardown.
+
+Position in the DAG: `S1` first defines the table, runtime selection, and
+generation policy that the in-kernel checker consumes.
 
 Current state:
 
@@ -1053,6 +1228,18 @@ Current state:
   yet documented as thoroughly as SuperCollider runs.
 - No equivalent `gfx942`, `gfx950`, or `gfx1250` ConSan test tier exists yet.
 
+Dependency split:
+
+- `T1A` owns reusable tier definitions, commands, timeouts, cleanup, and result
+  recording. It is already partial and can continue directly from `B0`.
+- `T1B` is the actual gfx1201 parity qualification run. It starts only after
+  `T1A`, `O1`, `I2`, `I3`, and `S2`; their transitive prerequisites include
+  the full register/spill, placement, and inline-coverage tracks.
+- Passing `T1B` reaches the `T1` milestone. `M0` is then an acceptance review
+  of that evidence, not a prerequisite for generating it.
+
+### T1A: Test Tiers And Harness - PARTIAL
+
 Work:
 
 - Define three tiers:
@@ -1062,21 +1249,46 @@ Work:
 - Add exact commands to `TUTORIAL.md` or `USAGE.md`.
 - Keep `ctest -j8` as the GPU default.
 - Add a short test-results table that can be updated per snapshot.
-- Require MOI test rows for every SuperCollider row where the engine should be
-  able to run. If an engine intentionally cannot run that row yet, record the
-  blocker instead of leaving the row absent.
+- Add explicit per-test timeouts and cleanup for the broad inline-shadow tier.
 - Add per-architecture rows for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`,
-  distinguishing live-GPU runs from synthetic/code-object-only coverage.
+  distinguishing live-GPU runs from synthetic/code-object-only coverage. Mark
+  unavailable hardware honestly; those rows do not make `A1` a local gate.
 
 Done criteria:
 
 - A teammate can run one command per tier and know what a pass means.
+- A failed or timed-out GPU test cannot silently leave a later tier looking
+  successful.
+
+### T1B: MOI Parity Qualification Runs - TODO
+
+Work:
+
+- Require MOI test rows for every SuperCollider row where the engine should be
+  able to run. If an engine intentionally cannot run that row yet, record the
+  blocker instead of leaving the row absent.
+- Run tier0, tier1, and tier2 on gfx1201 under each standard MOI profile, with
+  SuperCollider as the compatibility-coverage reference and record/replay as
+  the MOI semantic oracle where applicable.
+- Record instrumentation, spill, report/diagnostic, timeout, and unsupported
+  counters so a clean application exit is not mistaken for sanitizer coverage.
+
+Done criteria:
+
+- Every applicable SuperCollider gfx1201 row has an explicit result for all
+  three MOI engines.
 - MOI no longer has only smoke/targeted coverage where SuperCollider has broad
-  compatibility coverage.
+  compatibility coverage, and no resource-induced hang remains hidden behind
+  a timeout.
 
 ## D1: Team Snapshot Docs - TODO
 
 Goal: keep documentation aligned with the current team-facing snapshot.
+
+Position in the DAG: implementation nodes and `T1` keep their working commands
+and readiness claims current before `M0`. `D1` is the post-acceptance editorial
+snapshot that makes the accepted result easy for a new reader to navigate; it
+does not supply evidence needed to accept `M0`.
 
 Current state:
 
