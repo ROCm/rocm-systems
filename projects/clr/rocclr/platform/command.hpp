@@ -1673,11 +1673,14 @@ class Marker : public Command {
 
 class AccumulateCommand : public Command {
  private:
-  //! Stable kernel name pointers per dispatch slot (nullptr = non-dispatch).
-  //! Resolved from KernelMap once at dispatch time — device-lifetime pointers,
-  //! no copies, no borrowing, no GraphExec coupling.
+  //! Stable kernel name pointers — one entry per kernel dispatch slot (base and
+  //! ext variants). Resolved from KernelMap at dispatch time; point into Kernel
+  //! objects that live for the device lifetime. Non-dispatch slots (barriers,
+  //! SDMA) are skipped so kernelNames_ and timestamps_ are always parallel.
+  //! "<unknown>" is used when the kernel_object is not found in KernelMap.
   std::vector<const char*> kernelNames_;
-  //! GPU timestamps per dispatch slot — populated at signal completion time.
+  //! GPU timestamps — one entry per kernel dispatch slot, parallel to
+  //! kernelNames_, populated at signal completion time.
   std::vector<std::pair<uint64_t, uint64_t>> timestamps_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1716,7 +1719,8 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Record a stable kernel name pointer for one dispatch slot.
+  //! Record a stable kernel name pointer for one kernel dispatch slot.
+  //! Must not be nullptr — use "<unknown>" when the name cannot be resolved.
   void addKernelName(const char* name) { kernelNames_.push_back(name); }
 
   //! Add GPU timestamps for one dispatch slot (called at signal completion).

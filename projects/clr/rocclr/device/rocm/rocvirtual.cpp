@@ -1575,25 +1575,39 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
-  // Resolve kernel names at dispatch time from KernelMap — one per dispatch slot
-  // (same cardinality as timestamps_). Stable const char* into Kernel objects
-  // that live for the device lifetime. No copies, no GraphExec coupling.
+  // Resolve kernel names at dispatch time from KernelMap — one entry per kernel
+  // dispatch slot (base HSA_PACKET_TYPE_KERNEL_DISPATCH and AMD ext variants),
+  // parallel to timestamps_ populated at signal completion. Stable const char*
+  // into Kernel objects that live for the device lifetime. No copies, no
+  // GraphExec coupling. Non-dispatch slots (barriers, memcpy) are skipped so
+  // kernelNames_ and timestamps_ always have the same cardinality.
   {
     static constexpr size_t kPacketSize = 64;
-    static constexpr size_t kKernelObjectOffset =
+    static constexpr size_t kBaseKernelObjectOffset =
         offsetof(hsa_kernel_dispatch_packet_t, kernel_object);
+    static constexpr size_t kExtKernelObjectOffset =
+        offsetof(hsa_amd_ext_kernel_dispatch_packet_t, kernel_object);
     const auto& kernel_map = dev().KernelMap();
     for (size_t i = 0; i < numPackets; ++i) {
       uint16_t header = static_cast<uint16_t>(validFullHeaders[i]);
-      uint16_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
-                                         HSA_PACKET_HEADER_WIDTH_TYPE);
-      if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
+                                        HSA_PACKET_HEADER_WIDTH_TYPE);
+      uint8_t amd_format = static_cast<uint8_t>((validFullHeaders[i] >> 16) & 0xFF);
+      const bool is_base_dispatch = (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+      const bool is_ext_dispatch  = (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                                     amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+      if (is_base_dispatch || is_ext_dispatch) {
+        size_t offset = is_base_dispatch ? kBaseKernelObjectOffset : kExtKernelObjectOffset;
         uint64_t kernel_object = 0;
         memcpy(&kernel_object,
-               flatPacketData.data() + i * kPacketSize + kKernelObjectOffset,
+               flatPacketData.data() + i * kPacketSize + offset,
                sizeof(kernel_object));
         auto it = kernel_map.find(kernel_object);
-        vcmd->addKernelName(it != kernel_map.end() ? it->second.getDemangledName().c_str() : nullptr);
+        // Use a stable fallback string rather than nullptr to avoid crashes in
+        // downstream activity consumers that assume a non-null kernel name.
+        vcmd->addKernelName(it != kernel_map.end()
+                                ? it->second.getDemangledName().c_str()
+                                : "<unknown>");
       }
     }
   }
