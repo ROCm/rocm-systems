@@ -337,18 +337,20 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   #endif
   // Set intermediate GPU rank, if routing through an intermediate GPU.
   struct ncclTopoLinkList* path = gpu1->paths[GPU]+g2;
+  // xGMI fabric routes non-adjacent GPU pairs directly in hardware, so a
+  // software GPU relay is unnecessary and slower.
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (path->count == 4) { // Intermediate goes through DEV, not GPU.
     // path is GPU1 - DEV1 - DEV2 - DEV3 - GPU2, so the intermediate DEV is located at path->list[1]->remNode
     struct ncclTopoNode* intermediateNode = path->list[1]->remNode;
     if (intermediateNode->type == DEV) {
       int interRank;
       NCCLCHECK(ncclTopoDevToRank(system, NCCL_TOPO_ID_SYSTEM_ID(intermediateNode->id), intermediateNode->dev.dev, /*warn=*/true, &interRank));
-      #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
       NCCLCHECK(ncclTopoRankToIndex(system, interRank, &intermediateIndex, true));
-      #endif
       if (intermediateRank) *intermediateRank = interRank;
     }
   }
+#endif
 
   // In general, use P2P whenever we can.
   int p2pLevel = PATH_SYS;

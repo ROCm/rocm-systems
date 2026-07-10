@@ -202,7 +202,7 @@ int RemoteDriver::open() {
 
   // Create a high-numbered synthetic KFD fd to avoid collisions with ROCR's
   // internal fd lifecycle. Use the top of the current rlimit range (same
-  // approach as SimulatedDriver::init_reserved_fd_range).
+  // approach as SimulatedKfd::init_reserved_fd_range).
   struct rlimit rl {};
   getrlimit(RLIMIT_NOFILE, &rl);
   int fd_min = static_cast<int>(rl.rlim_cur) - 64;
@@ -527,6 +527,12 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         size = static_cast<uint64_t>(st.st_size);
       register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
     }
+  }
+
+  if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
+    auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
+    if (num_fds > 0 && received_fds[0] >= 0)
+      export_args->dmabuf_fd = received_fds[0];
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {

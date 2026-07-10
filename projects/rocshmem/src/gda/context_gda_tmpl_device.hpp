@@ -570,32 +570,162 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Only workgroup 0 (is_block_zero_in_grid) runs the reduction algorithm;
+ * all workgroups participate in the per-chunk barrier_wg so the barrier
+ * call counts match.  This prevents concurrent accumulation races when
+ * multiple workgroups share the same team pSync/pWrk/dest buffers.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int GDAContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                             const T *source, int nreduce) {
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long *pSync = team_obj->reduce_pSync;
+  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+  int64_t flag_val = 1;
+  int finish = PE_start + stride * PE_size;
+
+  for (int c = 0; c < n_chunks; c++) {
+    if (is_block_zero_in_grid()) {
+      int offset = c * chunk_size;
+      int count  = min(chunk_size, nreduce - offset);
+
+      // Seed dest[offset..offset+count) from my own contribution.
+      for (int j = wg_id; j < count; j += wg_size) {
+        dest[offset + j] = source[team_rank * nreduce + offset + j];
+      }
+      __syncthreads();
+
+      // Send my contribution for each remote PE's output block, then signal.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                             reinterpret_cast<const void *>(
+                                 source + remote_rank * nreduce + offset),
+                             count * sizeof(T), i, i, wf_info);
+          if (is_thread_zero_in_block()) {
+            fence();
+            internal_putmem(&pSync[team_rank], &flag_val, sizeof(*pSync), i, i, wf_info);
+          }
+        }
+      }
+      threadfence_system();
+      __syncthreads();
+
+      // Wait for each remote PE s, then accumulate into dest.
+      for (int i = PE_start; i < finish; i += stride) {
+        if (i != my_pe) {
+          int remote_rank = (i - PE_start) / stride;
+          if (is_thread_zero_in_block()) {
+            wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, flag_val);
+          }
+          __syncthreads();
+          gda_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size],
+                                    dest + offset, count, wg_id, wg_size);
+          threadfence_system();
+        }
+      }
+      __syncthreads();
+
+      // Reset pSync before reuse.
+      for (int j = wg_id; j < PE_size; j += wg_size) {
+        pSync[j] = ROCSHMEM_SYNC_VALUE;
+      }
+      threadfence_system();
+      __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
-__device__ void GDAContext::internal_put_broadcast(T *dst, const T *src,
+__device__ void GDAContext::internal_put_broadcast_wave(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
   if (constmem.my_pe == pe_root) {
     int finish = pe_start + stride * pe_size;
     for (int i = pe_start; i < finish; i += stride) {
-      if (constmem.my_pe != i)
-        internal_putmem_nbi_wg(dst, src, nelems * sizeof(T), i, i, wf_info);
+      if (i != constmem.my_pe) {
+        internal_putmem_nbi_wave(dst, src, nelems * sizeof(T), i, i, wf_info);
+      }
     }
-    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+    memcpy_wave<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
-__device__ void GDAContext::internal_get_broadcast(T *dst, const T *src,
+__device__ void GDAContext::internal_get_broadcast_wave(T *dst, const T *src,
     int nelems, int pe_root, ActiveWFInfo &wf_info) {  // NOLINT(runtime/int)
-  if (constmem.my_pe == pe_root) {
-    memcpy_wg<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+  if (constmem.my_pe != pe_root) {
+    internal_getmem_wave(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
   } else {
-    internal_getmem_wg(dst, src, nelems * sizeof(T), pe_root, pe_root, wf_info);
+    memcpy_wave<MemcpyKind::Get>(dst, const_cast<T *>(src), nelems * sizeof(T));
   }
 }
 
 template <typename T>
-__device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
+__device__ int GDAContext::broadcast_wave(rocshmem_team_t team, T *dest, 
+    const T* source, int nelement, int PE_root) {
+  if (dest == nullptr || 
+    source == nullptr || 
+    team == ROCSHMEM_TEAM_INVALID)
+    return ROCSHMEM_ERROR;
+
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, pe_start, stride,
+               pe_size, p_sync);
+  return ROCSHMEM_SUCCESS;
+}
+
+template <typename T>
+__device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
+    int nelems, int pe_root, int pe_start, int stride, int pe_size,
+    long *p_sync) {  // NOLINT(runtime/int)
+
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+    internal_put_broadcast_wave(dst, src, nelems, pe_root, pe_start, stride,
+      pe_size, wf_info);
+  } else {
+    internal_get_broadcast_wave(dst, src, nelems, pe_root, wf_info);
+  }
+
+  // Synchronize on completion of broadcast
+  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+}
+
+template <typename T>
+__device__ void GDAContext::broadcast_wg(rocshmem_team_t team, T *dst,
     const T *src, int nelems, int pe_root) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
@@ -606,24 +736,8 @@ __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
 
   // Passed pe_root is relative to team, convert to world root
   int pe_root_world = team_obj->get_pe_in_world(pe_root);
-  internal_broadcast<T>(dst, src, nelems, pe_root_world, pe_start, stride,
+  internal_broadcastmem_wg(dst, src, nelems * sizeof(T), pe_root_world, pe_start, stride,
                pe_size, p_sync);
-}
-
-template <typename T>
-__device__ void GDAContext::internal_broadcast(T *dst, const T *src,
-    int nelems, int pe_root, int pe_start, int stride, int pe_size,
-    long *p_sync) {  // NOLINT(runtime/int)
-  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
-    internal_put_broadcast(dst, src, nelems, pe_root, pe_start, stride,
-      pe_size, wf_info);
-  } else {
-    internal_get_broadcast(dst, src, nelems, pe_root, wf_info);
-  }
-
-  // Synchronize on completion of broadcast
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 template <typename T>

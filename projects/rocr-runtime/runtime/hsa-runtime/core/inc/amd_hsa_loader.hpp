@@ -143,6 +143,7 @@ struct CodeObjectReaderImpl final {
       size_t _code_object_size);
 
   const void *GetCodeObjectMemory() const { return code_object_memory; };
+  size_t GetCodeObjectSize() const { return code_object_size; };
 
   std::string GetUri() const { return uri; };
 

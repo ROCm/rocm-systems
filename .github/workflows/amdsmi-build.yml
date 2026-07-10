@@ -44,6 +44,9 @@ jobs:
   # artifact format used for upload.
   build-and-test:
     name: ${{ matrix.os }}
+    # Privileged self-hosted runner (SYS_MODULE + host /lib/modules): never
+    # auto-run untrusted fork-PR code on it. Mirrors the guard other CI jobs use.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}

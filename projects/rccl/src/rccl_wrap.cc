@@ -438,7 +438,7 @@ ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   ncclSymkKernelId kernelId;
   int nWarps;
   bool forced = false;
-  NCCLCHECK(ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, (ncclSymRegType_t)0, &estTimeUs, &kernelId, maxChannels, &nWarps, &forced));
+  NCCLCHECK(ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, ncclSymSendRegRecvReg, &estTimeUs, &kernelId, maxChannels, &nWarps, &forced));
   if (kernelId == ncclSymkKernelId_Count) return ncclInvalidArgument;
   *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
   *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;

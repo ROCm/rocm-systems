@@ -20,7 +20,6 @@ public:
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;
-    std::string_view get_pc_sampling_beta_enabled() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
@@ -28,7 +27,6 @@ public:
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
     void set_pc_sampling_method(const std::string& method);
-    void set_pc_sampling_beta_enabled(const std::string& value);
 
     void unset_output_path();
     void unset_requested_counters();
@@ -44,7 +42,6 @@ private:
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
     std::string m_pc_sampling_method;
-    std::string m_pc_sampling_beta_enabled;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
