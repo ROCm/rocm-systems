@@ -3,6 +3,8 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/remote_driver.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
@@ -16,12 +18,14 @@
 #include <fcntl.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
 #include <array>
 #include <cstring>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -471,6 +475,122 @@ TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
   q.pid = static_cast<uint32_t>(getpid());
   q.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &q), -ENOSYS);
+}
+
+// Exercises the RemoteDriver client stub against an in-process server that runs
+// the real daemon-mode handler. A debugger may hand kfd_dbg_trap_enable a
+// runtime-info buffer larger than kfd_runtime_info; the handler fills only
+// sizeof(kfd_runtime_info) and reports that size, so bytes past it must survive
+// the RPC round trip (local mode preserves them; the daemon path used to clobber
+// them). Routing through RemoteDriver also locks in the DBG_TRAP embedded-pointer
+// marshalling — a crash there would take the server thread, and thus this test
+// process, down.
+TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode) {
+  ASSERT_NE(soc_, nullptr);
+
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
+  constexpr pid_t kClientPid = 4242;
+  uint32_t process_id = daemon_driver.open_process(kClientPid);
+  ASSERT_NE(process_id, 0u);
+
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  // Minimal stand-in for the daemon's RPC_IOCTL loop: reconstruct the inlined
+  // runtime-info pointer exactly as tools/rocjitsu does, run the real handler,
+  // then echo the args (plus any inline tail) back to the client. jthread (not
+  // thread) so an ASSERT_* failure below unwinds without calling
+  // std::terminate() on a still-joinable thread.
+  std::jthread server([&, server_fd = sv[1]] {
+    for (;;) {
+      rocjitsu::RpcHeader hdr{};
+      if (!rocjitsu::rpc_recv_exact(server_fd, &hdr, sizeof(hdr)))
+        break;
+      if (hdr.opcode != rocjitsu::RPC_IOCTL) {
+        rocjitsu::RpcHeader resp{};
+        resp.request_id = hdr.request_id;
+        rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+        if (hdr.opcode == rocjitsu::RPC_CLOSE)
+          break;
+        continue;
+      }
+      std::vector<uint8_t> payload(hdr.payload_bytes);
+      if (!rocjitsu::rpc_recv_exact(server_fd, payload.data(), hdr.payload_bytes))
+        break;
+      auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(payload.data());
+      const uint32_t cmd = ireq->ioctl_cmd;
+      const size_t buf_size = ireq->args_bytes;
+      uint8_t *buf = payload.data() + sizeof(rocjitsu::RpcIoctlRequest);
+
+      const size_t arg_size = rocjitsu::ioctl_arg_size(cmd);
+      if (cmd == AMDKFD_IOC_DBG_TRAP && buf_size > arg_size) {
+        auto *dbg = reinterpret_cast<kfd_ioctl_dbg_trap_args *>(buf);
+        if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE)
+          dbg->enable.rinfo_ptr = reinterpret_cast<uint64_t>(buf + arg_size);
+      }
+
+      const int result = daemon_driver.ioctl(process_id, cmd, buf);
+
+      rocjitsu::RpcHeader resp{};
+      resp.opcode = rocjitsu::RPC_IOCTL;
+      resp.request_id = hdr.request_id;
+      resp.result = result;
+      resp.payload_bytes = static_cast<uint32_t>(buf_size);
+      if (!rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp)))
+        break;
+      if (buf_size > 0 && !rocjitsu::rpc_send_exact(server_fd, buf, buf_size))
+        break;
+    }
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // Runtime-enable so the session reports ENABLED and carries r_debug/ttmp.
+  kfd_ioctl_runtime_enable_args rt{};
+  rt.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK | KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK;
+  rt.r_debug = 0xcafef00d;
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &rt), 0);
+
+  // Oversized runtime-info buffer: the 16-byte struct plus a 32-byte tail,
+  // pre-filled with a sentinel the handler must leave untouched.
+  constexpr size_t kCapacity = sizeof(kfd_runtime_info) + 32;
+  constexpr uint8_t kSentinel = 0xAB;
+  std::array<uint8_t, kCapacity> rinfo_buf;
+  rinfo_buf.fill(kSentinel);
+
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(kClientPid);
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = 0; // daemon mode skips the fd reference check
+  args.enable.rinfo_ptr = reinterpret_cast<uint64_t>(rinfo_buf.data());
+  args.enable.rinfo_size = static_cast<uint32_t>(kCapacity);
+
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
+
+  // Returned info: the handler reports the true struct size, not the capacity,
+  // and fills the runtime state the debugger expects.
+  EXPECT_EQ(args.enable.rinfo_size, sizeof(kfd_runtime_info));
+  kfd_runtime_info info{};
+  std::memcpy(&info, rinfo_buf.data(), sizeof(info));
+  EXPECT_EQ(info.runtime_state, static_cast<uint32_t>(DEBUG_RUNTIME_STATE_ENABLED));
+  EXPECT_EQ(info.r_debug, 0xcafef00dULL);
+  EXPECT_EQ(info.ttmp_setup, 1u);
+
+  // Tail: every byte past the struct must retain the sentinel.
+  for (size_t i = sizeof(kfd_runtime_info); i < kCapacity; ++i)
+    EXPECT_EQ(rinfo_buf[i], kSentinel) << "runtime-info tail clobbered at byte " << i;
+
+  // Daemon liveness: a follow-up ioctl still round-trips, proving the server
+  // survived the embedded-pointer marshalling and is still serving requests.
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(kClientPid);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+
+  rd.close(); // sends RPC_CLOSE so the server loop exits
+  server.join();
+  EXPECT_EQ(daemon_driver.close(process_id), 0);
 }
 
 } // namespace

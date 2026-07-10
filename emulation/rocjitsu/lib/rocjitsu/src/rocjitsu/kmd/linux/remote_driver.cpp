@@ -336,6 +336,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_apertures_ptr = 0;
   uint64_t saved_device_ids_ptr = 0;
   uint64_t saved_dbg_rinfo_ptr = 0;
+  uint32_t saved_dbg_rinfo_size = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
@@ -356,6 +357,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       switch (dbg->op) {
       case KFD_IOC_DBG_TRAP_ENABLE:
         saved_dbg_rinfo_ptr = dbg->enable.rinfo_ptr;
+        saved_dbg_rinfo_size = dbg->enable.rinfo_size;
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
@@ -407,7 +409,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       size_t inline_size = 0;
       switch (dbg->op) {
       case KFD_IOC_DBG_TRAP_ENABLE:
-        inline_size = dbg->enable.rinfo_size;
+        inline_size =
+            std::min(static_cast<size_t>(dbg->enable.rinfo_size), sizeof(kfd_runtime_info));
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
         inline_size =
@@ -512,18 +515,22 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       case AMDKFD_IOC_DBG_TRAP: {
         auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
         void *dst = nullptr;
+        size_t copy_len = 0;
         switch (dbg->op) {
         case KFD_IOC_DBG_TRAP_ENABLE:
           dst = reinterpret_cast<void *>(saved_dbg_rinfo_ptr);
+          copy_len = std::min(static_cast<size_t>(saved_dbg_rinfo_size),
+                              std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
           dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+          copy_len = extra;
           break;
         default:
           break;
         }
-        if (dst != nullptr)
-          std::memcpy(dst, payload.data() + arg_size, extra);
+        if (dst != nullptr && copy_len > 0)
+          std::memcpy(dst, payload.data() + arg_size, copy_len);
         break;
       }
       default:
