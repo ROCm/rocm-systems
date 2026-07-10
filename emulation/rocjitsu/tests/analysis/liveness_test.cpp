@@ -1023,5 +1023,40 @@ TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskReadsSgprDestinationNotVgpr) {
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
 }
 
+TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
+  // v_pk_add_u16 (VOP3P, VGPR vdst=6). VOP3P gained DPP on gfx11+ and has no
+  // SDWA, so a partial row mask preserves the packed VGPR dst.
+  // RDNA4 VOP3P word0: encoding[31:24]=204, op[22:16]=10 (v_pk_add_u16),
+  // vdst[7:0]=6. word1: src0[8:0]=250 (SRC_DPP), src1[17:9]=3 (VGPR3).
+  constexpr uint32_t kVop3pAddU16Word0 = (204u << 24) | (10u << 16) | 6u;
+  constexpr uint32_t kVop3pDppWord1 = (3u << 9) | 250u;
+  auto inst = decode_rdna4({kVop3pAddU16Word0, kVop3pDppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 12), "v_pk_add_u16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsBothDestinations) {
+  // v_add_co_ci_u32_e64 (VOP3_SDST_ENC) writes TWO destinations: a VGPR result
+  // (v6) and an SGPR carry-out (s[8:9]). A partial DPP mask preserves both, so
+  // both must surface -- this is why implicit_uses loops over every dst operand.
+  // RDNA4 VOP3_SDST_ENC word0: encoding[31:26]=53, op[25:16]=288, sdst[14:8]=8,
+  // vdst[7:0]=6. word1: src0=250 (SRC_DPP), src1[17:9]=3, src2[26:18]=10 (carry).
+  constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
+  constexpr uint32_t kVop3SdstWord1 = (10u << 18) | (3u << 9) | 250u;
+  auto inst = decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 14), "v_add_co_ci_u3");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 1}));
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
 } // namespace
 } // namespace rocjitsu

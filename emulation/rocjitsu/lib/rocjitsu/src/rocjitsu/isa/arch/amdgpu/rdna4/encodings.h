@@ -189,6 +189,7 @@ public:
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();
@@ -286,6 +287,7 @@ public:
 class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
+  void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
   bool has_lit_1();
   bool has_lit_0_has_lit_1();

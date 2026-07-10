@@ -133,9 +133,10 @@ void Vop1::implicit_uses(RegisterSet &uses) const {
                      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
                       (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
   if (sdwa_preserve || dpp_partial)
-    if (const auto *dst = dst_operand(0))
-      if (auto ref = dst->to_register_ref())
-        uses.expand(*ref);
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          uses.expand(*ref);
 }
 
 bool Vop1::default_encoding() {
@@ -181,9 +182,10 @@ void Vop2::implicit_uses(RegisterSet &uses) const {
                      (dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF ||
                       (dpp_bound_ctrl_ == 0 && amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)));
   if (sdwa_preserve || dpp_partial)
-    if (const auto *dst = dst_operand(0))
-      if (auto ref = dst->to_register_ref())
-        uses.expand(*ref);
+    for (int i = 0; i < num_dst_operands(); ++i)
+      if (const auto *dst = dst_operand(i))
+        if (auto ref = dst->to_register_ref())
+          uses.expand(*ref);
 }
 
 bool Vop2::default_encoding() {

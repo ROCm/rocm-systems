@@ -1697,46 +1697,44 @@ class CodeGenerator:
                 'static_cast<uint16_t>(inst_.saddr), 2});'
                 '}'
             )
-        # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial
-        # row/bank mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl)
-        # leave the old destination in place, so surface it as a use.
-        # Relevant only for VOP1, VOP2, and VOP3 encodings.
+        # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial row/bank
+        # mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl) leave the old
+        # destination in place, so surface every destination operand as a use.
+        # Deriving the ref from the decoded dst operand(s) yields the real class
+        # and width and covers multi-dst encodings: VOP3_SDST_ENC writes both a
+        # VGPR result and an SGPR carry, both preserved under a partial mask.
         #
-        # VOP1/VOP2: the modifier forms are always 32-bit VGPR-dest, so emit a
-        # fixed VGPR ref. (SGPR-dest ops like v_readfirstlane have no SDWA/DPP.)
-        if (
-            inst_enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
-            and 'vdst' in enc_field_names
-        ):
+        # SDWA exists only on VOP1/VOP2; DPP additionally exists on VOP3/VOP3P/
+        # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
+        # VOPC/VOPCX stay omitted: their result lands in VCC/EXEC, which liveness
+        # does not track (see liveness.h).
+        enc = inst_enc.enc_name.upper()
+        has_sdwa = enc in ('ENC_VOP1', 'ENC_VOP2')
+        has_dpp = enc in ('ENC_VOP1', 'ENC_VOP2') or (
+            enc in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+            and self._supports_vop_dpp_encoding(enc)
+        )
+        if (has_sdwa or has_dpp) and 'vdst' in enc_field_names:
+            decls = ''
+            guards = []
+            if has_sdwa:
+                decls += (
+                    'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
+                    'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE; '
+                )
+                guards.append('sdwa_preserve')
+            if has_dpp:
+                decls += (
+                    'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
+                    '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
+                    '(dpp_bound_ctrl_ == 0 && '
+                    'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
+                )
+                guards.append('dpp_partial')
             return (
-                'bool sdwa_preserve = sdwa_dst_sel_ != amdgpu::sdwa::DWORD && '
-                'sdwa_dst_unused_ == amdgpu::sdwa::UNUSED_PRESERVE;'
-                'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
-                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
-                '(dpp_bound_ctrl_ == 0 && '
-                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
-                'if (sdwa_preserve || dpp_partial) '
-                'if (const auto *dst = dst_operand(0)) '
-                'if (auto ref = dst->to_register_ref()) '
-                'uses.expand(*ref);'
-            )
-        # VOP3 gained DPP on gfx11+ (no SDWA). Its vdst can name an SGPR
-        # (re-encoded compares), so derive the ref from the decoded dst operand
-        # for the real class/width. Gated on VOP3-DPP support (GCN/CDNA lack the
-        # dpp_* fields). VOPC/VOPCX stay omitted: they preserve VCC/EXEC, which
-        # liveness does not track (see liveness.h).
-        if (
-            inst_enc.enc_name.upper() == 'ENC_VOP3'
-            and 'vdst' in enc_field_names
-            and self._supports_vop_dpp_encoding('ENC_VOP3')
-        ):
-            return (
-                'bool dpp_partial = inst_.src0 == amdgpu::SRC_DPP && '
-                '(dpp_row_mask_ != 0xF || dpp_bank_mask_ != 0xF || '
-                '(dpp_bound_ctrl_ == 0 && '
-                'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
-                'if (dpp_partial) '
-                'if (const auto *dst = dst_operand(0)) '
+                decls + f'if ({" || ".join(guards)}) '
+                'for (int i = 0; i < num_dst_operands(); ++i) '
+                'if (const auto *dst = dst_operand(i)) '
                 'if (auto ref = dst->to_register_ref()) '
                 'uses.expand(*ref);'
             )
