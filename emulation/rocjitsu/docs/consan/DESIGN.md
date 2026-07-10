@@ -14,7 +14,8 @@ patch the final code object for the architecture that will actually run.
 
 This document is present-facing. It describes what the current code does, why it
 does it, and which parts are deliberately prototype-shaped rather than the
-intended destination.
+intended destination. [SPILLING.md](SPILLING.md) is the focused guide to the R1
+register allocation, private-layout, ownership, and spill transaction.
 
 ## Current Status At A Glance
 

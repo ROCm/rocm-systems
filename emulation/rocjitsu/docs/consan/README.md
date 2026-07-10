@@ -26,6 +26,8 @@ state, and report buffers.
 - [TUTORIAL.md](TUTORIAL.md): team-facing commands for SuperCollider and MOI.
 - [DESIGN.md](DESIGN.md): current architecture, implemented behavior, and
   explicit prototype gaps.
+- [SPILLING.md](SPILLING.md): the R1 register allocator, gfx1201 spill backend,
+  ownership rules, provenance, and validation boundary.
 - [USAGE.md](USAGE.md): detailed environment-variable and test runbook.
 - [PLAN.md](PLAN.md): near-future work DAG from the current baseline.
 

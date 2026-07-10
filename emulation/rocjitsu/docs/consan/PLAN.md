@@ -4,8 +4,10 @@ This plan starts from the current ConSan prototype state and intentionally
 omits completed-session history. Use it as the forward DAG for the next phase
 of rocJITsu DBI sanitizer work.
 
-`DESIGN.md` describes what exists now and where that differs from the intended
-architecture. This file describes the open lines of work from here.
+[DESIGN.md](DESIGN.md) describes what exists now and where that differs from
+the intended architecture. [SPILLING.md](SPILLING.md) documents the R1 resource
+path as a deliverable in its own right. This file describes the open lines of
+work from here.
 
 ## Status Legend
 

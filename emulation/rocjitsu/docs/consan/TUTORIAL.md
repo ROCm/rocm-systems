@@ -11,7 +11,8 @@ covers both top-level flavors:
 
 ConSan runs through the HSA tools hook and patches final native RDNA4 /
 `gfx1201` GPU code objects at load time. It does not require rebuilding the
-application being tested.
+application being tested. [SPILLING.md](SPILLING.md) explains how MOI obtains
+temporary registers without relying on globally safe register numbers.
 
 ## Prerequisites
 

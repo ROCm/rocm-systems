@@ -5,6 +5,9 @@ team-facing docs, this file may name local paths and current machine state.
 
 Current local GPU: RDNA4 `gfx1201`.
 
+See [SPILLING.md](SPILLING.md) for the resource-path invariants exercised by
+the focused and live spill tests below.
+
 ## Local Paths
 
 - rocm-systems repo: `/home/benoit/workspace/TheRock/rocm-systems`

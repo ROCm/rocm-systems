@@ -1,7 +1,9 @@
 # ConSan Usage
 
 This is the detailed runbook for ConSan in rocJITsu. For a shorter guided
-walkthrough, start with [TUTORIAL.md](TUTORIAL.md). The currently implemented
+walkthrough, start with [TUTORIAL.md](TUTORIAL.md). For the allocator hierarchy,
+private spill layout, and current failure boundaries, see
+[SPILLING.md](SPILLING.md). The currently implemented
 flavors are `supercollider` and `moi`. The
 SuperCollider flavor is the redundant-access check/trap proof path and is the
 recommended mode for anyone trying the current snapshot. The MOI flavor
