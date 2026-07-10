@@ -101,6 +101,8 @@ struct HookConfig {
   uint32_t max_patches = 1;
   uint32_t moi_sample_stride = 1;
   uint32_t moi_sample_offset = 0;
+  uint32_t moi_runtime_sample_stride = 1;
+  uint32_t moi_runtime_sample_offset = 0;
   uint32_t report_marker = 1;
   int log_level = kLogDisabled;
   std::string dump_dir;
@@ -602,6 +604,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       constexpr const char *kSampledOnlyKnobs[] = {
           "RJ_CONSAN_MOI_SAMPLE_STRIDE",
           "RJ_CONSAN_MOI_SAMPLE_OFFSET",
+          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
       };
       for (const char *name : kSampledOnlyKnobs) {
         if (env_has_value(name))
@@ -652,6 +656,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       "RJ_CONSAN_MOI_EPOCH_VGPR",
       "RJ_CONSAN_MOI_SAMPLE_STRIDE",
       "RJ_CONSAN_MOI_SAMPLE_OFFSET",
+      "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
+      "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
   };
   for (const char *name : kMoiOnlyKnobs) {
     if (env_has_value(name))
@@ -750,6 +756,26 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                  "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_SAMPLE_OFFSET='%s'; expected < "
                  "RJ_CONSAN_MOI_SAMPLE_STRIDE (%u)\n",
                  std::getenv("RJ_CONSAN_MOI_SAMPLE_OFFSET"), config.moi_sample_stride);
+    return std::nullopt;
+  }
+  if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", 1, &config.moi_runtime_sample_stride))
+    return std::nullopt;
+  if (config.moi_runtime_sample_stride == 0 || config.moi_runtime_sample_stride > 1024 ||
+      (config.moi_runtime_sample_stride & (config.moi_runtime_sample_stride - 1u)) != 0) {
+    std::fprintf(stderr,
+                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE='%s'; "
+                 "expected a power of two in 1..1024\n",
+                 std::getenv("RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE"));
+    return std::nullopt;
+  }
+  if (!parse_u32_env("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET", 0, &config.moi_runtime_sample_offset))
+    return std::nullopt;
+  if (config.moi_runtime_sample_offset >= config.moi_runtime_sample_stride) {
+    std::fprintf(stderr,
+                 "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET='%s'; "
+                 "expected < RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE (%u)\n",
+                 std::getenv("RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET"),
+                 config.moi_runtime_sample_stride);
     return std::nullopt;
   }
   if (!refresh_report_config_from_env(&config))
@@ -1139,7 +1165,7 @@ public:
   [[nodiscard]] bool allocate(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
                               uint64_t requested_size, bool direct_sampled, bool inline_shadow,
                               bool track_barriers, bool track_atomics, uint64_t *address,
-                              uint64_t *registered_size) {
+                              uint64_t *registered_size, uint64_t *registered_generation) {
     if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
         core->hsa_region_get_info_fn == nullptr || core->hsa_memory_allocate_fn == nullptr ||
         core->hsa_memory_free_fn == nullptr) {
@@ -1252,6 +1278,8 @@ public:
     }
     *address = reinterpret_cast<uint64_t>(ptr);
     *registered_size = requested;
+    if (registered_generation != nullptr)
+      *registered_generation = generation;
     log_message(kLogInfo,
                 "ConSan MOI auto report buffer reader=%llu addr=0x%llx bytes=%zu "
                 "access_record_capacity=%u barrier_record_capacity=%u atomic_record_capacity=%u "
@@ -2425,6 +2453,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.max_patches = config->max_patches;
     patch_options.moi_sample_stride = config->moi_sample_stride;
     patch_options.moi_sample_offset = config->moi_sample_offset;
+    patch_options.moi_runtime_sample_stride = config->moi_runtime_sample_stride;
+    patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
     patch_options.report_marker = config->report_marker;
     if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
@@ -2441,6 +2471,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
 
       uint64_t auto_report_address = 0;
       uint64_t auto_report_size = 0;
+      uint64_t auto_report_generation = 0;
       const bool direct_sampled = config->moi_engine == rocjitsu::ConSanMoiEngine::Sampled;
       const bool inline_shadow = config->moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow;
       if (!patch_result_storage &&
@@ -2448,9 +2479,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               layer().core_table(), agent, code_object_reader.handle,
               config->moi_auto_report_buffer_size, direct_sampled, inline_shadow,
               config->moi_track_barriers, config->moi_track_atomics, &auto_report_address,
-              &auto_report_size)) {
+              &auto_report_size, &auto_report_generation)) {
         patch_options.moi_report_buffer_address = auto_report_address;
         patch_options.moi_report_buffer_size = auto_report_size;
+        patch_options.moi_report_generation = static_cast<uint32_t>(auto_report_generation);
       } else if (!patch_result_storage && config->fail_closed) {
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       } else if (!patch_result_storage) {

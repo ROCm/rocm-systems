@@ -1884,6 +1884,23 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(
+                NAME "ConSanMoiHipTest.DbiRuntimeSampledBackendSelectsOneWave"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=ConSanMoiHipTest.RuntimeSampledBackendSelectsOneWave"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                    "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
                 NAME "ConSanMoiHipTest.DbiSampledAutoBufferReportsConflict"
                 COMMAND
                     ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test

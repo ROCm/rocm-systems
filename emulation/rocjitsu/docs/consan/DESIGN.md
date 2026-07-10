@@ -619,13 +619,20 @@ Current implementation:
 - Uses generation zero in direct DBI mode.
 - Selects static sites with `RJ_CONSAN_MOI_SAMPLE_STRIDE` and
   `RJ_CONSAN_MOI_SAMPLE_OFFSET`.
-- Scans sampled entries on the host at HSA-tool teardown and reports sampled
-  conflict counts.
+- Can leave every eligible static site patched while deterministically
+  selecting runtime waves with `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE` and
+  `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET`. The power-of-two policy compares the
+  wave owner against `owner & (stride - 1)` and preserves VCC in an
+  automatically allocated scalar pair.
+- Auto-buffer probes publish the buffer generation in every sampled entry.
+  Host replay ignores entries from older generations, scans the active entries
+  at HSA-tool teardown, and reports sampled conflict counts.
 - Keeps host-side sampled publish/replay helpers as semantic references.
 
 Important current simplifications:
 
-- Static-site selection is not runtime probabilistic sampling.
+- Runtime selection is deterministic owner-stride sampling, not probabilistic
+  or temporally varying sampling within one wave.
 - There is no in-kernel sampled conflict checker.
 - Clean sampled output is inconclusive.
 - Owner/epoch values are masked to the prototype 10-bit fields before packing.

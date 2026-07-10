@@ -140,8 +140,8 @@ flowchart LR
     direction LR
     I2["I2: Inline Diagnostics"]:::done
     I3["I3: Barrier And<br/>Atomic Semantics"]:::done
-    S1["S1: Sampling Policy"]:::active
-    S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
+    S1["S1: Sampling Policy"]:::done
+    S2["S2: In-Kernel<br/>Sampled Checking"]:::active
 
     S1 --> S2
   end
@@ -376,7 +376,7 @@ Landed state:
   the allocator/spill-frame direction and the `SpillManager` starting point.
   ConSan added the gfx1201 emitter, owner analysis, descriptor/dispatch
   transaction, and tests; [SPILLING.md](SPILLING.md) records the boundary.
-- Qualification is 168/168 focused synthetic/unit tests, 25/25 live rocJITsu
+- Qualification is 170/170 focused synthetic/unit tests, 26/26 live rocJITsu
   tests, 189/189 hip-moi controls, guarded TileAndFuse and scan/softmax tests,
   and 209/209 broad IREE compatibility under each MOI engine.
 
@@ -933,7 +933,7 @@ Landed evidence:
 - Standard record/replay, sampled, and targeted inline-shadow recipes contain
   no scratch, owner, epoch, or SGPR numbers; live forced-spill tests prove
   preservation and dispatch-private growth.
-- Focused tests pass 168/168, the live resource/behavior tier 25/25, hip-moi controls
+- Focused tests pass 170/170, the live resource/behavior tier 26/26, hip-moi controls
   189/189, and the 209-test IREE compatibility tier under every engine. Guarded
   TileAndFuse and scan/softmax regressions pass without resource-induced hangs.
 - [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
@@ -996,7 +996,7 @@ Landed evidence:
   objects. Overflow counts are printed unconditionally, and
   `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` is the strict guard.
 - The deliberate 144-byte dynamic-record test proves visible overflow. The
-  168 focused tests and 25 live gfx1201 resource/behavior tests pass, and all
+  170 focused tests and 26 live gfx1201 resource/behavior tests pass, and all
   three 209-test IREE sweeps pass without a buffer-size variable.
 
 ### O1B: Freeze Standard Engine Profiles - TODO
@@ -1200,7 +1200,7 @@ Landed evidence:
 - The live cross-wave race prints owner/epoch/instruction/access fields,
   `second_lanes=0x10001`, and `[0,4)` first/second LDS ranges; it also exercises
   visible diagnostic overflow at the default four-record capacity.
-- The 99-test `ConSanMoi` suite, 25-test live resource/behavior tier, and
+- The 101-test `ConSanMoi` suite, 26-test live resource/behavior tier, and
   209-test inline-shadow IREE compatibility sweep pass.
 
 ## I3: Inline Barrier And Atomic Semantics - DONE
@@ -1238,7 +1238,7 @@ Landed evidence:
   `hw_id` owner sources.
 - The focused `ConSanMoi` suite and live resource/behavior tier pass.
 
-## S1: Sampling Policy - TODO
+## S1: Sampling Policy - DONE
 
 Goal: turn sampled mode from static-site throttling into a real low-overhead
 sanitizer option.
@@ -1247,29 +1247,37 @@ Position in the DAG: wait for `R1` before adding runtime probe state or
 conditions, so the policy is implemented on automatic resources rather than a
 new manual-register recipe.
 
-Current state:
+Landed state:
 
 - `RJ_CONSAN_MOI_ENGINE=sampled` writes compact sampled entries directly from
   DBI probes.
 - `RJ_CONSAN_MOI_SAMPLE_STRIDE` and `RJ_CONSAN_MOI_SAMPLE_OFFSET` select static
   candidate sites deterministically.
-- Direct sampled entries use generation zero and are checked host-side at
-  teardown.
-
-Work:
-
-- Decide the first runtime sampling mechanism: counter, lane condition,
-  hardware-derived seed, or host-configured deterministic sequence.
-- Keep a deterministic mode for reproducible tests.
-- Add generation updates so old sampled entries can be consumed or ignored
-  intentionally.
-- Document that sampled is lower-fidelity: a clean run is not proof of no race.
+- `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE` and
+  `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` select runtime waves by a deterministic
+  power-of-two owner predicate while leaving all eligible sites patchable.
+- The predicate preserves VCC in an automatically allocated scalar pair and
+  skips the expensive delay, packing, and stores for unselected waves.
+- Auto-buffer entries carry the buffer generation; host replay ignores stale
+  generations. Explicit caller buffers retain the deterministic
+  generation-zero convention.
+- Sampled mode remains lower fidelity: a clean run is not proof of no race.
 
 Done criteria:
 
 - A run can reduce sampled probe overhead without recompiling or changing which
   static sites are patchable.
 - The test suite has deterministic sampled controls.
+
+Landed evidence:
+
+- Synthetic code-generation coverage proves two static sites remain patched,
+  the owner predicate appears at both sites, and VCC is automatically
+  preserved.
+- A live two-wave gfx1201 control with stride 2/offset 0 produces exactly one
+  valid entry from the selected owner.
+- The auto-buffer conflict control proves generated entries carry the active
+  generation, while host tests prove stale generations are ignored.
 
 ## S2: In-Kernel Sampled Checking - TODO
 

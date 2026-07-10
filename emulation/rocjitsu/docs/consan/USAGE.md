@@ -158,9 +158,10 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_FORBID_OVERFLOW` | all MOI engines with auto report buffers | Optional guard: process exits nonzero at hook unload if access, barrier, atomic, or diagnostic records were dropped. Drops are always reported to stderr even without the guard. |
 | `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Access, barrier, and atomic probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
+| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` | `sampled` | Deterministic runtime wave selection without removing eligible static sites. The stride defaults to 1 and must be a power of two in 1..1024; the offset defaults to 0 and must be smaller than the stride. A wave publishes when `owner & (stride - 1) == offset`. |
 | `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported RDNA4 barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
 | `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `record_replay` | Opt-in access-record append mode. Each active lane reserves its own access-record slot at runtime. Dynamic probes automatically preserve EXEC, VCC, and SCC and currently skip candidates immediately after `s_*_saveexec` while control-flow/liveness handling is still conservative. |
-| `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, `inline_shadow` diagnostics/atomics | Optional explicit even-base debug override. Record/barrier probes reserve five SGPRs from an even base in `0..100`: EXEC, VCC, and SCC. Inline diagnostics/atomic acquire reserve eleven SGPRs from an even base in `0..94`: four nested EXEC pairs, VCC, and SCC. Without the override, ConSan places a fresh window above all guest scalar references and grows only owning descriptors. |
+| `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, sampled runtime selection, `inline_shadow` diagnostics/atomics | Optional explicit even-base debug override. Runtime sampled probes reserve one VCC-save pair; record/barrier probes reserve five SGPRs from an even base in `0..100`: EXEC, VCC, and SCC. Inline diagnostics/atomic acquire reserve eleven SGPRs from an even base in `0..94`: four nested EXEC pairs, VCC, and SCC. Without the override, ConSan places a fresh window above all guest scalar references and grows only owning descriptors. |
 | `RJ_CONSAN_MOI_TRACK_ATOMICS` | `record_replay`, `inline_shadow` | For `record_replay`, enable the experimental atomic-record patch for a narrow RDNA4 no-SADDR `flat_atomic*` subset; host replay models supported release/acquire atomic events, and live GPU smoke coverage checks one same-address handoff. For `inline_shadow`, enable the first one-slot address-scoped release/acquire metadata patch for the same flat-atomic subset; release atomics publish owner/epoch/address into the internal slot, and acquire atomics import `release_epoch + 1` only when the address matches. |
 | `RJ_CONSAN_MOI_OWNER_VGPR`, `RJ_CONSAN_MOI_EPOCH_VGPR`, `RJ_CONSAN_MOI_INIT_OWNER_EPOCH` | `record_replay`, `inline_shadow` experiments | Optional explicit debug overrides. Inline shadow and tracked atomics normally assign persistent state above guest references or use derived-owner/private-epoch state when the VGPR file is full. |
 | `RJ_CONSAN_MOI_OWNER_SOURCE`, `RJ_CONSAN_MOI_OWNER_SGPR` | owner/epoch prologue experiments | Select owner initialization. Default `workitem_id` uses `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads RDNA4 `HW_ID1` low bits and automatically receives a fresh scalar temporary; `RJ_CONSAN_MOI_OWNER_SGPR` is an optional debug override. |
@@ -285,6 +286,15 @@ them.
   `RJ_CONSAN_MOI_SAMPLE_STRIDE`. Candidate `i` is eligible when
   `i % stride == offset`. This is a deterministic static site filter, not a
   runtime random sampler.
+- `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N`: power-of-two runtime wave-selection
+  stride in `1..1024`. Unlike the static stride, this leaves all eligible sites
+  patchable and skips the delay, packing, and stores for unselected owners.
+- `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=M`: selected owner residue smaller than
+  the runtime stride. The deterministic predicate is
+  `owner & (stride - 1) == offset`; VCC preservation is automatic.
+- Auto report buffers assign a generation to each code-object buffer and bake
+  it into direct sampled entries. Teardown ignores stale-generation entries.
+  Explicit caller-owned sampled buffers retain generation zero.
 - `RJ_CONSAN_MOI_OWNER_VGPR=N`: experimental MOI first-light hook. When set,
   the injected LDS probe copies this VGPR into the access record's owner field.
   When unset for a kernel-owned first-light site, the probe derives a prototype
@@ -292,8 +302,7 @@ them.
   descriptor's wavefront-size bit, and writes that value to the record. With
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`, the kernel-entry prologue initializes this
   VGPR from `RJ_CONSAN_MOI_OWNER_SOURCE`. In direct sampled mode, an explicit
-  owner VGPR value is packed into a 10-bit sampled field without additional
-  in-kernel masking.
+  owner VGPR value is masked and packed into a 10-bit sampled field.
 - `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id|hw_id`: controls only the
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1` prologue. `workitem_id` is the default and
   initializes owner as `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads

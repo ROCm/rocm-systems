@@ -1143,6 +1143,45 @@ TEST(ConSanMoiHipTest, SampledBackendWritesDirectEntries) {
   EXPECT_TRUE(moi_sampled_entries_conflict(live_entries[1], live_entries[0]));
 }
 
+TEST(ConSanMoiHipTest, RuntimeSampledBackendSelectsOneWave) {
+  constexpr uint32_t kSampledSlots = 2;
+  constexpr size_t kReportBytes = moi_direct_sampled_report_buffer_bytes(kSampledSlots);
+  uint32_t *d_out = nullptr;
+  void *d_report = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&d_report, kReportBytes));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_report, 0, kReportBytes));
+
+  ReportEnvGuard report_env;
+  ASSERT_TRUE(set_moi_report_buffer_env(d_report, kReportBytes));
+
+  moi_two_wave_lds_accesses<<<1, 64>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  const hipError_t sync = hipDeviceSynchronize();
+  ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);
+
+  std::vector<uint8_t> report(kReportBytes);
+  HIP_ASSERT(hipMemcpy(report.data(), d_report, report.size(), hipMemcpyDeviceToHost));
+  free_device_ptr(static_cast<uint32_t *>(d_report));
+  free_device_ptr(d_out);
+
+  std::vector<MoiSampledEntry> live_entries;
+  for (uint32_t i = 0; i < kSampledSlots; ++i) {
+    uint64_t raw_entry = 0;
+    std::memcpy(&raw_entry, report.data() + sizeof(MoiReportHeader) + i * sizeof(uint64_t),
+                sizeof(raw_entry));
+    MoiSampledEntry entry = decode_moi_sampled_entry(raw_entry);
+    if (entry.valid)
+      live_entries.push_back(entry);
+  }
+
+  ASSERT_EQ(live_entries.size(), 1u);
+  EXPECT_EQ(live_entries.front().owner_id & 1u, 0u);
+  EXPECT_EQ(live_entries.front().epoch, 0u);
+  EXPECT_EQ(live_entries.front().cell_count, 1u);
+}
+
 TEST(ConSanMoiHipTest, EquivalentAccessesInDifferentWorkgroupsDoNotConflict) {
   constexpr uint32_t kAccessSlots = 8;
   constexpr size_t kReportBytes = moi_report_buffer_bytes(kAccessSlots);

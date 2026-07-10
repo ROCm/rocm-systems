@@ -261,6 +261,18 @@ export RJ_CONSAN_MOI_SAMPLE_STRIDE=2
 export RJ_CONSAN_MOI_SAMPLE_OFFSET=0
 ```
 
+To keep every eligible site patched but sample one deterministic owner residue
+at runtime:
+
+```sh
+export RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=4
+export RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0
+```
+
+The runtime stride must be a power of two in `1..1024`. Unselected waves skip
+sample delay, packing, and publication; auto-buffer generations prevent stale
+entries from participating in teardown replay.
+
 Interpretation:
 
 - visible sampled entries prove DBI probes executed;

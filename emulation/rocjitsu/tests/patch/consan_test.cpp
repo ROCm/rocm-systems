@@ -3148,6 +3148,66 @@ TEST(ConSanMoi, DirectSampledProbeCanStrideCandidateSelection) {
   EXPECT_EQ(result.patches.front().anchor_offset, kSecondSiteWord * sizeof(uint32_t));
 }
 
+TEST(ConSanMoi, DirectSampledProbeRuntimeWaveSelectionKeepsAllSitesPatchable) {
+  constexpr uint32_t kSecondSiteWord = 170;
+  std::vector<uint32_t> text_words(420, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  text_words[kSecondSiteWord] = 0xD8D80000u;
+  text_words[kSecondSiteWord + 1] = 0x01000000u; // ds_load_b32 v1, v0
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+  options.max_patches = 2;
+  options.moi_runtime_sample_stride = 4;
+  options.moi_runtime_sample_offset = 1;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_EQ(result.patches[0].anchor_offset, 0u);
+  EXPECT_EQ(result.patches[1].anchor_offset, kSecondSiteWord * sizeof(uint32_t));
+  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text_section = patched.text_sections().front();
+  ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
+  std::vector<uint32_t> patched_words(text_section->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), text_section->data(), text_section->size());
+
+  const uint16_t save_sgpr = *result.resolved_moi_exec_save_sgpr;
+  const auto save_vcc = build_s_mov_b64(save_sgpr, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(save_vcc);
+  ASSERT_TRUE(restore_vcc);
+  EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *save_vcc), 2);
+  EXPECT_EQ(std::count(patched_words.begin(), patched_words.end(), *restore_vcc), 2);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    ASSERT_TRUE(patch.scratch_vgpr);
+    const uint16_t low_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 2u);
+    const uint16_t owner_vgpr = static_cast<uint16_t>(*patch.scratch_vgpr + 4u);
+    const auto owner_mask =
+        build_v_and_b32_e32_literal(low_vgpr, /*literal=*/3, owner_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto selected = build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(1), low_vgpr,
+                                                     ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(owner_mask);
+    ASSERT_TRUE(selected);
+    EXPECT_TRUE(contains_subsequence(patched_words, *owner_mask));
+    EXPECT_NE(std::find(patched_words.begin(), patched_words.end(), *selected),
+              patched_words.end());
+  }
+}
+
 TEST(ConSanMoi, DirectSampledProbeWarnsWhenReportCapacityLimitsPatches) {
   std::vector<uint32_t> text_words(360, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words[0] = 0xD8340000u;
@@ -5771,6 +5831,30 @@ TEST(ConSanMoi, SampledWatchpointReplayDoesNotTreatCleanSnapshotAsProof) {
       pack_consan_moi_sampled_watchpoint_entry(ConSanMoiShadowAccessKind::Read,
                                                /*owner_id=*/2, /*epoch=*/3, /*generation=*/7,
                                                /*start_cell=*/3, /*cell_count=*/1),
+  };
+  std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
+
+  const ConSanMoiSampledReplayResult replay =
+      consan_moi_sampled_replay_entries(header, sampled, diagnostics);
+
+  EXPECT_EQ(replay.processed_entry_count, 2u);
+  EXPECT_EQ(replay.emitted_diagnostic_count, 0u);
+  EXPECT_FALSE(replay.conflict);
+  EXPECT_EQ(header.diagnostic_count, 0u);
+}
+
+TEST(ConSanMoi, SampledWatchpointReplayIgnoresStaleGenerations) {
+  ConSanMoiReportHeader header = make_consan_moi_report_header(
+      /*generation=*/8, /*dispatch_id=*/11, /*access_record_capacity=*/0,
+      /*diagnostic_capacity=*/1, /*exact_shadow_entry_capacity=*/0,
+      /*sampled_watchpoint_capacity=*/2);
+  std::array<uint64_t, 2> sampled = {
+      pack_consan_moi_sampled_watchpoint_entry(ConSanMoiShadowAccessKind::Write,
+                                               /*owner_id=*/1, /*epoch=*/3, /*generation=*/7,
+                                               /*start_cell=*/2, /*cell_count=*/1),
+      pack_consan_moi_sampled_watchpoint_entry(ConSanMoiShadowAccessKind::Read,
+                                               /*owner_id=*/2, /*epoch=*/3, /*generation=*/7,
+                                               /*start_cell=*/2, /*cell_count=*/1),
   };
   std::array<ConSanMoiDiagnosticRecord, 1> diagnostics{};
 

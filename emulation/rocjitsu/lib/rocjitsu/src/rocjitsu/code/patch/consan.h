@@ -106,10 +106,17 @@ struct ConSanOptions {
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
+  /// Generation stored in direct sampled entries. Auto report buffers set
+  /// this from their versioned header; explicit buffers default to zero.
+  uint32_t moi_report_generation = 0;
   uint32_t delay_nops = 0;
   uint32_t max_patches = 1;
   uint32_t moi_sample_stride = 1;
   uint32_t moi_sample_offset = 0;
+  /// Runtime deterministic wave selector for direct sampled probes. The
+  /// stride is a power of two and selects owner & (stride - 1) == offset.
+  uint32_t moi_runtime_sample_stride = 1;
+  uint32_t moi_runtime_sample_offset = 0;
   uint32_t report_marker = 1;
 };
 
