@@ -9,7 +9,7 @@
 #
 # Downstream stages (math-libs, comm-libs, storage-libs, debug-tools,
 # dctools-core, profiler-apps, media-libs, wsl-rocdxg) are pulled from the
-# latest successful nightly ASAN run via prebuilt_stages, so they are not
+# latest successful nightly develop run via prebuilt_stages, so they are not
 # rebuilt. The baseline_run_id can be overridden manually via workflow_dispatch.
 
 name: TheRock Multi-Arch CI ASAN (hip-tests only)
