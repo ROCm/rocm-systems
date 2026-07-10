@@ -1,4 +1,4 @@
-# ConSan Near-Future Plan
+# ConSan Work Plan
 
 This plan records the dependency DAG used to bring ConSan's gfx1201 MOI
 flavors to broad operational parity. It intentionally omits session history;
@@ -7,8 +7,8 @@ forward branch for native-target breadth.
 
 [DESIGN.md](DESIGN.md) describes what exists now and where that differs from
 the intended architecture. [SPILLING.md](SPILLING.md) documents the R1 resource
-path as a deliverable in its own right. This file describes the open lines of
-work from here.
+path as a deliverable in its own right. This file records the completed gfx1201
+path and the explicitly deferred architecture branch.
 
 ## Status Legend
 
@@ -29,12 +29,11 @@ Project rules:
 - Keep GPU test parallelism around `-j8`.
 - Use the workspace TheRock ROCm build for ROCm runtime tests.
 - Keep hip-moi as a semantic reference, not as public ConSan terminology.
-- Start spilling work from Kunwar Grover's
+- The spilling work started from Kunwar Grover's
   `origin/users/Groverkss/text-relocation-land` branch. It contains a reusable
-  VGPR allocation/spill-frame pattern and a CDNA3 save/restore emitter. Add
-  RDNA4 emission for ConSan's local target, and add minimal ConSan-local SGPR
-  spilling only if a current probe truly needs it before shared rocJITsu
-  spilling exists.
+  VGPR allocation/spill-frame pattern and a CDNA3 save/restore emitter. ConSan
+  added RDNA4 emission for its local target; no current probe required a
+  parallel general SGPR spilling implementation.
 - Keep spill/cave code prototype-shaped. Broader rocJITsu spilling work may
   replace ConSan-local integration.
 
@@ -188,7 +187,7 @@ flowchart LR
   T1B["T1B: MOI Parity<br/>Qualification Runs"]:::done
   T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::done
   M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::done
-  D1["D1: Team Snapshot Docs"]:::active
+  D1["D1: Team Snapshot Docs"]:::done
   A1["A1: Multi-Architecture Native Targets<br/>(outside current local window)"]:::deferred
 
   B0 --> T1A
@@ -240,21 +239,19 @@ scope of `B` should not start until `A` is complete. An arrow does not mean
 are completion or acceptance milestones; work flows into them, never out of
 them as though the milestone created its prerequisites.
 
-The current autonomous priority order within that DAG is:
+The executed dependency order was:
 
 1. `R1` is complete: access, barrier, and atomic probes use the common
    resource policy, and the gfx1201 profiles have been qualified without
    register-number configuration.
-2. Advance `I1A`, `I2`, `I3`, and `S1` as independent feature
-   branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
-3. `R2`, `F1`, and `T1A` are already ready from the baseline and can be
-   taken in bounded slices when they unblock the main path. Freeze profiles in
-   `O1B` only after the engine behavior and automatic resource choices named
-   by its incoming edges are stable.
-4. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
-   and sampled checking paths are ready. Passing it reaches the `T1` parity
-   milestone and permits the final `M0` broad-turn-on acceptance review.
-5. Refresh the durable team snapshot in `D1` after `M0` is accepted.
+2. `I1A`, `I2`, `I3`, and `S1` advanced as independent feature branches;
+   `I1B` waited for `F1`, and `S2` waited for `S1`.
+3. `R2`, `F1`, and `T1A` advanced from the baseline. `O1B` followed its
+   engine-behavior and automatic-resource prerequisites.
+4. `T1B` followed profiles, placement, diagnostics, ordering, and sampled
+   checking. Its passing matrix reached `T1` and supported the `M0` acceptance
+   review.
+5. This durable team snapshot (`D1`) followed accepted `M0`.
 
 `A1` remains in the full project DAG, but it is intentionally outside the
 current local execution window while only `gfx1201` hardware is available. Its
@@ -268,8 +265,8 @@ coverage and operational behavior on that boundary.
 
 ## M0: MOI Broad Turn-On Readiness - DONE
 
-Goal: remove the remaining reasons why MOI cannot be run over the same broad
-test corpus as SuperCollider with only a top-level flavor and engine choice.
+Goal: remove the reasons why MOI could not be run over the same broad test
+corpus as SuperCollider with only a top-level flavor and engine choice.
 
 Position in the DAG: `M0` is the acceptance milestone at the end of the
 gfx1201 readiness path, not an umbrella parent at its beginning. The
@@ -286,9 +283,8 @@ RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled \
 ctest ...
 ```
 
-Engine choice should stay explicit. The work here is to eliminate the extra
-per-test prototype knobs that currently make MOI feel like a collection of
-targeted experiments.
+Engine choice stays explicit. The accepted profiles eliminate extra per-test
+register and buffer knobs from ordinary corpus runs.
 
 Acceptance state:
 
@@ -1419,7 +1415,7 @@ developer session and a broader corpus for confidence.
 
 Current state:
 
-- Focused rocJITsu unit and HIP GPU tests cover the main prototype pieces.
+- Focused rocJITsu unit and HIP GPU tests cover the main implementation pieces.
 - IREE TileAndFuse RDNA4 / `gfx1201` matmul smoke has passed for
   SuperCollider, MOI record/replay, sampled, and inline-shadow configurations.
 - The broader IREE e2e inventory has been used as compatibility coverage for
@@ -1427,8 +1423,8 @@ Current state:
 - The broader local IREE e2e inventory passes all three MOI engines without
   register-number configuration; this remains compatibility rather than proof
   that every loaded code object was instrumented.
-- hip-moi's 189-test semantic control suite is documented and clean, but the
-  final profile-by-tier ConSan matrix still belongs to `T1B`.
+- hip-moi's 189-test semantic control suite and the final profile-by-tier
+  ConSan matrix are documented and clean.
 - No equivalent `gfx942`, `gfx950`, or `gfx1250` ConSan test tier exists yet.
 
 Dependency split:
@@ -1516,7 +1512,7 @@ for dead/growth/spill allocation, access/barrier/atomic records, inline and
 sampled diagnostics, overflow, and unsupported skips. Tier1/tier2 are
 compatibility evidence, not a claim that every object was instrumented.
 
-## D1: Team Snapshot Docs - TODO
+## D1: Team Snapshot Docs - DONE
 
 Goal: keep documentation aligned with the current team-facing snapshot.
 
@@ -1525,20 +1521,19 @@ and readiness claims current before `M0`. `D1` is the post-acceptance editorial
 snapshot that makes the accepted result easy for a new reader to navigate; it
 does not supply evidence needed to accept `M0`.
 
-Current state:
+Landed state:
 
 - `TUTORIAL.md` introduces both top-level flavors.
 - `DESIGN.md` explains current behavior and intentional gaps.
 - `USAGE.md` remains the detailed env-var runbook.
+- `README.md` is the concise landing page; command-heavy material lives in
+  `TUTORIAL.md`, `USAGE.md`, and `LOCAL_TESTING.md`.
+- `DESIGN.md` describes the accepted implementation and its explicit
+  precision/architecture boundaries rather than listing closed M0 blockers.
+- `PLAN.md` preserves dependency and acceptance evidence without session-log
+  archaeology.
 
-Work:
-
-- Keep `README.md` as the landing page.
-- Move command-heavy details into `TUTORIAL.md` and `USAGE.md`.
-- Keep `DESIGN.md` present-facing and avoid work-log language.
-- Keep `PLAN.md` future-facing and avoid closed-session archaeology.
-
-Done criteria:
+Acceptance check:
 
 - New readers can answer:
   - which flavor should I run?
@@ -1548,17 +1543,17 @@ Done criteria:
 
 ## External Branch References
 
-Kunwar Grover (`@Groverkss`) has DBT/DBI work on origin that should guide the
-next spilling and text-relocation work:
+Kunwar Grover (`@Groverkss`) has DBT/DBI work on origin that guided the R1
+spilling and text-relocation work and remains useful provenance:
 
 - `origin/users/Groverkss/text-relocation-land`
-  - Primary branch for ConSan's next spilling work.
+  - Primary source branch used for ConSan's R1 spilling work.
   - Its reusable pattern is split across `semantic_scratch.*`,
     `semantic/cdna3_scratch.*`, `TranslationContext`, kernel-scoped liveness,
     descriptor feedback, and kernel text relocation.
-  - The current concrete save/restore emitter is CDNA3-only and the allocator
-    is VGPR-only. R1 must provide RDNA4 emission for local validation and should
-    not claim general SGPR spilling.
+  - Its concrete save/restore emitter is CDNA3-only and its allocator is
+    VGPR-only. R1 supplied separate RDNA4 emission for local validation and
+    does not claim general SGPR spilling.
   - Kernarg extension, virtual LDS, and sidecars are useful examples of
     persistent state and transactional descriptor/text updates, but they are
     not prerequisites for the first ConSan VGPR spill probe.

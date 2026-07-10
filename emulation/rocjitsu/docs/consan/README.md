@@ -29,11 +29,12 @@ extensions because they change patch composition and buffer layout.
 
 - [TUTORIAL.md](TUTORIAL.md): team-facing commands for SuperCollider and MOI.
 - [DESIGN.md](DESIGN.md): current architecture, implemented behavior, and
-  explicit prototype gaps.
+  explicit capability boundaries.
 - [SPILLING.md](SPILLING.md): the R1 register allocator, gfx1201 spill backend,
   ownership rules, provenance, and validation boundary.
 - [USAGE.md](USAGE.md): detailed environment-variable and test runbook.
-- [PLAN.md](PLAN.md): near-future work DAG from the current baseline.
+- [PLAN.md](PLAN.md): dependency DAG, completion evidence, and deferred
+  multi-architecture branch.
 
 ## Quick Start
 
@@ -98,3 +99,19 @@ barrier, and atomic sites share an owner-aware dead/fresh/spill planner, and
 ordinary runs do not select register numbers. The gfx1201 `standard-v1`
 profiles have passed the common 209-test broad IREE tier; remaining work is
 native-target breadth and explicitly documented precision/coverage extensions.
+
+## Acceptance And Next Work
+
+The current gfx1201 snapshot passed 183 focused unit tests, 37 live rocJITsu
+controls, 189 independent hip-moi semantic controls, 8 selected IREE tests per
+profile, and 209 broad IREE tests per profile, with no timeout. A useful run
+should show `patches=N modified=true`; focused MOI runs additionally use the
+record or diagnostic guards documented in [TUTORIAL.md](TUTORIAL.md).
+
+These results establish guarded DBI execution and broad output compatibility,
+not universal opcode coverage or proof that a clean workload is race-free.
+The next major engineering branch is `A1`: native implementation and live-GPU
+qualification for `gfx942`, `gfx950`, and `gfx1250`. It is deferred while this
+workspace has only gfx1201 hardware. Narrow extensions such as more inline
+atomic forms remain capability improvements rather than hidden acceptance
+requirements.

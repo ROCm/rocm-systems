@@ -26,11 +26,11 @@ register allocation, private-layout, ownership, and spill transaction.
 | Public flavor switch | `RJ_CONSAN_FLAVOR=supercollider|moi`. | Keep the two top-level flavors. |
 | SuperCollider | Usable redundant LDS/likely-group-flat check/trap mode. | Keep as a simple perturbation/value-check sanitizer mode. |
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
-| MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
-| MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
+| MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, admitted group-flat forms, barriers, and one-slot atomic ordering controls. | Broaden proven instruction/order coverage while retaining exact supported-form semantics. |
+| MOI `sampled` | Runtime-qualified sampled entry publication, host-side conflict scan, and opt-in immediate check. | Improve sampling fidelity and overhead measurement without presenting clean samples as proof of race freedom. |
 | MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration; tier0 supplies guarded semantic evidence. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
 | Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
-| Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
+| Diagnostics | Bounded inline and sampled diagnostics plus resource, overflow, and unsupported-site summaries; compact shadow words limit prior-lane detail. | Preserve bounded output while improving precision and presentation. |
 | Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with a normalized RDNA4 group-flat address contract. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
 
 ## Source Map
@@ -67,8 +67,8 @@ Primary files:
     as the target matrix expands.
 - `lib/rocjitsu/src/rocjitsu/code/patch/trampoline_builder.*`,
   `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*`
-  - Reusable patch-placement and DBT utilities that ConSan should lean on more
-    heavily as probe size grows. `spill_manager.*` now also emits transactional
+  - Reusable patch-placement and DBT utilities used by all ConSan engines.
+    `spill_manager.*` also emits transactional
     gfx1201 B32 VGPR save/restore batches, performs kernel-local fixed-private
     descriptor growth, and keeps the matching AMDGPU MessagePack metadata
     coherent in place.
@@ -709,7 +709,8 @@ Intended direction:
 - Keep 3D workgroup identity.
 - Use a robust owner derivation that does not require user-selected registers.
 - Preserve `hw_id` as a useful low-level source where appropriate.
-- Integrate owner/epoch state with the future scratch/spill policy.
+- Owner/epoch state is integrated with the R1 scratch/spill policy; broaden the
+  identity encoding only when a concrete workload exceeds its packed bounds.
 
 ## Barrier And Atomic Semantics
 
@@ -735,8 +736,9 @@ Atomics:
 - `inline_shadow` has a one-slot release/acquire address-matching prototype.
 - `sampled` has no atomic ordering implementation yet.
 
-Current atomic support is intentionally narrow. The next goal is semantic
-confidence on LDS ordering controls, not broad atomic opcode coverage.
+Current atomic support is intentionally narrow. Broader opcode coverage should
+follow concrete semantic controls rather than being inferred from compatibility
+runs.
 
 ## Why The Current Code Is Not The Final Design
 
@@ -804,7 +806,7 @@ What it does not mean:
 - It does not prove flat `MaybeGroup` is formally correct for arbitrary code.
 - It does not prove unsupported instruction families are instrumented.
 
-## Immediate Engineering Gaps
+## Remaining Engineering Boundary
 
 The R1 resource path is in place: non-spill allocation, gfx1201 spill-backed
 access/barrier/atomic probes, zero-to-nonzero dispatch scratch,

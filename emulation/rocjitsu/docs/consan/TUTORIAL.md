@@ -407,6 +407,6 @@ Sampled mode reports no conflicts:
 
 - `README.md`: overview and recommended starting point.
 - `TUTORIAL.md`: commands to run.
-- `DESIGN.md`: current architecture and prototype gaps.
+- `DESIGN.md`: current architecture and capability boundaries.
 - `USAGE.md`: detailed environment-variable reference.
-- `PLAN.md`: near-future work DAG.
+- `PLAN.md`: dependency DAG, acceptance evidence, and deferred target breadth.
