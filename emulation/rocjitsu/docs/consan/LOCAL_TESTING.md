@@ -58,8 +58,8 @@ Known local result:
 
 - Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
   passed after the R1D implementation.
-- Current resource/MOI/spill-manager focus: 148/148 passed after enabling
-  zero-to-nonzero dispatch scratch.
+- Current resource/MOI/spill-manager focus: 151/151 passed after adding the
+  descriptor-full private-epoch fallback.
 
 Focused gfx1201 spill hardware smoke:
 
@@ -93,19 +93,21 @@ Known local result:
 - The forced tier and kernel selector are internal CTest controls, not public
   ConSan configuration.
 
-Automatic inline-shadow persistent VGPR checks:
+Automatic inline-shadow resource checks:
 
 ```sh
 ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
-  -R '^ConSanInlineShadowTest\.Dbi(ReportsCrossWaveRace|BarrierEpochOrdersCrossWaveAccesses)$' \
-  --parallel 2 --output-on-failure
+  -R '^ConSanInlineShadowTest\.Dbi(ReportsCrossWaveRace|BarrierEpochOrdersCrossWaveAccesses|PrivateEpochBarrierOrdersCrossWaveAccesses)$' \
+  --parallel 3 --output-on-failure
 ```
 
 Known local result:
 
-- 2/2 passed without owner/epoch VGPR numbers or
-  `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`. Scratch and the diagnostic EXEC-save SGPR
-  remain explicit in this R1E slice.
+- 3/3 passed without scratch, owner, or epoch VGPR numbers or
+  `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`. The private-epoch control forces the
+  zero-private entry/access/barrier representation and raises its dispatch
+  private size to 20 bytes. The diagnostic EXEC-save SGPR remains explicit and
+  belongs to `R1F`.
 
 ## SuperCollider Coverage
 

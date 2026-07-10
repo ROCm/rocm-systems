@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, direct-kernel sites can preserve a live victim window through gfx1201 private scratch (including zero-private kernels through dispatch rewriting), and inline shadow automatically assigns dedicated owner/epoch VGPRs when capacity exists. | Add the descriptor-full persistent fallback, scalar/special state, and shared functions. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay, sampled, and inline-shadow access probes. Direct-kernel sites can preserve a live victim window through gfx1201 private scratch (including zero-private kernels through dispatch rewriting). Inline shadow uses dedicated owner/epoch VGPRs when capacity exists and derived-owner/private-epoch state when it does not. | Add scalar/special state and shared-function plans, then converge every probe family on the common policy. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -263,21 +263,25 @@ Current register policy:
   the loaded kernel object and rewrites its AQL dispatch packet, so a compiled
   private size of zero can become nonzero without relying on the runtime's
   original symbol metadata.
-- Dynamic, barrier, atomic, inline-shadow scratch/diagnostic, and EXEC-save
-  paths still rely on explicit env knobs.
-- Inline shadow is the exception for persistent vector state: when no explicit
-  owner/epoch pair is supplied, it places a dedicated pair above guest
-  references and the selected scratch window, replans scratch with that pair
-  forbidden, and injects a kernel-entry initializer. This automatic path is
-  currently direct-kernel only and requires spare VGPR-file capacity.
+- Dynamic record, diagnostic/atomic scalar state, and EXEC-save paths still
+  rely on explicit env knobs. Inline-shadow access scratch now uses the common
+  planner.
+- When no explicit inline-shadow owner/epoch pair is supplied, ConSan first
+  places a dedicated pair above guest references and the selected scratch
+  window, replans scratch with that pair forbidden, and injects a kernel-entry
+  initializer. If no pair fits, it derives owner per access and keeps epoch in
+  a persistent private dword. The epoch slot precedes an independently aligned
+  ephemeral spill zone shared by access, barrier, and entry-prologue leases.
+  Both automatic representations remain direct-kernel only until shared-owner
+  planning lands.
 - A standalone gfx1201 spill backend allocates stable slots through
   `SpillManager`, emits address-free `scratch_store/load_b32` batches with
   conservative split waits, and grows only the selected descriptor's fixed
   private segment. Dynamic-stack kernels are detected from compiler-emitted
   symbols and rejected by this first backend.
-- Static record/replay and sampled access probes consume that backend for
-  direct kernels. Shared functions, persistent state, scalar state, and dynamic
-  stacks remain outside this first vertical slice.
+- Static record/replay, sampled, and descriptor-full inline-shadow access
+  probes consume that backend for direct kernels. Shared functions, scalar
+  state, and dynamic stacks remain outside the current resource slice.
 
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
 first reference for spilling work. Its directly reusable piece is the
@@ -752,11 +756,10 @@ What it does not mean:
 
 ## Immediate Engineering Gaps
 
-The non-spill scratch policy, the first complete gfx1201 spill-backed access
-slice, zero-to-nonzero dispatch scratch, and spare-capacity persistent
-owner/epoch placement are now in place. The immediate gap is descriptor-full
-persistent state: its private-backed slots must be kept separate from ephemeral
-spill leases and used consistently by access and barrier probes.
+The non-spill scratch policy, gfx1201 spill-backed access path, zero-to-nonzero
+dispatch scratch, spare-capacity persistent VGPR placement, and descriptor-full
+private epoch fallback are now in place. The immediate resource gap is
+scalar/special state, followed by compatible assignments for shared functions.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:

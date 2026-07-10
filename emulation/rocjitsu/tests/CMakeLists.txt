@@ -1651,7 +1651,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
                     "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
                     "RJ_CONSAN_MAX_PATCHES=4"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
@@ -1697,8 +1696,28 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=104"
                     "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiPrivateEpochBarrierOrdersCrossWaveAccesses"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=padded_barrier_ordered_lds_store"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )

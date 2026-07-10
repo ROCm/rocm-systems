@@ -77,6 +77,7 @@ struct HookConfig {
   bool moi_track_atomics = false;
   bool moi_dynamic_access_records = false;
   bool test_force_vgpr_spill = false;
+  bool test_force_private_epoch = false;
   std::string test_kernel_name_filter;
   bool moi_require_records = false;
   bool moi_require_diagnostics = false;
@@ -159,6 +160,8 @@ struct HookConfig {
     return "trampoline-moi-sampled-watchpoint-store";
   case rocjitsu::ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue:
     return "kernel-entry-moi-owner-epoch-prologue";
+  case rocjitsu::ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue:
+    return "kernel-entry-moi-private-epoch-prologue";
   case rocjitsu::ConSanPatchKind::TrampolineMoiBarrierRecord:
     return "trampoline-moi-barrier-record";
   case rocjitsu::ConSanPatchKind::TrampolineMoiInlineEpochBarrier:
@@ -672,6 +675,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   // Deliberately test-only: this is not part of the public ConSan knob set.
   if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill))
+    return std::nullopt;
+  if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false,
+                      &config.test_force_private_epoch))
     return std::nullopt;
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
@@ -2309,6 +2315,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_track_atomics = config->moi_track_atomics;
     patch_options.moi_dynamic_access_records = config->moi_dynamic_access_records;
     patch_options.force_vgpr_spill = config->test_force_vgpr_spill;
+    patch_options.force_private_epoch = config->test_force_private_epoch;
     patch_options.test_kernel_name_filter = config->test_kernel_name_filter;
     patch_options.fault_barrier_index = config->fault_barrier_index;
     patch_options.delay_mode = config->delay_mode;
@@ -2464,9 +2471,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
             plan.required_vgpr_count, plan.original_private_segment_size);
       }
-      if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr) {
+      if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||
+          patch_result.moi_private_epoch_automatic) {
         log_message(kLogInfo,
-                    "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s automatic=%s",
+                    "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
+                    "automatic_vgprs=%s automatic_private_epoch=%s",
                     static_cast<unsigned long long>(code_object_reader.handle),
                     patch_result.resolved_moi_owner_vgpr
                         ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
@@ -2474,7 +2483,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     patch_result.resolved_moi_epoch_vgpr
                         ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
                         : "-",
-                    patch_result.moi_persistent_vgprs_automatic ? "true" : "false");
+                    patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
+                    patch_result.moi_private_epoch_automatic ? "true" : "false");
       }
     }
     size_t candidate_kernel_count = 0;
@@ -2738,14 +2748,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanPatchInfo &patch : patch_result.patches) {
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
+      const std::string private_epoch_offset =
+          patch.persistent_epoch_private_offset
+              ? std::to_string(*patch.persistent_epoch_private_offset)
+              : "-";
       log_message(kLogInfo,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
                   "trampoline=0x%llx original_size=%u scratch_vgpr=%s "
-                  "spilled_vgprs=%u private_bytes=%u",
+                  "private_epoch_offset=%s spilled_vgprs=%u private_bytes=%u",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
-                  scratch_vgpr.c_str(), patch.spilled_vgpr_count,
+                  scratch_vgpr.c_str(), private_epoch_offset.c_str(), patch.spilled_vgpr_count,
                   patch.required_private_segment_size);
     }
     if (config->require_patch && !patch_result.modified) {

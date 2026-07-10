@@ -81,10 +81,16 @@ struct ConSanOptions {
   /// Test-only control that exercises the spill tier even when a dead or
   /// descriptor-growth VGPR window is available.
   bool force_vgpr_spill = false;
+  /// Test-only control that exercises derived-owner/private-epoch state even
+  /// when a dedicated persistent VGPR pair is available.
+  bool force_private_epoch = false;
   /// Test-only substring filter for selecting MOI candidates from one kernel.
   std::string test_kernel_name_filter;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
+  /// Internal marker set when inline shadow derives owner at each probe and
+  /// keeps epoch in per-lane private memory.
+  bool automatic_moi_private_epoch = false;
   uint32_t fault_barrier_index = 0;
   ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
   uint16_t delay_var_ssrc = 106;
@@ -192,6 +198,7 @@ enum class ConSanPatchKind : uint8_t {
   InlineMoiSampledWatchpointStore,
   TrampolineMoiSampledWatchpointStore,
   KernelEntryMoiOwnerEpochPrologue,
+  KernelEntryMoiPrivateEpochPrologue,
   TrampolineMoiBarrierRecord,
   TrampolineMoiInlineEpochBarrier,
   TrampolineMoiInlineAtomicOrdering,
@@ -344,6 +351,7 @@ struct ConSanPatchInfo {
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
   std::optional<uint16_t> scratch_vgpr;
+  std::optional<uint32_t> persistent_epoch_private_offset;
   uint16_t spilled_vgpr_count = 0;
   uint32_t required_private_segment_size = 0;
 };
@@ -370,6 +378,7 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   bool moi_persistent_vgprs_automatic = false;
+  bool moi_private_epoch_automatic = false;
   size_t input_size = 0;
   std::string target_name;
   std::string arch_name;

@@ -89,7 +89,7 @@ flowchart LR
   R1B["R1B: Automatic Non-Spill Allocation"]:::done
   R1C["R1C: gfx1201 VGPR Spill Backend"]:::done
   R1D["R1D: Spill-Backed Access Probes"]:::done
-  R1E["R1E: Persistent Owner And Epoch State"]:::active
+  R1E["R1E: Persistent Owner And Epoch State"]:::done
   R1F["R1F: Scalar And Special-State Policy"]:::todo
   R1G["R1G: Shared-Function Resource Plans"]:::todo
   R1H["R1H: MOI Resource Parity Rollout"]:::todo
@@ -238,12 +238,11 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1E` by adding the descriptor-full private-backed persistent
-   owner/epoch fallback. Zero-to-nonzero dispatch scratch and the first
-   forced-spill record/replay and sampled vertical slice are complete.
-2. Complete `R1G` after that vertical slice. `R1F` is already ready
-   after `R1B` and may be interleaved because dead/fresh scalar allocation does
-   not require the VGPR spill emitter.
+1. Complete `R1F`'s scalar/special-state policy. `R1E` now covers both the
+   spare-capacity persistent VGPR pair and the descriptor-full private-epoch
+   fallback.
+2. Complete `R1G` after the direct-kernel resource slices. `R1F` and `R1G` may
+   be developed independently before they converge in `R1H`.
 3. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
    register/spill policy, rather than only its first backend, is ready.
 4. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
@@ -739,7 +738,7 @@ Done criteria:
 - Record/replay and sampled access probes can reach the spill tier without a
   caller-selected VGPR.
 
-## R1E: Persistent Owner And Epoch State - ACTIVE
+## R1E: Persistent Owner And Epoch State - DONE
 
 Goal: place inline-shadow owner and epoch state safely across an entire kernel,
 which cannot be solved by a site-local scratch lease.
@@ -760,7 +759,7 @@ Work:
 - Do not add shared-function persistent state until `R1G` can require a
   compatible assignment across every owner.
 
-Current progress:
+Landed boundary:
 
 - Inline shadow now assigns a common dedicated owner/epoch VGPR pair
   automatically when no explicit pair is supplied. The pair is above every
@@ -770,12 +769,20 @@ Current progress:
   owner derivation, and automatic mode grows and redirects only direct kernels
   that actually receive an inline access/barrier patch. Shared-function sites
   remain excluded until `R1G`.
-- Live racy-access and barrier-ordering tests pass without owner/epoch register
-  numbers or the explicit prologue-init flag.
+- Inline access scratch now consumes the common per-site planner, so the live
+  racy-access and barrier-ordering tests pass without scratch, owner, or epoch
+  register numbers or the explicit prologue-init flag.
 - Zero-private forced-spill record/replay and sampled tests pass with the HSA
   queue interceptor raising the patched kernel's dispatch-private size.
-- Descriptor-full private-backed persistent state remains the open part of this
-  node.
+- When no whole-kernel pair fits, owner is derived at each access and epoch is
+  kept in one aligned per-lane private slot. Entry, access, and barrier caves
+  use the same offset; one-register barrier/prologue leases and any access
+  spill window start in a separately aligned ephemeral area.
+- The descriptor-full forced-spill synthetic uses epoch byte 0 and a seven-VGPR
+  lease starting at byte 16, grows private size to 44 bytes, and validates the
+  save/load/update/store/restore shapes. A gfx1201 live control exercises the
+  zero-private private-epoch entry/access/barrier path and its AQL dispatch
+  growth without register-number knobs.
 
 Done criteria:
 
