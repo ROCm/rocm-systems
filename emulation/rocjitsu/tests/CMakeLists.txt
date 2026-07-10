@@ -1647,7 +1647,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -1665,7 +1664,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -1684,7 +1682,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -1703,7 +1700,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -1724,7 +1720,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
@@ -1744,7 +1739,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1763,7 +1757,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1783,7 +1776,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1802,7 +1794,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=inline_shadow"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
@@ -1897,7 +1888,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=sampled"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=4096"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
@@ -1931,12 +1921,33 @@ if(RJ_ENABLE_HIP_TESTS)
                     "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
-                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536"
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiOverflowIsVisible"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=144"
+                    "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            set_tests_properties(
+                "ConSanMoiHipTest.DbiOverflowIsVisible"
+                PROPERTIES
+                    PASS_REGULAR_EXPRESSION "ConSan MOI report overflow: dropped"
             )
             rj_add_test(
                 NAME "ConSanMoiHipTest.DbiOneRecordCapacityLimitsAccessPatches"

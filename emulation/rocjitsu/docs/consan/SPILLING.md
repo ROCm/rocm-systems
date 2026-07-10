@@ -253,7 +253,8 @@ ctest -j8 --output-on-failure \
   -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.'
 ```
 
-The current result is 24/24. Notable controls include record/replay and sampled
+The current resource/behavior result is 25/25. Notable controls include
+record/replay and sampled
 forced-spill preservation, zero-to-nonzero private dispatch backing,
 private-epoch barriers, inline diagnostics, and atomic handoff behavior, all
 without register-number configuration. The independent hip-moi control suite

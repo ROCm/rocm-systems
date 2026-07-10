@@ -197,7 +197,6 @@ the clearest MOI mode for seeing DBI-written data from real IREE kernels.
 ```sh
 export RJ_CONSAN_FLAVOR=moi
 export RJ_CONSAN_MOI_ENGINE=record_replay
-export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
 export RJ_CONSAN_MAX_PATCHES=4
 export RJ_CONSAN_REQUIRE_PATCH=1
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
@@ -245,7 +244,6 @@ teardown.
 ```sh
 export RJ_CONSAN_FLAVOR=moi
 export RJ_CONSAN_MOI_ENGINE=sampled
-export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
 export RJ_CONSAN_MAX_PATCHES=4
 export RJ_CONSAN_REQUIRE_PATCH=1
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
@@ -281,7 +279,6 @@ For focused IREE patchability smoke with hardware-ID owner initialization:
 ```sh
 export RJ_CONSAN_FLAVOR=moi
 export RJ_CONSAN_MOI_ENGINE=inline_shadow
-export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
 export RJ_CONSAN_REQUIRE_PATCH=1
 export RJ_CONSAN_MOI_OWNER_SOURCE=hw_id

@@ -2183,6 +2183,33 @@ TEST(ConSanMoi, ReportAbiHeaderCarriesVersionedLayout) {
       13u * sizeof(ConSanMoiDiagnosticRecord) + 17u * sizeof(uint64_t) + 19u * sizeof(uint64_t);
   EXPECT_EQ(consan_moi_report_buffer_min_bytes(11, 13, 17, 19, 23, 29), expected_bytes);
 
+  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::RecordReplay), 64u * 1024u);
+  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::Sampled), 64u * 1024u);
+  EXPECT_EQ(consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::InlineShadow),
+            256u * 1024u);
+
+  constexpr ConSanMoiReportBufferLayout default_record_layout =
+      consan_moi_report_buffer_layout_for_bytes(
+          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::RecordReplay), true, true);
+  EXPECT_GT(default_record_layout.access_record_capacity, 0u);
+  EXPECT_EQ(default_record_layout.access_record_capacity,
+            default_record_layout.barrier_record_capacity);
+  EXPECT_EQ(default_record_layout.access_record_capacity,
+            default_record_layout.atomic_record_capacity);
+
+  constexpr ConSanMoiReportBufferLayout default_sampled_layout =
+      consan_moi_direct_sampled_report_buffer_layout_for_bytes(
+          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::Sampled));
+  EXPECT_GT(default_sampled_layout.sampled_watchpoint_capacity, 0u);
+
+  constexpr ConSanMoiReportBufferLayout default_inline_layout =
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+          consan_moi_default_auto_report_buffer_size(ConSanMoiEngine::InlineShadow));
+  EXPECT_EQ(default_inline_layout.diagnostic_capacity,
+            kConSanMoiInlineShadowDefaultDiagnosticCapacity);
+  EXPECT_GE(default_inline_layout.exact_shadow_entry_capacity,
+            kConSanMoiInlineShadowConservativeExactShadowEntries);
+
   constexpr ConSanMoiReportBufferLayout access_only_layout =
       consan_moi_report_buffer_layout_for_bytes(consan_moi_report_buffer_min_bytes(5, 0, 0, 0),
                                                 /*include_barriers=*/false);

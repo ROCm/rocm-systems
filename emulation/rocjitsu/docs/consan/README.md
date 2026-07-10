@@ -20,8 +20,8 @@ Use `moi` for structured memory-order instrumentation experiments. MOI has
 `record_replay`, `inline_shadow`, and `sampled` engines. On gfx1201 their
 standard paths now allocate or preserve scratch registers, owner/epoch state,
 and scalar special state automatically; explicit register variables remain
-debug overrides. Report-buffer sizing and engine profiles are still
-prototype-facing operational work.
+debug overrides. Per-engine report buffers are allocated automatically when
+needed. Stable engine behavior profiles remain prototype-facing work.
 
 ## Documents
 

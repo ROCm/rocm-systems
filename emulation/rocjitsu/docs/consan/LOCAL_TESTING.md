@@ -122,11 +122,12 @@ ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/
 
 Known local result:
 
-- 24/24 passed on gfx1201. The inline-shadow race, barrier, atomic, private
+- 25/25 passed on gfx1201. The inline-shadow race, barrier, atomic, private
   epoch, and `hw_id` variants carry no register-number environment variables.
   Dynamic access and barrier-record variants also choose their EXEC/VCC/SCC
   scalar state automatically. Forced record/replay and sampled spill controls
-  remain in the tier.
+  remain in the tier. Auto-buffer tests use per-engine defaults, and a
+  deliberate 144-byte dynamic-record case verifies visible overflow.
 
 ## SuperCollider Coverage
 
@@ -196,7 +197,6 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay \
-RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
 RJ_CONSAN_MAX_PATCHES=4 \
 ctest --test-dir /home/benoit/workspace/iree-build \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
@@ -205,7 +205,8 @@ ctest --test-dir /home/benoit/workspace/iree-build \
 
 Known local result:
 
-- IREE e2e broad sweep: 209/209 passed on `gfx1201`.
+- IREE e2e broad sweep: 209/209 passed on `gfx1201` without a buffer-size
+  variable.
 
 Guarded TileAndFuse non-vacuity run:
 
@@ -214,7 +215,6 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay \
-RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
@@ -236,7 +236,6 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=sampled \
-RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
 RJ_CONSAN_MAX_PATCHES=4 \
 ctest --test-dir /home/benoit/workspace/iree-build \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
@@ -245,7 +244,8 @@ ctest --test-dir /home/benoit/workspace/iree-build \
 
 Known local result:
 
-- IREE e2e broad sweep: 209/209 passed on `gfx1201`.
+- IREE e2e broad sweep: 209/209 passed on `gfx1201` without a buffer-size
+  variable.
 
 Guarded TileAndFuse non-vacuity run:
 
@@ -254,7 +254,6 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=sampled \
-RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
@@ -276,7 +275,6 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=inline_shadow \
-RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
 RJ_CONSAN_MOI_OWNER_SOURCE=hw_id \
 RJ_CONSAN_MAX_PATCHES=1 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
@@ -291,8 +289,8 @@ Known local result:
 - TileAndFuse guarded subset: 5/5 passed on `gfx1201`.
 - Scan/softmax regression subset: 3/3 passed on `gfx1201`.
 - IREE e2e broad sweep: 209/209 passed on `gfx1201` with a 60-second per-test
-  timeout and no register-number configuration. The earlier scan/softmax hang
-  has not reproduced since the common resource rollout.
+  timeout and no register-number or buffer-size configuration. The earlier
+  scan/softmax hang has not reproduced since the common resource rollout.
 
 ## hip-moi Semantic Controls
 

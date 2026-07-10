@@ -40,6 +40,22 @@ enum class ConSanMoiAtomicEventKind : uint32_t {
 
 inline constexpr uint32_t kConSanMoiReportMagic = 0x494f4d43u; // "CMOI" as little-endian bytes.
 inline constexpr uint32_t kConSanMoiReportAbiVersion = 1;
+inline constexpr uint64_t kConSanMoiRecordReplayDefaultReportBufferBytes = 64u * 1024u;
+inline constexpr uint64_t kConSanMoiSampledDefaultReportBufferBytes = 64u * 1024u;
+inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 256u * 1024u;
+
+[[nodiscard]] constexpr uint64_t
+consan_moi_default_auto_report_buffer_size(ConSanMoiEngine engine) {
+  switch (engine) {
+  case ConSanMoiEngine::RecordReplay:
+    return kConSanMoiRecordReplayDefaultReportBufferBytes;
+  case ConSanMoiEngine::InlineShadow:
+    return kConSanMoiInlineShadowDefaultReportBufferBytes;
+  case ConSanMoiEngine::Sampled:
+    return kConSanMoiSampledDefaultReportBufferBytes;
+  }
+  return 0;
+}
 
 struct alignas(8) ConSanMoiReportHeader {
   uint32_t magic = kConSanMoiReportMagic;

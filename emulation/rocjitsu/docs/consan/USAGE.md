@@ -150,11 +150,12 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_ENGINE` | all MOI runs | Public engine selector. |
 | `RJ_CONSAN_MOI_BACKEND` | legacy all MOI runs | Ignored when `RJ_CONSAN_MOI_ENGINE` is set. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER`, `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | Explicit caller-owned report buffer. The layout depends on `RJ_CONSAN_MOI_ENGINE`. |
-| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | HSA-tool-owned report buffer, easiest for IREE. The HSA tool allocates the matching engine layout. For `record_replay`, teardown replays visible access/barrier/atomic records and logs the first diagnostic when one is emitted. For `inline_shadow`, teardown counts visible diagnostics and samples nonzero exact-shadow entries; the buffer must be at least 131,496 bytes with the default four diagnostic slots and one internal inline atomic release slot so the exact-shadow table covers the full 64 KiB LDS address range. |
+| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | Optional HSA-tool-owned buffer-size override. When absent, relevant code objects receive 64 KiB in `record_replay`/`sampled` and 256 KiB in `inline_shadow`; explicit zero disables auto allocation. Teardown summarizes the matching engine layout. An inline override must be at least 131,496 bytes to cover the full 64 KiB LDS range with the default diagnostics and atomic slot. |
 | `RJ_CONSAN_MOI_REQUIRE_RECORDS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if all auto report buffers contain zero visible access/barrier/atomic/diagnostic/exact-shadow/sampled records. |
 | `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain zero visible inline diagnostics, zero host-replay diagnostics, and zero sampled conflicts. The checked inline-shadow race and sampled-conflict controls use this guard. |
 | `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain any visible inline diagnostic, host-replay diagnostic, or sampled conflict. The checked inline-shadow barrier-order control uses this guard. |
 | `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT` | `record_replay` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto-buffer host replay emits no conflict. |
+| `RJ_CONSAN_MOI_FORBID_OVERFLOW` | all MOI engines with auto report buffers | Optional guard: process exits nonzero at hook unload if access, barrier, atomic, or diagnostic records were dropped. Drops are always reported to stderr even without the guard. |
 | `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Access, barrier, and atomic probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
 | `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported RDNA4 barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
@@ -229,10 +230,13 @@ them.
   `RJ_CONSAN_MOI_TRACK_BARRIERS=1`, the current
   `record_replay` prototype derives equal access and barrier record capacities
   from the payload size.
-- `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N`: ask the HSA tool to allocate one
-  MOI report buffer per code object and pass it into DBI patching. This is the
-  easiest path for IREE-style runs because the application does not need to
-  provide a kernel argument or exported device pointer. For `record_replay`,
+- Without a caller-owned buffer, the HSA tool automatically allocates a MOI
+  report buffer after inventory finds relevant sites. Defaults are 64 KiB for
+  `record_replay` and `sampled` and 256 KiB for `inline_shadow`.
+  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N` overrides that default; explicit
+  zero disables auto allocation. This is the easiest path for IREE-style runs
+  because the application does not need to provide a kernel argument or
+  exported device pointer. For `record_replay`,
   the teardown log prints access/barrier/atomic capacities, visible and dropped
   record counts, `event_counter`, host-replay totals, the first replay
   diagnostic when one is emitted, and a few sample records. For `sampled`, it
@@ -242,26 +246,30 @@ them.
   exact-shadow entries, and up to a few decoded exact-shadow entries. With
   `RJ_CONSAN_MOI_TRACK_BARRIERS=1`, the `record_replay` auto buffer is split
   into access and barrier sections.
+- `RJ_CONSAN_MOI_FORBID_OVERFLOW=1`: fail at hook unload if an auto buffer
+  dropped access, barrier, atomic, or diagnostic records. Dropped counts are
+  printed to stderr regardless of this guard, so overflow cannot silently look
+  like a clean run.
 - `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`: opt into dynamic access-record
   append for `record_replay`. The default access-record probe writes one static
   slot per patched site. Dynamic append atomically increments
   `access_record_count` per active lane, masks out lanes whose slot is beyond
   capacity, writes per-lane records, and restores EXEC, VCC, and SCC. It can
   consume report-buffer slots quickly.
-- `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`: demo guard for
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. At hook unload, fail the process with
+- `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`: demo guard for HSA-tool-owned auto report
+  buffers. At hook unload, fail the process with
   a nonzero exit code if every HSA-tool-owned MOI report buffer contains zero
   visible access/barrier/atomic/diagnostic/exact-shadow/sampled records. This
   is intentionally an end-of-process guard for IREE-style demos, not a
   per-dispatch assertion.
-- `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1`: demo guard for
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. At hook unload, fail the process with
+- `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1`: demo guard for HSA-tool-owned auto
+  report buffers. At hook unload, fail the process with
   a nonzero exit code if auto report buffers contain zero visible inline
   diagnostics, zero host-replay diagnostics, and zero sampled conflicts. This is
   the guard used by the checked inline-shadow two-wave race diagnostic and the
   checked sampled conflict smoke.
-- `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1`: demo guard for
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. At hook unload, fail the process with
+- `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1`: demo guard for HSA-tool-owned auto
+  report buffers. At hook unload, fail the process with
   a nonzero exit code if auto report buffers contain any visible inline
   diagnostic, host-replay diagnostic, or sampled conflict. This is the guard
   used by the checked inline-shadow barrier-order clean control.
@@ -312,8 +320,8 @@ them.
   `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` also the SGPR allocation, when needed. It
   validates those registers through the common resource plan.
 - `RJ_CONSAN_MOI_TRACK_BARRIERS=1`: experimental MOI barrier record patch.
-  Requires a MOI report buffer, either explicit or
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. Register choices are automatic for
+  Uses the per-engine auto report buffer unless a caller buffer or explicit
+  size override is supplied. Register choices are automatic for
   the standard direct-kernel path. Each decoded 32-bit barrier is rewritten to branch
   through an appended `.text` trampoline. The trampoline narrows record writes
   to one representative lane, dynamically reserves a barrier-record slot,
@@ -322,8 +330,8 @@ them.
   host replay coalesces a contiguous same-workgroup run of arrivals into one
   logical epoch advance.
 - `RJ_CONSAN_MOI_TRACK_ATOMICS=1`: experimental MOI atomic patching.
-  Requires a MOI report buffer, either explicit or
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. Scratch, persistent owner/epoch,
+  Uses the per-engine auto report buffer unless a caller buffer or explicit
+  size override is supplied. Scratch, persistent owner/epoch,
   and scalar special-state choices are automatic; their environment variables
   are optional debug overrides. The current DBI path supports only a narrow
   RDNA4 no-SADDR `flat_atomic*` subset.
@@ -513,7 +521,6 @@ MOI inline-shadow publication smoke:
 env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
   RJ_CONSAN_FLAVOR=moi \
   RJ_CONSAN_MOI_ENGINE=inline_shadow \
-  RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
   RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
   RJ_CONSAN_REQUIRE_PATCH=1 \
   RJ_CONSAN_MAX_PATCHES=4 \
@@ -632,7 +639,6 @@ env \
   LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   RJ_CONSAN_FLAVOR=moi \
   RJ_CONSAN_MOI_ENGINE=inline_shadow \
-  RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
   RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
   RJ_CONSAN_REQUIRE_PATCH=1 \
   RJ_CONSAN_MOI_OWNER_SOURCE=hw_id \

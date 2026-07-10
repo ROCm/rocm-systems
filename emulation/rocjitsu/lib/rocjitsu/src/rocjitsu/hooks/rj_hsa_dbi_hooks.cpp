@@ -83,6 +83,7 @@ struct HookConfig {
   bool moi_require_diagnostics = false;
   bool moi_forbid_diagnostics = false;
   bool moi_require_replay_conflict = false;
+  bool moi_forbid_overflow = false;
   uint32_t fault_barrier_index = 0;
   rocjitsu::ConSanDelayMode delay_mode = rocjitsu::ConSanDelayMode::Nop;
   uint16_t delay_var_ssrc = 106;
@@ -95,6 +96,7 @@ struct HookConfig {
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
   uint64_t moi_auto_report_buffer_size = 0;
+  bool moi_auto_report_buffer_size_explicit = false;
   uint32_t delay_nops = 0;
   uint32_t max_patches = 1;
   uint32_t moi_sample_stride = 1;
@@ -638,6 +640,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS",
       "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS",
       "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT",
+      "RJ_CONSAN_MOI_FORBID_OVERFLOW",
       "RJ_CONSAN_MOI_INIT_OWNER_EPOCH",
       "RJ_CONSAN_MOI_TRACK_BARRIERS",
       "RJ_CONSAN_MOI_TRACK_ATOMICS",
@@ -718,6 +721,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT", false,
                       &config.moi_require_replay_conflict))
+    return std::nullopt;
+  if (!parse_bool_env("RJ_CONSAN_MOI_FORBID_OVERFLOW", false, &config.moi_forbid_overflow))
     return std::nullopt;
   if (!parse_u32_env("RJ_CONSAN_FAULT_BARRIER_INDEX", 0, &config.fault_barrier_index))
     return std::nullopt;
@@ -800,6 +805,11 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     warn_env("RJ_CONSAN_MOI_FORBID_DIAGNOSTICS",
              "this guard only checks HSA-tool-owned auto report buffers");
   }
+  if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_forbid_overflow &&
+      config.moi_auto_report_buffer_size == 0) {
+    warn_env("RJ_CONSAN_MOI_FORBID_OVERFLOW",
+             "this guard only checks HSA-tool-owned auto report buffers");
+  }
   if (config.flavor == rocjitsu::ConSanFlavor::Moi && config.moi_require_diagnostics &&
       config.moi_forbid_diagnostics) {
     std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS and "
@@ -843,9 +853,18 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
   if (!parse_u64_env("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", 0, &config->moi_report_buffer_size))
     return false;
-  if (!parse_u64_env("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", 0,
-                     &config->moi_auto_report_buffer_size))
-    return false;
+  config->moi_auto_report_buffer_size_explicit =
+      env_has_value("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE");
+  if (config->moi_auto_report_buffer_size_explicit) {
+    if (!parse_u64_env("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", 0,
+                       &config->moi_auto_report_buffer_size))
+      return false;
+  } else {
+    config->moi_auto_report_buffer_size =
+        config->flavor == rocjitsu::ConSanFlavor::Moi && !config->moi_report_buffer_address
+            ? rocjitsu::consan_moi_default_auto_report_buffer_size(config->moi_engine)
+            : 0;
+  }
   if (config->moi_auto_report_buffer_size != 0 &&
       config->moi_auto_report_buffer_size <
           rocjitsu::consan_moi_report_buffer_min_bytes(1, 0, 0, 0)) {
@@ -951,6 +970,18 @@ is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &can
 [[nodiscard]] bool require_moi_patch_applies_to(const rocjitsu::ConSanResult &result) {
   return std::any_of(result.moi_candidates.begin(), result.moi_candidates.end(),
                      is_supported_require_patch_moi_candidate);
+}
+
+[[nodiscard]] bool moi_inventory_needs_report_buffer(const rocjitsu::ConSanResult &result,
+                                                     const HookConfig &config) {
+  if (!result.moi_candidates.empty())
+    return true;
+  const auto container_needs_buffer = [&](const auto &container) {
+    return (config.moi_track_barriers && !container.barrier_sites.empty()) ||
+           (config.moi_track_atomics && !container.atomic_sites.empty());
+  };
+  return std::ranges::any_of(result.kernels, container_needs_buffer) ||
+         std::ranges::any_of(result.functions, container_needs_buffer);
 }
 
 std::mutex &log_mutex() {
@@ -1246,6 +1277,7 @@ public:
     uint64_t dropped_access_record_count = 0;
     uint64_t dropped_barrier_record_count = 0;
     uint64_t dropped_atomic_record_count = 0;
+    uint64_t dropped_diagnostic_record_count = 0;
     uint64_t replay_conflict_count = 0;
     uint64_t replay_diagnostic_count = 0;
     uint64_t sampled_conflict_count = 0;
@@ -1266,6 +1298,7 @@ public:
       total.dropped_access_record_count += entry_summary.dropped_access_record_count;
       total.dropped_barrier_record_count += entry_summary.dropped_barrier_record_count;
       total.dropped_atomic_record_count += entry_summary.dropped_atomic_record_count;
+      total.dropped_diagnostic_record_count += entry_summary.dropped_diagnostic_record_count;
       total.replay_conflict_count += entry_summary.replay_conflict_count;
       total.replay_diagnostic_count += entry_summary.replay_diagnostic_count;
       total.sampled_conflict_count += entry_summary.sampled_conflict_count;
@@ -1399,6 +1432,9 @@ private:
     const uint32_t dropped_atomics = header->atomic_record_count > visible_atomics
                                          ? header->atomic_record_count - visible_atomics
                                          : 0;
+    const uint32_t dropped_diagnostics = header->diagnostic_count > visible_diagnostics
+                                             ? header->diagnostic_count - visible_diagnostics
+                                             : 0;
     const auto *exact_shadow = reinterpret_cast<const uint64_t *>(
         static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader) +
         static_cast<size_t>(header->access_record_capacity) *
@@ -1455,6 +1491,7 @@ private:
     summary.dropped_access_record_count = dropped_records;
     summary.dropped_barrier_record_count = dropped_barriers;
     summary.dropped_atomic_record_count = dropped_atomics;
+    summary.dropped_diagnostic_record_count = dropped_diagnostics;
     summary.sampled_conflict_count = sampled_conflicts;
     log_message(kLogInfo,
                 "ConSan MOI auto report reader=%llu addr=0x%llx bytes=%zu generation=%llu "
@@ -1462,7 +1499,8 @@ private:
                 "capacity=%u "
                 "barrier_records=%u visible_barriers=%u dropped_barriers=%u barrier_capacity=%u "
                 "atomic_records=%u visible_atomics=%u dropped_atomics=%u atomic_capacity=%u "
-                "diagnostics=%u visible_diagnostics=%u diagnostic_capacity=%u "
+                "diagnostics=%u visible_diagnostics=%u dropped_diagnostics=%u "
+                "diagnostic_capacity=%u "
                 "exact_shadow_capacity=%u visible_exact_shadow=%zu "
                 "sampled_watchpoints=%u visible_sampled=%zu sampled_conflicts=%u "
                 "fine_grained=%s",
@@ -1473,10 +1511,10 @@ private:
                 header->access_record_capacity, header->barrier_record_count, visible_barriers,
                 dropped_barriers, header->barrier_record_capacity, header->atomic_record_count,
                 visible_atomics, dropped_atomics, header->atomic_record_capacity,
-                header->diagnostic_count, visible_diagnostics, header->diagnostic_capacity,
-                header->exact_shadow_entry_capacity, visible_exact_shadow.size(),
-                header->sampled_watchpoint_capacity, visible_sampled.size(), sampled_conflicts,
-                entry.fine_grained ? "true" : "false");
+                header->diagnostic_count, visible_diagnostics, dropped_diagnostics,
+                header->diagnostic_capacity, header->exact_shadow_entry_capacity,
+                visible_exact_shadow.size(), header->sampled_watchpoint_capacity,
+                visible_sampled.size(), sampled_conflicts, entry.fine_grained ? "true" : "false");
 
     const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
         static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader));
@@ -1869,13 +1907,13 @@ public:
         "fault_drop_barrier=%s moi_init_owner_epoch=%s moi_track_barriers=%s "
         "moi_track_atomics=%s moi_dynamic_access_records=%s moi_require_records=%s "
         "moi_require_diagnostics=%s moi_forbid_diagnostics=%s "
-        "moi_require_replay_conflict=%s "
+        "moi_require_replay_conflict=%s moi_forbid_overflow=%s "
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
         "max_patches=%u tmp_vgpr=%s moi_exec_save_sgpr=%s "
         "moi_owner_source=%s moi_owner_sgpr=%s moi_owner_vgpr=%s moi_epoch_vgpr=%s "
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
-        "moi_auto_report_buffer_size=%llu mode=%s",
+        "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
         flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
         rocjitsu::consan_moi_engine_name(config.moi_engine), config.delay_nops,
         config.fail_closed ? "true" : "false", config.require_patch ? "true" : "false",
@@ -1891,7 +1929,8 @@ public:
         config.moi_require_records ? "true" : "false",
         config.moi_require_diagnostics ? "true" : "false",
         config.moi_forbid_diagnostics ? "true" : "false",
-        config.moi_require_replay_conflict ? "true" : "false", config.fault_barrier_index,
+        config.moi_require_replay_conflict ? "true" : "false",
+        config.moi_forbid_overflow ? "true" : "false", config.fault_barrier_index,
         delay_mode_name(config.delay_mode), config.delay_var_ssrc, config.max_patches,
         config.scratch_vgpr ? std::to_string(*config.scratch_vgpr).c_str() : "auto",
         config.moi_exec_save_sgpr ? std::to_string(*config.moi_exec_save_sgpr).c_str() : "unset",
@@ -1903,6 +1942,7 @@ public:
                                          : "disabled",
         static_cast<unsigned long long>(config.moi_report_buffer_size),
         static_cast<unsigned long long>(config.moi_auto_report_buffer_size),
+        config.moi_auto_report_buffer_size_explicit ? "override" : "default",
         config.fault_drop_barrier
             ? (config.probe_lds_check_trap && config.probe_flat_check_trap
                    ? "proof-check-trap-all+fault-drop-barrier"
@@ -1955,9 +1995,29 @@ public:
     const bool moi_require_diagnostics = config_ && config_->moi_require_diagnostics;
     const bool moi_forbid_diagnostics = config_ && config_->moi_forbid_diagnostics;
     const bool moi_require_replay_conflict = config_ && config_->moi_require_replay_conflict;
+    const bool moi_forbid_overflow = config_ && config_->moi_forbid_overflow;
     CodeObjectReaderRegistry::instance().clear();
     KernelPrivateDispatchRegistry::instance().clear();
     clear_unlocked();
+    const uint64_t moi_dropped_record_count = moi_report_summary.dropped_access_record_count +
+                                              moi_report_summary.dropped_barrier_record_count +
+                                              moi_report_summary.dropped_atomic_record_count +
+                                              moi_report_summary.dropped_diagnostic_record_count;
+    if (moi_dropped_record_count != 0) {
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] ConSan MOI report overflow: dropped access=%llu "
+          "barrier=%llu atomic=%llu diagnostic=%llu across %llu auto report "
+          "buffer(s)\n",
+          static_cast<unsigned long long>(moi_report_summary.dropped_access_record_count),
+          static_cast<unsigned long long>(moi_report_summary.dropped_barrier_record_count),
+          static_cast<unsigned long long>(moi_report_summary.dropped_atomic_record_count),
+          static_cast<unsigned long long>(moi_report_summary.dropped_diagnostic_record_count),
+          static_cast<unsigned long long>(moi_report_summary.buffer_count));
+      std::fflush(stderr);
+      if (moi_forbid_overflow)
+        std::_Exit(90);
+    }
     if (moi_require_records && moi_report_summary.visible_access_record_count +
                                        moi_report_summary.visible_barrier_record_count +
                                        moi_report_summary.visible_atomic_record_count +
@@ -2364,26 +2424,42 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.report_marker = config->report_marker;
     if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
+      rocjitsu::ConSanOptions inventory_options = patch_options;
+      inventory_options.moi_report_buffer_size = 0;
+      rocjitsu::ConSanResult inventory =
+          rocjitsu::try_patch_consan(std::span<const uint8_t>(bytes, size), inventory_options);
+      if (!moi_inventory_needs_report_buffer(inventory, *config)) {
+        log_message(kLogInfo,
+                    "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
+                    static_cast<unsigned long long>(code_object_reader.handle));
+        patch_result_storage = std::move(inventory);
+      }
+
       uint64_t auto_report_address = 0;
       uint64_t auto_report_size = 0;
       const bool direct_sampled = config->moi_engine == rocjitsu::ConSanMoiEngine::Sampled;
       const bool inline_shadow = config->moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow;
-      if (AutoMoiReportBufferRegistry::instance().allocate(
+      if (!patch_result_storage &&
+          AutoMoiReportBufferRegistry::instance().allocate(
               layer().core_table(), agent, code_object_reader.handle,
               config->moi_auto_report_buffer_size, direct_sampled, inline_shadow,
               config->moi_track_barriers, config->moi_track_atomics, &auto_report_address,
               &auto_report_size)) {
         patch_options.moi_report_buffer_address = auto_report_address;
         patch_options.moi_report_buffer_size = auto_report_size;
-      } else if (config->fail_closed) {
+      } else if (!patch_result_storage && config->fail_closed) {
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      } else if (!patch_result_storage) {
+        patch_result_storage = std::move(inventory);
       }
     }
 
     log_message(kLogInfo, "ConSan patch begin reader=%llu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle), size);
-    patch_result_storage =
-        rocjitsu::try_patch_consan(std::span<const uint8_t>(bytes, size), patch_options);
+    if (!patch_result_storage) {
+      patch_result_storage =
+          rocjitsu::try_patch_consan(std::span<const uint8_t>(bytes, size), patch_options);
+    }
     const rocjitsu::ConSanResult &patch_result = *patch_result_storage;
     log_message(kLogInfo,
                 "ConSan patch end reader=%llu visited=%s modified=%s errors=%zu "

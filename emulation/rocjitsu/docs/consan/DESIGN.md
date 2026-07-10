@@ -139,11 +139,11 @@ The gap is not one feature. It is a set of concrete blockers:
   remains architecture- and layout-sensitive; broad operation still needs a
   robust identity policy for arbitrary workgroup shapes.
 - **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
-  which is the right direction for applications such as IREE. Current broad
-  tests still pass explicit sizes. Broad operation needs per-engine default
-  sizing, capacity planning from the number of patched sites where possible,
-  and visible overflow diagnostics so "buffer too small" does not look like "no
-  races."
+  which is the right direction for applications such as IREE. The HSA hook
+  defaults to 64 KiB for record/replay and sampled and 256 KiB for inline
+  shadow, allocates only after a code object inventories relevant sites, and
+  reports dropped records unconditionally. Explicit size and zero-disable
+  overrides remain available.
 - **Engine profiles.** `record_replay`, `inline_shadow`, and `sampled` have
   different resource needs and diagnostic meanings. Broad operation should not
   require users to memorize prototype recipes. Each engine needs a documented
@@ -490,8 +490,11 @@ Report-buffer sources:
 
 - `RJ_CONSAN_MOI_REPORT_BUFFER=0xADDR` and
   `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE=N`: caller-supplied buffer.
-- `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N`: HSA tool allocates one buffer per
-  patched code object and summarizes it at teardown.
+- With no caller buffer or size override, the HSA tool allocates a per-engine
+  default buffer only for code objects with relevant MOI sites and summarizes
+  it at teardown.
+- `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=N`: override the default; explicit
+  zero disables auto allocation.
 
 The auto-buffer path is the practical path for IREE and other applications that
 cannot add a sanitizer kernel argument.
@@ -506,6 +509,9 @@ Demo guards:
   is observed.
 - `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1`: stricter `record_replay` guard
   that requires host replay to emit a conflict.
+- `RJ_CONSAN_MOI_FORBID_OVERFLOW=1`: fail at teardown if an auto buffer dropped
+  access, barrier, atomic, or diagnostic records. Overflow is always printed to
+  stderr even without this guard.
 
 ### Record/Replay Engine
 
@@ -696,7 +702,6 @@ The code intentionally contains several prototype mechanisms:
 - optional manual register debug overrides;
 - a gfx1201-only ordinary-VGPR spill backend rather than general register-class
   spilling;
-- explicit report-buffer sizes in broad MOI test recipes;
 - engine-specific resource recipes that users currently need to know;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
@@ -782,8 +787,7 @@ only the minimal SGPR support needed for the current probe family, keep it
 isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
-The next operational gap is MOI defaulting: engine
-profiles, auto report-buffer sizing, clear failure modes, and a test matrix
-that proves each engine can run without ad hoc per-test register choices. That
+The next operational gap is freezing engine profiles and completing the test
+matrix that proves each engine can run without ad hoc per-test choices. That
 work is tracked in `PLAN.md` as the path from targeted MOI instrumentation to
 broad MOI operation.

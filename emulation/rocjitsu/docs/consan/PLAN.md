@@ -138,7 +138,7 @@ flowchart LR
 
   subgraph BEHAVIOR["Engine behavior"]
     direction LR
-    I2["I2: Inline Diagnostics"]:::todo
+    I2["I2: Inline Diagnostics"]:::active
     I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
     S1["S1: Sampling Policy"]:::todo
     S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
@@ -148,7 +148,7 @@ flowchart LR
 
   subgraph OPS["Operational profile"]
     direction LR
-    O1A["O1A: Buffer And<br/>Failure Defaults"]:::todo
+    O1A["O1A: Buffer And<br/>Failure Defaults"]:::done
     O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::todo
     O1{"O1: Operational<br/>Defaults Ready"}:::todo
 
@@ -180,7 +180,7 @@ flowchart LR
 flowchart LR
   B0["B0: Baseline"]:::done
   O1{"O1: Operational<br/>Defaults Ready"}:::todo
-  I2["I2: Inline Diagnostics"]:::todo
+  I2["I2: Inline Diagnostics"]:::active
   I3["I3: Barrier And<br/>Atomic Semantics"]:::todo
   S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
   T1A["T1A: Test Tiers<br/>And Harness"]:::partial
@@ -203,6 +203,7 @@ flowchart LR
   B0 --> A1
 
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#ffd966,stroke:#7f6000,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
   classDef partial fill:#6fa8dc,stroke:#073763,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
@@ -245,7 +246,7 @@ The current autonomous priority order within that DAG is:
    register-number configuration.
 2. Advance `I1A`, `I2`, `I3`, and `S1` as independent feature
    branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
-3. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
+3. `R2`, `F1`, and `T1A` are already ready from the baseline and can be
    taken in bounded slices when they unblock the main path. Freeze profiles in
    `O1B` only after the engine behavior and automatic resource choices named
    by its incoming edges are stable.
@@ -296,7 +297,8 @@ Current state:
   but `inline_shadow` still has narrower instruction and diagnostic coverage.
 - The independent hip-moi semantic control suite passes 189/189; broader
   ConSan feature/non-vacuity qualification remains in `T1`.
-- MOI still needs explicit report-buffer sizing and stable engine profiles.
+- Per-engine report buffers now have lazy defaults and visible overflow;
+  stable engine profiles are still pending.
 
 The primary technical dependency for broad MOI operation, `R1`, is complete.
 The other gaps below still matter: a clean compatibility run proves
@@ -373,7 +375,7 @@ Landed state:
   the allocator/spill-frame direction and the `SpillManager` starting point.
   ConSan added the gfx1201 emitter, owner analysis, descriptor/dispatch
   transaction, and tests; [SPILLING.md](SPILLING.md) records the boundary.
-- Qualification is 168/168 focused synthetic/unit tests, 24/24 live rocJITsu
+- Qualification is 168/168 focused synthetic/unit tests, 25/25 live rocJITsu
   tests, 189/189 hip-moi controls, guarded TileAndFuse and scan/softmax tests,
   and 209/209 broad IREE compatibility under each MOI engine.
 
@@ -930,7 +932,7 @@ Landed evidence:
 - Standard record/replay, sampled, and targeted inline-shadow recipes contain
   no scratch, owner, epoch, or SGPR numbers; live forced-spill tests prove
   preservation and dispatch-private growth.
-- Focused tests pass 168/168, the live resource tier 24/24, hip-moi controls
+- Focused tests pass 168/168, the live resource/behavior tier 25/25, hip-moi controls
   189/189, and the 209-test IREE compatibility tier under every engine. Guarded
   TileAndFuse and scan/softmax regressions pass without resource-induced hangs.
 - [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
@@ -942,20 +944,18 @@ Goal: make MOI command lines stable and short enough for routine use.
 
 Current state:
 
-- Broad MOI tests often pass explicit `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`.
-- `record_replay`, `sampled`, and `inline_shadow` require different practical
-  buffer sizes.
+- Relevant code objects lazily receive 64 KiB record/replay or sampled buffers
+  and 256 KiB inline-shadow buffers unless explicitly overridden or disabled.
 - Some guards are useful for proving instrumentation happened:
   `RJ_CONSAN_REQUIRE_PATCH=1`, `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`,
   `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1`, and
   `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1`.
-- The current broad inline-shadow IREE sweep is clean after R1, but standard
-  recipes still need consistent failure containment and overflow reporting.
+- Dropped access, barrier, atomic, and diagnostic records are always reported;
+  `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` turns them into a teardown failure.
 
 Dependency split:
 
-- `O1A` is independent of register spilling and can start from the current
-  baseline. It owns report-buffer sizing, overflow visibility, and the
+- `O1A` is complete. It owns report-buffer sizing, overflow visibility, and the
   distinction between ordinary runs and instrumentation-proof guards.
 - `O1B` freezes the user-facing engine profiles. It waits for `O1A`, automatic
   resources (`R1`), complete inline LDS coverage (`I1`), stable inline ordering
@@ -964,7 +964,7 @@ Dependency split:
 - Completing `O1B` reaches the `O1` milestone because all of `O1A` is already
   an incoming prerequisite.
 
-### O1A: Buffer And Failure Defaults - TODO
+### O1A: Buffer And Failure Defaults - DONE
 
 Work:
 
@@ -985,6 +985,18 @@ Done criteria:
 - Default buffer sizes are conservative enough for those tiers, and overflows
   are reported as overflows.
 - Guarded demo recipes remain available but are clearly optional.
+
+Landed evidence:
+
+- Missing size variables select 64 KiB record/replay and sampled defaults or a
+  256 KiB inline-shadow default; an explicit size overrides and explicit zero
+  disables automatic allocation.
+- A read-only MOI inventory pass avoids allocating buffers for unrelated code
+  objects. Overflow counts are printed unconditionally, and
+  `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` is the strict guard.
+- The deliberate 144-byte dynamic-record test proves visible overflow. The
+  168 focused tests and 25 live gfx1201 resource/behavior tests pass, and all
+  three 209-test IREE sweeps pass without a buffer-size variable.
 
 ### O1B: Freeze Standard Engine Profiles - TODO
 
