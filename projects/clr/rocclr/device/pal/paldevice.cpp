@@ -2662,7 +2662,8 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
   // a side effect and can return nullptr, which was dereferenced below and crashed.
   device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this, false);
   if (phys_dev_mem == nullptr) {
-    // This device does not back the allocation; report no access rather than crashing.
+    LogPrintfError("Cannot find physical memory object for virtual address: 0x%x for device
+                    index: %d \n", va_addr, index());
     return false;
   }
   device::Memory::MemAccess mem_access = phys_dev_mem->GetAccess();
