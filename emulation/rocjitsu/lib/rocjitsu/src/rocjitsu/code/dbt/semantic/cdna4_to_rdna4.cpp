@@ -10,8 +10,12 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include "rocjitsu/code/dbt/generated/matrix_conversions.h"
@@ -26,17 +30,17 @@
 namespace rocjitsu {
 namespace {
 
-[[nodiscard]] uint32_t make_gfx12_sopp(uint8_t op, uint16_t simm16) {
+[[nodiscard]] uint32_t make_gfx12_sopp(uint16_t op, uint16_t simm16) {
   rdna4::SoppMachineInst s{};
-  s.encoding = 0x17F;
-  s.op = op;
+  s.encoding = rdna4::encoding::kSopp;
+  s.op = op & 0x7F;
   s.simm16 = simm16;
   return std::bit_cast<uint32_t>(s);
 }
 
 /// @brief Build VOP3P instruction word pair (packed math: WMMA, dot products).
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t>
-build_vop3p(uint8_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2) {
+build_vop3p(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t src2) {
   const uint32_t w0 = static_cast<uint32_t>(vdst) | (1u << 14) |
                       (static_cast<uint32_t>(op & 0x7F) << 16) | (0xCCu << 24);
   const uint32_t w1 = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18) | (3u << 27);
@@ -52,7 +56,7 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 }
 
 /// @brief Build VOP2 instruction word (xor, lshlrev, add_nc, etc.).
-[[nodiscard]] constexpr uint32_t build_vop2(uint8_t op, uint8_t vdst, uint16_t src0,
+[[nodiscard]] constexpr uint32_t build_vop2(uint16_t op, uint8_t vdst, uint16_t src0,
                                             uint8_t vsrc1) {
   return (src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25);
 }
@@ -60,8 +64,8 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 /// @brief Build s_mov_b64 sdst, ssrc0.
 [[nodiscard]] constexpr uint32_t build_s_mov_b64(uint8_t sdst, uint16_t ssrc0) {
   rdna4::Sop1MachineInst s{};
-  s.encoding = 0x17D;
-  s.op = 1;
+  s.encoding = rdna4::encoding::kSop1;
+  s.op = rdna4::kSMovB64;
   s.sdst = sdst & 0x7F;
   s.ssrc0 = ssrc0 & 0xFF;
   return std::bit_cast<uint32_t>(s);
@@ -71,8 +75,8 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
   rdna4::Sop1MachineInst s{};
-  s.encoding = 0x17D;
-  s.op = 0;
+  s.encoding = rdna4::encoding::kSop1;
+  s.op = rdna4::kSMovB32;
   s.sdst = sdst & 0x7F;
   s.ssrc0 = 0xFF;
   return {std::bit_cast<uint32_t>(s), literal};
@@ -121,20 +125,10 @@ ExpandResult lower_accvgpr_read(const Instruction &inst) {
       {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), static_cast<uint16_t>(256 + src_unified))});
 }
 
-constexpr uint8_t kSoppWaitIdle = 0x0A;
-constexpr uint8_t kOpWaitLoadcnt = 64;
-constexpr uint8_t kOpWaitDscnt = 70;
-
 constexpr uint8_t kExecLo = 126;
 constexpr uint16_t kInlineConst0 = 128;
 constexpr uint16_t kInlineConst2 = 130;
 constexpr uint16_t kInlineConstNeg1 = 193;
-
-constexpr uint16_t kOpMbcntLo = 0x31F;
-constexpr uint16_t kOpMbcntHi = 0x320;
-constexpr uint8_t kOpLshlrevB32 = 24;
-constexpr uint8_t kOpXorB32 = 29;
-constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 
 /// @brief Lower v_mfma_f32_16x16x16_f16 to v_wmma_f32_16x16x16_f16 on RDNA4.
 /// @details WMMA Wave64 writes all 64 lanes but swaps rows 4-7 and 8-11 vs
@@ -206,7 +200,7 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
 
   std::vector<uint32_t> words;
 
-  words.push_back(make_gfx12_sopp(kOpWaitLoadcnt, 0));
+  words.push_back(make_gfx12_sopp(rdna4::kSWaitLoadcnt, 0));
   words.push_back(build_s_mov_b64(kExecSave, kExecLo));
 
   // Compute bpermute byte addresses as lane_id * 4. HazardTracker inserts the
@@ -215,14 +209,14 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   HazardTracker hz;
 
   {
-    auto [w0, w1] = build_vop3(kOpMbcntLo, vaddr, kInlineConstNeg1, kInlineConst0);
+    auto [w0, w1] = build_vop3(rdna4::kVMbcntLoU32B32Vop3, vaddr, kInlineConstNeg1, kInlineConst0);
     hz.emit2(words, w0, w1, P::VALU);
   }
   {
-    auto [w0, w1] = build_vop3(kOpMbcntHi, vaddr, kInlineConstNeg1, 256 + vaddr);
+    auto [w0, w1] = build_vop3(rdna4::kVMbcntHiU32B32Vop3, vaddr, kInlineConstNeg1, 256 + vaddr);
     hz.emit2(words, w0, w1, P::VALU);
   }
-  hz.emit(words, build_vop2(kOpLshlrevB32, vaddr, kInlineConst2, vaddr), P::VALU);
+  hz.emit(words, build_vop2(rdna4::kVLshlrevB32Vop2, vaddr, kInlineConst2, vaddr), P::VALU);
 
   LanePermutation perm{};
   for (size_t i = 0; i < rocjitsu::kMatrixConversionCount; ++i) {
@@ -243,26 +237,26 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
     hz.emit2(words, el, lit, P::None); // EXEC writes are outside HazardTracker's model.
     auto [eh, lith] = build_s_mov_b32_lit(kExecLo + 1, static_cast<uint32_t>(exec_mask >> 32));
     hz.emit2(words, eh, lith, P::None);
-    hz.emit(words, build_vop2(kOpXorB32, vaddr, kTmpSgpr, vaddr), P::VALU);
+    hz.emit(words, build_vop2(rdna4::kVXorB32Vop2, vaddr, kTmpSgpr, vaddr), P::VALU);
   }
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 
   {
-    auto [w0, w1] = build_vop3p(kOpWmmaF32_16x16x16_F16, vdst, src0, src1, src2);
+    auto [w0, w1] = build_vop3p(rdna4::kVWmmaF3216x16x16F16, vdst, src0, src1, src2);
     words.push_back(w0);
     words.push_back(w1);
   }
 
   // Drain WMMA before ds_bpermute reads its VGPR outputs.
-  words.push_back(pack_sopp(kSoppWaitIdle, 0));
+  words.push_back(pack_sopp(rdna4::kSWaitIdle, 0));
 
   for (int r = 0; r < 4; ++r) {
     auto [w0, w1] = build_ds_bpermute(vdst + r, vaddr, vdst + r);
     words.push_back(w0);
     words.push_back(w1);
   }
-  words.push_back(pack_sopp(kOpWaitDscnt, 0));
+  words.push_back(pack_sopp(rdna4::kSWaitDscnt, 0));
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 
@@ -302,29 +296,17 @@ ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uin
   return lower_mfma_f32_16x16x16_f16(inst, liveness, context);
 }
 
-// CDNA4 encoding IDs (encoding_id = w0 >> 23, from CDNA4 instruction words).
-constexpr uint16_t kEncSopp = 0x17F;      // SOPP (0xBF8x -> 0x17F)
-constexpr uint16_t kEncVop3 = 0x1A4;      // VOP3A (0xD2xx -> 0x1A4)
-constexpr uint16_t kEncVop3pMfma = 0x1A7; // VOP3P-MFMA (0xD3xx -> 0x1A7)
-
-// CDNA4 opcodes (from decoder: opcode_ = inst_.op).
-constexpr uint16_t kCdna4Op_s_waitcnt = 12;
-constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x16_f16 = 77;
-constexpr uint16_t kCdna4Op_v_accvgpr_read = 88;
-constexpr uint16_t kCdna4Op_v_accvgpr_write = 89;
-constexpr uint16_t kCdna4Op_v_lshl_add_u64 = 520;
-
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
 const TranslationRule kExpandRules_cdna4_to_rdna4[] = {
-    {kEncSopp, kCdna4Op_s_waitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt, nullptr,
-     nullptr},
-    {kEncVop3, kCdna4Op_v_lshl_add_u64, RuleAction::Expand, 0, 0, nullptr,
-     expand_cdna4_v_lshl_add_u64_for_rdna, nullptr, nullptr},
-    {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x16_f16, RuleAction::Expand, 0, 0, nullptr,
-     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
-    {kEncVop3pMfma, kCdna4Op_v_accvgpr_read, RuleAction::Expand, 0, 0, nullptr, expand_accvgpr_read,
+    {cdna4::encoding::kSopp, cdna4::kSWaitcnt, RuleAction::Expand, 0, 0, nullptr, expand_waitcnt,
      nullptr, nullptr},
-    {kEncVop3pMfma, kCdna4Op_v_accvgpr_write, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3OpHi4, cdna4::kVLshlAddU64, RuleAction::Expand, 0, 0, nullptr,
+     expand_cdna4_v_lshl_add_u64_for_rdna, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x16F16, RuleAction::Expand, 0, 0, nullptr,
+     expand_mfma_f32_16x16x16_f16, &kMfmaF32_16x16x16_F16_Cdna4, &kWmmaF32_16x16x16_F16_Rdna4},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVAccvgprRead, RuleAction::Expand, 0, 0, nullptr,
+     expand_accvgpr_read, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVAccvgprWrite, RuleAction::Expand, 0, 0, nullptr,
      expand_accvgpr_write, nullptr, nullptr},
 };
 

@@ -544,6 +544,7 @@ public:
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
         event.thread_dim_z = num_thread_z;
+        event.dispatch_pkt_addr = dispatch_pkt_addr.at(me & 0x1).at(pipe);
         event.lds_size = ((rsrc2 >> 15) & 0x1FF) * 512;
 
         event.sgprs = 128;

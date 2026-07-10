@@ -270,3 +270,85 @@ in certain scenarios. To enable context tracking, set the following environment 
 
    export RCCL_ENABLE_CONTEXT_TRACKING=1
 
+.. _suspend-resume:
+
+Suspending and resuming a communicator
+======================================
+
+A long-lived application can hold several RCCL communicators that are only used
+during specific phases. While a communicator is idle, the GPU memory it holds
+for channel buffers, transport FIFOs, and similar resources stays reserved and
+is unavailable to the rest of the application. RCCL provides an API to release
+those resources while a communicator is idle and to reacquire them later
+without destroying and recreating the communicator.
+
+The relevant functions, declared in ``rccl.h``, are described in full in
+:ref:`communicator-suspend-resume`:
+
+- ``ncclCommSuspend`` releases the resources selected by its ``flags``
+  argument. Pass ``NCCL_SUSPEND_MEM`` to release dynamic GPU memory
+  allocations. After this call, the communicator can't be used until it's
+  resumed.
+- ``ncclCommResume`` reacquires every resource that the matching
+  ``ncclCommSuspend`` call released, after which the communicator can run
+  collectives again.
+- ``ncclCommMemStats`` reports per-communicator memory counters, such as the
+  amount of GPU memory that can be suspended and whether the communicator is
+  currently suspended.
+
+Requirements
+------------
+
+Releasing the physical backing of a suspended communicator while keeping its
+GPU virtual address space requires cuMem virtual memory management (VMM)
+support. VMM is available only when all of the following conditions are met:
+
+- ``NCCL_CUMEM_ENABLE`` is set to ``1`` (or to ``-2`` to enable VMM
+  automatically when the platform supports it). It is ``0`` (disabled) by
+  default.
+- The HIP/ROCm runtime provides the cuMem VMM APIs: ROCm 7.12 or later, or a
+  ROCm 7.0.x build that includes the cuMem backport.
+- The Linux kernel is version 6.8 or later.
+- The GPU and driver report VMM support.
+
+Without VMM support, ``ncclCommSuspend`` and ``ncclCommResume`` still succeed,
+but they can't release the physical GPU memory, so the operation is
+effectively a no-op.
+
+Example
+-------
+
+The following example suspends an idle communicator, queries how much GPU
+memory was freed, and later resumes it:
+
+.. code-block:: cpp
+
+   // comm is an initialized ncclComm_t that is currently idle.
+   uint64_t suspendable = 0, suspended = 0;
+
+   NCCLCHECK(ncclCommMemStats(comm, ncclStatGpuMemSuspend, &suspendable));
+   // suspendable is bytes of GPU memory Suspend can release; 0 means none right
+   // now. This query is informational; Suspend does not require suspendable > 0
+
+   // Release dynamic GPU memory held by the communicator.
+   NCCLCHECK(ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+   NCCLCHECK(ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended));
+   // suspended == 1 while the communicator is suspended.
+
+   // ... run other work that needs the freed GPU memory ...
+
+   // Reacquire the resources before using the communicator again.
+   NCCLCHECK(ncclCommResume(comm));
+
+To suspend or resume several communicators together, wrap the calls in
+``ncclGroupStart`` and ``ncclGroupEnd`` 
+(see :ref:`communicator-suspend-resume`):
+
+.. code-block:: cpp
+
+   NCCLCHECK(ncclGroupStart());
+   NCCLCHECK(ncclCommSuspend(commA, NCCL_SUSPEND_MEM));
+   NCCLCHECK(ncclCommSuspend(commB, NCCL_SUSPEND_MEM));
+   NCCLCHECK(ncclGroupEnd());
+

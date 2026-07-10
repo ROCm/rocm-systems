@@ -39,6 +39,7 @@
 #   --cull                 Cull groups stuck in GPU barriers / gridsync
 #   --cull=p1,p2,...       Cull groups matching any of the given substrings
 #   --check-lanes          Enable per-lane register divergence check inside each group
+#   --stats                Print per-group wavefront statistics
 #   --color                Force ANSI color output
 #   --no-color             Disable ANSI color output
 #   --no-coalesce          Skip the cross-rank coalescing pass
@@ -91,6 +92,7 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_DIR=""
 CULL_ARG=""
 CHECK_LANES_ARG=""
+STATS_ARG=""
 COLOR_ARG=""
 RUN_COALESCE=1
 NO_SHARED_FS=0
@@ -117,6 +119,8 @@ while [[ ${_i} -lt ${#_args[@]} ]]; do
         CULL_ARG="${_arg}"
     elif [[ "${_arg}" == "--check-lanes" ]]; then
         CHECK_LANES_ARG="--check-lanes"
+    elif [[ "${_arg}" == "--stats" ]]; then
+        STATS_ARG="--stats"
     elif [[ "${_arg}" == "--color" ]]; then
         COLOR_ARG="--color"
     elif [[ "${_arg}" == "--no-color" ]]; then
@@ -169,6 +173,7 @@ echo "Output directory: ${OUTPUT_DIR}"
 [[ ${NO_SHARED_FS} -eq 1 ]]    && echo "Filesystem mode:  no shared fs (--output-filename)"
 [[ -n "${CULL_ARG}" ]]         && echo "Cull option:      ${CULL_ARG}"
 [[ -n "${CHECK_LANES_ARG}" ]]  && echo "Check lanes:      yes"
+[[ -n "${STATS_ARG}" ]]        && echo "Stats:            yes"
 [[ -n "${COLOR_ARG}" ]]        && echo "Color:            ${COLOR_ARG}"
 [[ ${#MPIEXEC_EXTRA_ARGS[@]} -gt 0 ]] && echo "mpiexec args:     ${MPIEXEC_EXTRA_ARGS[*]}"
 echo ""
@@ -186,6 +191,7 @@ else
 fi
 [[ -n "${CULL_ARG}" ]]        && _attach_args+=("${CULL_ARG}")
 [[ -n "${CHECK_LANES_ARG}" ]] && _attach_args+=("${CHECK_LANES_ARG}")
+[[ -n "${STATS_ARG}" ]]       && _attach_args+=("${STATS_ARG}")
 [[ -n "${COLOR_ARG}" ]]       && _attach_args+=("${COLOR_ARG}")
 
 # -pernode launches exactly one process per allocated node (supported by

@@ -16,6 +16,54 @@
 #define CU_STREAM_WRITE_VALUE_DEFAULT 0
 #endif
 
+// === ROCm/HIP version milestones ==========================================
+// Every "magic" version number lives here, once. HIP_VERSION (compile time)
+// and cudaDriverGetVersion() (runtime) both encode as
+// MAJOR*10000000 + MINOR*100000 + PATCH.
+#define ROCM_VER_7_0_2_2     70051831  // 7.0.2.x backport range, lower bound
+#define ROCM_VER_7_0_3_0     70060000  // 7.0.2.x backport range, exclusive upper bound
+#define ROCM_VER_7_12_0      71200000  // hipMemcpyBatchAsync native min
+#define ROCM_VER_7_12_60540  71260540  // upstream cuMem/VMM + DMA-BUF export
+
+// === Generic version-range predicates =====================================
+// Constant expressions, so they are valid in both #if directives (compile
+// time, against HIP_VERSION) and regular C++ (runtime driver version).
+#define NCCL_VER_GE(v, lo)      ((v) >= (lo))
+#define NCCL_VER_IN(v, lo, hi)  ((v) >= (lo) && (v) < (hi))
+
+// === Per-feature VERSION predicates ========================================
+// Each capability names its own support window by composing milestones; do NOT
+// reuse a predicate across features that have different windows.
+
+// cuMem VMM + DMA-BUF driver export: native 7.12 OR the 7.0.2.x backport.
+#define NCCL_CUMEM_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
+
+// cuMem HOST allocations: native only. NOT part of the 7.0.2.x backport (relies
+// on hipDeviceAttributeHostNumaId, which is absent there).
+#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) \
+  NCCL_VER_GE(v, ROCM_VER_7_12_60540)
+
+// Back-compat alias for the few call sites that compare against the native
+// minimum directly.
+#define NCCL_CUMEM_NATIVE_MIN_VERSION  ROCM_VER_7_12_60540
+
+// hipMemcpyBatchAsync: native 7.12 OR the 7.0.2.x backport. No device-attribute
+// probe exists for the batch API, so this version window is the only runtime guard.
+#define NCCL_CE_BATCH_ASYNC_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_0) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
+
+// === Capability gates: prefer the CMake symbol probe, fall back to version ==
+// Method 1 (preferred): CMake sets RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED when
+//   check_symbol_exists(hipMemGetHandleForAddressRange ...) succeeds.
+// Method 2 (fallback): the version predicate above, for builds where the probe
+//   did not run / was not wired in.
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  #define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
+#else
+  #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+#endif
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps,
