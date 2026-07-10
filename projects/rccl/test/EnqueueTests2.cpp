@@ -24,15 +24,23 @@ namespace
     class AddP2pToPlanTest : public ::testing::Test
     {
     protected:
-        struct ncclComm* comm = nullptr;
-        struct ncclKernelPlan* plan = nullptr;
-        struct ncclTopoSystem* topo = nullptr;
+        // Value-initialised (zeroed) heap storage for the large POD structs,
+        // released automatically at end of test.
+        std::unique_ptr<ncclComm> commStorage;
+        std::unique_ptr<ncclKernelPlan> planStorage;
+        std::unique_ptr<ncclTopoSystem> topoStorage;
+
+        ncclComm* comm = nullptr;
+        ncclKernelPlan* plan = nullptr;
 
         void MakeComm(int nNodes)
         {
-            comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
-            plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
-            topo = static_cast<struct ncclTopoSystem*>(calloc(1, sizeof(*topo)));
+            commStorage = std::make_unique<ncclComm>();
+            planStorage = std::make_unique<ncclKernelPlan>();
+            topoStorage = std::make_unique<ncclTopoSystem>();
+            comm = commStorage.get();
+            plan = planStorage.get();
+            ncclTopoSystem* topo = topoStorage.get();
 
             // Bump-allocator used by ncclMemoryStackAlloc* inside the function.
             ncclMemoryStackConstruct(&comm->memScoped);
@@ -61,13 +69,6 @@ namespace
             uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
             ncclDevFuncNameToId[p2pKey] = 0;
         }
-
-        void TearDown() override
-        {
-            free(topo);
-            free(plan);
-            free(comm);
-        }
     };
 
     // Parameters for one P2P channel-scaling scenario. bytes are per direction
@@ -90,9 +91,9 @@ namespace
         MakeComm(tc.nNodes);
 
         // Non-null task per active direction so we can read back the count.
-        struct ncclTaskP2p recvTask = {};
-        struct ncclTaskP2p sendTask = {};
-        struct ncclTaskP2p* p2pTasks[2] = {
+        ncclTaskP2p recvTask = {};
+        ncclTaskP2p sendTask = {};
+        ncclTaskP2p* p2pTasks[2] = {
             tc.bytes[0] != -1 ? &recvTask : nullptr,
             tc.bytes[1] != -1 ? &sendTask : nullptr,
         };
@@ -168,7 +169,7 @@ namespace
         MakeComm(/*nNodes*/ 1);
 
         int planTotalTasks[2] = {1, 1};
-        struct ncclTaskP2p* p2pTasks[2] = {nullptr, nullptr};
+        ncclTaskP2p* p2pTasks[2] = {nullptr, nullptr};
 
         const int rank = comm->rank;
         ncclResult_t result = addP2pToPlan(
