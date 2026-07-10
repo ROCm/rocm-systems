@@ -243,9 +243,9 @@ Current placement mechanisms:
 `DbiPatchPlacementPlanner` is the shared transactional allocator for these
 choices. It records explicit anchor/body/return mappings, reserves the return
 branch as part of every cave, and leaves its state unchanged on overlap or
-branch-range failure. Inline-shadow access probes use it today; the remaining
-MOI access and synchronization families are being migrated off their older
-local placement loops.
+branch-range failure. Inline-shadow and sampled access probes use it today;
+the remaining record/replay and synchronization families are being migrated
+off their older local placement loops.
 
 Current register policy:
 

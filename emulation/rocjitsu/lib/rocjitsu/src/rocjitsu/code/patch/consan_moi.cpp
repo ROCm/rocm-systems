@@ -4254,19 +4254,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
 
   struct PlannedSampledPatch {
     const ConSanMoiCandidate *candidate = nullptr;
-    uint64_t patch_bytes = 0;
-    bool use_appended_cave = false;
+    DbiPatchPlacement placement;
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
   };
   std::vector<PlannedSampledPatch> planned_patches;
-  std::vector<PlannedSampledPatch> appended_cave_candidates;
-  std::vector<std::pair<uint64_t, uint64_t>> patched_ranges;
   planned_patches.reserve(candidates.size());
   AmdGpuCodeObject code_object(bytes.data(), bytes.size());
-  uint64_t appended_cave_text_offset = 0;
-  if (code_object.text_sections().size() == 1)
-    appended_cave_text_offset = code_object.text_sections().front()->size();
+  const uint64_t original_text_size =
+      code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
+  DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
   uint32_t sampled_candidate_index = 0;
   MoiSpillManagers spill_managers;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
@@ -4308,72 +4305,27 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         count_nop_padding(bytes, candidate.file_offset + candidate.size, arch);
     const uint64_t available_bytes =
         candidate.size + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
-    if (spill || patch_bytes > available_bytes) {
-      if (appended_cave_text_offset != 0 && candidate.size >= sizeof(uint32_t)) {
-        const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
-        if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
-            compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size)) {
-          PlannedSampledPatch planned;
-          planned.candidate = candidate_ptr;
-          planned.patch_bytes = patch_bytes;
-          planned.use_appended_cave = true;
-          planned.resources = *resources;
-          planned.spill = spill;
-          appended_cave_candidates.push_back(std::move(planned));
-          continue;
-        }
-      }
-      result.warnings.emplace_back("ConSan MOI sampled probe skipped a supported load/store site "
-                                   "without enough inline padding or an appended cave");
-      continue;
-    }
-    if (candidate.file_offset > bytes.size() ||
-        patch_bytes > bytes.size() - candidate.file_offset) {
-      result.errors.emplace_back("ConSan MOI sampled probe exceeds ELF bytes");
-      return;
-    }
-    const uint64_t patch_begin = candidate.file_offset;
-    const uint64_t patch_end = patch_begin + patch_bytes;
-    const auto overlaps_existing =
-        std::any_of(patched_ranges.begin(), patched_ranges.end(),
-                    [&](const std::pair<uint64_t, uint64_t> range) {
-                      return patch_begin < range.second && range.first < patch_end;
-                    });
-    if (overlaps_existing) {
-      result.warnings.emplace_back("ConSan MOI sampled probe skipped an overlapping patch site");
+    DbiPatchPlacementRequest placement_request;
+    placement_request.anchor_offset = candidate.text_offset;
+    placement_request.original_size = candidate.size;
+    placement_request.body_size = patch_bytes;
+    placement_request.inline_capacity = spill ? 0u : available_bytes;
+    std::string placement_error;
+    const auto placement = placement_planner.plan(placement_request, &placement_error);
+    if (!placement) {
+      result.warnings.emplace_back("ConSan MOI sampled probe skipped load/store site: " +
+                                   placement_error);
       continue;
     }
 
-    patched_ranges.emplace_back(patch_begin, patch_end);
     PlannedSampledPatch planned;
     planned.candidate = candidate_ptr;
-    planned.patch_bytes = patch_bytes;
+    planned.placement = *placement;
     planned.resources = *resources;
     planned.spill = spill;
     planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == max_candidates)
       break;
-  }
-
-  for (const PlannedSampledPatch &candidate : appended_cave_candidates) {
-    if (planned_patches.size() == max_candidates)
-      break;
-    if (candidate.candidate == nullptr)
-      continue;
-    const uint64_t patch_begin = candidate.candidate->file_offset;
-    const uint64_t patch_end = patch_begin + candidate.candidate->size;
-    const auto overlaps_existing =
-        std::any_of(patched_ranges.begin(), patched_ranges.end(),
-                    [&](const std::pair<uint64_t, uint64_t> range) {
-                      return patch_begin < range.second && range.first < patch_end;
-                    });
-    if (overlaps_existing) {
-      result.warnings.emplace_back(
-          "ConSan MOI sampled probe skipped an overlapping appended-cave patch site");
-      continue;
-    }
-    patched_ranges.emplace_back(patch_begin, patch_end);
-    planned_patches.push_back(candidate);
   }
 
   if (planned_patches.empty()) {
@@ -4405,8 +4357,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
   }
 
-  const bool uses_appended_cave = std::ranges::any_of(
-      planned_patches, [](const PlannedSampledPatch &patch) { return patch.use_appended_cave; });
+  const bool uses_appended_cave =
+      std::ranges::any_of(planned_patches, [](const PlannedSampledPatch &patch) {
+        return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
+      });
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
@@ -4443,7 +4397,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                        planned_patch.spill->restore_words.size()) *
                                                       sizeof(uint32_t))
                               : 0;
-      const uint64_t planned_probe_bytes = planned_patch.patch_bytes - spill_bytes;
+      const uint64_t planned_probe_bytes = planned_patch.placement.body_size - spill_bytes;
       if (words->size() * sizeof(uint32_t) > planned_probe_bytes) {
         result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
         return;
@@ -4452,7 +4406,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                     build_s_nop(0, arch));
 
       ConSanPatchInfo info;
-      info.kind = planned_patch.use_appended_cave
+      info.kind = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
                       ? ConSanPatchKind::TrampolineMoiSampledWatchpointStore
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.text_offset;
@@ -4463,12 +4417,17 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.required_private_segment_size = planned_patch.spill->total_private_bytes;
       }
 
-      if (planned_patch.use_appended_cave) {
-        const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
-        const auto fwd = compute_sopp_branch_simm16(candidate.text_offset, cave_text_offset);
-        const uint64_t return_branch_pc = cave_text_offset + planned_patch.patch_bytes;
-        const auto ret =
-            compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size);
+      if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
+        const uint64_t cave_text_offset = planned_patch.placement.body_offset;
+        if (new_text.size() != cave_text_offset) {
+          result.errors.emplace_back(
+              "ConSan MOI sampled probe emitted a stale appended-cave mapping");
+          return;
+        }
+        const auto fwd = compute_sopp_branch_simm16(planned_patch.placement.anchor_offset,
+                                                    planned_patch.placement.body_offset);
+        const auto ret = compute_sopp_branch_simm16(planned_patch.placement.return_branch_offset,
+                                                    planned_patch.placement.return_target);
         if (!fwd || !ret) {
           result.errors.emplace_back(
               "ConSan MOI sampled probe appended cave branch is out of range");
@@ -4499,6 +4458,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           cave_words.insert(cave_words.end(), planned_patch.spill->restore_words.begin(),
                             planned_patch.spill->restore_words.end());
         }
+        if (cave_words.size() * sizeof(uint32_t) != planned_patch.placement.body_size) {
+          result.errors.emplace_back("ConSan MOI sampled probe body size changed after placement");
+          return;
+        }
         cave_words.push_back(build_s_branch(*ret, arch));
         append_words_bytes(new_text, cave_words);
         info.trampoline_offset = cave_text_offset;
@@ -4506,7 +4469,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
       } else {
         const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-        if (patch_bytes != planned_patch.patch_bytes) {
+        if (patch_bytes != planned_patch.placement.body_size) {
           result.errors.emplace_back("ConSan MOI sampled probe final patch size changed");
           return;
         }
@@ -4552,7 +4515,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       result.elf_bytes.clear();
       return;
     }
-    const uint64_t planned_probe_bytes = planned_patch.patch_bytes;
+    const uint64_t planned_probe_bytes = planned_patch.placement.body_size;
     if (words->size() * sizeof(uint32_t) > planned_probe_bytes) {
       result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
       result.elf_bytes.clear();
@@ -4561,7 +4524,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     words->resize(static_cast<size_t>(planned_probe_bytes / sizeof(uint32_t)),
                   build_s_nop(0, arch));
     const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-    if (patch_bytes != planned_patch.patch_bytes) {
+    if (patch_bytes != planned_patch.placement.body_size) {
       result.errors.emplace_back("ConSan MOI sampled probe final patch size changed");
       result.elf_bytes.clear();
       return;
@@ -4587,7 +4550,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     info.kind = ConSanPatchKind::InlineMoiSampledWatchpointStore;
     info.anchor_offset = candidate.text_offset;
     info.trampoline_offset = candidate.text_offset + candidate.size;
-    info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
+    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
     info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
