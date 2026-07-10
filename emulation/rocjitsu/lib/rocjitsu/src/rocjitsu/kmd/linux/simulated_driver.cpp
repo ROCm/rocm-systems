@@ -1932,9 +1932,10 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
           (target->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
     }
     info.runtime_state = sess.runtime_state;
-    if (args->enable.rinfo_ptr != 0 && args->enable.rinfo_size >= sizeof(info))
+    size_t copy_size = std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(info));
+    if (args->enable.rinfo_ptr != 0 && copy_size > 0)
       std::memcpy(reinterpret_cast<void *>(static_cast<uintptr_t>(args->enable.rinfo_ptr)), &info,
-                  sizeof(info));
+                  copy_size);
     args->enable.rinfo_size = sizeof(info);
     return 0;
   }
