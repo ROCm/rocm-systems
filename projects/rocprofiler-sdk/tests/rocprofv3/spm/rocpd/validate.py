@@ -28,11 +28,14 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
 
     filtered = counter_csv[counter_csv[kernel_column].str.contains("matrixTranspose")]
 
-    csv_values = (
-        filtered.groupby(counter_column)[value_column].sum().to_dict()
-        if not filtered.empty
-        else {}
+    assert not filtered.empty, "No matrixTranspose entries in counter CSV"
+
+    filtered = filtered.copy()
+    filtered["base_counter"] = filtered[counter_column].str.replace(
+        r"\[.*\]$", "", regex=True
     )
+
+    csv_values = filtered.groupby("base_counter")[value_column].sum().to_dict()
 
     assert csv_values
 
@@ -67,13 +70,20 @@ def test_validate_spm_rocpd_csv(counter_csv: pd.DataFrame, spm_json_data):
     is_deterministic = lambda x: x[:3] == "SQ_" and x != "SQ_CYCLES"
 
     for counter_name, csv_value in csv_values.items():
-        if counter_name not in spm_values:
-            continue
+        assert counter_name in spm_values, (
+            f"{counter_name} in CSV but not in JSON. "
+            f"JSON counters: {sorted(spm_values.keys())}"
+        )
         spm_value = spm_values[counter_name]
         if is_deterministic(counter_name):
-            assert csv_value == spm_value
+            assert (
+                csv_value == spm_value
+            ), f"{counter_name}: csv={csv_value} != json={spm_value}"
         elif not is_cycle(counter_name):
-            assert within_tolerance(csv_value, spm_value)
+            assert within_tolerance(csv_value, spm_value), (
+                f"{counter_name}: csv={csv_value}, json={spm_value}, "
+                f"not within {TOLERANCE*100}% tolerance"
+            )
 
 
 def test_validate_spm_rocpd(spm_json_data, rocpd_data):

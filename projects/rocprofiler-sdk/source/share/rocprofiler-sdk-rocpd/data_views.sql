@@ -794,6 +794,7 @@ SELECT
     A.type_index AS agent_type_index,
     A.type AS agent_type,
     K.queue_id,
+    K.stream_id,
     k.grid_size_x AS grid_size_x,
     k.grid_size_y AS grid_size_y,
     k.grid_size_z AS grid_size_z,
