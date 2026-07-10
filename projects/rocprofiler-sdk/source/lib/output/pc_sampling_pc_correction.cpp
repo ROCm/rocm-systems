@@ -99,16 +99,25 @@ build_classification(code_obj_decoder_t& decoder, rocprofiler_code_object_id_t c
 Kind
 classify(std::string_view inst)
 {
-    // Start-small authoritative-on-gfx1250 list. Regular internals contribute to
-    // the snapshot PC correction factor; s_icache_inv does not. Extend the
-    // regular-internal list as the hardware-confirmed set grows (candidates:
-    // s_setprio, s_sendmsg, s_trap, s_clause). Erring toward EXT is safe: a
-    // missed internal means "no correction", never a corrupted healthy sample.
-    static constexpr std::array<std::string_view, 4> regular_internals = {
+    // Instructions that contribute to the snapshot PC correction factor on gfx1250.
+    // s_icache_inv does not — it is handled separately below.
+    // Erring toward EXT is safe: a missed entry means "no correction", never corruption.
+    // "s_wait" prefix-matches all s_wait* variants. "s_setprio" also matches
+    // "s_setprio_inc_wg". "s_sleep" does not match "s_monitor_sleep", hence both entries.
+    static constexpr std::array<std::string_view, 13> regular_internals = {
         "s_nop",
         "s_sleep",
+        "s_monitor_sleep",
         "s_wait",  // prefix-matches all s_wait* variants
         "s_barrier_wait",
+        "s_setprio",
+        "s_delay_alu",
+        "s_sethalt",
+        "s_setkill",
+        "s_singleuse_vdst",
+        "s_round_mode",
+        "s_denorm_mode",
+        "s_version",
     };
 
     if(starts_with(inst, "s_icache_inv")) return Kind::S_ICACHE_INV;
