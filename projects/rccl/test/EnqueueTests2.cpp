@@ -274,5 +274,74 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // AllToAll_Symmetric_UsesNChannelsMin
+    //
+    // Symmetric traffic: all ranks both send and receive, so neither direction
+    // of planTotalTasks is zero (alltoall = {N, N}). asymmetric == false, so
+    // the fix must keep nChStart == nChannelsMin to avoid XGMI link contention
+    // when all ranks transmit simultaneously.
+    //
+    // Both directions carry a positive 4 MiB payload (the size at which the
+    // asymmetric path would have selected nChannelsMax). Both tasks are
+    // non-null so we can confirm each direction stays at nChannelsMin.
+    TEST(addP2pToPlan, AllToAll_Symmetric_UsesNChannelsMin)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 1;
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        // 4 MiB in both directions: large enough that the asymmetric path would
+        // pick nChannelsMax, so a symmetric result of nChannelsMin proves the
+        // predicate correctly classified this as symmetric.
+        const ssize_t kBytes = 4 * 1024 * 1024;
+
+        struct ncclTaskP2p recvTask = {};
+        struct ncclTaskP2p sendTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {&recvTask, &sendTask};
+
+        // Alltoall: both directions have nonzero task totals.
+        int planTotalTasks[2] = {kNChannelsMax, kNChannelsMax};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ kBytes,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ kBytes,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // Symmetric traffic must stay at nChannelsMin, not be boosted to max.
+        EXPECT_EQ(recvTask.nChannels, kNChannelsMin);
+        EXPECT_EQ(sendTask.nChannels, kNChannelsMin);
+        EXPECT_LT(recvTask.nChannels, kNChannelsMax);
+
+        free(plan);
+        free(comm);
+    }
 }
 }
