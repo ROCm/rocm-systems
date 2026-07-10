@@ -1005,8 +1005,8 @@ std::string GuestKfd::topology_path() const {
 }
 
 int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const {
-  util::Logger::debug_print("rocjitsu guest gpu: rejecting ", LinuxKfd::ioctl_name(request),
-                            " for guest gpu_id=", guest_.gpu_id);
+  util::Logger::driver("rocjitsu guest gpu: rejecting ", LinuxKfd::ioctl_name(request),
+                       " for guest gpu_id=", guest_.gpu_id);
   errno = ENODEV;
   return -1;
 }

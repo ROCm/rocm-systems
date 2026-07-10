@@ -515,7 +515,7 @@ int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg) {
 }
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
-  util::Logger::cp("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
+  util::Logger::driver("IOCTL pid=", proc.process_id(), " ", LinuxKfd::ioctl_name(request));
 
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_GET_VERSION:
@@ -1723,7 +1723,7 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_process_by_client_pid(pid_t pid) 
 // in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
 int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
-  util::Logger::cp("DBG_TRAP pid=", args->pid, " op=", args->op);
+  util::Logger::driver("DBG_TRAP pid=", args->pid, " op=", args->op);
 
   KfdProcess *target = nullptr;
   std::shared_ptr<KfdProcess> target_ref;
