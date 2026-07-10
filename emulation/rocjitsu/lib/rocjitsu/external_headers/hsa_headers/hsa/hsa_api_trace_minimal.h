@@ -77,8 +77,8 @@ struct AmdExtTable {
   void *hsa_amd_ipc_signal_create_fn;
   void *hsa_amd_ipc_signal_attach_fn;
   void *hsa_amd_register_system_event_handler_fn;
-  void *hsa_amd_queue_intercept_create_fn;
-  void *hsa_amd_queue_intercept_register_fn;
+  hsa_amd_queue_intercept_create_fn_t hsa_amd_queue_intercept_create_fn;
+  hsa_amd_queue_intercept_register_fn_t hsa_amd_queue_intercept_register_fn;
   void *hsa_amd_queue_set_priority_fn;
   hsa_amd_memory_async_copy_rect_fn_t hsa_amd_memory_async_copy_rect_fn;
   void *hsa_amd_runtime_queue_create_register_fn;

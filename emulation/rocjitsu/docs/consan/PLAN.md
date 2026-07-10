@@ -238,9 +238,9 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1E`, including zero-to-nonzero scratch activation for kernels
-   that were compiled without a private segment. The first forced-spill
-   record/replay and sampled vertical slice in `R1D` is complete.
+1. Complete `R1E` by adding the descriptor-full private-backed persistent
+   owner/epoch fallback. Zero-to-nonzero dispatch scratch and the first
+   forced-spill record/replay and sampled vertical slice are complete.
 2. Complete `R1G` after that vertical slice. `R1F` is already ready
    after `R1B` and may be interleaved because dead/fresh scalar allocation does
    not require the VGPR spill emitter.
@@ -718,11 +718,11 @@ Landed boundary:
 - The owning descriptor and its AMDGPU MessagePack metadata grow together.
   Dynamic-stack kernels, ambiguous ownership, unencodable metadata growth, and
   placement failures remain precise non-patching outcomes.
-- The current HSA load-hook path can append slots only when the compiled kernel
-  already has a private segment and therefore already establishes flat-scratch
-  state. Merely changing a zero-private descriptor and metadata is insufficient
-  on gfx1201. Zero-to-nonzero flat-scratch activation is now explicit `R1E`
-  work before private-backed persistent state can be general.
+- The HSA hook records the enlarged private size for each patched kernel,
+  resolves the loaded kernel object through the executable symbol API, and
+  raises that kernel's AQL dispatch-packet `private_segment_size` through an
+  AMD queue interceptor. Descriptor, metadata, symbol-query, and dispatch sizes
+  therefore agree even for a kernel compiled with zero private bytes.
 - The descriptor-full IREE scan pressure test finishes 5/5 under a timeout. Its
   large scan kernel currently stops before allocation because all 640 DS sites
   decode as unsupported access kinds; the log is a precise non-spill blocker
@@ -746,10 +746,6 @@ which cannot be solved by a site-local scratch lease.
 
 Work:
 
-- Establish flat-scratch state for zero-private kernels before selecting a
-  private-backed persistent representation. This requires the missing entry
-  prologue/runtime setup; descriptor and MessagePack size edits alone are not
-  a safe zero-to-nonzero transition.
 - Prefer a dedicated whole-kernel VGPR pair above every guest reference, grow
   only the owning descriptor, and initialize it in the existing entry prologue.
 - For descriptor-full kernels, compare two bounded fallbacks:
@@ -776,8 +772,10 @@ Current progress:
   remain excluded until `R1G`.
 - Live racy-access and barrier-ordering tests pass without owner/epoch register
   numbers or the explicit prologue-init flag.
-- Descriptor-full private-backed state and zero-private flat-scratch entry
-  setup remain the open part of this node.
+- Zero-private forced-spill record/replay and sampled tests pass with the HSA
+  queue interceptor raising the patched kernel's dispatch-private size.
+- Descriptor-full private-backed persistent state remains the open part of this
+  node.
 
 Done criteria:
 

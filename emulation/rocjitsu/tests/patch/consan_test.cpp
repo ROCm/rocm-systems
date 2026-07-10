@@ -1694,7 +1694,7 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
       1u);
 }
 
-TEST(ConSanMoi, FirstLightProbeBlocksZeroToNonzeroDispatchScratch) {
+TEST(ConSanMoi, FirstLightProbeSupportsZeroToNonzeroDispatchScratch) {
   const std::array<uint32_t, 3> text_words = {
       0xD8340000u,
       0x00000000u,
@@ -1709,11 +1709,23 @@ TEST(ConSanMoi, FirstLightProbeBlocksZeroToNonzeroDispatchScratch) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.errors.empty());
-  EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("pre-existing private segment") != std::string::npos;
-  }));
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().spilled_vgpr_count, 3u);
+  EXPECT_EQ(result.patches.front().required_private_segment_size, 12u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 12u);
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+      1u);
 }
 
 TEST(ConSanMoi, FirstLightProbeRejectsSpillingDynamicStackKernel) {

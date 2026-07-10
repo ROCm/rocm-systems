@@ -1636,6 +1636,121 @@ private:
   std::atomic<uint64_t> next_generation_{0};
 };
 
+class KernelPrivateDispatchRegistry {
+public:
+  static KernelPrivateDispatchRegistry &instance() {
+    // The HSA runtime may call OnUnload from a shared-library finalizer after
+    // ordinary function-local statics have already been destroyed. Keep the
+    // registry alive for the process lifetime and clear its contents explicitly
+    // when the hook layer is uninstalled.
+    static auto *registry = new KernelPrivateDispatchRegistry;
+    return *registry;
+  }
+
+  void note_patch_requirements(hsa_executable_t executable, const rocjitsu::ConSanResult &result) {
+    std::lock_guard lock(mutex_);
+    for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
+      if (patch.required_private_segment_size == 0)
+        continue;
+      const auto kernel = std::ranges::find_if(result.kernels, [&](const auto &candidate) {
+        return candidate.has_text_range && patch.anchor_offset >= candidate.entry_text_offset &&
+               patch.anchor_offset - candidate.entry_text_offset < candidate.code_size;
+      });
+      if (kernel == result.kernels.end())
+        continue;
+      const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
+        return candidate.executable == executable.handle && candidate.kernel_name == kernel->name;
+      });
+      if (pending == pending_.end()) {
+        pending_.push_back({executable.handle, kernel->name, patch.required_private_segment_size});
+      } else {
+        pending->required_private_bytes =
+            std::max(pending->required_private_bytes, patch.required_private_segment_size);
+      }
+    }
+  }
+
+  void bind_symbol(hsa_executable_t executable, std::string_view symbol_name,
+                   hsa_executable_symbol_t symbol,
+                   decltype(hsa_executable_symbol_get_info) *original_get_info) {
+    if (original_get_info == nullptr)
+      return;
+    std::lock_guard lock(mutex_);
+    const std::string_view normalized = normalize_kernel_name(symbol_name);
+    const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
+      return candidate.executable == executable.handle &&
+             normalize_kernel_name(candidate.kernel_name) == normalized;
+    });
+    if (pending == pending_.end())
+      return;
+
+    uint64_t kernel_object = 0;
+    if (original_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object) !=
+        HSA_STATUS_SUCCESS) {
+      return;
+    }
+    const auto bound = std::ranges::find_if(
+        bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
+    if (bound == bound_.end()) {
+      bound_.push_back({symbol.handle, kernel_object, pending->required_private_bytes});
+    } else {
+      bound->kernel_object = kernel_object;
+      bound->required_private_bytes =
+          std::max(bound->required_private_bytes, pending->required_private_bytes);
+    }
+    log_message(kLogInfo,
+                "ConSan dispatch-private binding executable=%llu symbol=%llu kernel_object=0x%llx "
+                "private_bytes=%u",
+                static_cast<unsigned long long>(executable.handle),
+                static_cast<unsigned long long>(symbol.handle),
+                static_cast<unsigned long long>(kernel_object), pending->required_private_bytes);
+  }
+
+  [[nodiscard]] std::optional<uint32_t> required_for_symbol(hsa_executable_symbol_t symbol) const {
+    std::lock_guard lock(mutex_);
+    const auto bound = std::ranges::find_if(
+        bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
+    return bound == bound_.end() ? std::nullopt
+                                 : std::optional<uint32_t>(bound->required_private_bytes);
+  }
+
+  [[nodiscard]] std::optional<uint32_t> required_for_kernel_object(uint64_t kernel_object) const {
+    std::lock_guard lock(mutex_);
+    const auto bound = std::ranges::find_if(
+        bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
+    return bound == bound_.end() ? std::nullopt
+                                 : std::optional<uint32_t>(bound->required_private_bytes);
+  }
+
+  void clear() {
+    std::lock_guard lock(mutex_);
+    pending_.clear();
+    bound_.clear();
+  }
+
+private:
+  struct Pending {
+    uint64_t executable = 0;
+    std::string kernel_name;
+    uint32_t required_private_bytes = 0;
+  };
+  struct Bound {
+    uint64_t symbol = 0;
+    uint64_t kernel_object = 0;
+    uint32_t required_private_bytes = 0;
+  };
+
+  [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
+    if (name.ends_with(".kd"))
+      name.remove_suffix(3);
+    return name;
+  }
+
+  mutable std::mutex mutex_;
+  std::vector<Pending> pending_;
+  std::vector<Bound> bound_;
+};
+
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_file(
@@ -1644,6 +1759,17 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_destroy(hsa_code_object_reader_t 
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
     const char *options, hsa_loaded_code_object_t *loaded_code_object);
+hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t executable,
+                                                          const char *symbol_name,
+                                                          const hsa_agent_t *agent,
+                                                          hsa_executable_symbol_t *symbol);
+hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t symbol,
+                                                       hsa_executable_symbol_info_t attribute,
+                                                       void *value);
+hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                         void (*callback)(hsa_status_t, hsa_queue_t *, void *),
+                                         void *data, uint32_t private_segment_size,
+                                         uint32_t group_segment_size, hsa_queue_t **queue);
 
 class RjDbiHsaLayer {
 public:
@@ -1658,17 +1784,31 @@ public:
 
     table_ = table;
     core_ = table->core_;
+    amd_ext_ = table->amd_ext_;
     g_log_level.store(config.log_level, std::memory_order_relaxed);
     config_ = config;
     original_create_from_file_ = core_->hsa_code_object_reader_create_from_file_fn;
     original_create_from_memory_ = core_->hsa_code_object_reader_create_from_memory_fn;
     original_destroy_ = core_->hsa_code_object_reader_destroy_fn;
     original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
+    original_get_symbol_by_name_ = core_->hsa_executable_get_symbol_by_name_fn;
+    original_symbol_get_info_ = core_->hsa_executable_symbol_get_info_fn;
+    original_queue_create_ = core_->hsa_queue_create_fn;
+    intercept_dispatch_private_ =
+        config.flavor.value_or(rocjitsu::ConSanFlavor::None) == rocjitsu::ConSanFlavor::Moi;
+    const bool amd_intercept_table_valid =
+        amd_ext_ != nullptr &&
+        amd_ext_->version.minor_id >= offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn) +
+                                          sizeof(AmdExtTable::hsa_amd_queue_intercept_register_fn);
 
     if (original_create_from_file_ == nullptr || original_create_from_memory_ == nullptr ||
-        original_destroy_ == nullptr || original_load_agent_code_object_ == nullptr) {
-      std::fprintf(stderr,
-                   "[rocjitsu-dbi-hooks] HSA core table contains null code-object entries\n");
+        original_destroy_ == nullptr || original_load_agent_code_object_ == nullptr ||
+        (intercept_dispatch_private_ &&
+         (original_get_symbol_by_name_ == nullptr || original_symbol_get_info_ == nullptr ||
+          original_queue_create_ == nullptr || !amd_intercept_table_valid ||
+          amd_ext_->hsa_amd_queue_intercept_create_fn == nullptr ||
+          amd_ext_->hsa_amd_queue_intercept_register_fn == nullptr))) {
+      std::fprintf(stderr, "[rocjitsu-dbi-hooks] HSA API table lacks a required DBI entry\n");
       clear_unlocked();
       return false;
     }
@@ -1678,6 +1818,11 @@ public:
         rj_dbi_code_object_reader_create_from_memory;
     core_->hsa_code_object_reader_destroy_fn = rj_dbi_code_object_reader_destroy;
     core_->hsa_executable_load_agent_code_object_fn = rj_dbi_executable_load_agent_code_object;
+    if (intercept_dispatch_private_) {
+      core_->hsa_executable_get_symbol_by_name_fn = rj_dbi_executable_get_symbol_by_name;
+      core_->hsa_executable_symbol_get_info_fn = rj_dbi_executable_symbol_get_info;
+      core_->hsa_queue_create_fn = rj_dbi_queue_create;
+    }
     active_ = true;
 
     log_message(
@@ -1761,6 +1906,12 @@ public:
       if (core_->hsa_executable_load_agent_code_object_fn ==
           rj_dbi_executable_load_agent_code_object)
         core_->hsa_executable_load_agent_code_object_fn = original_load_agent_code_object_;
+      if (core_->hsa_executable_get_symbol_by_name_fn == rj_dbi_executable_get_symbol_by_name)
+        core_->hsa_executable_get_symbol_by_name_fn = original_get_symbol_by_name_;
+      if (core_->hsa_executable_symbol_get_info_fn == rj_dbi_executable_symbol_get_info)
+        core_->hsa_executable_symbol_get_info_fn = original_symbol_get_info_;
+      if (core_->hsa_queue_create_fn == rj_dbi_queue_create)
+        core_->hsa_queue_create_fn = original_queue_create_;
     }
 
     const AutoMoiReportBufferRegistry::Summary moi_report_summary =
@@ -1770,6 +1921,7 @@ public:
     const bool moi_forbid_diagnostics = config_ && config_->moi_forbid_diagnostics;
     const bool moi_require_replay_conflict = config_ && config_->moi_require_replay_conflict;
     CodeObjectReaderRegistry::instance().clear();
+    KernelPrivateDispatchRegistry::instance().clear();
     clear_unlocked();
     if (moi_require_records && moi_report_summary.visible_access_record_count +
                                        moi_report_summary.visible_barrier_record_count +
@@ -1874,6 +2026,31 @@ public:
     return original_load_agent_code_object_;
   }
 
+  [[nodiscard]] decltype(hsa_executable_get_symbol_by_name) *get_symbol_by_name() const {
+    std::lock_guard lock(mutex_);
+    return original_get_symbol_by_name_;
+  }
+
+  [[nodiscard]] decltype(hsa_executable_symbol_get_info) *symbol_get_info() const {
+    std::lock_guard lock(mutex_);
+    return original_symbol_get_info_;
+  }
+
+  [[nodiscard]] decltype(hsa_queue_create) *queue_create() const {
+    std::lock_guard lock(mutex_);
+    return original_queue_create_;
+  }
+
+  [[nodiscard]] hsa_amd_queue_intercept_create_fn_t queue_intercept_create() const {
+    std::lock_guard lock(mutex_);
+    return amd_ext_ == nullptr ? nullptr : amd_ext_->hsa_amd_queue_intercept_create_fn;
+  }
+
+  [[nodiscard]] hsa_amd_queue_intercept_register_fn_t queue_intercept_register() const {
+    std::lock_guard lock(mutex_);
+    return amd_ext_ == nullptr ? nullptr : amd_ext_->hsa_amd_queue_intercept_register_fn;
+  }
+
   [[nodiscard]] CoreApiTable *core_table() const {
     std::lock_guard lock(mutex_);
     return core_;
@@ -1887,8 +2064,12 @@ private:
     }
 
     constexpr size_t required_size =
-        offsetof(CoreApiTable, hsa_executable_load_agent_code_object_fn) +
-        sizeof(CoreApiTable::hsa_executable_load_agent_code_object_fn);
+        std::max({offsetof(CoreApiTable, hsa_executable_load_agent_code_object_fn) +
+                      sizeof(CoreApiTable::hsa_executable_load_agent_code_object_fn),
+                  offsetof(CoreApiTable, hsa_executable_get_symbol_by_name_fn) +
+                      sizeof(CoreApiTable::hsa_executable_get_symbol_by_name_fn),
+                  offsetof(CoreApiTable, hsa_executable_symbol_get_info_fn) +
+                      sizeof(CoreApiTable::hsa_executable_symbol_get_info_fn)});
     if (table->core_->version.minor_id < required_size) {
       std::fprintf(stderr,
                    "[rocjitsu-dbi-hooks] HSA core table too small: got %u bytes, need %zu bytes\n",
@@ -1903,22 +2084,32 @@ private:
     g_log_level.store(kLogDisabled, std::memory_order_relaxed);
     table_ = nullptr;
     core_ = nullptr;
+    amd_ext_ = nullptr;
     config_.reset();
     original_create_from_file_ = nullptr;
     original_create_from_memory_ = nullptr;
     original_destroy_ = nullptr;
     original_load_agent_code_object_ = nullptr;
+    original_get_symbol_by_name_ = nullptr;
+    original_symbol_get_info_ = nullptr;
+    original_queue_create_ = nullptr;
+    intercept_dispatch_private_ = false;
   }
 
   mutable std::mutex mutex_;
   HsaApiTable *table_ = nullptr;
   CoreApiTable *core_ = nullptr;
+  AmdExtTable *amd_ext_ = nullptr;
   std::optional<HookConfig> config_;
   bool active_ = false;
   decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
   decltype(hsa_code_object_reader_create_from_memory) *original_create_from_memory_ = nullptr;
   decltype(hsa_code_object_reader_destroy) *original_destroy_ = nullptr;
   decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
+  decltype(hsa_executable_get_symbol_by_name) *original_get_symbol_by_name_ = nullptr;
+  decltype(hsa_executable_symbol_get_info) *original_symbol_get_info_ = nullptr;
+  decltype(hsa_queue_create) *original_queue_create_ = nullptr;
+  bool intercept_dispatch_private_ = false;
 };
 
 RjDbiHsaLayer &layer() {
@@ -1971,6 +2162,105 @@ rj_dbi_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader) {
   if (original == nullptr)
     return HSA_STATUS_ERROR;
   return original(code_object_reader);
+}
+
+struct alignas(8) InterceptPacket {
+  std::array<uint8_t, sizeof(hsa_kernel_dispatch_packet_t)> bytes{};
+};
+static_assert(sizeof(InterceptPacket) == sizeof(hsa_kernel_dispatch_packet_t));
+static_assert(sizeof(InterceptPacket) == 64);
+
+void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
+                                    uint64_t user_packet_index, void *data,
+                                    hsa_amd_queue_intercept_packet_writer_t writer) {
+  (void)user_packet_index;
+  (void)data;
+  if (packets == nullptr || writer == nullptr || packet_count == 0) {
+    if (writer != nullptr)
+      writer(packets, packet_count);
+    return;
+  }
+  if (packet_count > std::numeric_limits<size_t>::max() / sizeof(InterceptPacket)) {
+    writer(packets, packet_count);
+    return;
+  }
+
+  std::vector<InterceptPacket> rewritten(static_cast<size_t>(packet_count));
+  std::memcpy(rewritten.data(), packets,
+              static_cast<size_t>(packet_count) * sizeof(InterceptPacket));
+  for (InterceptPacket &packet_bytes : rewritten) {
+    auto *packet = reinterpret_cast<hsa_kernel_dispatch_packet_t *>(packet_bytes.bytes.data());
+    const uint16_t type =
+        static_cast<uint16_t>((packet->header >> HSA_PACKET_HEADER_TYPE) &
+                              ((uint16_t{1} << HSA_PACKET_HEADER_WIDTH_TYPE) - 1u));
+    if (type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+      continue;
+    const auto required =
+        KernelPrivateDispatchRegistry::instance().required_for_kernel_object(packet->kernel_object);
+    if (!required || *required <= packet->private_segment_size)
+      continue;
+    log_message(kLogInfo, "ConSan dispatch-private grow kernel_object=0x%llx private_bytes=%u->%u",
+                static_cast<unsigned long long>(packet->kernel_object),
+                packet->private_segment_size, *required);
+    packet->private_segment_size = *required;
+  }
+  writer(rewritten.data(), packet_count);
+}
+
+hsa_status_t HSA_API rj_dbi_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                         void (*callback)(hsa_status_t, hsa_queue_t *, void *),
+                                         void *data, uint32_t private_segment_size,
+                                         uint32_t group_segment_size, hsa_queue_t **queue) {
+  auto *intercept_create = layer().queue_intercept_create();
+  auto *intercept_register = layer().queue_intercept_register();
+  if (intercept_create == nullptr || intercept_register == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t create_status = intercept_create(
+      agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  if (create_status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
+    return create_status;
+  const hsa_status_t register_status =
+      intercept_register(*queue, rj_dbi_queue_write_interceptor, nullptr);
+  if (register_status != HSA_STATUS_SUCCESS) {
+    CoreApiTable *core = layer().core_table();
+    if (core != nullptr && core->hsa_queue_destroy_fn != nullptr)
+      (void)core->hsa_queue_destroy_fn(*queue);
+    *queue = nullptr;
+  }
+  return register_status;
+}
+
+hsa_status_t HSA_API rj_dbi_executable_get_symbol_by_name(hsa_executable_t executable,
+                                                          const char *symbol_name,
+                                                          const hsa_agent_t *agent,
+                                                          hsa_executable_symbol_t *symbol) {
+  auto *original = layer().get_symbol_by_name();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t status = original(executable, symbol_name, agent, symbol);
+  if (status == HSA_STATUS_SUCCESS && symbol_name != nullptr && symbol != nullptr) {
+    KernelPrivateDispatchRegistry::instance().bind_symbol(executable, symbol_name, *symbol,
+                                                          layer().symbol_get_info());
+  }
+  return status;
+}
+
+hsa_status_t HSA_API rj_dbi_executable_symbol_get_info(hsa_executable_symbol_t symbol,
+                                                       hsa_executable_symbol_info_t attribute,
+                                                       void *value) {
+  auto *original = layer().symbol_get_info();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+  const hsa_status_t status = original(symbol, attribute, value);
+  if (status == HSA_STATUS_SUCCESS && value != nullptr &&
+      attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
+    const auto required = KernelPrivateDispatchRegistry::instance().required_for_symbol(symbol);
+    if (required) {
+      auto *private_bytes = static_cast<uint32_t *>(value);
+      *private_bytes = std::max(*private_bytes, *required);
+    }
+  }
+  return status;
 }
 
 hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
@@ -2507,6 +2797,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
 
   const hsa_status_t load_status =
       original_load(executable, agent, reader_to_load, options, loaded_code_object);
+  if (load_status == HSA_STATUS_SUCCESS && patch_result_storage && patch_result_storage->modified) {
+    KernelPrivateDispatchRegistry::instance().note_patch_requirements(executable,
+                                                                      *patch_result_storage);
+  }
   if (using_replacement_reader) {
     auto *original_destroy = layer().destroy();
     if (original_destroy != nullptr)

@@ -552,8 +552,6 @@ __global__ __launch_bounds__(
     64) void moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
-  volatile uint32_t private_words[4];
-  private_words[tid & 3u] = tid;
   const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
   uint32_t values[8] = {
       0x11000000u ^ tid, 0x22000000u ^ tid, 0x33000000u ^ tid, 0x44000000u ^ tid,

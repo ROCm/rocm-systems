@@ -58,7 +58,8 @@ Known local result:
 
 - Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
   passed after the R1D implementation.
-- R1D resource/MOI/spill-manager focus: 121/121 passed.
+- Current resource/MOI/spill-manager focus: 148/148 passed after enabling
+  zero-to-nonzero dispatch scratch.
 
 Focused gfx1201 spill hardware smoke:
 
@@ -84,9 +85,11 @@ ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/
 
 Known local result:
 
-- 15/15 passed. This includes forced-spill record/replay and sampled tests that
-  keep eight values live across the patched LDS access, verify every value
-  after restoration, and require a visible MOI record/entry.
+- 15/15 passed. This includes forced-spill record/replay and sampled tests whose
+  original kernel private size is zero. The hook raises the patched kernel's
+  dispatch-private size (to 12 and 20 bytes respectively); both tests keep
+  eight values live across the patched LDS access, verify every value after
+  restoration, and require a visible MOI record/entry.
 - The forced tier and kernel selector are internal CTest controls, not public
   ConSan configuration.
 
@@ -160,9 +163,10 @@ R1D descriptor-pressure check:
 - That kernel has 640 DS operations currently classified as unsupported access
   kinds, so it reaches a precise pre-allocation blocker rather than a spill
   patch. There was no hang and no silent high-VGPR borrowing.
-- Live forced-spill coverage uses a kernel with an existing 32-byte private
-  segment. Zero-to-nonzero private scratch is deliberately rejected until the
-  missing flat-scratch entry setup is implemented.
+- Live forced-spill coverage uses a kernel compiled with zero private bytes.
+  Record/replay and sampled instrumentation both bind the patched kernel symbol
+  to its loaded kernel object and raise the AQL dispatch-private size before
+  execution.
 
 Broad IREE compatibility:
 

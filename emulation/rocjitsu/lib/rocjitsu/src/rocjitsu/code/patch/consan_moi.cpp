@@ -2115,13 +2115,6 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     warnings.emplace_back("ConSan MOI spill does not yet support a dynamic-stack kernel");
     return std::nullopt;
   }
-  if (resources.original_private_segment_size == 0) {
-    warnings.emplace_back(
-        "ConSan MOI spill requires a pre-existing private segment; the HSA DBI load hook cannot "
-        "safely establish zero-to-nonzero dispatch scratch");
-    return std::nullopt;
-  }
-
   auto [it, inserted] =
       managers.try_emplace(descriptor_offset, resources.original_private_segment_size,
                            kMaxAddressFreeScratchPrivateBytes);

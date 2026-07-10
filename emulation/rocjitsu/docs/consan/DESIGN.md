@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, direct-kernel sites can preserve a live victim window through gfx1201 private scratch when the kernel already has a private segment, and inline shadow automatically assigns dedicated owner/epoch VGPRs when capacity exists. | Add the descriptor-full persistent fallback, scalar/special state, shared functions, and zero-private flat-scratch activation. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, direct-kernel sites can preserve a live victim window through gfx1201 private scratch (including zero-private kernels through dispatch rewriting), and inline shadow automatically assigns dedicated owner/epoch VGPRs when capacity exists. | Add the descriptor-full persistent fallback, scalar/special state, and shared functions. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -258,11 +258,11 @@ Current register policy:
   spill-required outcome. They use an appended cave containing the spill save,
   derived-owner setup, original access, conservative LDS wait,
   instrumentation, spill restore, and return.
-- Spill plans currently require a compiled nonzero private segment. The patcher
-  grows both the owning descriptor and the named kernel's AMDGPU MessagePack
-  private size. A zero-private kernel is left unmodified with a precise warning
-  because descriptor/metadata edits do not synthesize its missing flat-scratch
-  entry setup.
+- Spill plans grow both the owning descriptor and the named kernel's AMDGPU
+  MessagePack private size. The HSA hook also associates that requirement with
+  the loaded kernel object and rewrites its AQL dispatch packet, so a compiled
+  private size of zero can become nonzero without relying on the runtime's
+  original symbol metadata.
 - Dynamic, barrier, atomic, inline-shadow scratch/diagnostic, and EXEC-save
   paths still rely on explicit env knobs.
 - Inline shadow is the exception for persistent vector state: when no explicit
@@ -276,8 +276,8 @@ Current register policy:
   private segment. Dynamic-stack kernels are detected from compiler-emitted
   symbols and rejected by this first backend.
 - Static record/replay and sampled access probes consume that backend for
-  direct kernels. Shared functions, persistent state, scalar state, dynamic
-  stacks, and zero-private kernels remain outside this first vertical slice.
+  direct kernels. Shared functions, persistent state, scalar state, and dynamic
+  stacks remain outside this first vertical slice.
 
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
 first reference for spilling work. Its directly reusable piece is the
@@ -753,11 +753,10 @@ What it does not mean:
 ## Immediate Engineering Gaps
 
 The non-spill scratch policy, the first complete gfx1201 spill-backed access
-slice, and spare-capacity persistent owner/epoch placement are now in place.
-The immediate gap is descriptor-full persistent state. Its private-backed
-fallback also has to establish flat-scratch entry state for kernels compiled
-with no private segment; changing the descriptor and metadata alone was tested
-on gfx1201 and is not sufficient.
+slice, zero-to-nonzero dispatch scratch, and spare-capacity persistent
+owner/epoch placement are now in place. The immediate gap is descriptor-full
+persistent state: its private-backed slots must be kept separate from ephemeral
+spill leases and used consistently by access and barrier probes.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:
