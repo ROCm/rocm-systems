@@ -628,6 +628,21 @@ void WDDMDevice::InitCmdbufInfo(void) {
   // slack is retained. This scales with device geometry instead of being a
   // blunt over-allocation, and grows automatically if counter sets grow.
   constexpr uint32_t kFrameAlignmentMargin    = 128;
+  // Per-pass fixed overhead independent of the counter count: the shared PMC
+  // programming aqlprofile emits once around the per-counter loop
+  // (pmc_builder.h GpuPmcBuilder::Start/Stop/Read/Enable/Disable/WaitIdle).
+  // Rough gfx11 tally, using the packet sizes in gfx11_cmd_builder.h
+  // (EVENT_WRITE 2 dw = 8 B, SET_SH/UCONFIG_REG 3 dw = 12 B, COPY_DATA 6 dw =
+  // 24 B, ACQUIRE_MEM 8 dw = 32 B):
+  //   perfmon ctrl : CP_PERFMON_CNTL reset/start/stop + SQ_PERFCOUNTER_CTRL/CTRL2
+  //                  + GRBM broadcast resets, ~10 writes @ 12-24 B     ~= 220 B
+  //   wait-idle    : ~4 x EVENT_WRITE barrier @ 8 B                    ~=  32 B
+  //   cache flush  : ~2 x ACQUIRE_MEM @ 32 B                           ~=  64 B
+  //   enable/disable: 2 x COMPUTE_PERFCOUNT_ENABLE SET_SH_REG @ 12 B   ~=  24 B
+  //   sync waits   : ~2 x WAIT_REG_MEM (7 dw = 28 B)                   ~=  56 B
+  //                                                          subtotal  ~= 396 B
+  // 512 rounds that up with ~115 B slack (per-counter / per-instance costs are
+  // budgeted separately below), so it is a safe fixed bound.
   constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
   constexpr uint32_t kPmcStartBytesPerCounter = 64;
   constexpr uint32_t kPmcReadBytesPerInstance = 64;
