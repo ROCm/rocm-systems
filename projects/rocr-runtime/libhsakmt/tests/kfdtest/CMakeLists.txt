@@ -24,7 +24,7 @@
 # If environment variable DRM_DIR or LIBHSAKMT_PATH is set, the script
 # will pick up the corresponding libraries from those pathes.
 
-cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 project(KFDTest)
 
@@ -93,9 +93,8 @@ set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 find_package(PkgConfig)
 
 # Prepend DRM_DIR to CMAKE_PREFIX_PATH if set
-# Note: list(PREPEND) was added in CMake 3.15, using INSERT for 3.12 compatibility
 if(DRM_DIR)
-    list(INSERT CMAKE_PREFIX_PATH 0 "${DRM_DIR}")
+    list(PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
 endif()
 # The module name passed to pkg_check_modules() is determined by the
 # name of file *.pc
