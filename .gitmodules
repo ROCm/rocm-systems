@@ -130,3 +130,11 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/json"]
 	path = projects/rocprofiler-compute/src/lib/external/json
 	url = https://github.com/nlohmann/json.git
+[submodule "shared/lttng/lttng-ust"]
+	path = shared/lttng/lttng-ust
+	url = https://github.com/lttng/lttng-ust.git
+	branch = stable-2.13
+[submodule "shared/lttng/userspace-rcu"]
+	path = shared/lttng/userspace-rcu
+	url = https://github.com/urcu/userspace-rcu.git
+	branch = stable-0.14
