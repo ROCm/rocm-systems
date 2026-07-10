@@ -66,6 +66,7 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
       chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
     if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
+      cache_.invalidate(ea, vmid);
       l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
@@ -117,6 +118,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
     if (chunk_mtype == Mtype::UC || non_temporal) {
+      cache_.invalidate(ea, vmid);
       l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
