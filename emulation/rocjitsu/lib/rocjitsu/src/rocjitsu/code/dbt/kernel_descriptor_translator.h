@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -209,10 +210,9 @@ public:
   /// this avoids rescanning or recomputing unrelated kernel descriptors.
   /// @returns A translated descriptor plan, or std::nullopt if @p descriptor_file_offset
   /// does not point at a complete AMDHSA kernel descriptor in @p image.
-  [[nodiscard]] std::optional<KdTranslation>
-  translate_descriptor(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
-                       uint64_t entry_text_offset,
-                       const KernelDescriptorTranslationOptions &options) const;
+  [[nodiscard]] std::optional<KdTranslation> translate_descriptor(
+      std::span<const uint8_t> image, uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+      const KernelDescriptorTranslationOptions &options, std::string_view symbol_name = {}) const;
 
 private:
   rj_code_arch_t guest_arch_;

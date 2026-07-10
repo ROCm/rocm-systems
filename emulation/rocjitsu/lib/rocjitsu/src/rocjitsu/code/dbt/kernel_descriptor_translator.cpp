@@ -812,9 +812,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   if (options.target_vgpr_count_override != 0) {
     if (options.target_vgpr_count_override < result.guest_vgpr_count &&
         !(is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)) {
-      append_descriptor_error(result,
-                              "target VGPR count override below guest allocation requires "
-                              "unsupported VGPR virtualization");
+      append_descriptor_error(result, "target VGPR count override below guest allocation requires "
+                                      "unsupported VGPR virtualization");
     }
     required_vgprs = options.target_vgpr_count_override;
   }
@@ -1006,14 +1005,14 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
 
 std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, uint64_t entry_text_offset,
-    const KernelDescriptorTranslationOptions &options) const {
+    const KernelDescriptorTranslationOptions &options, std::string_view symbol_name) const {
   if (descriptor_file_offset > image.size() || image.size() - descriptor_file_offset < sizeof(KD))
     return std::nullopt;
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
   return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
-                                  entry_text_offset, {}, desc, options);
+                                  entry_text_offset, symbol_name, desc, options);
 }
 
 } // namespace rocjitsu

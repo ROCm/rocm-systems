@@ -5,7 +5,7 @@
     "host_isa": "gfx1201",
     "host_gpu_id": 0,
     "execution_backend": "simulator",
-    "simulator_config": "gfx1201_r9700.json",
+    "simulator_config": "gfx1201_functional.json",
     "guest_device": {
       "gpu_id": 1250,
       "gfx_target_version": 120500,

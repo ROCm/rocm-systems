@@ -7299,7 +7299,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
         auto updated = descriptor_translator.translate_descriptor(
             patcher.image_bytes(), scope.translation->descriptor_file_offset,
-            scope.translation->entry_text_offset, updated_options);
+            scope.translation->entry_text_offset, updated_options, scope.translation->symbol_name);
         if (!updated) {
           fail_expanded_copy(
               "expanded text copy could not recompute descriptor scratch requirements");
@@ -7949,7 +7949,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
         auto updated = descriptor_translator.translate_descriptor(
             patcher.image_bytes(), translation.descriptor_file_offset,
-            translation.entry_text_offset, descriptor_options);
+            translation.entry_text_offset, descriptor_options, translation.symbol_name);
         if (!updated) {
           append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                        "kernel descriptor translation could not be recomputed; leaving code object "

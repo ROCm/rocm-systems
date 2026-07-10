@@ -61,6 +61,21 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
+  auto functional =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1201_functional.json", rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(functional.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(functional.device.gfx_target_version, 120001u);
+  EXPECT_EQ(functional.device.simd_count, 128u);
+  EXPECT_EQ(functional.device.num_shader_engines, 8u);
+  EXPECT_EQ(functional.device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(functional.device.num_cu_per_sh, 8u);
+  EXPECT_EQ(functional.soc()->num_xcds(), 1u);
+  EXPECT_EQ(functional.soc()->xcd(0)->num_shader_engines(), 1u);
+  auto *functional_se = functional.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(functional_se->num_compute_units(), 2u);
+  EXPECT_EQ(functional_se->spi().max_cu_lds_bytes(), 64u * 1024u);
+  EXPECT_EQ(functional_se->spi().max_wgp_lds_bytes(), 128u * 1024u);
+
   auto rdna4 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
   EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);

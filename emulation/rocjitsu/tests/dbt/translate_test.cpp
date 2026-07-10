@@ -2073,6 +2073,27 @@ TEST(KernelDescriptorTranslator, Gfx1250Supports1024AddressableVgprs) {
   EXPECT_TRUE(translations[0].supported);
 }
 
+TEST(KernelDescriptorTranslator, RecomputedDescriptorPreservesDiscoveredSymbol) {
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+
+  KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto discovered = translator.translate_image(image, shdrs[1].sh_offset, shdrs[1].sh_size,
+                                                     KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(discovered.size(), 1u);
+  ASSERT_FALSE(discovered[0].symbol_name.empty());
+
+  KernelDescriptorTranslationOptions updated_options;
+  updated_options.minimum_vgprs = discovered[0].target_vgpr_count + 4;
+  const auto recomputed = translator.translate_descriptor(
+      image, discovered[0].descriptor_file_offset, discovered[0].entry_text_offset, updated_options,
+      discovered[0].symbol_name);
+
+  ASSERT_TRUE(recomputed.has_value());
+  EXPECT_EQ(recomputed->symbol_name, discovered[0].symbol_name);
+}
+
 TEST(CodeObjectPatcher, Gfx1250PatchSetsWave32DescriptorBit) {
   using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
   namespace kd = rocr::llvm::amdhsa;

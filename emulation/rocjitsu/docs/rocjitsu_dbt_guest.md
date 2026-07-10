@@ -114,7 +114,7 @@ guest/translation policy separate from the reusable target-machine model:
     "guest_isa": "gfx1250",
     "host_isa": "gfx1201",
     "execution_backend": "simulator",
-    "simulator_config": "gfx1201_r9700.json",
+    "simulator_config": "gfx1201_functional.json",
     "guest_device": {
       "gpu_id": 1250,
       "gfx_target_version": 120500
@@ -145,13 +145,21 @@ public identity:    configured guest agent and ISA
 execution identity: selected physical or simulated target agent and ISA
 ```
 
-The gfx1250 example selects the hardware-shaped `gfx1201_r9700.json` model.
-Each physical RDNA4 CU contributes 64 KiB of LDS. A translated descriptor with
+The gfx1250 example selects `gfx1201_functional.json`, a reduced correctness
+profile that retains the R9700 KFD/HSA identity while reducing the execution
+topology to one real RDNA4 WGP (two sibling CUs). Keeping functional E2E on a
+single WGP avoids multiplying event-loop overhead by every idle CU in the
+hardware-shaped `gfx1201_r9700.json` model; it does not increase or bypass any
+architectural resource or narrow the code objects ROCR may load. Each physical
+RDNA4 CU contributes 64 KiB of LDS. A
+translated descriptor with
 `COMPUTE_PGM_RSRC1.WGP_MODE=1` is placed on an adjacent CU pair and sees the
 combined 128 KiB WGP capacity, matching LLVM's GFX10+ local-memory model. CU
 mode remains limited to one CU's 64 KiB. Requests larger than the selected
 mode's capacity, or WGP requests on a topology without a sibling pair, fail at
 dispatch with an explicit capacity diagnostic instead of remaining queued.
+Focused scheduler tests also exercise the same rules across the full R9700
+topology.
 
 `GuestKfd` owns one application-facing open-reference domain and keeps the
 wrapped driver's primary fd private. The first application open retains the
