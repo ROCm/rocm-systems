@@ -130,10 +130,10 @@ hipMemoryType getMemoryType(const amd::Memory* memory) {
 }
 
 // ================================================================================================
-bool IsManagedMemory(unsigned int flags) {
-  constexpr unsigned int kHipMallocManagedFlags =
+bool IsManagedMemory(cl_mem_flags flags) {
+  constexpr cl_mem_flags kHipMallocManagedFlags =
       CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
-  constexpr unsigned int kManagedVarFlags = CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
+  constexpr cl_mem_flags kManagedVarFlags = CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
   return ((flags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
          ((flags & kManagedVarFlags) == kManagedVarFlags);
 }

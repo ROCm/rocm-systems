@@ -285,9 +285,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity) {
 /**
  * Test Description
  * ------------------------
- *  - Test NULL dptrs, sizes, prefetchLocs, prefetchLocIdxs arrays and invalid pointers
- *  - Verify API returns appropriate error for invalid NULL parameters, hipMalloc memory,
- *    and other non-managed pointers
+ *  - Test NULL dptrs, sizes, prefetchLocs, and prefetchLocIdxs arrays
+ *  - Verify API returns hipErrorInvalidValue for NULL parameters and hipMalloc device memory
  */
 HIP_TEST_CASE(Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers) {
   REQUIRE_MANAGED_ACCESS_DEVICE(device);
