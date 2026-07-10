@@ -27,6 +27,7 @@ intended destination.
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
+| MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
 | Registers | Mix of conservative automatic selection, descriptor growth, and explicit env knobs. | Centralize scratch allocation and reuse existing spill/cave machinery. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
@@ -110,6 +111,89 @@ The intended naming is now:
 - `record_replay`: exact host-side reference/debug MOI engine.
 - `inline_shadow`: exact GPU-side MOI engine.
 - `sampled`: low-overhead, lower-fidelity MOI engine.
+
+## MOI Broad Enablement Gap
+
+MOI has real DBI instrumentation today, but it is not yet a broad "turn it on
+over everything" mode in the same sense as SuperCollider. SuperCollider still
+has rough edges, but the typical command line is close to one flavor choice and
+one trap/report choice. MOI currently needs more engine-specific resource
+configuration and has narrower coverage in its exact inline path.
+
+The gap is not one feature. It is a set of concrete blockers:
+
+- **Scratch register allocation.** MOI probes still use explicit knobs such as
+  `RJ_CONSAN_TMP_VGPR`, `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`,
+  `RJ_CONSAN_MOI_OWNER_SGPR`, `RJ_CONSAN_MOI_OWNER_VGPR`, and
+  `RJ_CONSAN_MOI_EPOCH_VGPR` for important paths. Broad operation needs a
+  single scratch-planning policy that can find free registers when possible,
+  grow descriptors when legal, and spill/fill when necessary. The first
+  implementation reference is Kunwar Grover's
+  `origin/users/Groverkss/text-relocation-land` branch, which is confirmed to
+  contain initial VGPR spilling support.
+- **Owner and epoch state.** `inline_shadow` needs an owner and epoch live at
+  instrumented accesses. Today those values can be initialized by prologue code,
+  but the registers are manually chosen and the owner derivation is still
+  architecture- and layout-sensitive. Broad operation needs automatic
+  owner/epoch placement, a robust owner policy for arbitrary workgroup shapes,
+  and clear fallback behavior when that policy is not available.
+- **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
+  which is the right direction for applications such as IREE. Current broad
+  tests still pass explicit sizes. Broad operation needs per-engine default
+  sizing, capacity planning from the number of patched sites where possible,
+  and visible overflow diagnostics so "buffer too small" does not look like "no
+  races."
+- **Engine profiles.** `record_replay`, `inline_shadow`, and `sampled` have
+  different resource needs and diagnostic meanings. Broad operation should not
+  require users to memorize prototype recipes. Each engine needs a documented
+  default profile, with explicit override knobs retained for debugging.
+- **Instruction coverage.** `record_replay` and `sampled` can cover more of
+  the current broad IREE compatibility corpus, while `inline_shadow` is still
+  mostly native dword LDS. Exact inline operation needs multi-cell native DS
+  coverage, a policy for d16 accesses, and eventually likely-group flat/VFLAT
+  coverage after provenance and address normalization are hardened.
+- **Patch placement and text growth.** Broad MOI instrumentation inserts larger
+  probes than SuperCollider in several paths. Coverage should not depend on
+  hand-selected compact kernels. ConSan needs shared, tested placement through
+  inline padding, local caves, appended caves, and text-relocation utilities.
+- **Flat/generic LDS provenance.** Compilers can emit flat accesses for source
+  `__shared__` memory. Broad operation needs logs and policy that distinguish
+  strongly proven group memory from heuristic `MaybeGroup` memory, especially
+  before inline-shadow writes exact shadow entries from flat addresses.
+- **Barrier and atomic ordering.** Barriers and atomics are ordering evidence
+  for LDS races, not a global-memory sanitizer. Broad operation needs barrier
+  and selected atomic semantics that match the `record_replay` oracle closely
+  enough for the MVP corpus.
+- **Diagnostics.** `inline_shadow` currently emits a compact first-conflict
+  diagnostic. Team-facing broad operation needs bounded diagnostics that include
+  instruction offsets, access kinds, owners, epoch, LDS byte range, lane/EXEC
+  information when practical, and overflow signals.
+- **Runtime sampling policy.** `sampled` currently does deterministic static
+  site throttling plus host-side scan. To become the broad low-overhead engine,
+  it needs runtime sampling/generation policy and eventually in-kernel sampled
+  conflict checks.
+- **Architecture dispatch.** Local validation is on `gfx1201`, but the intended
+  target set is `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. Broad operation
+  needs ISA-specific capability checks and encoders instead of implicit RDNA4
+  assumptions.
+- **Test parity.** MOI must pass the same style of corpus as SuperCollider:
+  focused rocJITsu tests, hip-moi semantic controls, IREE TileAndFuse, broader
+  IREE e2e tests, and rocjitsu-test-corpus cases. Current local evidence is
+  useful but not parity: broad IREE compatibility has passed for
+  `record_replay` and `sampled`, while a broad `inline_shadow` sweep exposed a
+  timeout/hang and remains a targeted mode.
+
+The intended operational target is:
+
+```sh
+HSA_TOOLS_LIB=/path/to/librocjitsu_dbi_hooks.so \
+RJ_CONSAN_FLAVOR=moi \
+RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled \
+ctest ...
+```
+
+Engine choice should remain explicit. The gap to close is the extra prototype
+configuration currently needed after that choice.
 
 ## Interception And Code-Object Flow
 
@@ -572,10 +656,14 @@ The code intentionally contains several prototype mechanisms:
 
 - manual register knobs for MOI probes;
 - descriptor growth without general liveness/spilling proof;
+- explicit report-buffer sizes in broad MOI test recipes;
+- engine-specific resource recipes that users currently need to know;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
 - one-slot inline atomic release state;
 - sparse inline diagnostic records;
+- `inline_shadow` coverage and stability limited to targeted tests rather than
+  the full broad corpus;
 - deterministic or scalar-source delay instead of randomized sampling policy;
 - IREE correctness tests used as patchability/non-corruption evidence, not race
   reports.
@@ -607,6 +695,11 @@ Current evidence categories:
 - IREE RDNA4 / `gfx1201` TileAndFuse matmul tests under SuperCollider and MOI
   modes.
 - Broader IREE e2e inventory under SuperCollider patch-required mode.
+- Broader IREE e2e compatibility sweeps under MOI `record_replay` and
+  `sampled` with prototype resource knobs.
+- A broader IREE `inline_shadow` sweep is not yet clean: targeted TileAndFuse
+  tests pass, but a broad sweep exposed a timeout/hang, so `inline_shadow` is
+  not yet a blanket corpus mode.
 
 What a passing IREE test means:
 
@@ -624,7 +717,7 @@ What it does not mean:
 - It does not prove flat `MaybeGroup` is formally correct for arbitrary code.
 - It does not prove manually selected registers are generally safe.
 
-## Immediate Engineering Gap
+## Immediate Engineering Gaps
 
 The highest-leverage gap is register and spill policy. Most remaining feature
 work needs larger probes or more persistent state. Without a better scratch
@@ -647,3 +740,9 @@ If ConSan needs SGPR spilling, assume it is not already covered there. Implement
 only the minimal SGPR support needed for the current probe family, keep it
 isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
+
+After scratch/spill policy, the next operational gap is MOI defaulting: engine
+profiles, auto report-buffer sizing, clear failure modes, and a test matrix
+that proves each engine can run without ad hoc per-test register choices. That
+work is tracked in `PLAN.md` as the path from targeted MOI instrumentation to
+broad MOI operation.

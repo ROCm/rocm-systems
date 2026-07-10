@@ -75,7 +75,9 @@ The useful committed baseline is:
 flowchart TD
   B0["B0: Current ConSan Baseline"]:::done
 
+  M0["M0: MOI Broad Turn-On Readiness"]:::active
   R1["R1: Register And Spill Policy"]:::active
+  O1["O1: MOI Operational Defaults"]:::todo
   R2["R2: Patch Placement And Caves"]:::todo
   A1["A1: Multi-Architecture Native Targets"]:::todo
 
@@ -87,17 +89,20 @@ flowchart TD
   S2["S2: In-Kernel Sampled Checking"]:::todo
 
   F1["F1: Flat Provenance Hardening"]:::todo
-  T1["T1: Team Test Matrix"]:::todo
+  T1["T1: Team Test Matrix"]:::partial
   D1["D1: Team Snapshot Docs"]:::todo
 
-  B0 --> R1
-  B0 --> R2
-  B0 --> A1
-  B0 --> I1
-  B0 --> S1
-  B0 --> F1
-  B0 --> T1
-  B0 --> D1
+  B0 --> M0
+
+  M0 --> R1
+  M0 --> O1
+  M0 --> R2
+  M0 --> A1
+  M0 --> I1
+  M0 --> S1
+  M0 --> F1
+  M0 --> T1
+  M0 --> D1
 
   R1 --> I1
   R1 --> I2
@@ -127,24 +132,97 @@ flowchart TD
 
 ## Recommended Execution Order
 
-1. `R1`: settle how ConSan obtains scratch SGPR/VGPRs without relying on
+1. `M0`: keep the explicit checklist of why MOI is not yet a broad
+   turn-on-everything mode, and update it as each blocker closes.
+2. `R1`: settle how ConSan obtains scratch SGPR/VGPRs without relying on
    caller-chosen registers forever. Start from Kunwar's confirmed VGPR spilling
    support in `text-relocation-land`.
-2. `A1`: separate current gfx1201 implementation details from the intended
+3. `O1`: remove prototype command-line burden: report-buffer sizing, default
+   per-engine resource profiles, and clear unsupported/overflow failures.
+4. `A1`: separate current gfx1201 implementation details from the intended
    native target set: `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`.
-3. `I1`: expand inline-shadow beyond native dword LDS so it can cover the IREE
+5. `I1`: expand inline-shadow beyond native dword LDS so it can cover the IREE
    and hip-moi-style sites that matter.
-4. `I2` and `I3`: make inline-shadow diagnostics and ordering semantics
+6. `I2` and `I3`: make inline-shadow diagnostics and ordering semantics
    credible enough for team-facing use.
-5. `S1` and `S2`: turn sampled from static-site publication into a real
+7. `S1` and `S2`: turn sampled from static-site publication into a real
    low-overhead sanitizer option.
-6. `F1`: harden flat/generic LDS classification as coverage expands.
-7. `T1` and `D1`: keep the external snapshot honest as the feature set grows.
+8. `F1`: harden flat/generic LDS classification as coverage expands.
+9. `T1` and `D1`: keep the external snapshot honest as the feature set grows.
 
 The most important design dependency is `R1`. Current ConSan works by manually
 selecting owner, epoch, scratch VGPRs, and sometimes explicit SGPR pairs. That
 is acceptable for a prototype, but it is the main reason broader instrumentation
 coverage is risky.
+
+## M0: MOI Broad Turn-On Readiness - ACTIVE
+
+Goal: remove the remaining reasons why MOI cannot be run over the same broad
+test corpus as SuperCollider with only a top-level flavor and engine choice.
+
+Target operator experience:
+
+```sh
+HSA_TOOLS_LIB=/path/to/librocjitsu_dbi_hooks.so \
+RJ_CONSAN_FLAVOR=moi \
+RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled \
+ctest ...
+```
+
+Engine choice should stay explicit. The work here is to eliminate the extra
+per-test prototype knobs that currently make MOI feel like a collection of
+targeted experiments.
+
+Current state:
+
+- `record_replay` and `sampled` have passed broad local IREE e2e compatibility
+  sweeps with explicit prototype resource knobs.
+- `inline_shadow` has passed targeted IREE TileAndFuse tests, but a broader
+  local IREE sweep exposed a timeout/hang, so it is not yet a blanket mode.
+- hip-moi and rocjitsu-test-corpus coverage have historically been run more
+  thoroughly under SuperCollider than under all MOI engines.
+- MOI still needs explicit report-buffer sizing and, for several paths,
+  manually selected scratch/owner/epoch registers.
+
+Blocking reasons to close:
+
+- Scratch register allocation and spilling are not automatic enough.
+- Owner and epoch state are not automatically placed for arbitrary kernels.
+- HSA-tool-owned report buffers do not yet have robust per-engine default
+  capacities and overflow reporting.
+- MOI has engine-specific recipes instead of stable profiles.
+- `inline_shadow` instruction coverage is narrower than `record_replay` and
+  `sampled`.
+- Patch placement is not yet stress-tested for broad multi-probe MOI growth.
+- Flat/generic LDS provenance is still partly heuristic.
+- Barrier and atomic ordering are present but narrow.
+- Inline diagnostics are basic first-conflict records.
+- Sampled mode lacks runtime sampling/generation policy and in-kernel checking.
+- Non-gfx1201 architecture dispatch is not validated.
+- The test matrix does not yet require MOI parity with SuperCollider.
+
+Work:
+
+- Keep this section synchronized with `DESIGN.md`'s "MOI Broad Enablement Gap".
+- As each blocker moves to a dedicated implementation node, record that
+  dependency here instead of leaving it implicit.
+- Define a standard MOI command profile for each engine. Explicit debug knobs
+  may remain, but should not be required for ordinary corpus runs.
+- Treat a broad corpus hang, timeout, or silent no-record run as a product bug,
+  not just a test inconvenience.
+
+Done criteria:
+
+- `record_replay`, `sampled`, and `inline_shadow` each have one documented
+  standard run recipe.
+- Those recipes avoid hand-picking registers for ordinary corpus runs.
+- The standard recipes pass focused rocJITsu tests, hip-moi controls, selected
+  IREE LDS-heavy tests, and the broader IREE e2e compatibility tier on
+  `gfx1201`.
+- Unsupported code objects fail or skip with clear logs; they do not hang and
+  do not look like successful instrumentation.
+- `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and local testing notes agree on the
+  readiness level of each MOI engine.
 
 ## R1: Register And Spill Policy - ACTIVE
 
@@ -199,8 +277,8 @@ Done criteria:
 - A future ConSan probe author can request scratch resources through one policy
   path instead of open-coding env-var register choices.
 - Existing explicit knobs still work for targeted debugging.
-- At least one MOI inline-shadow recipe can run without hand-picking every
-  register except where spilling is still intentionally unsupported.
+- Every standard MOI recipe can run without hand-picking every register except
+  where spilling is still intentionally unsupported and documented.
 - The docs clearly state whether ConSan is using Kunwar-style VGPR spilling,
   ConSan-local SGPR spilling, or still falling back to explicit registers for a
   given probe family.
@@ -215,6 +293,50 @@ LD_LIBRARY_PATH=/path/to/rocm/lib \
 emulation/rocjitsu/build/tests/rocjitsu_tests \
   '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*'
 ```
+
+## O1: MOI Operational Defaults - TODO
+
+Goal: make MOI command lines stable and short enough for routine use.
+
+Current state:
+
+- Broad MOI tests often pass explicit `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`.
+- `record_replay`, `sampled`, and `inline_shadow` require different practical
+  buffer sizes.
+- Some guards are useful for proving instrumentation happened:
+  `RJ_CONSAN_REQUIRE_PATCH=1`, `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`,
+  `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1`, and
+  `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1`.
+- The current broad inline-shadow IREE sweep can timeout/hang, so standard
+  recipes also need failure containment.
+
+Work:
+
+- Add per-engine default auto-buffer sizing when
+  `RJ_CONSAN_FLAVOR=moi` is selected and the user did not provide a report
+  buffer.
+- Prefer capacity estimates derived from candidate counts where practical.
+- Make buffer overflow visible in logs, guards, and diagnostics.
+- Define standard engine profiles:
+  - `record_replay`: reference/debug, host replay enabled, enough records for
+    ordinary compatibility sweeps.
+  - `sampled`: low-overhead profile with deterministic sampling knobs only when
+    the user asks for reproducibility.
+  - `inline_shadow`: exact profile with automatic owner/epoch/scratch once R1
+    is ready.
+- Keep explicit env overrides for debugging.
+- Separate "prove instrumentation happened" guards from ordinary compatibility
+  runs so teammates know when to use each.
+- Add timeout/hang triage notes to local testing until the underlying
+  inline-shadow broad issue is fixed.
+
+Done criteria:
+
+- A teammate can run each MOI engine with `RJ_CONSAN_FLAVOR=moi` plus
+  `RJ_CONSAN_MOI_ENGINE=...` and no buffer-size knob for ordinary tests.
+- Default buffer sizes are conservative enough for tier0 and tier1.
+- Overflows are reported as overflows.
+- Guarded demo recipes remain available but are clearly optional.
 
 ## A1: Multi-Architecture Native Targets - TODO
 
@@ -455,7 +577,7 @@ Done criteria:
   versus a heuristic `MaybeGroup`.
 - Inline-shadow flat work has a concrete address-normalization contract.
 
-## T1: Team Test Matrix - TODO
+## T1: Team Test Matrix - PARTIAL
 
 Goal: maintain a small but meaningful ConSan test corpus that can run in a
 developer session and a broader corpus for confidence.
@@ -467,6 +589,13 @@ Current state:
   SuperCollider, MOI record/replay, sampled, and inline-shadow configurations.
 - The broader IREE e2e inventory has been used as compatibility coverage for
   SuperCollider.
+- The broader local IREE e2e inventory has also passed MOI `record_replay` and
+  `sampled` compatibility sweeps with explicit prototype resource knobs.
+- A broader local IREE e2e `inline_shadow` sweep is not yet clean: targeted
+  TileAndFuse tests pass, but a broad run exposed a timeout/hang. Treat that as
+  an open MOI broad-readiness bug.
+- hip-moi has been valuable as semantic control coverage, but MOI runs are not
+  yet documented as thoroughly as SuperCollider runs.
 - No equivalent `gfx942`, `gfx950`, or `gfx1250` ConSan test tier exists yet.
 
 Work:
@@ -478,12 +607,17 @@ Work:
 - Add exact commands to `TUTORIAL.md` or `USAGE.md`.
 - Keep `ctest -j8` as the GPU default.
 - Add a short test-results table that can be updated per snapshot.
+- Require MOI test rows for every SuperCollider row where the engine should be
+  able to run. If an engine intentionally cannot run that row yet, record the
+  blocker instead of leaving the row absent.
 - Add per-architecture rows for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`,
   distinguishing live-GPU runs from synthetic/code-object-only coverage.
 
 Done criteria:
 
 - A teammate can run one command per tier and know what a pass means.
+- MOI no longer has only smoke/targeted coverage where SuperCollider has broad
+  compatibility coverage.
 
 ## D1: Team Snapshot Docs - TODO
 
