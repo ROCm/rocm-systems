@@ -199,6 +199,7 @@ void ResetRuntimeTestEnv() {
   g_fake_hsa_env = FakeHsaEnv{};
   g_fake_env_vars.clear();
   rocr::hotswap::ResetAgentGfxRevisionCache();
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
 }
 
 bool ComgrHotswapOptionsApiAvailable() {
@@ -558,12 +559,54 @@ TEST(HotswapRewrite, RuntimeLoadRewriteFailureFallsBackToOriginal) {
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }
 
-TEST(HotswapRewrite, RuntimeLoadRewrittenLoadFailureFallsBackToOriginal) {
+TEST(HotswapRewrite, RuntimeLoadOptionalRewriteFailureFallsBackToOriginal) {
   ResetRuntimeTestEnv();
   if (!ComgrHotswapOptionsApiAvailable()) return;
+  g_fake_hsa_env.isa_name = kGfx1251Isa;
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(true);
+  LoadRecorder load;
+  const hsa_executable_t executable = MakeTestExecutable(0x508);
+
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kOriginal);
+  EXPECT_EQ(load.calls[0].code_object, static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
+}
+
+TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewriteFailureReturnsError) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(true);
+  LoadRecorder load;
+  const hsa_executable_t executable = MakeTestExecutable(0x509);
+
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_TRUE(load.calls.empty());
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+
+  rocr::hotswap::ForceRetargetCodeObjectFailureForTesting(false);
+}
+
+TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  g_fake_hsa_env.isa_name = kGfx1251Isa;
   LoadRecorder load;
   load.rewritten_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
-  const hsa_executable_t executable = MakeTestExecutable(0x508);
+  const hsa_executable_t executable = MakeTestExecutable(0x510);
 
   const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
       executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
@@ -574,6 +617,24 @@ TEST(HotswapRewrite, RuntimeLoadRewrittenLoadFailureFallsBackToOriginal) {
   EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_EQ(load.calls[1].path, LoadPath::kOriginal);
   EXPECT_EQ(load.calls[1].code_object, static_cast<const void*>(kGfx1250MinCo));
+  EXPECT_EQ(
+      rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
+}
+
+TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) {
+  ResetRuntimeTestEnv();
+  if (!ComgrHotswapOptionsApiAvailable()) return;
+  LoadRecorder load;
+  load.rewritten_status = HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  const hsa_executable_t executable = MakeTestExecutable(0x511);
+
+  const hsa_status_t status = rocr::hotswap::LoadAgentCodeObjectWithHotswap(
+      executable, MakeTestAgent(), MakeRealCodeObjectView(), nullptr, nullptr,
+      MakeLoadCallbacks(&load));
+
+  EXPECT_EQ(status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  ASSERT_EQ(load.calls.size(), 1u);
+  EXPECT_EQ(load.calls[0].path, LoadPath::kRewritten);
   EXPECT_EQ(
       rocr::hotswap::RetainedRewrittenElfBufferCountForTesting(executable), 0u);
 }

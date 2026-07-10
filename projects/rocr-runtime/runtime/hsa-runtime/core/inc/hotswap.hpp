@@ -77,6 +77,17 @@ struct RewriteDecision {
   bool request_strict_mode = false;
 };
 
+enum class RetargetCodeObjectStatus {
+  kSkipped,
+  kRewritten,
+  kRequiredRewriteFailed,
+};
+
+struct RetargetCodeObjectResult {
+  RetargetCodeObjectStatus status = RetargetCodeObjectStatus::kSkipped;
+  bool strict_mode_required = false;
+};
+
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(
     void* context, hsa_agent_t agent, hsa_code_object_t code_object,
     const char* options, const std::string& uri,
@@ -101,13 +112,13 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         bool request_entry_trampolines = false,
                         bool request_strict_mode = false);
 
-bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer,
-                           size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(
+    const CodeObjectView& code_object, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader,
-                           hsa_agent_t agent, OwnedElfBuffer* out_elf_buffer,
-                           size_t* out_elf_size);
+RetargetCodeObjectResult TryRetargetCodeObject(
+    amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size);
 
 hsa_status_t LoadAgentCodeObjectWithHotswap(
     hsa_executable_t executable, hsa_agent_t agent,
@@ -125,6 +136,7 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
     const std::string& target_isa, const RewriteOptions& options);
 size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
 bool HotswapRewriteWithOptionsAvailableForTesting();
+void ForceRetargetCodeObjectFailureForTesting(bool force);
 #endif
 
 }  // namespace hotswap

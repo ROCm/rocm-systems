@@ -68,6 +68,9 @@ namespace {
 
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
+#ifdef ROCR_HOTSWAP_TESTING
+bool g_force_retarget_code_object_failure_for_testing = false;
+#endif
 
 constexpr char kGfx1250[] = "gfx1250";
 constexpr char kGfx1250B0Feature[] = ":gfx1250-b0-specific+";
@@ -375,6 +378,17 @@ void LogRewrittenCodeObjectLoadFailure(hsa_status_t status) {
       static_cast<int>(status));
 }
 
+void LogRequiredRewriteFailure() {
+  HOTSWAP_LOG("hotswap: required strict-mode rewrite failed, not falling back to original "
+              "code object\n");
+}
+
+void LogRequiredRewrittenLoadFailure(hsa_status_t status) {
+  HOTSWAP_LOG("hotswap: required strict-mode rewritten load failed (status=%d), not falling "
+              "back to original code object\n",
+              static_cast<int>(status));
+}
+
 }  // namespace
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
@@ -448,17 +462,19 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   return true;
 }
 
-bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object,
+                                               hsa_agent_t agent,
+                                               OwnedElfBuffer* out_elf_buffer,
+                                               size_t* out_elf_size) {
   if (IsHotswapDisabledByEnv() || !code_object.data || code_object.size == 0) {
-    return false;
+    return {};
   }
 
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
   RewriteOptions options;
   options.gfx12_5_rewrite_enabled = IsGfx12_5RewriteRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
-    return false;
+    return {};
   }
 
   const std::string source_isa = GetCodeObjectIsaName(code_object.data, code_object.size);
@@ -468,27 +484,42 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   if (!decision) {
     HOTSWAP_LOG("hotswap: rewrite skipped, no decision (src='%s' tgt='%s')\n",
                 source_isa.c_str(), target_isa.c_str());
-    return false;
+    return {};
   }
 
-  const bool rewritten =
-      RetargetCodeObject(code_object.data, code_object.size,
-                         decision->source_isa.c_str(), decision->target_isa.c_str(),
-                         out_elf_buffer, out_elf_size,
-                         decision->request_entry_trampolines,
-                         decision->request_strict_mode);
+  bool rewritten = false;
+#ifdef ROCR_HOTSWAP_TESTING
+  if (g_force_retarget_code_object_failure_for_testing) {
+    HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
+  } else
+#endif
+  {
+    rewritten = RetargetCodeObject(code_object.data, code_object.size,
+                                   decision->source_isa.c_str(), decision->target_isa.c_str(),
+                                   out_elf_buffer, out_elf_size,
+                                   decision->request_entry_trampolines,
+                                   decision->request_strict_mode);
+  }
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d "
               "in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
               decision->request_entry_trampolines, decision->request_strict_mode,
               code_object.size, rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
-  return rewritten;
+  if (rewritten) {
+    return {RetargetCodeObjectStatus::kRewritten,
+            decision->request_strict_mode};
+  }
+  if (decision->request_strict_mode) {
+    return {RetargetCodeObjectStatus::kRequiredRewriteFailed, true};
+  }
+  return {};
 }
 
-bool TryRetargetCodeObject(amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
-                           OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
+RetargetCodeObjectResult TryRetargetCodeObject(
+    amd::hsa::loader::CodeObjectReaderImpl* reader, hsa_agent_t agent,
+    OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size) {
   if (!reader) {
-    return false;
+    return {};
   }
 
   CodeObjectView code_object;
@@ -510,7 +541,9 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
 
   OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
   size_t rewritten_elf_size = 0;
-  if (TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size)) {
+  const RetargetCodeObjectResult retarget_result =
+      TryRetargetCodeObject(code_object, agent, &rewritten_elf_buffer, &rewritten_elf_size);
+  if (retarget_result.status == RetargetCodeObjectStatus::kRewritten) {
     hsa_code_object_t rewritten_code_object = {
         reinterpret_cast<uint64_t>(rewritten_elf_buffer.get())};
     hsa_status_t status = callbacks.load_rewritten_code_object(
@@ -520,7 +553,15 @@ hsa_status_t LoadAgentCodeObjectWithHotswap(hsa_executable_t executable, hsa_age
       RetainRewrittenElfBuffer(executable, std::move(rewritten_elf_buffer));
       return status;
     }
+    if (retarget_result.strict_mode_required) {
+      LogRequiredRewrittenLoadFailure(status);
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
     LogRewrittenCodeObjectLoadFailure(status);
+  } else if (retarget_result.status ==
+             RetargetCodeObjectStatus::kRequiredRewriteFailed) {
+    LogRequiredRewriteFailure();
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
   return callbacks.load_original_code_object(callbacks.context, agent, original_code_object,
@@ -559,6 +600,10 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
 bool HotswapRewriteWithOptionsAvailableForTesting() {
   ComgrApi* api = GetComgrApi();
   return api && api->hotswap_rewrite_with_options;
+}
+
+void ForceRetargetCodeObjectFailureForTesting(bool force) {
+  g_force_retarget_code_object_failure_for_testing = force;
 }
 #endif
 
