@@ -541,14 +541,15 @@ namespace
 
 // Minimum column width for the topic name in the compact listing. The width is
 // grown at print time if a topic name would otherwise touch its blurb
-constexpr int k_topic_col_width = 13;
+constexpr int topic_col_width = 13;
+constexpr int name_blurb_gap  = 2;
 
 struct group_topic_desc
 {
     const char*                   name;
     const char*                   blurb;
     help_group_names              sections;
-    std::vector<std::string_view> tools;  // empty => shown for all tools
+    std::vector<std::string_view> tools{};  // empty => shown for all tools
 };
 
 const std::vector<group_topic_desc>&
@@ -618,6 +619,17 @@ domain_topic_table()
     };
     return table;
 }
+
+// A topic is listed for a tool when it targets no specific tool (empty =>
+// all tools) or explicitly names the current tool. Shared by the compact
+// --help listing and the unknown-topic error so both stay in sync (e.g. the
+// 'execution' topic is gated to rocprof-sys-run only).
+bool
+shown_for_tool(const std::vector<std::string_view>& tools, std::string_view tool_name)
+{
+    return tools.empty() ||
+           std::find(tools.begin(), tools.end(), tool_name) != tools.end();
+}
 }  // namespace
 
 const help_topic_map&
@@ -682,6 +694,40 @@ print_see_also(std::string_view topic, std::ostream& out)
 }
 
 void
+print_topic_listing(std::string_view tool_name, std::ostream& out)
+{
+    // Grow the name column if any topic name would otherwise touch its blurb.
+    // "all" is synthetic (emitted below) but still participates in alignment.
+    const int name_width = [] {
+        std::size_t longest = std::string_view{ "all" }.size();
+        for(const auto& topic : group_topic_table())
+            longest = std::max(longest, std::string_view{ topic.name }.size());
+        for(const auto& domain : domain_topic_table())
+            longest = std::max(longest, std::string_view{ domain.name }.size());
+        return std::max<int>(topic_col_width, static_cast<int>(longest) + name_blurb_gap);
+    }();
+
+    const auto saved_flags = out.flags();
+    out << std::left;
+
+    out << "  Group topics:\n";
+    // "all" is a synthetic entry (dumps the full parser help) rather than a
+    // registered topic, so it is emitted here rather than living in the table.
+    out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
+    for(const auto& topic : group_topic_table())
+    {
+        if(!shown_for_tool(topic.tools, tool_name)) continue;
+        out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
+    }
+    out << "\n  Domain topics:\n";
+    for(const auto& domain : domain_topic_table())
+        out << "    " << std::setw(name_width) << domain.name << domain.info.description
+            << "\n";
+
+    out.flags(saved_flags);
+}
+
+void
 print_compact_help(std::string_view tool_name, std::ostream& out)
 {
     out << "Usage: rocprof-sys-" << tool_name << " [OPTIONS] -- <command> [args...]\n"
@@ -706,44 +752,10 @@ print_compact_help(std::string_view tool_name, std::ostream& out)
         << "  -v, --verbose          Increase verbosity\n"
         << "\n"
         << "HELP TOPICS (use --help=<topic> for details)\n"
-        << "\n"
-        << "  Group topics:\n";
+        << "\n";
 
-    // Grow the name column if any topic name would otherwise touch its blurb.
-    // "all" is synthetic (emitted below) but still participates in alignment.
-    const int name_width = [] {
-        std::size_t longest = std::string_view{ "all" }.size();
-        for(const auto& topic : group_topic_table())
-            longest = std::max(longest, std::string_view{ topic.name }.size());
-        for(const auto& domain : domain_topic_table())
-            longest = std::max(longest, std::string_view{ domain.name }.size());
-        return std::max<int>(k_topic_col_width, static_cast<int>(longest) + 2);
-    }();
+    print_topic_listing(tool_name, out);
 
-    // A topic is listed when it targets no specific tool (empty => all tools)
-    // or explicitly names the current tool
-    auto shown_for_tool = [&](const std::vector<std::string_view>& tools) {
-        return tools.empty() ||
-               std::find(tools.begin(), tools.end(), tool_name) != tools.end();
-    };
-
-    const auto saved_flags = out.flags();
-    out << std::left;
-
-    // "all" is a synthetic entry (dumps the full parser help) rather than a
-    // registered topic, so it is emitted here rather than living in the table.
-    out << "    " << std::setw(name_width) << "all" << "Full help output (all options)\n";
-    for(const auto& topic : group_topic_table())
-    {
-        if(!shown_for_tool(topic.tools)) continue;
-        out << "    " << std::setw(name_width) << topic.name << topic.blurb << "\n";
-    }
-    out << "\n  Domain topics:\n";
-    for(const auto& domain : domain_topic_table())
-        out << "    " << std::setw(name_width) << domain.name << domain.info.description
-            << "\n";
-
-    out.flags(saved_flags);
     out << "\n"
         << "EXAMPLES\n"
         << "  rocprof-sys-" << tool_name << " --preset=balanced -- ./myapp\n"
@@ -776,7 +788,6 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         size_t      end;
         std::string header;
     };
-    size_t               preamble_end = lines.size();
     std::vector<Section> sections;
 
     for(size_t line_idx = 0; line_idx < lines.size(); ++line_idx)
@@ -784,10 +795,7 @@ print_help_for_topic(const std::string& captured, std::string_view topic,
         std::string bracket_name;
         if(is_section_header(lines[line_idx], bracket_name))
         {
-            if(sections.empty())
-                preamble_end = line_idx;
-            else
-                sections.back().end = line_idx;
+            if(!sections.empty()) sections.back().end = line_idx;
             sections.push_back({ line_idx, lines.size(), bracket_name });
         }
     }
