@@ -1412,18 +1412,10 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
-  // gfx1250+: all SDMA engines are equivalent and there are no XGMI engines, we prefer first 2 engines
-  // for h2d/d2h and remaining for p2p.
+  // gfx125+: all SDMA engines are equivalent, return all engines regardless of direction.
   if (supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5) {
-    bool is_p2p = (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
-                  dst_agent.device_type() == core::Agent::kAmdGpuDevice);
-
-    if (is_p2p) {
-      *recommended_ids_mask = ((1u << num_p2p_engines_) - 1) << (DefaultBlitCount - 1);
-    } else {
-      *recommended_ids_mask = (1u << num_h2d_d2h_engines_) - 1;
-    }
-
+    uint32_t total = num_h2d_d2h_engines_ + num_p2p_engines_;
+    *recommended_ids_mask = (1u << total) - 1;
     return HSA_STATUS_SUCCESS;
   }
 
