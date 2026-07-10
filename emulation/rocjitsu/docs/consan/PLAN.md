@@ -1,8 +1,9 @@
 # ConSan Near-Future Plan
 
-This plan starts from the current ConSan prototype state and intentionally
-omits completed-session history. Use it as the forward DAG for the next phase
-of rocJITsu DBI sanitizer work.
+This plan records the dependency DAG used to bring ConSan's gfx1201 MOI
+flavors to broad operational parity. It intentionally omits session history;
+completed nodes retain their acceptance evidence, while `A1` is the remaining
+forward branch for native-target breadth.
 
 [DESIGN.md](DESIGN.md) describes what exists now and where that differs from
 the intended architecture. [SPILLING.md](SPILLING.md) documents the R1 resource
@@ -186,8 +187,8 @@ flowchart LR
   T1A["T1A: Test Tiers<br/>And Harness"]:::done
   T1B["T1B: MOI Parity<br/>Qualification Runs"]:::done
   T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::done
-  M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::active
-  D1["D1: Team Snapshot Docs"]:::todo
+  M0{"M0: MOI Broad<br/>Turn-On Accepted"}:::done
+  D1["D1: Team Snapshot Docs"]:::active
   A1["A1: Multi-Architecture Native Targets<br/>(outside current local window)"]:::deferred
 
   B0 --> T1A
@@ -265,7 +266,7 @@ shared-helper access, barrier, and atomic probes have automatic ephemeral,
 persistent, scalar, and spill-backed resources. Subsequent nodes build feature
 coverage and operational behavior on that boundary.
 
-## M0: MOI Broad Turn-On Readiness - TARGET
+## M0: MOI Broad Turn-On Readiness - DONE
 
 Goal: remove the remaining reasons why MOI cannot be run over the same broad
 test corpus as SuperCollider with only a top-level flavor and engine choice.
@@ -289,52 +290,46 @@ Engine choice should stay explicit. The work here is to eliminate the extra
 per-test prototype knobs that currently make MOI feel like a collection of
 targeted experiments.
 
-Current state:
+Acceptance state:
 
 - `record_replay`, `sampled`, and `inline_shadow` have each passed the 209-test
   local IREE e2e compatibility sweep without register-number configuration.
-- Guarded TileAndFuse plus scan/softmax regressions pass under every engine,
-  but `inline_shadow` still has narrower instruction and diagnostic coverage.
-- The independent hip-moi semantic control suite passes 189/189; broader
-  ConSan feature/non-vacuity qualification remains in `T1`.
-- Per-engine report buffers now have lazy defaults and visible overflow;
-  stable engine profiles are still pending.
+- Guarded TileAndFuse plus scan/softmax regressions pass under every engine;
+  `inline_shadow` still deliberately supports fewer instruction forms than
+  record/replay, but supported native multi-cell and admitted group-flat forms
+  have focused non-vacuity controls.
+- The independent hip-moi semantic control suite passes 189/189. Tier0 passes
+  183/183 unit tests and 37/37 live tests with explicit patch, record,
+  diagnostic, spill, overflow, and unsupported-site guards.
+- Per-engine report buffers have lazy defaults and visible overflow. Startup
+  names the frozen conservative `standard-v1` profile for every engine.
 
-The primary technical dependency for broad MOI operation, `R1`, is complete.
-The other gaps below still matter: a clean compatibility run proves
-non-corruption for patched supported sites, not full instruction coverage or
-diagnostic quality.
+The primary technical dependency, `R1`, and every feature/profile prerequisite
+flowing into `T1` are complete. The acceptance review closed the original
+blockers as follows:
 
-Blocking reasons to close:
+- lazy default buffers, overflow visibility, and `standard-v1` profiles close
+  the operator-configuration gap;
+- the shared transactional placement planner covers all MOI engines and
+  SuperCollider;
+- strict/likely flat provenance policy and normalized RDNA4 group-flat
+  addresses bound the heuristic behavior explicitly;
+- inline multi-cell/group-flat coverage, bounded diagnostics, barrier/atomic
+  controls, runtime sampling, and immediate sampled checking have focused live
+  controls;
+- the fail-fast tier matrix applies identical selected and broad IREE tiers to
+  SuperCollider and all three MOI engines.
 
-- HSA-tool-owned report buffers do not yet have robust per-engine default
-  capacities and overflow reporting.
-- MOI has engine-specific recipes instead of stable profiles.
-- `inline_shadow` instruction coverage is narrower than `record_replay` and
-  `sampled`.
-- Patch placement is not yet stress-tested for broad multi-probe MOI growth.
-- Flat/generic LDS provenance is still partly heuristic.
-- Barrier and atomic ordering are present but narrow.
-- Inline diagnostics are bounded first-N records with range, owner, epoch,
-  instruction, and current conflict-lane evidence.
-- Sampled mode lacks runtime sampling/generation policy and in-kernel checking.
-- The test matrix does not yet require MOI parity with SuperCollider.
+Some mechanisms remain intentionally narrow: inline atomic ordering is
+one-slot, sampled mode does not consume barrier epochs, and unsupported
+instructions are skipped rather than guessed. These are documented capability
+boundaries, not reasons that the standard profiles cannot be run broadly.
 
 Non-gfx1201 architecture dispatch remains an important project gap, but it is
 tracked by the deliberately deferred `A1` branch rather than being presented
 as a blocker for gfx1201 `M0` acceptance.
 
-Work:
-
-- Keep this section synchronized with `DESIGN.md`'s "MOI Broad Enablement Gap".
-- As each blocker moves to a dedicated implementation node, record that
-  dependency here instead of leaving it implicit.
-- Accept `O1`'s standard MOI command profile for each engine. Explicit debug
-  knobs may remain, but should not be required for ordinary corpus runs.
-- Treat a broad corpus hang, timeout, or silent no-record run as a product bug,
-  not just a test inconvenience.
-
-Done criteria:
+Accepted criteria:
 
 - `record_replay`, `sampled`, and `inline_shadow` each have one documented
   standard run recipe.
@@ -346,6 +341,11 @@ Done criteria:
   do not look like successful instrumentation.
 - `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and local testing notes agree on the
   readiness level of each MOI engine.
+
+Qualification evidence is the `T1B` table below: 8/8 selected IREE and 209/209
+broad IREE tests for SuperCollider and every MOI engine, 189/189 hip-moi
+controls, and no timeout. Compatibility rows are not claims of universal
+instruction coverage; tier0 supplies the guarded semantic evidence.
 
 ## R1: Register And Spill Policy - DONE
 

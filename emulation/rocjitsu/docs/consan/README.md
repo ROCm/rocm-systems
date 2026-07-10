@@ -16,7 +16,7 @@ Use `supercollider` first when sharing the current snapshot with a teammate. It
 is the shortest useful path: redundant-access LDS/likely-group-flat checks,
 configurable delay, and trap or marker-buffer reporting.
 
-Use `moi` for structured memory-order instrumentation experiments. MOI has
+Use `moi` for structured memory-order instrumentation. MOI has
 `record_replay`, `inline_shadow`, and `sampled` engines. On gfx1201 their
 standard paths now allocate or preserve scratch registers, owner/epoch state,
 and scalar special state automatically; explicit register variables remain
@@ -87,15 +87,14 @@ MOI currently supports:
 
 - `record_replay`: DBI access/barrier/atomic records plus host-side exact
   replay diagnostics;
-- `inline_shadow`: direct GPU-side exact-shadow updates for a narrow native LDS
-  subset, compact diagnostics, barrier epoch controls, and narrow atomic
-  ordering controls;
-- `sampled`: direct sampled watchpoint publication plus host-side sampled
-  conflict scanning.
+- `inline_shadow`: direct GPU-side exact-shadow updates for supported native
+  multi-cell and admitted group-flat LDS forms, compact diagnostics, barrier
+  epoch controls, and narrow atomic ordering controls;
+- `sampled`: runtime-qualified sampled watchpoint publication, host-side
+  conflict scanning, and opt-in immediate checking.
 
 The R1 resource path is complete for the current gfx1201 MOI probes: access,
 barrier, and atomic sites share an owner-aware dead/fresh/spill planner, and
-ordinary runs do not select register numbers. Remaining broad-readiness work is
-tracked separately in [PLAN.md](PLAN.md): stable buffer/profile defaults,
-placement and instruction coverage, richer diagnostics and ordering, sampled
-checking, and qualification.
+ordinary runs do not select register numbers. The gfx1201 `standard-v1`
+profiles have passed the common 209-test broad IREE tier; remaining work is
+native-target breadth and explicitly documented precision/coverage extensions.

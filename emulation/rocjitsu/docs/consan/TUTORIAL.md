@@ -5,9 +5,10 @@ covers both top-level flavors:
 
 - `supercollider`: redundant-access LDS checking. This is the shortest useful
   mode to try on a normal workload.
-- `moi`: structured memory-order instrumentation. This is useful now for
-  developer experiments and focused tests; it is not yet as polished as
-  `supercollider`.
+- `moi`: structured memory-order instrumentation with three versioned
+  `standard-v1` engine profiles. On gfx1201 these profiles are qualified over
+  the same broad compatibility tier as `supercollider`; their precision and
+  diagnostic shapes intentionally differ.
 
 ConSan runs through the HSA tools hook and patches final native RDNA4 /
 `gfx1201` GPU code objects at load time. It does not require rebuilding the
@@ -68,9 +69,13 @@ The MOI engine choices are:
 
 | Engine | What it does now | Best current use |
 | --- | --- | --- |
-| `record_replay` | DBI probes write access/barrier/atomic records; host code replays them into diagnostics. | Reference/debug mode and IREE dynamic-record evidence. |
-| `inline_shadow` | DBI probes update/check exact shadow state on the GPU for a narrow native LDS subset. | Focused race controls and first exact GPU-side diagnostics. |
-| `sampled` | DBI probes publish compact sampled watchpoint entries; host teardown scans them for sampled conflicts. | Lower-overhead prototype and sampled-mode bring-up. |
+| `record_replay` | DBI probes write access/barrier/atomic records; host code replays them into diagnostics. | Highest-observability reference/debug mode. |
+| `inline_shadow` | DBI probes update/check exact shadow state on the GPU for supported native multi-cell and admitted group-flat LDS forms. | Exact GPU-side checking for supported forms. |
+| `sampled` | DBI probes publish compact sampled watchpoint entries; host teardown scans them, with optional immediate checking. | Lower-overhead, lower-fidelity broad mode. |
+
+Selecting an engine activates its conservative `standard-v1` profile. Report
+buffers and scratch resources are automatic; ordinary runs do not require a
+buffer size or register number. Advanced composition knobs remain opt-in.
 
 ## Non-Vacuity Guards
 
@@ -155,7 +160,7 @@ ctest --test-dir "$IREE_BUILD_DIR" \
   --output-on-failure
 ```
 
-Broader IREE e2e LDS-relevant inventory:
+Broader illustrative IREE e2e LDS-relevant inventory:
 
 ```sh
 ctest --test-dir "$IREE_BUILD_DIR" \
@@ -164,7 +169,10 @@ ctest --test-dir "$IREE_BUILD_DIR" \
   --output-on-failure
 ```
 
-Observed evidence in the current workspace for the broader command:
+This narrower illustrative regular expression has previously selected 152
+tests. The authoritative current broad tier is the 209-test `tier2` command in
+`tests/dbi/consan_test_matrix.sh`, which passed under SuperCollider and all
+three MOI engines.
 
 ```text
 100% tests passed, 0 tests failed out of 152
@@ -293,9 +301,9 @@ Interpretation:
 
 ## Tutorial 5: MOI Inline Shadow
 
-Inline shadow is the exact GPU-side MOI direction. The current implementation
-is still narrow, but it can demonstrate direct exact-shadow updates and compact
-diagnostics.
+Inline shadow is the exact GPU-side MOI engine. It performs direct exact-shadow
+updates and emits compact diagnostics for its supported instruction forms;
+unsupported forms are counted and skipped explicitly.
 
 For focused IREE patchability smoke with hardware-ID owner initialization:
 
@@ -390,7 +398,8 @@ MOI inline-shadow reports a resource-plan skip:
 Sampled mode reports no conflicts:
 
 - That is not proof of no races.
-- Sampled currently publishes static sampled entries and scans them host-side.
+- Sampled publishes runtime-generation-qualified entries and scans them
+  host-side; optional immediate checking remains lower fidelity.
 - Use exact `record_replay` or `inline_shadow` controls when a definitive race
   diagnostic is required.
 

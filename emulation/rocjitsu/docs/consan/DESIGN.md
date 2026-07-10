@@ -28,10 +28,10 @@ register allocation, private-layout, ownership, and spill transaction.
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
 | MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
-| MOI broad operation | All three engines complete the 209-test gfx1201 IREE compatibility sweep without register-number configuration; guarded semantic coverage remains narrower, especially for inline shadow. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel buffer tuning, and expand feature/non-vacuity qualification. |
+| MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration; tier0 supplies guarded semantic evidence. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
 | Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
-| Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
+| Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with a normalized RDNA4 group-flat address contract. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
 
 ## Source Map
 
@@ -78,7 +78,7 @@ Test anchors:
 - `tests/patch/consan_test.cpp`
   - Unit and synthetic patch-shape coverage.
   - Host-side MOI exact-shadow, sampled, barrier, and atomic semantic coverage.
-- `tests/hip/`
+- `tests/dbi/`
   - Focused live GPU controls for ConSan instrumentation modes.
 - IREE e2e tests in an external HIP-enabled IREE build directory.
   - Compatibility and patchability coverage for real kernels, currently
@@ -116,15 +116,16 @@ The intended naming is now:
 - `inline_shadow`: exact GPU-side MOI engine.
 - `sampled`: low-overhead, lower-fidelity MOI engine.
 
-## MOI Broad Enablement Gap
+## MOI Broad Operation And Boundaries
 
-MOI has real DBI instrumentation today, but it is not yet a broad "turn it on
-over everything" mode in the same sense as SuperCollider. SuperCollider still
-has rough edges, but the typical command line is close to one flavor choice and
-one trap/report choice. MOI currently needs more engine-specific resource
-configuration and has narrower coverage in its exact inline path.
+On gfx1201, MOI is now a broad "turn it on" mode in the same operational sense
+as SuperCollider: select the flavor and one explicit engine, and the
+`standard-v1` profile supplies resources and report buffers. All three engines
+pass the same selected and broad IREE tiers as SuperCollider. This is an
+operational and compatibility claim, not a claim that every loaded instruction
+is instrumented or that every engine has identical precision.
 
-The gap is not one feature. It is a set of concrete blockers:
+The implementation boundary is:
 
 - **Scratch register allocation.** Record/replay, sampled, and inline-shadow
   access, barrier, and atomic probes choose per-site dead or fresh
@@ -135,9 +136,8 @@ The gap is not one feature. It is a set of concrete blockers:
   `origin/users/Groverkss/text-relocation-land` branch, whose reusable
   contribution is the initial VGPR spill-slot allocator.
 - **Owner and epoch state.** `inline_shadow` automatically uses a persistent
-  descriptor-backed pair or derived-owner/private-epoch state. Owner derivation
-  remains architecture- and layout-sensitive; broad operation still needs a
-  robust identity policy for arbitrary workgroup shapes.
+  descriptor-backed pair or derived-owner/private-epoch state. The packed
+  identity contract is intentionally bounded and architecture-sensitive.
 - **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
   which is the right direction for applications such as IREE. The HSA hook
   defaults to 64 KiB for record/replay and sampled and 256 KiB for inline
@@ -149,42 +149,37 @@ The gap is not one feature. It is a set of concrete blockers:
   resources, conservative one-site composition, and explicit extensions for
   broader patch counts, dynamic records, ordering probes, and immediate
   sampled checking. Startup logs name the profile.
-- **Instruction coverage.** `record_replay` and `sampled` can cover more of
-  the current broad IREE compatibility corpus, while `inline_shadow` is still
-  mostly native dword LDS. Exact inline operation needs multi-cell native DS
-  coverage, a policy for d16 accesses, and eventually likely-group flat/VFLAT
-  coverage after provenance and address normalization are hardened.
-- **Patch placement and text growth.** Broad MOI instrumentation inserts larger
-  probes than SuperCollider in several paths. Coverage should not depend on
-  hand-selected compact kernels. ConSan needs shared, tested placement through
-  inline padding, local caves, appended caves, and text-relocation utilities.
+- **Instruction coverage.** Inline shadow handles supported native multi-cell
+  DS ranges and admitted zero-offset group-flat forms through the same shadow
+  publisher. Unsupported d16, encoding, or provenance shapes remain visible
+  skips rather than speculative instrumentation.
+- **Patch placement and text growth.** All MOI engines and SuperCollider use a
+  shared transactional planner for inline padding, local caves, and appended
+  caves. A failed plan does not leave partial descriptor/text mutations.
 - **Flat/generic LDS provenance.** Compilers can emit flat accesses for source
-  `__shared__` memory. Broad operation needs logs and policy that distinguish
-  strongly proven group memory from heuristic `MaybeGroup` memory, especially
-  before inline-shadow writes exact shadow entries from flat addresses.
-- **Barrier and atomic ordering.** Barriers and atomics are ordering evidence
-  for LDS races, not a global-memory sanitizer. Broad operation needs barrier
-  and selected atomic semantics that match the `record_replay` oracle closely
-  enough for the MVP corpus.
+  `__shared__` memory. Inventory distinguishes proven `Group`, heuristic
+  `MaybeGroup`, private, and unknown forms. `strict` admits only proven group;
+  `likely` also admits likely group, with exclusions reported explicitly.
+- **Barrier and atomic ordering.** Barriers and selected atomics are ordering
+  evidence for LDS races, not global-memory checks. Record/replay is the
+  semantic oracle; inline ordering deliberately remains a narrow one-slot
+  prototype, and sampled mode does not consume barrier epochs.
 - **Diagnostics.** `inline_shadow` emits bounded first-N diagnostics with
   instruction offsets, access kinds, owners, epoch, LDS byte ranges, the
   current conflict EXEC mask, and visible overflow. The prior writer's lane
   mask is unavailable in the compact exact-shadow word and is reported as
   unknown/zero.
-- **Runtime sampling policy.** `sampled` currently does deterministic static
-  site throttling plus host-side scan. To become the broad low-overhead engine,
-  it needs runtime sampling/generation policy and eventually in-kernel sampled
-  conflict checks.
+- **Runtime sampling policy.** `sampled` combines deterministic runtime
+  generation policy with host scanning and an opt-in immediate in-kernel
+  conflict check. Static site selection still bounds patch composition.
 - **Architecture dispatch.** Local validation is on `gfx1201`, but the intended
   target set is `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. Broad operation
   needs ISA-specific capability checks and encoders instead of implicit RDNA4
   assumptions.
-- **Test parity.** MOI must pass the same style of corpus as SuperCollider:
-  focused rocJITsu tests, hip-moi semantic controls, IREE TileAndFuse, broader
-  IREE e2e tests, and rocjitsu-test-corpus cases. Current local evidence is
-  useful but not full feature parity: broad IREE compatibility passes for all
-  three engines, while inline-shadow instrumentation coverage and the
-  rocjitsu-test-corpus matrix remain incomplete.
+- **Test parity.** The fail-fast matrix covers 183 tier0 unit tests, 37 live
+  rocJITsu controls, 189 hip-moi controls, 8 selected IREE tests per profile,
+  and 209 broad IREE tests per profile. The broader rocjitsu-test-corpus has
+  separate local dependency limitations documented in `LOCAL_TESTING.md`.
 
 The intended operational target is:
 
@@ -195,8 +190,9 @@ RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled \
 ctest ...
 ```
 
-Engine choice should remain explicit. The gap to close is the extra prototype
-configuration currently needed after that choice.
+Engine choice remains explicit because the engines trade precision, overhead,
+and diagnostic shape. Advanced knobs remain available, but ordinary corpus
+runs do not require register or buffer selection.
 
 ## Interception And Code-Object Flow
 
@@ -454,8 +450,9 @@ It does not yet represent the destination in these ways:
   sampling policy;
 - marker-buffer reporting is a smoke-test ABI, not final diagnostics;
 - flat `MaybeGroup` classification is heuristic;
-- register pressure is handled conservatively but not through a general spill
-  policy.
+- SuperCollider uses the shared resource/placement machinery where its probe
+  shape requires it; the reusable gfx1201 spill backend is currently driven by
+  the larger MOI probes rather than claiming general multi-target spilling.
 
 ## MOI Flavor
 
@@ -748,7 +745,7 @@ The code intentionally contains several prototype mechanisms:
 - optional manual register debug overrides;
 - a gfx1201-only ordinary-VGPR spill backend rather than general register-class
   spilling;
-- engine-specific resource recipes that users currently need to know;
+- conservative versioned engine profiles with advanced extensions kept opt-in;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
 - one-slot inline atomic release state;
@@ -832,5 +829,6 @@ only the minimal SGPR support needed for the current probe family, keep it
 isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
-The remaining operational gate is the profile-by-tier qualification matrix in
-`PLAN.md`, followed by the broad-turn-on acceptance review.
+The gfx1201 profile-by-tier qualification and broad-turn-on acceptance are
+complete. The remaining major branch is native implementation and validation
+for the deferred `A1` architecture targets.
