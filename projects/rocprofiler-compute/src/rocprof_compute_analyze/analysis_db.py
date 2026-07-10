@@ -458,6 +458,9 @@ class db_analysis(OmniAnalyze_Base):
         """Add the full code-object disassembly as instruction lines,
         skipping any offset already present."""
         tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
+        # load_base comes only from the clobbered single ps_file, keyed by
+        # code_object_id, so non-survivor pids get wrong ISA offsets. Left until
+        # multi-process results-file clobbering is fixed.
         load_base_by_id = {
             code_object["code_object_id"]: code_object.get("load_base")
             for code_object in (tool_data or {}).get("code_objects", [])
