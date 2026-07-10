@@ -210,6 +210,22 @@ bool ComgrHotswapOptionsApiAvailable() {
   return false;
 }
 
+bool ComgrStrictModeApiAvailable() {
+  if (!ComgrHotswapOptionsApiAvailable()) return false;
+
+  rocr::hotswap::OwnedElfBuffer rewritten_elf_buffer(nullptr, &std::free);
+  size_t rewritten_elf_size = 0;
+  if (rocr::hotswap::RetargetCodeObject(
+          kGfx1250MinCo, sizeof(kGfx1250MinCo), kGfx1250B0Isa, kGfx1250B0Isa,
+          &rewritten_elf_buffer, &rewritten_elf_size,
+          false, true)) {
+    return true;
+  }
+
+  SUCCEED() << "requires COMGR accepting AMD_COMGR_HOTSWAP_REWRITE_FLAG_STRICT_MODE";
+  return false;
+}
+
 hsa_agent_t MakeTestAgent() {
   hsa_agent_t agent{};
   agent.handle = 1;
@@ -242,10 +258,17 @@ rocr::hotswap::AgentGfxRevision MakeRevision(const std::string& gfx_target,
 }
 
 TEST(HotswapRewriteDecision, A0RetargetsWithoutStrictModeRegardlessOfOptions) {
-  const rocr::hotswap::RewriteOptions options[] = {{}, {false}};
+  rocr::hotswap::RewriteOptions entry_trampolines_disabled;
+  entry_trampolines_disabled.gfx12_5_rewrite_enabled = false;
+  rocr::hotswap::RewriteOptions strict_mode_enabled;
+  strict_mode_enabled.strict_mode_enabled = true;
+  const rocr::hotswap::RewriteOptions options[] = {
+      {}, entry_trampolines_disabled, strict_mode_enabled};
   for (const auto& option : options) {
-    SCOPED_TRACE(option.gfx12_5_rewrite_enabled ? "entry trampolines enabled"
-                                                : "entry trampolines disabled");
+    SCOPED_TRACE(option.gfx12_5_rewrite_enabled
+                     ? (option.strict_mode_enabled ? "strict mode enabled"
+                                                   : "default options")
+                     : "entry trampolines disabled");
     const auto decision = rocr::hotswap::DecideHotswapRewriteForTesting(
         MakeRevision("gfx1250", 0), kGfx1250Isa, kGfx1250Isa, option);
 
@@ -516,7 +539,7 @@ TEST(HotswapRewrite, RuntimeLoadNonA0FallsBackWhenEntryTrampolinesAreZeroAndStri
 
 TEST(HotswapRewrite, RuntimeLoadNonA0UsesStrictModeEnvWhenEntryTrampolinesAreZero) {
   ResetRuntimeTestEnv();
-  if (!ComgrHotswapOptionsApiAvailable()) return;
+  if (!ComgrStrictModeApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   g_fake_env_vars["AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES"] = "0";
   g_fake_env_vars["HSA_HOTSWAP_STRICT_MODE"] = "1";
@@ -678,7 +701,7 @@ TEST(HotswapRewrite, RuntimeLoadOptionalRewrittenLoadFailureFallsBackToOriginal)
 
 TEST(HotswapRewrite, RuntimeLoadRequiredStrictRewrittenLoadFailureReturnsError) {
   ResetRuntimeTestEnv();
-  if (!ComgrHotswapOptionsApiAvailable()) return;
+  if (!ComgrStrictModeApiAvailable()) return;
   g_fake_hsa_env.asic_revision = 1;
   g_fake_env_vars["HSA_HOTSWAP_STRICT_MODE"] = "1";
   LoadRecorder load;
