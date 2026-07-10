@@ -3661,6 +3661,7 @@ __launch_bounds__(BLOCKSIZE)
     }
 }
 
+// clang-format off
 #define GPU_KERNEL_TEMPORAL_DECL(BLOCKSIZE, UNROLL, DWORD)                               \
     { GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_NONE>,                          \
       GpuReduceKernel<DWORD, BLOCKSIZE, UNROLL, TEMPORAL_LOAD>,                          \
@@ -3677,6 +3678,7 @@ __launch_bounds__(BLOCKSIZE)
       GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),          \
       GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),          \
       GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7), GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8) }
+// clang-format on
 
 // Table of all GPU Reduction kernel functions (templated blocksize / unroll / dword size)
 typedef void (*GpuKernelFuncPtr)(SubExecParam*, int, int);
@@ -3994,9 +3996,11 @@ RunExecutor(int const iteration, ConfigOptions const& cfg, ExeDevice const& exeD
 //========================================================================================
 /// @endcond
 
+// clang-format off
 ErrResult::ErrResult(ErrType err)
 : errType(err)
 , errMsg("") {};
+// clang-format on
 
 ErrResult::ErrResult(hipError_t err)
 {
