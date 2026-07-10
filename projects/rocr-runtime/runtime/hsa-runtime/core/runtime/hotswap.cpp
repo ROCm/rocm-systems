@@ -322,7 +322,7 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   RewriteDecision decision{source_isa, source_isa,
                            request_entry_trampolines,
                            request_strict_mode};
-  if (request_strict_mode) {
+  if (source_gfx == kGfx1250) {
     decision.source_isa =
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
     decision.target_isa =

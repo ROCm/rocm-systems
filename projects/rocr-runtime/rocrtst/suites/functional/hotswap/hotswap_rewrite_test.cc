@@ -298,8 +298,8 @@ TEST(HotswapRewriteDecision, EntryTrampolinesDefaultOnRoutesNonA0Gfx1250) {
       MakeRevision("gfx1250", 1), kGfx1250Isa, kGfx1250Isa, {});
 
   ASSERT_TRUE(decision.has_value());
-  EXPECT_EQ(decision->source_isa, kGfx1250Isa);
-  EXPECT_EQ(decision->target_isa, kGfx1250Isa);
+  EXPECT_EQ(decision->source_isa, kGfx1250B0Isa);
+  EXPECT_EQ(decision->target_isa, kGfx1250B0Isa);
   EXPECT_TRUE(decision->request_entry_trampolines);
   EXPECT_FALSE(decision->request_strict_mode);
 }
