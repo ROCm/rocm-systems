@@ -113,3 +113,4 @@ jobs:
           python3 "${RCCL_CI_ROOT}/ci/format_report.py" \
             "${RCCL_CI_ROOT}/ab_artifacts/ab_regression_report.json" \
             --output /dev/null
+
