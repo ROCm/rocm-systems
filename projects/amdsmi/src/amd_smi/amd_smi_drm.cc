@@ -58,7 +58,7 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder, const std:
 }
 
 amdsmi_status_t AMDSmiDrm::init() {
-  amdsmi_status_t status = lib_loader_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = lib_loader_.load(libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }

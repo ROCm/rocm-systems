@@ -704,7 +704,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   }
 
   amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  amdsmi_status_t status = libdrm_amdgpu_.load(amd::smi::libdrm_amdgpu_sonames());
   if (status != AMDSMI_STATUS_SUCCESS) {
     libdrm_amdgpu_.unload();
     return status;
