@@ -357,22 +357,44 @@ ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *new
 ncclResult_t  ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
 
-/* Generate per-communicator unique ID for grow.
- * Constraints:
- * - Cannot generate a new UID while a previous UID is unconsumed
- * - Each UID can only be used once (no reuse after consumption)
- * - Must wait for grow operation to complete before calling again */
-ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
-ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @brief      Generate a per-communicator unique ID for growing a communicator.
+    @details    Generates a unique ID on an existing communicator. The ID must be
+                distributed to the ranks joining through ncclCommGrow.
+                Constraints:
+                - A new ID cannot be generated while a previous ID is unconsumed.
+                - Each ID can only be used once (no reuse after consumption).
+                - The grow operation must complete before calling this again.
+    @return     Result code. See @ref rccl_result_code for more details.
 
-/* Grow communicator by adding new ranks.
- * Parameter usage:
- * - Existing non-root: comm, uniqueId=NULL, rank=-1
- * - Existing root: comm, uniqueId=&id, rank=-1
- * - New ranks: comm=NULL, uniqueId=&id, rank=assigned
- * The UID is consumed upon successful grow and cannot be reused. */
+    @param[in]  comm          Existing communicator that coordinates the grow
+    @param[out] uniqueId      Pointer to the generated unique ID */
+ncclResult_t ncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @cond       include_hidden */
+ncclResult_t pncclCommGetUniqueId(ncclComm_t comm, ncclUniqueId* uniqueId);
+/*! @endcond */
+
+/*! @brief      Grow a communicator by adding new ranks.
+    @details    Creates a larger communicator from an existing one plus newly
+                joining ranks. The unique ID obtained from ncclCommGetUniqueId
+                must be distributed to the new ranks. Parameter usage:
+                - Existing non-root ranks: comm set, uniqueId = NULL, rank = -1
+                - Existing root rank: comm set, uniqueId = &id, rank = -1
+                - New ranks: comm = NULL, uniqueId = &id, rank = assigned
+                The unique ID is consumed upon a successful grow and cannot be reused.
+                If config is NULL, the new communicator inherits the original
+                communicator's configuration.
+    @return     Result code. See @ref rccl_result_code for more details.
+
+    @param[in]  comm          Existing communicator, or NULL for newly joining ranks
+    @param[in]  nRanks        Total number of ranks in the new communicator
+    @param[in]  uniqueId      Unique ID from ncclCommGetUniqueId; NULL on existing non-root ranks
+    @param[in]  rank          Rank in the new communicator for joining ranks; -1 for existing ranks
+    @param[out] newcomm       Pointer to the new communicator
+    @param[in]  config        Config for the new communicator. May be NULL to inherit from comm */
 ncclResult_t  ncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+/*! @cond       include_hidden */
 ncclResult_t pncclCommGrow(ncclComm_t comm, int nRanks, const ncclUniqueId* uniqueId, int rank, ncclComm_t* newcomm, ncclConfig_t* config);
+/*! @endcond */
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to ncclCommInitRankConfig.
      @details    Allows to use more than one ncclUniqueId (up to one per rank), 

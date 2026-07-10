@@ -8,10 +8,10 @@ import getpass
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 from typing import Optional
 import re
-import subprocess
 
 from .capabilities import SystemCapabilities
 
@@ -150,9 +150,23 @@ class RocprofsysConfig:
 
         return ":".join(paths)
 
-    def get_target_executable(
-        self, name: str, python_version: Optional[str] = None
-    ) -> Path:
+    def get_preload_path(self) -> Optional[str]:
+        """Get LD_PRELOAD for sanitizer builds, or None when not applicable.
+
+        When $ASAN_LIBRARY is set (exported by the sanitizer CI) it is prepended
+        to the shell's LD_PRELOAD so the asan runtime stays first in the link
+        order once rocprof-sys-run appends librocprof-sys-dl.so.
+
+        Returns:
+            LD_PRELOAD string, or None when not building with the sanitizer.
+        """
+        asan_library = os.environ.get("ASAN_LIBRARY")
+        if not asan_library:
+            return None
+        existing = os.environ.get("LD_PRELOAD", "")
+        return f"{asan_library}:{existing}" if existing else asan_library
+
+    def get_target_executable(self, name: str) -> Path:
         """Get path to a test target executable.
 
         When is_installed is True, searches in the following order:
@@ -167,7 +181,6 @@ class RocprofsysConfig:
 
         Args:
             name: Name of the target executable
-            python_version: Optional Python version string
 
         Returns:
             Path to the executable
@@ -245,131 +258,6 @@ class RocprofsysConfig:
                 f"  - {self.rocprofsys_bin_dir}/{name}\n"
                 f"  - PATH"
             )
-
-    def get_fundamental_environment(self) -> dict[str, str]:
-        """Get fundamental environment variables inherited from parent process."""
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", ""),
-            "USER": os.environ.get("USER", ""),
-            "SHELL": os.environ.get("SHELL", ""),
-            "TERM": os.environ.get("TERM", ""),
-            "LANG": os.environ.get("LANG", ""),
-        }
-
-        # TheRock sysdeps should be used as VA drivers when present, if not set by the user
-        _libva = (os.environ.get("LIBVA_DRIVERS_PATH") or "").strip()
-        if _libva:
-            env["LIBVA_DRIVERS_PATH"] = _libva
-        elif self.rocm_path:
-            _sysdeps = (self.rocm_path / "lib" / "rocm_sysdeps" / "lib").resolve()
-            if _sysdeps.is_dir():
-                env["LIBVA_DRIVERS_PATH"] = str(_sysdeps)
-        if "LIBVA_DRIVER_NAME" in os.environ:
-            env["LIBVA_DRIVER_NAME"] = os.environ["LIBVA_DRIVER_NAME"]
-        # To maintain a stable environment, only inherit OMPI_ and ROCPROFSYS_ env vars
-        for key, value in os.environ.items():
-            if key.startswith(("OMPI_", "ROCPROFSYS_")):
-                env[key] = value
-
-        # Forward sanitizer runtime options so pytest-launched binaries honor
-        # the suppression files / exitcode set by the CI workflow.
-        for key in (
-            "ASAN_OPTIONS",
-            "LSAN_OPTIONS",
-            "UBSAN_OPTIONS",
-            "TSAN_OPTIONS",
-            "ASAN_SYMBOLIZER_PATH",
-        ):
-            if key in os.environ:
-                env[key] = os.environ[key]
-
-        # When the address sanitizer is in use the example binaries are not
-        # built with -fsanitize=address, so libasan only enters the process via
-        # librocprof-sys-dl.so as a transitive DT_NEEDED. Asan refuses to
-        # initialize unless its runtime is first in the link order, so prepend
-        # libasan to LD_PRELOAD; rocprof-sys-run later appends librocprof-sys-dl
-        # via update_mode::APPEND, preserving "asan first".
-        asan_library = os.environ.get("ASAN_LIBRARY")
-        if asan_library:
-            existing = os.environ.get("LD_PRELOAD", "")
-            env["LD_PRELOAD"] = f"{asan_library}:{existing}" if existing else asan_library
-
-        return env
-
-    def get_base_environment(self) -> dict[str, str]:
-        """Get base environment variables for test execution."""
-        return {
-            "ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS": "64",
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_CONFIG_FILE": "",
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_FILE_OUTPUT": "ON",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "info",
-            "ROCPROFSYS_SAMPLING_FREQ": "300",
-            "ROCPROFSYS_SAMPLING_DELAY": "0.05",
-            "ROCPROFSYS_SAMPLING_GPUS": "all",
-            "OMP_PROC_BIND": "spread",
-            "OMP_PLACES": "threads",
-            "OMP_NUM_THREADS": "2",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-        }
-
-    def get_base_binary_environment(self) -> dict[str, str]:
-        """Get base environment variables for rocprof-sys binary test execution."""
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_LOG_LEVEL": "info",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-            "ROCPROFSYS_CONFIG_FILE": "",
-        }
-
-    def get_base_python_environment(self) -> dict[str, str]:
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_TRACE": "ON",
-            "ROCPROFSYS_PROFILE": "ON",
-            "ROCPROFSYS_USE_SAMPLING": "OFF",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-            "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_TREE_OUTPUT": "OFF",
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-            "PYTHONPATH": (
-                str(self.rocprofsys_site_packages)
-                if self.rocprofsys_site_packages
-                else ""
-            ),
-            "ROCPROFSYS_CONFIG_FILE": "",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-        }
-
-    def get_base_causal_environment(self) -> dict[str, str]:
-        return {
-            "ROCPROFSYS_CI": "ON",
-            "ROCPROFSYS_CI_TIMEOUT": os.environ.get("ROCPROFSYS_CI_TIMEOUT", "300"),
-            "ROCPROFSYS_USE_PID": "OFF",
-            "ROCPROFSYS_THREAD_POOL_SIZE": "0",
-            "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_LOG_LEVEL": "info",
-            "ROCPROFSYS_DL_VERBOSE": "0",
-            "ROCPROFSYS_DEBUG_SETTINGS": "0",
-            "LD_LIBRARY_PATH": self.get_library_path(),
-            "ROCPROFSYS_CONFIG_FILE": "",
-        }
 
 
 def _find_rocm_path(optional: bool = False) -> Optional[Path]:
