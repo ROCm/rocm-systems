@@ -73,6 +73,13 @@ constexpr std::array<uint32_t, 2> encode_vop3(uint32_t op, uint32_t vdst, uint32
               ((omod & 0x3u) << 27) | ((neg & 0x7u) << 29)};
 }
 
+constexpr std::array<uint32_t, 2> encode_cdna_vop3(uint32_t op, uint32_t vdst, uint32_t src0,
+                                                   uint32_t src1, uint32_t src2,
+                                                   uint32_t opsel = 0) {
+  return {vdst | ((opsel & 0xFu) << 11) | ((op & 0x3FFu) << 16) | (0x34u << 26),
+          (src0 & 0x1FFu) | ((src1 & 0x1FFu) << 9) | ((src2 & 0x1FFu) << 18)};
+}
+
 constexpr std::array<uint32_t, 2> encode_vop2(uint32_t op, uint32_t vdst, uint32_t src0,
                                               uint32_t vsrc1) {
   return {(src0 & 0x1FFu) | ((vsrc1 & 0xFFu) << 9) | ((vdst & 0xFFu) << 17) | ((op & 0x3Fu) << 25),
@@ -498,6 +505,102 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
     EXPECT_EQ(cu->read_sgpr(sb + 1), static_cast<uint32_t>(expected_mask >> 32));
 
     cu->reset_all_wf();
+  }
+}
+
+TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
+  struct ArchCase {
+    rj_code_arch_t arch;
+    std::string_view name;
+  };
+
+  constexpr ArchCase arch_cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, "cdna1"},
+      {ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
+      {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
+      {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+  };
+
+  for (const auto &arch : arch_cases) {
+    for (bool force_scalar : {false, true}) {
+      ForceScalarGuard guard(force_scalar);
+      const std::string suffix = force_scalar ? "_scalar" : "_simd";
+      amdgpu::GpuMemory gpu_mem(std::string(arch.name) + "_true16_vop3_mem" + suffix);
+      amdgpu::L2Cache l2(std::string(arch.name) + "_true16_vop3_l2" + suffix);
+
+      amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = arch.arch;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 106;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+
+      auto cu = amdgpu::ComputeUnitCore::create(std::string(arch.name), cfg, &gpu_mem, &l2);
+      ASSERT_NE(cu, nullptr);
+
+      auto decoder = Decoder::create(arch.arch);
+      ASSERT_NE(decoder, nullptr);
+
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_EQ(wf->wf_size(), 64u);
+      wf->set_exec(~uint64_t{0});
+
+      const uint32_t vb = wf->vgpr_alloc().base;
+
+      auto execute = [&](const std::array<uint32_t, 2> &words, std::string_view mnemonic) {
+        std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+        ASSERT_NE(inst, nullptr) << arch.name << " " << mnemonic;
+        ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic) << arch.name;
+        cu->execute_instruction(inst.get(), *wf);
+      };
+
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb + 0, lane, pack16(1u, 4u));
+        cu->write_vgpr(vb + 1, lane, pack16(0x8888u, 0x1234u));
+        cu->write_vgpr(vb + 16, lane, 0xBEEFCAFEu);
+      }
+      // v_lshrrev_b16 v16.h, v0.h, v1.h op_sel:[1,1,0,1]
+      execute(encode_cdna_vop3(/*op=*/0x12B, /*vdst=*/16, /*src0=*/256, /*src1=*/257,
+                               /*src2=*/0, /*opsel=*/0xBu),
+              "v_lshrrev_b16");
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 16, lane), pack16(0xCAFEu, 0x0123u))
+            << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
+      }
+
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb + 0, lane, pack16(0x0011u, 2u));
+        cu->write_vgpr(vb + 1, lane, pack16(0x0022u, 3u));
+        cu->write_vgpr(vb + 2, lane, pack16(0x0033u, 4u));
+        cu->write_vgpr(vb + 4, lane, 0xBEEFCAFEu);
+      }
+      // v_mad_u16 v4.l, v0.h, v1.h, v2.h op_sel:[1,1,1,0]
+      execute(encode_cdna_vop3(/*op=*/0x204, /*vdst=*/4, /*src0=*/256, /*src1=*/257,
+                               /*src2=*/258, /*opsel=*/0x7u),
+              "v_mad_u16");
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 4, lane), 10u)
+            << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
+      }
+
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb + 0, lane, pack16(0x0002u, 0xFFFEu));
+        cu->write_vgpr(vb + 1, lane, pack16(0x0004u, 3u));
+        cu->write_vgpr(vb + 2, lane, pack16(0x0006u, 5u));
+        cu->write_vgpr(vb + 5, lane, 0xCAFE1234u);
+      }
+      // v_mad_i16 v5.h, v0.h, v1.h, v2.h op_sel:[1,1,1,1]
+      execute(encode_cdna_vop3(/*op=*/0x205, /*vdst=*/5, /*src0=*/256, /*src1=*/257,
+                               /*src2=*/258, /*opsel=*/0xFu),
+              "v_mad_i16");
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        EXPECT_EQ(cu->read_vgpr(vb + 5, lane), 0xFFFF1234u)
+            << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
+      }
+
+      cu->reset_all_wf();
+    }
   }
 }
 

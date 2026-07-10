@@ -1041,7 +1041,7 @@ def _lower_dst_write(
                     f'{ind}{{',
                     f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
                     f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
-                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, src_half);',
+                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, src_half, true);',
                     f'{ind}}}',
                 ]
             else:

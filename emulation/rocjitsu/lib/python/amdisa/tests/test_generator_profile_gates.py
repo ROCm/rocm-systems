@@ -83,6 +83,11 @@ def rdna4_generated_root(amdgpu_generated_root: Path) -> Path:
     return amdgpu_generated_root / 'rdna4'
 
 
+@pytest.fixture
+def cdna4_generated_root(amdgpu_generated_root: Path) -> Path:
+    return amdgpu_generated_root / 'cdna4'
+
+
 def _shared_execute_body(execute_shared: str, name: str, next_name: str) -> str:
     start = execute_shared.index(f'inline void execute_{name}')
     end = execute_shared.index(f'inline void execute_{next_name}', start)
@@ -922,7 +927,7 @@ def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, true)' in body
 
 
 def test_generated_special_vop3_true16_paths_use_selected_halves(
@@ -957,7 +962,10 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
-    assert 'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits)' in div_fixup
+    assert (
+        'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits, true)'
+        in div_fixup
+    )
 
     pack = _shared_execute_body(
         execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
@@ -965,6 +973,30 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in pack
     assert 'read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0)' in pack
     assert 'read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1)' in pack
+
+
+def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
+    cdna4_generated_root: Path,
+):
+    vop3 = (cdna4_generated_root / 'vop3.cpp').read_text()
+    cases = [
+        ('VLshlrevB16Vop3', 'VLshrrevB16Vop3', 2),
+        ('VLshrrevB16Vop3', 'VAshrrevI16Vop3', 2),
+        ('VAshrrevI16Vop3', 'VMaxF16Vop3', 2),
+        ('VMadU16Vop3', 'VMadI16Vop3', 3),
+        ('VMadI16Vop3', 'VFmaF16Vop3', 3),
+    ]
+
+    for class_name, next_class_name, src_count in cases:
+        body = _generated_method_body(vop3, class_name, next_class_name)
+        assert 'amdgpu::execute_v_' not in body
+        assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
+        for src_idx in range(src_count):
+            assert (
+                f'read_vop3_true16_src(src{src_idx}, wf, lane, opsel, {src_idx})'
+                in body
+            )
+        assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in body
 
 
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
@@ -1096,7 +1128,7 @@ def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
     assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, true)' in body
     assert 'inst.vdst.write_lane' not in body
 
 
@@ -1368,7 +1400,7 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'util::f16_to_f32' in body
     assert 'util::f32_to_f16' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'throw util::UnimplementedInst' not in body
 
 

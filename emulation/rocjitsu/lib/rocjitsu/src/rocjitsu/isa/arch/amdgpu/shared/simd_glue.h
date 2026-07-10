@@ -281,24 +281,41 @@ inline util::native<uint32_t> select_vop3_true16_src(util::native<uint32_t> valu
   return value & util::broadcast<uint32_t>(0xffffu);
 }
 
+inline bool cdna_vop3_low_dst_zeroes_high(const Wavefront &wf) {
+  switch (wf.cu().arch()) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
 template <typename Operand>
 inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t lane, uint32_t opsel,
-                                  uint32_t value) {
+                                  uint32_t value, bool cdna_low_dst_zeroes_high = false) {
   uint32_t src_half = value & 0xffffu;
+  const bool dst_hi = (opsel & 0x8u) != 0;
+  const bool low_dst_zeroes_high =
+      !dst_hi && cdna_low_dst_zeroes_high && cdna_vop3_low_dst_zeroes_high(wf);
   auto reg = dst.to_register_ref();
   if (reg && reg->cls == RegClass::VGPR) {
-    // VOP3 true16 selects the destination half with op_sel[3], independent of
-    // any packed operand encoding convention.
+    // Real VOP3 OP_SEL true16 destinations select the destination half with
+    // op_sel[3]. CDNA low-half OP_SEL writes zero the upper half; fixed
+    // MIXLO/MIXHI-style half writes and RDNA/gfx true16 writes preserve it.
     uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
     uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
     uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
-    uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                                     : ((old_dst & 0xffff0000u) | src_half);
+    uint32_t merged = dst_hi
+                          ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                          : (low_dst_zeroes_high ? src_half : ((old_dst & 0xffff0000u) | src_half));
     wf.cu().write_vgpr(idx, lane, merged);
     return;
   }
-  dst.write_lane(wf, lane, (opsel & 0x8u) ? (src_half << 16) : src_half);
+  dst.write_lane(wf, lane, dst_hi ? (src_half << 16) : src_half);
 }
 
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
@@ -511,12 +528,15 @@ inline void write_simd_at(VgprStorage *rd, const Op &op, Wavefront &wf, uint32_t
 template <typename Op>
   requires(util::has_stdx_simd)
 inline void write_vop3_true16_simd_at(VgprStorage *rd, const Op &op, Wavefront &wf, uint32_t base,
-                                      util::native<uint32_t> value, uint64_t mask, uint32_t opsel) {
+                                      util::native<uint32_t> value, uint64_t mask, uint32_t opsel,
+                                      bool cdna_low_dst_zeroes_high = false) {
   const auto old = simd_load_or<uint32_t>(rd, base, util::native<uint32_t>{});
   const auto src_half = value & util::broadcast<uint32_t>(0xffffu);
-  const auto merged = (opsel & 0x8u)
-                          ? ((old & util::broadcast<uint32_t>(0x0000ffffu)) | (src_half << 16))
-                          : ((old & util::broadcast<uint32_t>(0xffff0000u)) | src_half);
+  util::native<uint32_t> merged =
+      (opsel & 0x8u) ? ((old & util::broadcast<uint32_t>(0x0000ffffu)) | (src_half << 16))
+                     : ((old & util::broadcast<uint32_t>(0xffff0000u)) | src_half);
+  if (!(opsel & 0x8u) && cdna_low_dst_zeroes_high && cdna_vop3_low_dst_zeroes_high(wf))
+    merged = src_half;
   write_simd_at<uint32_t>(rd, op, wf, base, merged, mask);
 }
 
@@ -1705,9 +1725,10 @@ template <typename T, typename Inst, typename BinOp>
 
 /// VOP3 f16 binary fast path. The generic form matches the ordinary scalar
 /// body's low-half read plus full-dword zero-extending write. The true16 form
-/// selects source halves with op_sel[0:1] and merges the destination half with
-/// op_sel[3]. The packed-f16 binary functors do not apply abs/neg/omod/clamp,
-/// so both forms bail to scalar whenever a modifier is present.
+/// selects source halves with op_sel[0:1] and writes the destination half per
+/// the ISA's op_sel[3] policy. The packed-f16 binary functors do not apply
+/// abs/neg/omod/clamp, so both forms bail to scalar whenever a modifier is
+/// present.
 template <bool True16, typename T, typename Inst, typename BinOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
@@ -1743,7 +1764,7 @@ template <bool True16, typename T, typename Inst, typename BinOp>
     }
     const auto r = bin_op(a, b);
     if constexpr (True16)
-      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, r, chunk, opsel);
+      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, r, chunk, opsel, true);
     else
       write_simd_at<T>(rd, inst.vdst, wf, base, r, chunk);
   }
@@ -2128,8 +2149,8 @@ template <typename Inst, typename UnOp>
 /// VOP3 f16 unary SIMD fast path. Mirrors the scalar body's
 /// f16_to_f32 -> abs/neg -> op -> omod/clamp -> f32_to_f16 chain. The generic
 /// form reads the low source half and zero-extends the full destination dword;
-/// the true16 form selects the source half and merges the selected destination
-/// half.
+/// the true16 form selects the source half and writes the selected destination
+/// half per the ISA's op_sel[3] policy.
 /// All steps bit-exact per the f16 VOP3 cmp slice's widening probe (f16_to_f32
 /// + f32_to_f16 verified exhaustive incl. NaN payload).
 template <bool True16, typename Inst, typename UnOp>
@@ -2167,7 +2188,7 @@ template <bool True16, typename Inst, typename UnOp>
     const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
     if constexpr (True16)
-      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel);
+      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel, true);
     else
       write_simd_at<T>(rd, inst.vdst, wf, base, out, chunk);
   }
@@ -2293,7 +2314,7 @@ template <typename T, typename Inst, typename TernOp>
     const auto b = select_vop3_true16_src(simd_load_or<T>(r1, base, b_bcast), opsel, 1);
     const auto c = select_vop3_true16_src(simd_load_or<T>(r2, base, c_bcast), opsel, 2);
     const auto r = tern_op(a, b, c);
-    write_vop3_true16_simd_at(rd, inst.vdst, wf, base, r, chunk, opsel);
+    write_vop3_true16_simd_at(rd, inst.vdst, wf, base, r, chunk, opsel, true);
   }
   return true;
 }
@@ -2353,7 +2374,8 @@ template <typename Inst, typename FmaOp>
 /// sources: widen each via util::f16_to_f32_simd, apply f32 abs/neg, run
 /// `tern_op` on native<float>, apply omod/clamp, narrow via f32_to_f16_simd.
 /// The generic form zero-extends the full destination dword; the true16 form
-/// selects all source halves and merges the selected destination half.
+/// selects all source halves and writes the selected destination half per the
+/// ISA's op_sel[3] policy.
 template <bool True16, typename Inst, typename FmaOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &inst, Wavefront &wf,
@@ -2403,7 +2425,7 @@ template <bool True16, typename Inst, typename FmaOp>
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
     if constexpr (True16)
-      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel);
+      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel, true);
     else
       write_simd_at<T>(rd, inst.vdst, wf, base, out, chunk);
   }
@@ -2565,7 +2587,7 @@ template <bool True16, typename Inst, typename FmaOp>
     const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp);
     const auto out = util::f32_to_f16_simd(r);
     if constexpr (True16)
-      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel);
+      write_vop3_true16_simd_at(rd, inst.vdst, wf, base, out, chunk, opsel, true);
     else
       write_simd_at<T>(rd, inst.vdst, wf, base, out, chunk);
   }

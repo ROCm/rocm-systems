@@ -238,7 +238,7 @@ void VMovB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint16_t>(
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1778,7 +1778,7 @@ void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                         ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1))
                   : static_cast<uint16_t>(
                         ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {

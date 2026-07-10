@@ -360,7 +360,7 @@ def gen_vector_div_fixup(
             L.extend(vop3_dst_mod('result'))
             L.append('    uint32_t result_bits = util::f32_to_f16(result);')
             L.append(
-                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits);'
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, opsel, result_bits, true);'
             )
         else:
             L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16(result));')
@@ -676,7 +676,7 @@ def gen_vector_bitop3(
     if dtype == 'b16' and true16_opsel:
         L.append(
             f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, '
-            f'{true16_opsel}, result);'
+            f'{true16_opsel}, result, true);'
         )
     else:
         L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
@@ -957,7 +957,7 @@ def gen_vector_cvt_pk(
                 '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
             )
             L.append(
-                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
+                f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
             )
         elif op in ('f32_fp8', 'f32_bf8', 'f16_fp8', 'f16_bf8'):
             conv = fp8_helper_name(
@@ -1500,7 +1500,7 @@ def _gen_pk_narrow_fp8(
         '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
     )
     L.append(
-        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed);'
+        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst[0]}, wf, lane, ({opsel}) & 0x8u, packed, true);'
     )
 
 

@@ -333,7 +333,7 @@ TEST(Vop3CvtPkF32RdnaCorrectness, NormI16_SignedMarker) {
     Fixture fx;
     ASSERT_NE(fx.cu, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;
-    // lane 0: (+1.0, +1.0) -> both halves 0xFFFF; lane 1: (-1.0, -1.0) -> 0.
+    // lane 0: (+1.0, +1.0) -> both halves 0x7FFF; lane 1: (-1.0, -1.0) -> 0x8001.
     fx.cu->write_vgpr(vb + 0, 0, std::bit_cast<uint32_t>(1.0f));
     fx.cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.0f));
     fx.cu->write_vgpr(vb + 0, 1, std::bit_cast<uint32_t>(-1.0f));

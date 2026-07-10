@@ -193,7 +193,7 @@ void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne(s0) : util::f32_to_fp8_e4m3_rne(s0);
     uint32_t hi = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne(s1) : util::f32_to_fp8_e4m3_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -293,7 +293,7 @@ void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
     uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -1009,7 +1009,7 @@ void VCvtPkFp8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne(s0) : util::f32_to_fp8_e4m3_rne(s0);
     uint32_t hi = (inst_.clamp) ? util::f32_to_fp8_e5m3_rne(s1) : util::f32_to_fp8_e4m3_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,
@@ -1093,7 +1093,7 @@ void VCvtPkBf8F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
     uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, (inst_.opsel) & 0x8u, packed, true);
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = amdgpu::dpp::dpp_write_mask(wf.wf_size(), dpp_ctrl_, dpp_row_mask_,

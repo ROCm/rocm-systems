@@ -319,7 +319,7 @@ def test_gfx1250_bitop3_b16_uses_true16_helpers():
     assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, inst_.opsel, 2)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result, true)' in body
 
 
 def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
@@ -343,7 +343,7 @@ def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert 'uint32_t result_bits = util::f32_to_f16(result);' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
     assert 'std::bit_cast<float>(src0.read_lane' not in body
 
 

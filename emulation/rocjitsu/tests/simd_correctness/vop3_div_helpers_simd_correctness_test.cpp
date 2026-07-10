@@ -240,14 +240,15 @@ void check_div_fixup_f32(uint64_t exec) {
 }
 
 std::array<uint32_t, WF_SIZE> run_div_fixup_f16_opsel(bool force_scalar, uint32_t opcode,
-                                                      uint16_t p, uint16_t b, uint16_t c) {
+                                                      uint16_t p, uint16_t b, uint16_t c,
+                                                      uint32_t op_sel = 0xFu) {
   util::set_force_scalar_for_testing(force_scalar);
   Fixture fx;
   EXPECT_NE(fx.cu, nullptr);
   EXPECT_NE(fx.wf, nullptr);
   uint32_t words[4] = {0u, 0u, 0u, 0u};
   vop3_tern_encode(opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257, /*src2=*/258, words,
-                   /*op_sel=*/0xFu);
+                   op_sel);
   Instruction *inst = fx.decoder->decode(words);
   EXPECT_NE(inst, nullptr) << "v_div_fixup_f16-family decode failed";
 
@@ -531,6 +532,14 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
             << o.name << " normal force_scalar=" << force_scalar << " lane " << lane;
       }
 
+      const auto low_dst =
+          run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(2.0f),
+                                  util::f32_to_f16(3.0f), util::f32_to_f16(4.0f), 0x7u);
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        EXPECT_EQ(low_dst[lane], util::f32_to_f16(2.0f))
+            << o.name << " low dst force_scalar=" << force_scalar << " lane " << lane;
+      }
+
       const auto s2_nan = run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(1.0f),
                                                   util::f32_to_f16(3.0f), 0x7E00u);
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
@@ -538,6 +547,15 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF16Family_OpSelHighHalves) {
             << o.name << " NaN force_scalar=" << force_scalar << " lane " << lane;
         EXPECT_TRUE(is_f16_nan(high16(s2_nan[lane])))
             << o.name << " NaN force_scalar=" << force_scalar << " lane " << lane;
+      }
+
+      constexpr uint16_t kS1Nan = 0x7E11u;
+      constexpr uint16_t kS2Nan = 0x7E23u;
+      const auto distinct_nan =
+          run_div_fixup_f16_opsel(force_scalar, o.opcode, util::f32_to_f16(1.0f), kS1Nan, kS2Nan);
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        EXPECT_EQ(distinct_nan[lane], pack16(0xBEEFu, kS2Nan))
+            << o.name << " distinct NaN force_scalar=" << force_scalar << " lane " << lane;
       }
     }
   }

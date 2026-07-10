@@ -2658,6 +2658,11 @@ class CodeGenerator:
             and bool(dst_operands)
             and (has_src or has_dst)
         )
+        # A few VOP3 f16 special bodies must still use true16 OP_SEL selection
+        # even though their semantic operand model is not a plain 16-bit
+        # value op. Keep that body classification separate from the profile
+        # gate above so the generated scalar body and shared SIMD probe use
+        # the same true16 policy.
         body_uses_true16 = enabled or (
             bool(is_vop3) and (force_div_fixup or force_cmp_class or force_cvt_pk_src)
         )
@@ -2967,7 +2972,7 @@ class CodeGenerator:
                         f'{src_lines}'
                         f'{setup_lines}'
                         f'    uint32_t result = {result_expr};\n'
-                        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result);\n'
+                        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, true);\n'
                         '  }\n'
                     )
                 if cls == 'vector_add_co':
@@ -7259,7 +7264,7 @@ class CodeGenerator:
                     f'{src_lines}'
                     f'{setup_lines}'
                     f'    uint32_t result = {result_expr};\n'
-                    '    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result);\n'
+                    '    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result, true);\n'
                     '  }'
                 )
             entries.append(

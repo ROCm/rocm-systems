@@ -524,7 +524,7 @@ void VCvtF16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     {
       uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(
           util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>(src0.read_lane(wf, lane))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1793,7 +1793,7 @@ void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(util::f32_to_f16(static_cast<float>(static_cast<uint16_t>(
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1877,7 +1877,7 @@ void VCvtF16I16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       uint32_t src_half = static_cast<uint32_t>(
           static_cast<uint16_t>(util::f32_to_f16(static_cast<float>(static_cast<int16_t>(
               ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) & 0xFFFF)))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -1967,7 +1967,7 @@ void VCvtU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           return static_cast<uint32_t>(UINT16_MAX);
         return static_cast<uint32_t>(static_cast<uint16_t>(s));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2059,7 +2059,7 @@ void VCvtI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));
         return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s)));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2173,7 +2173,7 @@ void VFrexpMantF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2290,7 +2290,7 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
           v = std::clamp(v, 0.0f, 1.0f);
         return v;
       }())));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2379,7 +2379,7 @@ void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);
         return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled)));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -2468,7 +2468,7 @@ void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
         float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);
         return static_cast<uint32_t>(static_cast<uint16_t>(scaled));
       }()));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3319,7 +3319,7 @@ void VCvtF16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
                         ((::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) >>
                           (((opsel & 0x2u) >> 1) * 8u)) &
                          0xFFu)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {
@@ -3405,7 +3405,7 @@ void VCvtF16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
               ((::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0) >>
                 (((opsel & 0x2u) >> 1) * 8u)) &
                0xFFu)))))));
-      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half);
+      ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
   if (inst_.src0 == amdgpu::SRC_DPP) {

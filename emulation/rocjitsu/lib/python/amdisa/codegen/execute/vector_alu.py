@@ -30,7 +30,7 @@ def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
 def _write_vop3_true16_dst(opnd: str, opsel: str, value: str) -> str:
     return (
         f'::rocjitsu::amdgpu::write_vop3_true16_dst'
-        f'({opnd}, wf, lane, {opsel}, {value});'
+        f'({opnd}, wf, lane, {opsel}, {value}, true);'
     )
 
 
