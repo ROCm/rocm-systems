@@ -180,6 +180,7 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     BroadcastTests.cpp
+    DoneEventOrderingTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
