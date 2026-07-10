@@ -49,7 +49,7 @@ from utils.metrics.noise_clamper import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import (
     InstructionLineRecord,
-    normalize_pc_sampling_for_db,
+    load_aggregated_pc_sampling,
 )
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
@@ -393,7 +393,7 @@ class db_analysis(OmniAnalyze_Base):
         stall_reason_types: dict[str, orm.PCSampleStallReasonType] = {}
         instruction_sample_types: dict[str, orm.InstructionSampleType] = {}
 
-        for code_object in normalize_pc_sampling_for_db(tool_data):
+        for code_object in load_aggregated_pc_sampling(tool_data):
             code_object_store = orm.CodeObjectStore(
                 pid=pid,
                 code_object_id=code_object.code_object_id,

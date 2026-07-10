@@ -44,6 +44,28 @@ NORMALIZED_RECORD_COLUMNS = [
 SOURCE_LINE_MISSING = "N/A"
 
 
+class InstructionLineRecord(NamedTuple):
+    """One sampled offset attributed to one kernel, with aggregated counts."""
+
+    code_object_offset: int
+    kernel_name: Optional[str]
+    instruction: Optional[str]
+    comment: str
+    total_count: int
+    issue_count: Optional[int]
+    stall_count: Optional[int]
+    stall_reasons: dict[str, int]
+    inst_types: dict[str, int]
+
+
+class CodeObjectRecord(NamedTuple):
+    """A code object and the sampled instruction lines it owns."""
+
+    code_object_id: int
+    load_base: Optional[int]
+    instruction_lines: list[InstructionLineRecord]
+
+
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
     """Detect the PC sampling method from the populated buffer record array.
 
@@ -100,11 +122,7 @@ def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
 ) -> pd.DataFrame:
-    """Group normalized records into per-group counts, stall reasons, inst types.
-
-    The ``inst_type`` count dict is always produced; consumers that do not need
-    it (the CLI) simply drop the column in their final projection.
-    """
+    """Group normalized records into per-group counts, stall reasons, inst types."""
     # inst_index and kernel_id are constant within a group; carry the first when
     # they are not group keys.
     carried = [
@@ -176,46 +194,12 @@ def enrich_with_metadata(
     return df
 
 
-def load_aggregated_pc_sampling(
-    tool_data: dict[str, Any],
-    group_by: list[str],
-    attach: set[str],
-) -> pd.DataFrame:
-    """Run load -> aggregate -> enrich for the given grouping and columns."""
-    records_df = load_pc_sample_records(tool_data)
-    aggregated_df = aggregate_pc_sample_records(records_df, group_by)
-    return enrich_with_metadata(aggregated_df, tool_data, attach)
-
-
-class CodeObjectRecord(NamedTuple):
-    """A code object and the sampled instruction lines it owns."""
-
-    code_object_id: int
-    load_base: Optional[int]
-    instruction_lines: list["InstructionLineRecord"]
-
-
-class InstructionLineRecord(NamedTuple):
-    """One sampled offset attributed to one kernel, with aggregated counts."""
-
-    code_object_offset: int
-    kernel_name: Optional[str]
-    instruction: Optional[str]
-    comment: str
-    total_count: int
-    issue_count: Optional[int]
-    stall_count: Optional[int]
-    stall_reasons: dict[str, int]
-    inst_types: dict[str, int]
-
-
-def normalize_pc_sampling_for_db(tool_data: dict[str, Any]) -> list[CodeObjectRecord]:
+def load_aggregated_pc_sampling(tool_data: dict[str, Any]) -> list[CodeObjectRecord]:
     """Build the normalized code-object tree the analysis DB inserts.
 
-    Pure computation: groups samples by (code_object_id, offset, kernel_id) so
-    each line is attributed to the kernel its dispatch ran, attaches the
-    instruction/comment and typed count dicts, and joins the code object catalog
-    (load_base).
+    Runs load -> aggregate -> enrich, grouping samples by
+    (code_object_id, offset, kernel_id) so each line is attributed to the kernel
+    its dispatch ran, then joins the code object catalog (load_base).
     """
     records_df = load_pc_sample_records(tool_data)
     aggregated_df = aggregate_pc_sample_records(

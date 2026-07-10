@@ -34,7 +34,6 @@ from utils.pc_sampling_analysis import (
     enrich_with_metadata,
     load_aggregated_pc_sampling,
     load_pc_sample_records,
-    normalize_pc_sampling_for_db,
 )
 from utils.utils_common import is_only_pc_sampling
 
@@ -487,24 +486,20 @@ def test_enrich_kernel_name_unmapped_is_none() -> None:
 
 
 def test_load_aggregated_pc_sampling_happy_path() -> None:
-    """The combined helper loads, aggregates and enriches in one call."""
+    """The helper loads, aggregates, enriches and returns the code-object tree."""
     tool_data = make_tool_data(
         stochastic=[make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
         instructions=["v_mov"],
         comments=["/s/a.cpp:1"],
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
+        code_objects=[make_code_object(5)],
     )
-    df = load_aggregated_pc_sampling(
-        tool_data,
-        group_by=["code_object_id", "code_object_offset"],
-        attach={"instruction", "source_line", "kernel_name"},
-    )
-    row = df.iloc[0]
-    assert row["count"] == 1
-    assert row["instruction"] == "v_mov"
-    assert row["source_line"] == "/s/a.cpp:1"
-    assert row["kernel_name"] == "vecCopy"
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
+    assert line.total_count == 1
+    assert line.instruction == "v_mov"
+    assert line.comment == "/s/a.cpp:1"
+    assert line.kernel_name == "vecCopy"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1293,7 +1288,7 @@ def test_load_non_mertrics_table_pc_sampling_empty_without_tool_data(
 
 
 # ═══════════════════════════════════════════════════════════════
-# aggregate_pc_sample_records / normalize_pc_sampling_for_db
+# aggregate_pc_sample_records / load_aggregated_pc_sampling
 # ═══════════════════════════════════════════════════════════════
 
 
@@ -1315,7 +1310,7 @@ def test_aggregate_adds_inst_type_dict() -> None:
 
 def test_normalize_missing_tool_data_returns_empty() -> None:
     """An empty tool record yields no code-object records."""
-    assert normalize_pc_sampling_for_db(make_tool_data()) == []
+    assert load_aggregated_pc_sampling(make_tool_data()) == []
 
 
 def test_normalize_groups_by_code_object_with_catalog() -> None:
@@ -1343,7 +1338,7 @@ def test_normalize_groups_by_code_object_with_catalog() -> None:
             make_code_object(6, load_base=0x2000),
         ],
     )
-    records = {r.code_object_id: r for r in normalize_pc_sampling_for_db(tool_data)}
+    records = {r.code_object_id: r for r in load_aggregated_pc_sampling(tool_data)}
     assert records[5].load_base == 0x1000
     assert len(records[5].instruction_lines) == 2
     assert len(records[6].instruction_lines) == 1
@@ -1367,7 +1362,7 @@ def test_normalize_attributes_line_to_kernel_via_dispatch() -> None:
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
         code_objects=[make_code_object(5)],
     )
-    lines = normalize_pc_sampling_for_db(tool_data)[0].instruction_lines
+    lines = load_aggregated_pc_sampling(tool_data)[0].instruction_lines
     by_offset = {line.code_object_offset: line.kernel_name for line in lines}
     assert by_offset[0x10] == "vecCopy"
     assert by_offset[0x20] == "vecAdd"
@@ -1401,7 +1396,7 @@ def test_normalize_instruction_line_counts_and_dicts() -> None:
         kernel_dispatch=[make_dispatch(0, 100)],
         code_objects=[make_code_object(5)],
     )
-    line = normalize_pc_sampling_for_db(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
     assert line.code_object_offset == 0x10
     assert line.instruction == "v_mov"
     assert line.total_count == 2
@@ -1420,7 +1415,7 @@ def test_normalize_host_trap_line_has_null_issue_stall() -> None:
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         code_objects=[make_code_object(5)],
     )
-    line = normalize_pc_sampling_for_db(tool_data)[0].instruction_lines[0]
+    line = load_aggregated_pc_sampling(tool_data)[0].instruction_lines[0]
     assert line.total_count == 1
     assert line.issue_count is None
     assert line.stall_count is None
@@ -1454,7 +1449,7 @@ def test_normalize_unmapped_dispatch_yields_none_kernel() -> None:
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         code_objects=[make_code_object(999)],
     )
-    record = normalize_pc_sampling_for_db(tool_data)[0]
+    record = load_aggregated_pc_sampling(tool_data)[0]
     assert record.code_object_id == 999
     assert record.instruction_lines[0].kernel_name is None
 
