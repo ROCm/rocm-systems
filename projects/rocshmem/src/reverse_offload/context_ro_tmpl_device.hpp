@@ -381,7 +381,7 @@ __device__ int ROContext::alltoall_wave([[maybe_unused]] rocshmem_team_t team,
                                             [[maybe_unused]] T* dest, 
                                             [[maybe_unused]] const T* source, 
                                             [[maybe_unused]] int nelems) {
-  LOGD_WARN("Alltoall not implemented for reverse offload backend");
+  LOGD_WARN("Alltoall_wave not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }
 

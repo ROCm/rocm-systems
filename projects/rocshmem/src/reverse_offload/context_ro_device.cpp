@@ -803,7 +803,7 @@ __device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team
                                            [[maybe_unused]] void* dest, 
                                            [[maybe_unused]] const void* source, 
                                            [[maybe_unused]] int nelems){
-  LOGD_WARN("Alltoallmem not implemented for reverse offload backend");
+  LOGD_WARN("Alltoallmem_wave not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }
 
