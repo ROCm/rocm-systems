@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from conftest import RocprofsysTest, _validate_rocpd_candidates
-from rocprofsys import GPUInfo, TestResult, ValidationResult
+from rocprofsys import GPUInfo, TestResult as RocprofsysTestResult, ValidationResult
 
 pytestmark = [pytest.mark.pytest_impl]
 
@@ -81,10 +81,9 @@ class TestTestResult(RocprofsysTest):
         default_db.touch()
         rank_db.touch()
 
-        result = TestResult(0, "", tmp_path, [], {})
+        result = RocprofsysTestResult(0, "", tmp_path, [], {})
 
         assert result.rocpd_files == [default_db]
-        assert result.rocpd_file == default_db
 
     def test_rocpd_files_returns_sorted_rank_databases(self, tmp_path):
         higher_pid_db = tmp_path / "rocpd-66607-0.db"
@@ -92,10 +91,9 @@ class TestTestResult(RocprofsysTest):
         higher_pid_db.touch()
         lower_pid_db.touch()
 
-        result = TestResult(0, "", tmp_path, [], {})
+        result = RocprofsysTestResult(0, "", tmp_path, [], {})
 
         assert result.rocpd_files == [lower_pid_db, higher_pid_db]
-        assert result.rocpd_file == lower_pid_db
 
     def test_rocpd_candidates_accepts_later_valid_candidate(
         self,
@@ -123,7 +121,7 @@ class TestTestResult(RocprofsysTest):
                 command=f"validate {db_path.name}",
             )
 
-        passing_output, failures = _validate_rocpd_candidates(
+        passing_output, failures, global_failure = _validate_rocpd_candidates(
             [invalid_db, valid_db],
             validate_rocpd_database,
             pass_regex=[r"rocpd validated"],
@@ -131,6 +129,7 @@ class TestTestResult(RocprofsysTest):
 
         assert calls == [invalid_db, valid_db]
         assert passing_output == f"Command: validate {valid_db.name}\n\nvalid candidate"
+        assert global_failure is None
         assert failures == [
             f"Command: validate {invalid_db.name}\n\nmissing GPU counter rows"
         ]
@@ -152,13 +151,53 @@ class TestTestResult(RocprofsysTest):
                 command=f"validate {db_path.name}",
             )
 
-        passing_output, failures = _validate_rocpd_candidates(
+        passing_output, failures, global_failure = _validate_rocpd_candidates(
             [first_db, second_db],
             validate_rocpd_database,
         )
 
         assert passing_output is None
+        assert global_failure is None
         message = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
         assert "rocpd-66606-0.db is missing GPU counter rows" in message
         assert "rocpd-7-0.db is missing GPU counter rows" in message
         assert "--- Next ROCpd candidate ---" in message
+
+    def test_rocpd_candidates_fail_regex_is_global(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        invalid_db = tmp_path / "rocpd-66606-0.db"
+        valid_db = tmp_path / "rocpd-66607-0.db"
+        invalid_db.touch()
+        valid_db.touch()
+        calls: list[Path] = []
+
+        def validate_rocpd_database(db_path: Path) -> ValidationResult:
+            calls.append(db_path)
+            if db_path == invalid_db:
+                return ValidationResult(
+                    False,
+                    "invalid candidate",
+                    stdout="validation failed with FORBIDDEN marker",
+                    command=f"validate {db_path.name}",
+                )
+            return ValidationResult(
+                True,
+                "valid candidate",
+                stdout="rocpd validated",
+                command=f"validate {db_path.name}",
+            )
+
+        passing_output, failures, global_failure = _validate_rocpd_candidates(
+            [invalid_db, valid_db],
+            validate_rocpd_database,
+            fail_regex=[r"FORBIDDEN"],
+        )
+
+        assert calls == [invalid_db]
+        assert passing_output is None
+        assert failures == []
+        assert global_failure is not None
+        assert "Fail regex found: FORBIDDEN" in global_failure
+        assert f"validate {invalid_db.name}" in global_failure

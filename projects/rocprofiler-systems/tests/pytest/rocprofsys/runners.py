@@ -66,6 +66,7 @@ class TestResult:
     extra_output: Optional[str] = None
     duration: Optional[float] = None
     _instrumented_files: list[Path] = field(default_factory=list)
+    __test__ = False
 
     @property
     def success(self) -> bool:
@@ -87,11 +88,6 @@ class TestResult:
                 return candidate
         protos = list(self.output_dir.glob("perfetto-trace*.proto"))
         return protos[0] if protos else None
-
-    @property
-    def rocpd_file(self) -> Optional[Path]:
-        files = self.rocpd_files
-        return files[0] if files else None
 
     @property
     def rocpd_files(self) -> list[Path]:

@@ -2441,14 +2441,20 @@ def assert_rocpd(subtests, tests_dir, request):
                     gpu_category_to_skip=gpu_category_to_skip,
                 )
 
-            passing_output, failures = _validate_rocpd_candidates(
+            passing_output, failures, global_failure = _validate_rocpd_candidates(
                 rocpd_files,
                 validate_candidate,
                 pass_regex=pass_regex,
                 fail_regex=fail_regex,
             )
 
-            if passing_output is None:
+            if global_failure is not None:
+                msg = fail_message or f"ROCpd validation failed:\n{global_failure}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg, pytrace=False)
+            elif passing_output is None:
                 output = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
                 msg = fail_message or f"ROCpd validation failed:\n{output}"
                 if skip_on_fail:
@@ -2465,18 +2471,23 @@ def _validate_rocpd_candidates(
     validate_candidate: Callable[[Path], ValidationResult],
     pass_regex: Optional[list[str]] = None,
     fail_regex: Optional[list[str]] = None,
-) -> tuple[Optional[str], list[str]]:
+) -> tuple[Optional[str], list[str], Optional[str]]:
     """Validate ROCpd candidates and return the first passing output.
 
     Multi-process runs can emit multiple ROCpd databases. Some rank-local
     databases may not contain the GPU rows required by a rule set, so the
-    validation succeeds if any emitted candidate fully validates.
+    validation succeeds if any emitted candidate fully validates. A fail regex
+    match is a global failure and stops validation immediately.
     """
     failures: list[str] = []
 
     for rocpd_file in rocpd_files:
         validation = validate_candidate(rocpd_file)
         output = f"Command: {validation.command}\n\n{validation.message}"
+        if fail_regex:
+            for pattern in fail_regex:
+                if re.search(pattern, validation.stdout):
+                    return None, failures, f"Fail regex found: {pattern}\n{output}"
         if not validation.is_valid:
             failures.append(output)
             continue
@@ -2487,18 +2498,13 @@ def _validate_rocpd_candidates(
                 if not re.search(pattern, validation.stdout):
                     regex_failure = f"Pass regex not found: {pattern}"
                     break
-        if regex_failure is None and fail_regex:
-            for pattern in fail_regex:
-                if re.search(pattern, validation.stdout):
-                    regex_failure = f"Fail regex found: {pattern}"
-                    break
         if regex_failure is not None:
             failures.append(f"{regex_failure}\n{output}")
             continue
 
-        return output, failures
+        return output, failures, None
 
-    return None, failures
+    return None, failures, None
 
 
 @pytest.fixture
