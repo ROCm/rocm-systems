@@ -3067,3 +3067,30 @@ TEST(KernelDescriptorTranslator, IgnoresNonAllocExecutableSectionsForEntryRange)
   EXPECT_TRUE(translations.empty())
       << "non-loadable executable sections must not extend valid kernel entry range";
 }
+
+TEST(KernelDescriptorTranslator, AcceptsAllocExecutableContinuationForEntryRange) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  const auto ehdr = rocjitsu::read_elf_struct_for_test<rocjitsu::Elf64_Ehdr>(image, 0);
+  auto shdrs =
+      rocjitsu::read_elf_array_for_test<rocjitsu::Elf64_Shdr>(image, ehdr.e_shoff, ehdr.e_shnum);
+
+  constexpr uint64_t continuation_vaddr = 0x9000;
+  shdrs[5].sh_type = rocjitsu::SHT_PROGBITS;
+  shdrs[5].sh_flags = rocjitsu::SHF_ALLOC | rocjitsu::SHF_EXECINSTR;
+  shdrs[5].sh_addr = continuation_vaddr;
+  shdrs[5].sh_size = sizeof(uint32_t);
+  for (size_t i = 0; i < shdrs.size(); ++i)
+    rocjitsu::write_elf_struct_for_test(image, ehdr.e_shoff + i * sizeof(rocjitsu::Elf64_Shdr),
+                                        shdrs[i]);
+
+  rocjitsu::write_kernel_descriptor_entry_offset(image.data() + shdrs[2].sh_offset,
+                                                 static_cast<int64_t>(continuation_vaddr) -
+                                                     static_cast<int64_t>(shdrs[2].sh_addr));
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_CDNA4,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translations = translator.translate_image(
+      image, shdrs[1].sh_offset, shdrs[1].sh_size, rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(translations.size(), 1u);
+  EXPECT_EQ(translations[0].entry_text_offset, continuation_vaddr - shdrs[1].sh_addr);
+}

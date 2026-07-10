@@ -238,6 +238,33 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   return std::nullopt;
 }
 
+[[nodiscard]] uint64_t executable_code_range_size(uint64_t text_vaddr, uint64_t text_size,
+                                                  const Elf64_Ehdr &ehdr, const Elf64_Shdr *shdr) {
+  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
+  if (text_vaddr > max_u64 - text_size)
+    return 0;
+
+  uint64_t code_end = text_vaddr + text_size;
+
+  // DBT places expansion bodies in .rj_translations and addresses them as a
+  // .text-relative continuation. Include executable sections at or after .text
+  // so a redirected kernel descriptor entry can still be parsed.
+  for (int i = 0; i < ehdr.e_shnum; ++i) {
+    constexpr uint64_t executable_load_flags = SHF_ALLOC | SHF_EXECINSTR;
+    if (shdr[i].sh_type != SHT_PROGBITS)
+      continue;
+    if ((shdr[i].sh_flags & executable_load_flags) != executable_load_flags)
+      continue;
+    if (shdr[i].sh_addr < text_vaddr)
+      continue;
+    if (shdr[i].sh_addr > max_u64 - shdr[i].sh_size)
+      continue;
+    code_end = std::max(code_end, shdr[i].sh_addr + shdr[i].sh_size);
+  }
+
+  return code_end - text_vaddr;
+}
+
 using KernelDescriptorVisitor = std::function<void(uint64_t descriptor_file_offset,
                                                    uint64_t entry_text_offset, const KD &desc)>;
 
@@ -254,10 +281,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   auto text_vaddr = text_vaddr_for_section(text_offset, text_size, *ehdr, shdr);
   if (!text_vaddr)
     return;
-  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
-  if (*text_vaddr > max_u64 - text_size)
-    return;
-  const uint64_t text_end = *text_vaddr + text_size;
+  const uint64_t code_range_size = executable_code_range_size(*text_vaddr, text_size, *ehdr, shdr);
 
   // .symtab and .dynsym may both describe the same descriptor. Translation is
   // keyed by descriptor bytes, so visit each file offset once.
@@ -305,7 +329,7 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
       if (entry_vaddr_signed < 0)
         continue;
       const uint64_t entry_vaddr = static_cast<uint64_t>(entry_vaddr_signed);
-      if (entry_vaddr < *text_vaddr || entry_vaddr >= text_end)
+      if (entry_vaddr < *text_vaddr || entry_vaddr >= *text_vaddr + code_range_size)
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
