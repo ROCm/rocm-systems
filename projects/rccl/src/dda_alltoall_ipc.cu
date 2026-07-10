@@ -61,7 +61,13 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
 
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
-
+  
+  CUDACHECK(cudaMemcpyAsync(
+        comm->ddaIpcScratch,
+        sendbuff,
+        totalCount * sizeof(T),
+        cudaMemcpyDeviceToDevice,
+        stream));
   meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>
       <<<grid, block, 0, stream>>>(
           d_ipcbuffs,
