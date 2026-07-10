@@ -106,8 +106,8 @@ struct RedOpArg<FuncMinMax<T>> {
 
 template <typename A, typename B, int EltPerPackA>
 struct Apply_Cast/*{
-    static BytePack<EltPerPackA*sizeof(B)/sizeof(A)> cast(BytePack<EltPerPackA*sizeof(A)> a);
-  }*/
+     static BytePack<EltPerPackA*sizeof(B)/sizeof(A)> cast(BytePack<EltPerPackA*sizeof(A)> a);
+   }*/
   ;
 
 template <typename Fn, int EltPerPack>
@@ -119,27 +119,27 @@ struct Apply_Reduce /*{
   ;
 template <typename Fn, int EltPerPack>
 struct Apply_PreOp/*{
-    static constexpr bool IsIdentity;
-    static BytePack<EltPerPack*sizeof(T)> preOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
-  }*/
+     static constexpr bool IsIdentity;
+     static BytePack<EltPerPack*sizeof(T)> preOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
+   }*/
   ;
 template <typename Fn, int EltPerPack>
 struct Apply_PostOp/*{
-    static constexpr bool IsIdentity;
-    static BytePack<EltPerPack*sizeof(T)> postOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
-  }*/
+     static constexpr bool IsIdentity;
+     static BytePack<EltPerPack*sizeof(T)> postOp(Fn fn, BytePack<EltPerPack*sizeof(T)> a);
+   }*/
   ;
 template <typename Fn>
 struct LoadMultimem_BigPackSize/*{
-    // If non-zero, then this and sizeof(T) are valid pack sizes for LoadMultimem,
-    // otherwise there are no valid pack sizes for LoadMultimem.
-    static constexpr int BigPackSize = 0;
-  }*/
+     // If non-zero, then this and sizeof(T) are valid pack sizes for LoadMultimem,
+     // otherwise there are no valid pack sizes for LoadMultimem.
+     static constexpr int BigPackSize = 0;
+   }*/
   ;
 template <typename Fn, int BytePerPack>
 struct Apply_LoadMultimem/*{
-    static BytePack<BytePerPack> load(Fn fn, uintptr_t addr);
-  }*/
+     static BytePack<BytePerPack> load(Fn fn, uintptr_t addr);
+   }*/
   ;
 
 // Helpers for dealing with BytePack<0>'s

@@ -185,7 +185,10 @@ NCCL_DEVICE_INLINE ncclCoopNamedBarrierSlot* ncclCoopNamedBarrierState() {
 // binding passes a kernel __shared__ pointer here so the LDS lives in the
 // launching kernel rather than in the indirectly-called thunk.
 NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit(ncclCoopNamedBarrierSlot* slots) {
-  for (int i = threadIdx.x; i < ncclCoopNamedBarrierSlots; i += blockDim.x) { slots[i].arrive = 0; slots[i].sense = 0; }
+  for (int i = threadIdx.x; i < ncclCoopNamedBarrierSlots; i += blockDim.x) {
+    slots[i].arrive = 0;
+    slots[i].sense = 0;
+  }
   __syncthreads();
 }
 
@@ -209,13 +212,10 @@ struct ncclCoopWarpSpan {
   ncclCoopNamedBarrierSlot* slots;
 
   NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id,
-                                                ncclCoopNamedBarrierSlot* slots = nullptr):
-    warp0(warp0), nWarps(nWarps), id(id), slots(slots) {
-  }
+                                                ncclCoopNamedBarrierSlot* slots = nullptr)
+    : warp0(warp0), nWarps(nWarps), id(id), slots(slots) {}
 #else
-  NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id):
-    warp0(warp0), nWarps(nWarps), id(id) {
-  }
+  NCCL_DEVICE_INLINE constexpr ncclCoopWarpSpan(int warp0, int nWarps, int id) : warp0(warp0), nWarps(nWarps), id(id) {}
 #endif
 
   NCCL_DEVICE_INLINE int thread_rank() const {
@@ -233,12 +233,15 @@ struct ncclCoopWarpSpan {
     // __syncthreads() can't sync a subset of warps; emulate a named barrier in software.
     // Single-warp span is lockstep: skip the shared atomic (hot path) and just fence.
     using Atom = cuda::atomic_ref<uint32_t, cuda::thread_scope_block>;
-    if (nWarps <= 1) { cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_block); return; }
-  #if defined(__clang_llvm_bitcode_lib__)
+    if (nWarps <= 1) {
+      cuda::atomic_thread_fence(cuda::memory_order_acq_rel, cuda::thread_scope_block);
+      return;
+    }
+#if defined(__clang_llvm_bitcode_lib__)
     ncclCoopNamedBarrierSlot* slot = &slots[id];                          // bitcode: caller-owned LDS only
-  #else
+#else
     ncclCoopNamedBarrierSlot* slot = &(slots ? slots : ncclCoopNamedBarrierState())[id];
-  #endif
+#endif
     cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_block);
     if ((threadIdx.x % WARP_SIZE) == 0) {  // one leader per warp
       uint32_t s = Atom{slot->sense}.load(cuda::memory_order_relaxed);

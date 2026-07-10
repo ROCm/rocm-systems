@@ -44,7 +44,7 @@
  ************************************************************************/
 typedef enum {
   AMDSMI_FW_ID_SMU = 1,                   /**< System Management Unit (power management,
-           clock control, thermal monitoring, etc...) */
+clock control, thermal monitoring, etc...) */
   AMDSMI_FW_ID_FIRST = AMDSMI_FW_ID_SMU,
   AMDSMI_FW_ID_CP_CE,                     //!< Compute Processor - Command_Engine (fetch, decode, dispatch)
   AMDSMI_FW_ID_CP_PFP,                    //!< Compute Processor - Pixel Front End Processor (pixelating process)

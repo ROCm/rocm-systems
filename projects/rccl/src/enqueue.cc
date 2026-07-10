@@ -1189,8 +1189,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (bytes[dir] == -1) nChannels[dir] = 0;
     else if (bytes[dir] == 0) nChannels[dir] = 1;
     else {
-      ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
-      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
+      ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir] / 2 : stepSize[dir] / 8;
+      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir] : stepSize[dir] * 32;
       // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
       // fully utilize XGMI bandwidth when only one rank is the traffic hub.
       // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
@@ -1272,8 +1272,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (bytes[dir] == -1) nChannels[dir] = 0;
     else if (bytes[dir] == 0) nChannels[dir] = 1;
     else {
-      ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
-      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
+      ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir] / 2 : stepSize[dir] / 8;
+      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir] : stepSize[dir] * 32;
       // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
       // fully utilize XGMI bandwidth when only one rank is the traffic hub.
       // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
