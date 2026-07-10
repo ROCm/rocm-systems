@@ -9,7 +9,11 @@ from typing import Any, Optional
 import pandas as pd
 
 from utils import schema
-from utils.kernel_filter import mark_selected_kernels
+from utils.kernel_filter import (
+    apply_kernel_filter_to_df,
+    apply_workload_filters,
+    mark_selected_kernels,
+)
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
@@ -28,7 +32,6 @@ from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
-    normalize_filter_to_str_list,
 )
 
 # ------------------------------------------------------------------------------
@@ -280,30 +283,20 @@ def apply_filters(
     Apply user's filters to the raw_pmc df.
     """
 
-    # TODO: error out properly if filters out of bound
-    filtered_df = workload.raw_pmc
+    filtered_df = apply_workload_filters(
+        workload.raw_pmc,
+        workload.kernel_filter,
+        filter_gpu_ids=workload.filter_gpu_ids,
+        filter_dispatch_ids=workload.filter_dispatch_ids,
+        validate_dispatch_ids=True,
+    )
+    if workload.filter_gpu_ids and filtered_df.empty:
+        console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
 
-    # Apply GPU ID filter
-    if workload.filter_gpu_ids:
-        filtered_df = filtered_df.loc[
-            filtered_df["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
-
-    # Apply kernel filter
-    # NB:
-    # Kernel id is unique!
-    # We pick up kernel names from kerne ids first.
-    # Then filter valid entries with kernel names.
     if workload.kernel_filter.is_active:
-        filtered_df = apply_kernel_filter(filtered_df, workload)
-
-    # Apply dispatch filter
-    if workload.filter_dispatch_ids:
-        filtered_df = apply_dispatch_filter(filtered_df, workload)
+        kernel_top_df = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+        if kernel_top_df is not None:
+            mark_selected_kernels(kernel_top_df, workload.kernel_filter)
 
     if debug:
         print("~" * 40, "\nraw pmc df info:\n")
@@ -315,7 +308,7 @@ def apply_filters(
 
 
 def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Filter *df* to the workload's selected kernels, matched by name."""
+    """Filter *df* to the workload's selected kernel identity/name constraints."""
     kernel_filter = workload.kernel_filter
     if not kernel_filter.is_active:
         return df
@@ -324,12 +317,7 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
     if kernel_top_df is not None:
         mark_selected_kernels(kernel_top_df, kernel_filter)
 
-    stripped_names = df["Kernel_Name"].apply(
-        lambda kernel_name: (
-            kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
-        )
-    )
-    return df.loc[stripped_names.isin(kernel_filter.names)]
+    return apply_kernel_filter_to_df(df, kernel_filter)
 
 
 def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
@@ -484,23 +472,26 @@ def load_pc_sampling_data(
             num_rows=num_rows,
         )
 
-    if len(kernel_filter.names) > 1:
-        console_error(
-            "PC sampling supports single kernel only! Please specify -k with "
-            "single kernel.",
-            exit=False,
+    if len(kernel_filter.names) == 1:
+        kernel_name = next(iter(kernel_filter.names))
+        return load_pc_sampling_data_per_kernel(
+            pc_sampling_method,
+            tool_data,
+            sorting_type,
+            kernel_name,
+            num_rows=num_rows,
         )
-        return pd.DataFrame()
 
-    # Exactly one selected kernel.
-    kernel_name = next(iter(kernel_filter.names))
-    return load_pc_sampling_data_per_kernel(
+    filtered_df = load_pc_sampling_data_per_kernel(
         pc_sampling_method,
         tool_data,
         sorting_type,
-        kernel_name,
         num_rows=num_rows,
     )
+    if filtered_df.empty or not kernel_filter.names:
+        return filtered_df
+
+    return filtered_df.loc[filtered_df["Kernel_Name"].isin(kernel_filter.names)]
 
 
 def _stall_reason_dict_to_list(

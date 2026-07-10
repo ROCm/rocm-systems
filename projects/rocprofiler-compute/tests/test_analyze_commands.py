@@ -1762,18 +1762,21 @@ def test_apply_kernel_filter_inactive_is_passthrough(mock_workload_for_filter):
 
 @pytest.mark.misc
 def test_pc_sampling_multiple_kernels_does_not_crash():
-    """A multi-kernel selection (e.g. from an operator filter) is rejected
-    gracefully rather than crashing."""
+    """A multi-kernel selection filters PC sampling rows by kernel name."""
     workload = Mock()
     workload.dfs = {1: pd.DataFrame({"Kernel_Name": ["kernel_a", "kernel_b"]})}
     workload.kernel_filter = KernelFilter(frozenset(["kernel_a", "kernel_b"]))
     tool_data = {
         "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
     }
-    with patch("utils.parser.console_error") as mock_error:
+    all_rows = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+        "source_line": ["a.cpp:1", "b.cpp:1", "c.cpp:1"],
+    })
+    with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+        mock_per_kernel.return_value = all_rows
         result = load_pc_sampling_data(workload, "test", "count", tool_data)
-        mock_error.assert_called_once()
-        assert result.empty
+    assert set(result["Kernel_Name"]) == {"kernel_a", "kernel_b"}
 
 
 @pytest.mark.misc

@@ -905,15 +905,32 @@ def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
     assert by_kernel[".../vadd.cpp:99"] == "vecAdd"
 
 
-def test_load_pc_sampling_data_multiple_kernels_error() -> None:
-    """Return an empty DataFrame and log an error when >1 kernel ID is filtered."""
-    tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
+def test_load_pc_sampling_data_multiple_kernels_filter_by_name() -> None:
+    """Return rows for all selected kernels when multiple names are filtered."""
+    tool_data = make_tool_data(
+        stochastic=[
+            make_record(5, 0x10, 0, dispatch_id=0),
+            make_record(6, 0x20, 1, dispatch_id=1),
+            make_record(7, 0x30, 2, dispatch_id=2),
+        ],
+        instructions=["v_mov", "v_add", "v_mul"],
+        comments=["/src/vcopy.cpp:42", "/src/vadd.cpp:99", "/src/vmul.cpp:7"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "vecCopy"),
+            make_kernel_symbol(101, 6, "vecAdd"),
+            make_kernel_symbol(102, 7, "vecMul"),
+        ],
+        kernel_dispatch=[
+            make_dispatch(0, 100),
+            make_dispatch(1, 101),
+            make_dispatch(2, 102),
+        ],
+    )
     workload = schema.Workload(
         kernel_filter=KernelFilter(frozenset(["vecCopy", "vecAdd"]))
     )
-    with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
-    assert df.empty
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
+    assert set(df["Kernel_Name"]) == {"vecCopy", "vecAdd"}
 
 
 def test_load_pc_sampling_data_single_kernel_valid() -> None:
