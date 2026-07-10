@@ -1102,8 +1102,9 @@ reader_t::impl::get_all_pmc_infos()
         m_pmc_info_list.reserve(pmc_info_list.size());
         for(const auto& pmc_info : pmc_info_list)
         {
-            auto pmc_info_ptr  = std::make_shared<reader_types::pmc_info_t>();
-            pmc_info_ptr->name = pmc_info.name;
+            auto pmc_info_ptr    = std::make_shared<reader_types::pmc_info_t>();
+            pmc_info_ptr->pmc_id = pmc_info.id;
+            pmc_info_ptr->name   = pmc_info.name;
 
             pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or("");
             pmc_info_ptr->event_code       = pmc_info.event_code;

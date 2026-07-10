@@ -155,7 +155,8 @@ using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_t
 {
-    std::string                   name{};
+    size_t      pmc_id{};  ///< numeric PMC id (rocpd_info_pmc primary key).
+    std::string name{};
     std::shared_ptr<agent_info_t> agent_info;
 
     std::string           target_arch{};
