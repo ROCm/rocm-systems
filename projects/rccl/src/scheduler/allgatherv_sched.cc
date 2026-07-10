@@ -11,7 +11,6 @@
 #include "scheduler.h"
 
 
-
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
                                           struct ncclKernelPlanBudget* budget) {
   struct ncclKernelPlanner* planner = &comm->planner;
@@ -31,8 +30,9 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
       if (t == nullptr) continue;
       // see if we can fit another batch to args, and a bunch of bcast to workStorage
       // Each batch can fit 64 bcast, if batchTasks > 64 we use nextExtends to extend the batch.
+      // workBytes accounts for nChannels: each task produces one ncclDevWorkBcast per channel.
       if (!ncclTestBudget(budget, nChannels * DIVUP(batchTasks + 1, 64),
-                          (batchTasks + 1) * sizeof(struct ncclDevWorkBcast)) ||
+                          nChannels * (batchTasks + 1) * sizeof(struct ncclDevWorkBcast)) ||
           batchTasks + 1 == maxitem) {
         break;
       }
@@ -151,6 +151,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
           workNode->size = sizeof(struct ncclDevWorkBcast);
           ncclIntruQueueEnqueue(&plan->workQueue, workNode);
           struct ncclDevWorkBcast* work = (struct ncclDevWorkBcast*)(workNode + 1);
+          memset(work, 0, sizeof(*work));
           work->recvbuff = (char*)t->recvbuff + offset_lo;
           work->bytes = offset_hi - offset_lo;
           work->ringDepth = ringDepth;

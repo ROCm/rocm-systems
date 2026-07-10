@@ -2328,6 +2328,13 @@ ncclResult_t ncclLaunchFinish(struct ncclComm* comm) {
       cb->base.event = finishedEvent;
       cb->base.fn = KernelFinishCallback_fn;
       cb->workFifoConsumed = comm->workFifoProduced;
+      // The callback advances comm->workFifoConsumed, which gates reuse of work-FIFO
+      // space in waitWorkFifoAvailable(). It must therefore only fire after the kernels
+      // that consume this FIFO region have completed. In the fast launch path
+      // (non-captured, single-stream, LAUNCH_ORDER_IMPLICIT=0) the event-record branch
+      // below is skipped, so record the stolen completion event on launchStream here to
+      // ensure the callback waits for real kernel completion before recycling the FIFO.
+      CUDACHECK(cudaEventRecord(finishedEvent, launchStream));
       ncclIntruQueueEnqueue(&comm->eventCallbackQueue, &cb->base);
       // We just stole scratchEvent so must create a new one.
       CUDACHECK(cudaEventCreateWithFlags(&comm->sharedRes->scratchEvent, cudaEventDisableTiming));
