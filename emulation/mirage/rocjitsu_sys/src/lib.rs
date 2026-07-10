@@ -77,6 +77,8 @@ pub struct RjVmCmd {
     pub result: i32,
     /// `[out]` Backing handle for shareable allocations, or -1.
     pub shared_handle: RjHandle,
+    /// `[in]` Client-provided fd (e.g. debugger notifier), or -1.
+    pub in_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).

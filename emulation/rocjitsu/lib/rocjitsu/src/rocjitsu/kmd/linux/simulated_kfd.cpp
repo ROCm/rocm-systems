@@ -1817,6 +1817,11 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     return 0;
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
+    // Release the debugger notifier the daemon transport handed us via
+    // SCM_RIGHTS (daemon mode owns the dup'd fd). In local mode dbg_fd is the
+    // debugger's own fd, so it is left for the debugger to close.
+    if (daemon_mode_ && sess.dbg_fd >= 0)
+      ::close(sess.dbg_fd);
     sess = KfdProcess::DebugSession{};
     return 0;
   default:
