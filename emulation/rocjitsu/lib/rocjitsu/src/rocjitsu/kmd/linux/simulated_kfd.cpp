@@ -1787,9 +1787,14 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   case KFD_IOC_DBG_TRAP_ENABLE: {
     if (sess.enabled)
       return -EALREADY; // target process is already debug enabled
+
+    const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
+    if (!daemon_mode_ && fcntl(dbg_fd, F_GETFD) == -1)
+      return -EBADF;
+
     sess.enabled = true;
     sess.debugger_pid = caller.client_pid();
-    sess.dbg_fd = static_cast<int>(args->enable.dbg_fd);
+    sess.dbg_fd = dbg_fd;
     sess.exception_enable_mask = args->enable.exception_mask;
     sess.runtime_state =
         runtime_enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;

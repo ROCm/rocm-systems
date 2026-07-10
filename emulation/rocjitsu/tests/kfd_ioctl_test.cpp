@@ -14,6 +14,7 @@
 
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -95,12 +96,27 @@ protected:
   void TearDown() override {
     if (driver_)
       driver_->close();
+    for (int fd : debug_fds_)
+      ::close(fd);
+    debug_fds_.clear();
+  }
+
+  // Returns a real eventfd standing in for a debugger's notification target.
+  // kfd_dbg_trap_enable() takes a reference to dbg_fd via fget(), so the driver
+  // rejects an unusable descriptor; enable-success tests therefore need a live
+  // fd. Tracked here so TearDown closes it.
+  int make_debug_fd() {
+    int fd = eventfd(0, EFD_CLOEXEC);
+    EXPECT_GE(fd, 0);
+    debug_fds_.push_back(fd);
+    return fd;
   }
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
   rocjitsu::SoC *soc_ = nullptr;
   rocjitsu::SimulatedKfd *driver_ = nullptr;
+  std::vector<int> debug_fds_;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -367,7 +383,7 @@ TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(getpid());
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
-  args.enable.dbg_fd = 7;
+  args.enable.dbg_fd = make_debug_fd();
   args.enable.rinfo_ptr = reinterpret_cast<uint64_t>(&info);
   args.enable.rinfo_size = sizeof(info);
 
@@ -387,16 +403,33 @@ TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(getpid());
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
-  args.enable.dbg_fd = KFD_INVALID_FD;
+  args.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EALREADY);
+}
+
+TEST_F(KfdIoctlTest, DbgTrapEnableBadFdReturnsEBADF) {
+  // kfd_dbg_trap_enable() fails with -EBADF when it cannot fget(dbg_fd); an
+  // unusable notification target must not be stored on the session.
+  kfd_ioctl_dbg_trap_args args{};
+  args.pid = static_cast<uint32_t>(getpid());
+  args.op = KFD_IOC_DBG_TRAP_ENABLE;
+  args.enable.dbg_fd = KFD_INVALID_FD;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EBADF);
+
+  // The rejected enable left the session disabled, so a follow-up op is refused
+  // with -EINVAL rather than admitted against a half-initialized session.
+  kfd_ioctl_dbg_trap_args after{};
+  after.pid = static_cast<uint32_t>(getpid());
+  after.op = KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &after), -EINVAL);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
-  en.enable.dbg_fd = KFD_INVALID_FD;
+  en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
   // SET_FLAGS is a DBG_HW_OP: it requires AMDKFD_IOC_RUNTIME_ENABLE first.
@@ -414,7 +447,7 @@ TEST_F(KfdIoctlTest, DbgTrapWatchBadGpuReturnsENODEV) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
-  en.enable.dbg_fd = KFD_INVALID_FD;
+  en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
   // Runtime is enabled, so the HW-op gate passes and the gpu-id check runs.
@@ -429,7 +462,7 @@ TEST_F(KfdIoctlTest, DbgTrapAdmittedOpNotYetImplemented) {
   kfd_ioctl_dbg_trap_args en{};
   en.pid = static_cast<uint32_t>(getpid());
   en.op = KFD_IOC_DBG_TRAP_ENABLE;
-  en.enable.dbg_fd = KFD_INVALID_FD;
+  en.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
 
   // QUERY_DEBUG_EVENT is not a HW-op, so the gate ladder admits it; the handler
