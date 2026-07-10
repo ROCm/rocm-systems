@@ -1560,7 +1560,6 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
                                             const std::vector<uint32_t>& validFullHeaders,
                                             amd::AccumulateCommand* vcmd, bool attach_signal,
-                                            const std::vector<const std::string*>* kernelNames,
                                             bool pre_patched, bool blocking,
                                             const std::vector<uint8_t>* flatMetadataData) {
   if (vcmd == nullptr || flatPacketData.empty() || validFullHeaders.empty()) {
@@ -1576,8 +1575,27 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
-  if (kernelNames != nullptr && vcmd->profilingInfo().enabled_) {
-    vcmd->addKernelNames(*kernelNames);
+  // Resolve kernel names at dispatch time from KernelMap — one per dispatch slot
+  // (same cardinality as timestamps_). Stable const char* into Kernel objects
+  // that live for the device lifetime. No copies, no GraphExec coupling.
+  {
+    static constexpr size_t kPacketSize = 64;
+    static constexpr size_t kKernelObjectOffset =
+        offsetof(hsa_kernel_dispatch_packet_t, kernel_object);
+    const auto& kernel_map = dev().KernelMap();
+    for (size_t i = 0; i < numPackets; ++i) {
+      uint16_t header = static_cast<uint16_t>(validFullHeaders[i]);
+      uint16_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
+                                         HSA_PACKET_HEADER_WIDTH_TYPE);
+      if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+        uint64_t kernel_object = 0;
+        memcpy(&kernel_object,
+               flatPacketData.data() + i * kPacketSize + kKernelObjectOffset,
+               sizeof(kernel_object));
+        auto it = kernel_map.find(kernel_object);
+        vcmd->addKernelName(it != kernel_map.end() ? it->second.getDemangledName().c_str() : nullptr);
+      }
+    }
   }
 
   const uint32_t queueSize = gpu_queue_->size;
@@ -1737,10 +1755,10 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
           }
         }
         if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
-             IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
-            kernelNames != nullptr && i < kernelNames->size() && isKernelDispatch) {
+             IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) && isKernelDispatch) {
+          auto kit = dev().KernelMap().find(slot->kernel_object);
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[i] != nullptr ? (*kernelNames)[i]->c_str() : "<null>",
+                  kit != dev().KernelMap().end() ? kit->second.getDemangledName().c_str() : "<null>",
                   dev().index());
           if (isBaseKernelDispatch) {
             logAqlDispatchPacket(roc_device_, gpu_queue_, hdr, slot, slotIdx, priority_);
