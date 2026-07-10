@@ -4603,22 +4603,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
   struct PlannedAccessRecordPatch {
     const ConSanMoiCandidate *candidate = nullptr;
-    uint64_t patch_bytes = 0;
-    bool use_appended_cave = false;
+    DbiPatchPlacement placement;
     uint32_t record_index = 0;
     uint32_t record_count = 0;
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
-  std::vector<PlannedAccessRecordPatch> appended_cave_candidates;
-  std::vector<std::pair<uint64_t, uint64_t>> patched_ranges;
   uint32_t planned_record_count = 0;
   planned_patches.reserve(candidates.size());
   AmdGpuCodeObject code_object(bytes.data(), bytes.size());
-  uint64_t appended_cave_text_offset = 0;
-  if (code_object.text_sections().size() == 1)
-    appended_cave_text_offset = code_object.text_sections().front()->size();
+  const uint64_t original_text_size =
+      code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
+  DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
   MoiSpillManagers spill_managers;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
@@ -4676,48 +4673,22 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         count_nop_padding(bytes, candidate.file_offset + candidate.size, arch);
     const uint64_t available_bytes =
         candidate.size + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
-    if (spill || patch_bytes > available_bytes) {
-      if (appended_cave_text_offset != 0 && candidate.size >= sizeof(uint32_t)) {
-        const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
-        if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
-            compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size)) {
-          PlannedAccessRecordPatch planned;
-          planned.candidate = candidate_ptr;
-          planned.patch_bytes = patch_bytes;
-          planned.use_appended_cave = true;
-          planned.record_count = candidate_record_count;
-          planned.resources = *resources;
-          planned.spill = spill;
-          appended_cave_candidates.push_back(std::move(planned));
-          continue;
-        }
-      }
-      result.warnings.emplace_back("ConSan MOI first-light probe skipped a supported load/store "
-                                   "site without enough inline padding or an appended cave");
-      continue;
-    }
-    if (candidate.file_offset > bytes.size() ||
-        patch_bytes > bytes.size() - candidate.file_offset) {
-      result.errors.emplace_back("ConSan MOI first-light probe exceeds ELF bytes");
-      return;
-    }
-    const uint64_t patch_begin = candidate.file_offset;
-    const uint64_t patch_end = patch_begin + patch_bytes;
-    const auto overlaps_existing =
-        std::any_of(patched_ranges.begin(), patched_ranges.end(),
-                    [&](const std::pair<uint64_t, uint64_t> range) {
-                      return patch_begin < range.second && range.first < patch_end;
-                    });
-    if (overlaps_existing) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe skipped an overlapping patch site");
+    DbiPatchPlacementRequest placement_request;
+    placement_request.anchor_offset = candidate.text_offset;
+    placement_request.original_size = candidate.size;
+    placement_request.body_size = patch_bytes;
+    placement_request.inline_capacity = spill ? 0u : available_bytes;
+    std::string placement_error;
+    const auto placement = placement_planner.plan(placement_request, &placement_error);
+    if (!placement) {
+      result.warnings.emplace_back("ConSan MOI first-light probe skipped load/store site: " +
+                                   placement_error);
       continue;
     }
 
-    patched_ranges.emplace_back(patch_begin, patch_end);
     PlannedAccessRecordPatch planned;
     planned.candidate = candidate_ptr;
-    planned.patch_bytes = patch_bytes;
+    planned.placement = *placement;
     planned.record_index = planned_record_count;
     planned.record_count = candidate_record_count;
     planned.resources = *resources;
@@ -4726,36 +4697,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned_record_count += candidate_record_count;
     if (planned_patches.size() == options.max_patches)
       break;
-  }
-
-  for (PlannedAccessRecordPatch candidate : appended_cave_candidates) {
-    if (planned_patches.size() == options.max_patches)
-      break;
-    if (candidate.candidate == nullptr)
-      continue;
-    if (!options.moi_dynamic_access_records &&
-        candidate.record_count > layout.access_record_capacity - planned_record_count) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe skipped an appended-cave site without enough "
-          "report-buffer access-record slots");
-      continue;
-    }
-    const uint64_t patch_begin = candidate.candidate->file_offset;
-    const uint64_t patch_end = patch_begin + candidate.candidate->size;
-    const auto overlaps_existing =
-        std::any_of(patched_ranges.begin(), patched_ranges.end(),
-                    [&](const std::pair<uint64_t, uint64_t> range) {
-                      return patch_begin < range.second && range.first < patch_end;
-                    });
-    if (overlaps_existing) {
-      result.warnings.emplace_back(
-          "ConSan MOI first-light probe skipped an overlapping appended-cave patch site");
-      continue;
-    }
-    patched_ranges.emplace_back(patch_begin, patch_end);
-    candidate.record_index = planned_record_count;
-    planned_patches.push_back(candidate);
-    planned_record_count += candidate.record_count;
   }
 
   if (planned_patches.empty())
@@ -4775,7 +4716,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
 
   const bool uses_appended_cave =
       std::ranges::any_of(planned_patches, [](const PlannedAccessRecordPatch &patch) {
-        return patch.use_appended_cave;
+        return patch.placement.kind == DbiPatchPlacementKind::AppendedCave;
       });
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
@@ -4809,8 +4750,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         return;
 
       ConSanPatchInfo info;
-      info.kind = planned_patch.use_appended_cave ? ConSanPatchKind::TrampolineMoiAccessRecordStore
-                                                  : ConSanPatchKind::InlineMoiAccessRecordStore;
+      info.kind = planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave
+                      ? ConSanPatchKind::TrampolineMoiAccessRecordStore
+                      : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
@@ -4819,12 +4761,17 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         info.required_private_segment_size = planned_patch.spill->total_private_bytes;
       }
 
-      if (planned_patch.use_appended_cave) {
-        const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
-        const auto fwd = compute_sopp_branch_simm16(candidate.text_offset, cave_text_offset);
-        const uint64_t return_branch_pc = cave_text_offset + planned_patch.patch_bytes;
-        const auto ret =
-            compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size);
+      if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
+        const uint64_t cave_text_offset = planned_patch.placement.body_offset;
+        if (new_text.size() != cave_text_offset) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe emitted a stale appended-cave mapping");
+          return;
+        }
+        const auto fwd = compute_sopp_branch_simm16(planned_patch.placement.anchor_offset,
+                                                    planned_patch.placement.body_offset);
+        const auto ret = compute_sopp_branch_simm16(planned_patch.placement.return_branch_offset,
+                                                    planned_patch.placement.return_target);
         if (!fwd || !ret) {
           result.errors.emplace_back(
               "ConSan MOI first-light probe appended cave branch is out of range");
@@ -4855,6 +4802,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           cave_words.insert(cave_words.end(), planned_patch.spill->restore_words.begin(),
                             planned_patch.spill->restore_words.end());
         }
+        if (cave_words.size() * sizeof(uint32_t) != planned_patch.placement.body_size) {
+          result.errors.emplace_back(
+              "ConSan MOI first-light probe body size changed after placement");
+          return;
+        }
         cave_words.push_back(build_s_branch(*ret, arch));
         append_words_bytes(new_text, cave_words);
         info.trampoline_offset = cave_text_offset;
@@ -4862,7 +4814,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         info.trampoline_size = static_cast<uint32_t>(cave_words.size() * sizeof(uint32_t));
       } else {
         const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-        if (patch_bytes != planned_patch.patch_bytes) {
+        if (patch_bytes != planned_patch.placement.body_size) {
           result.errors.emplace_back("ConSan MOI first-light probe final patch size changed");
           return;
         }
@@ -4908,7 +4860,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       return;
     }
     const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
-    if (patch_bytes != planned_patch.patch_bytes) {
+    if (patch_bytes != planned_patch.placement.body_size) {
       result.errors.emplace_back("ConSan MOI first-light probe final patch size changed");
       result.elf_bytes.clear();
       return;
@@ -4934,7 +4886,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     info.kind = ConSanPatchKind::InlineMoiAccessRecordStore;
     info.anchor_offset = candidate.text_offset;
     info.trampoline_offset = candidate.text_offset + candidate.size;
-    info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
+    info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
     info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;

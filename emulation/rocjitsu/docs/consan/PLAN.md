@@ -1076,7 +1076,7 @@ Current state:
 - Placement is conservative and still duplicated across probe families.
 - A shared `DbiPatchPlacementPlanner` now models inline, local-cave, and
   appended-cave reservations with explicit anchor/body/return coordinates.
-  Inline-shadow and sampled access probes consume it; record/replay and
+  Inline-shadow, sampled, and record/replay access probes consume it;
   synchronization families still need migration.
 
 Work:
