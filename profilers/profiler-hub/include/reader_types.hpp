@@ -279,7 +279,9 @@ enum class track_type_t
           ///< copies only, keyed (nid, pid, queue_id, dst_agent_id) by destination agent
           ///< to match Optiq's memory-copy swimlanes — a single event table. Stream-level
           ///< grouping of memory copies lives on the `stream` track type instead.
-    counter,  ///< thread_info + (optional) agent_info. Scalar track of counter samples.
+    counter,  ///< thread_info + pmc_info + (optional) agent_info. Scalar track of counter
+              ///< samples. pmc_info carries the full PMC metadata panel (name, symbol,
+              ///< description, units, block, expression, …) keyed by the real pmc_id.
     stream,   ///< stream_info populated. Interval track that AGGREGATES three event
              ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
              ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
@@ -331,6 +333,7 @@ struct track_info_t
         agent_info;  ///< gpu_queue, dma, memory; optionally counter.
     std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
+    std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter.
 };
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;

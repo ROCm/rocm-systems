@@ -268,9 +268,12 @@ reader_t::impl::get_all_tracks()
             counter_track_ids.insert(r.track_id);
         }
 
+        // Maps counter track_id -> pmc_id (for pmc_info lookup) and track_id -> name.
+        std::unordered_map<size_t, size_t>      counter_track_pmc_ids;
         std::unordered_map<size_t, std::string> counter_track_names;
         for(const auto& r : m_read_statements->counter_track_names()().to_vector())
         {
+            counter_track_pmc_ids.emplace(r.track_id, r.pmc_id);
             counter_track_names.emplace(r.track_id, r.name);
         }
 
@@ -316,6 +319,18 @@ reader_t::impl::get_all_tracks()
                 if(nit != counter_track_names.end() && !nit->second.empty())
                 {
                     track_info_ptr->name = nit->second;
+                }
+            }
+
+            // Attach the full pmc_info panel so callers can key identity and metadata on
+            // the real pmc_id without a second lookup (mirrors agent_info on gpu_queue).
+            {
+                auto pit = counter_track_pmc_ids.find(track_info.id);
+                if(pit != counter_track_pmc_ids.end())
+                {
+                    auto pmit = m_pmc_info_utility.find(pit->second);
+                    if(pmit != m_pmc_info_utility.end())
+                        track_info_ptr->pmc_info = pmit->second;
                 }
             }
 
@@ -666,10 +681,12 @@ reader_t::impl::build_v4_tracks()
         memory_alloc_track_ids.insert(r.track_id);
     }
 
-    // Counter display name = PMC name (Q9), keyed by track id.
+    // Counter display name = PMC name (Q9) and pmc_id for identity, keyed by track id.
+    std::unordered_map<size_t, size_t>      counter_track_pmc_ids;
     std::unordered_map<size_t, std::string> counter_track_names;
     for(const auto& r : m_read_statements->counter_track_names()().to_vector())
     {
+        counter_track_pmc_ids.emplace(r.track_id, r.pmc_id);
         counter_track_names.emplace(r.track_id, r.name);
     }
 
@@ -784,6 +801,14 @@ reader_t::impl::build_v4_tracks()
             if(nit != counter_track_names.end() && !nit->second.empty())
             {
                 track_info_ptr->name = nit->second;
+            }
+            // Attach the full pmc_info panel (identity + metadata) keyed on pmc_id.
+            auto pit = counter_track_pmc_ids.find(track_info.id);
+            if(pit != counter_track_pmc_ids.end())
+            {
+                auto pmit = m_pmc_info_utility.find(pit->second);
+                if(pmit != m_pmc_info_utility.end())
+                    track_info_ptr->pmc_info = pmit->second;
             }
         }
         else if(track_info_ptr->name.empty())

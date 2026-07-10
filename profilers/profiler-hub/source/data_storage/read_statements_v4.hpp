@@ -612,13 +612,14 @@ private:
         // Map each counter track_id to its PMC name.
         m_counter_track_names =
             m_backend->create_read_statement_executor<counter_track_name_result>(
-                fmt::format("SELECT s.track_id, ip.name "
+                fmt::format("SELECT s.track_id, pe.pmc_id, ip.name "
                             "FROM rocpd_sample_{u} s "
                             "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
                             "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
                             "GROUP BY s.track_id",
                             fmt::arg("u", u)),
                 &counter_track_name_result::track_id,
+                &counter_track_name_result::pmc_id,
                 &counter_track_name_result::name);
 
         // memory tracks: one per distinct (nid, agent_id, queue_id, pid) in

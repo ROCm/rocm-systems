@@ -456,11 +456,12 @@ struct max_track_id_result
     std::optional<size_t> max_id;
 };
 
-/// Maps a counter track_id to its PMC name (rocpd_info_pmc.name). One row per
+/// Maps a counter track_id to its PMC id and name (rocpd_info_pmc). One row per
 /// counter track.
 struct counter_track_name_result
 {
     size_t      track_id{};
+    size_t      pmc_id{};
     std::string name;
 };
 

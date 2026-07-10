@@ -1325,16 +1325,38 @@ private:
             fmt::format("SELECT MAX(id) FROM rocpd_track_{}", u),
             &max_track_id_result::max_id);
 
-        m_counter_track_names =
-            m_backend->create_read_statement_executor<counter_track_name_result>(
-                fmt::format("SELECT s.track_id, ip.name "
-                            "FROM rocpd_sample_{u} s "
-                            "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
-                            "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
-                            "GROUP BY s.track_id",
-                            fmt::arg("u", u)),
-                &counter_track_name_result::track_id,
-                &counter_track_name_result::name);
+        // Resolve each counter track's own pmc deterministically. One AMD-SMI poll
+        // co-samples all of an agent's metrics under a single rocpd_sample.event_id, so a
+        // plain sample->pmc_event join on event_id fans a track out to every co-sampled
+        // pmc_id; a bare GROUP BY track_id would then keep an arbitrary one. v3
+        // rocpd_track has no agent_id/pmc_id, but when the sampled tracks are per-metric
+        // their name_id string carries the metric identity + agent ordinal (e.g.
+        // "device_busy_gfx [0]"). The event_id join already scopes candidates to the
+        // track's own agent; rank the candidate whose ip.name matches that string
+        // (ordinal stripped) first, so it wins. Tracks that are NOT per-metric (name is a
+        // thread name, and the event join is a clean 1:1 with no fan-out) have a single
+        // candidate and fall through to it via the pmc_id tiebreaker -- still
+        // deterministic. rocpd_string is LEFT-joined so a NULL name_id degrades to the
+        // same fallback instead of dropping the track.
+        m_counter_track_names = m_backend->create_read_statement_executor<
+            counter_track_name_result>(
+            fmt::format(
+                "SELECT track_id, pmc_id, name FROM ("
+                "SELECT s.track_id AS track_id, pe.pmc_id AS pmc_id, ip.name AS name, "
+                "ROW_NUMBER() OVER (PARTITION BY s.track_id ORDER BY "
+                "CASE WHEN ip.name = CASE WHEN instr(str.string, ' [') > 0 "
+                "THEN substr(str.string, 1, instr(str.string, ' [') - 1) "
+                "ELSE str.string END THEN 0 ELSE 1 END, pe.pmc_id) AS rn "
+                "FROM rocpd_sample_{u} s "
+                "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
+                "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
+                "JOIN rocpd_track_{u} t ON t.id = s.track_id "
+                "LEFT JOIN rocpd_string_{u} str ON str.id = t.name_id"
+                ") WHERE rn = 1",
+                fmt::arg("u", u)),
+            &counter_track_name_result::track_id,
+            &counter_track_name_result::pmc_id,
+            &counter_track_name_result::name);
     }
 
     void initialize_interval_track_statements()
