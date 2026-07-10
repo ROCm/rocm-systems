@@ -245,7 +245,40 @@ flowchart LR
 
 ### Target
 
-> Note: this sequence contains sections with the Profiler Hub integration applied, but does not depend on it. See [Profiler Hub integration HLD](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/projects/rocprofiler-compute/docs/design/hld-profiler-hub-integration.md) for the detailed design document.
+This is the Phase B boundary only (rocpd). For the integrated view once the
+Profiler Hub is applied, see [Phase B-2](#phase-b-2-combined-sequence-with-the-profiler-hub-integration).
+
+```mermaid
+sequenceDiagram
+    participant Profile as Profile mode
+    participant Boundary as profiling_data boundary (get_writer / get_reader)
+    participant Impl as rocpd_data.py
+    participant Store as On-disk (rocpd .db)
+    participant Analyze as Analyze mode
+
+    note over Profile, Store: Profile (write side)
+    Profile->>Boundary: get_writer(format), persist completed pass
+    Boundary->>Impl: selected implementation
+    Impl->>Store: write per-pass rocpd (.db)
+
+    note over Analyze, Store: Analyze (read side)
+    Analyze->>Boundary: get_reader(profiling_config).read_pmc_frame(dir, filters)
+    Boundary->>Impl: selected implementation
+    Impl->>Store: read per-pass rocpd(s) (.db)
+    Store-->>Impl: rows
+    note over Impl: concatenate + apply filters, normalize to pmc df (in memory)
+    Impl-->>Boundary: PMC DataFrame
+    Boundary-->>Analyze: PMC DataFrame
+    Boundary->>Store: write pmc_perf.csv (one way export, never read back)
+```
+
+### Phase B-2: Combined sequence with the Profiler Hub integration
+
+This is the integrated view of Phase B's boundary alongside the Profiler Hub
+integration, which is a separate effort
+([Profiler Hub integration HLD](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/projects/rocprofiler-compute/docs/design/hld-profiler-hub-integration.md)).
+Phase B itself does not depend on the Hub; this shows what the sequence of
+operations looks like once both are applied.
 
 ```mermaid
 sequenceDiagram
@@ -263,14 +296,14 @@ sequenceDiagram
     loop each collection pass
         SDK->>Store: per-process rocpd
         Native->>Boundary: hand off per-process counters
-    note over Boundary: get_writer(format) selects the native implementation, compute performs the merge, the implementation only reads/writes
-    alt rocpd_data.py implementation
-        Boundary->>Store: read per-process, write per-pass native rocpd (.db)
-    else profiler_hub_data.py implementation
-        Boundary->>Hub: read per-process, write per-pass (via Hub interface)
-        Hub->>Store: per-pass native storage
-    end
-    Profile->>Store: merge per-process to per-pass SDK rocpd (compute, raw, no boundary)
+        note over Boundary: get_writer(format) selects the native implementation, compute performs the merge, the implementation only reads/writes
+        alt rocpd_data.py implementation
+            Boundary->>Store: read per process, write per pass native rocpd (.db)
+        else profiler_hub_data.py implementation
+            Boundary->>Hub: read per process, write per pass (via Hub interface)
+            Hub->>Store: per-pass native storage
+        end
+        Profile->>Store: merge per-process to per-pass SDK rocpd (compute; raw, no boundary)
         Profile->>Store: delete per-process intermediates
     end
 
