@@ -139,9 +139,20 @@ Building the library using CMake
 ================================
 
 RCCL has moved from the standalone ``ROCm/rccl`` repository into the
-``ROCm/rocm-systems`` monorepo, where it is located at ``projects/rccl``. Use a
-partial, sparse checkout so you only fetch the RCCL project instead of the entire
-monorepo:
+``ROCm/rocm-systems`` monorepo, where it is located at ``projects/rccl``. Clone
+the monorepo using either of the following options.
+
+Option A: Clone the full monorepo:
+
+.. code-block:: shell
+
+    git clone https://github.com/ROCm/rocm-systems.git
+    cd rocm-systems
+    git checkout develop
+
+Option B: Clone with sparse checkout. To limit your local checkout to only RCCL
+and improve performance with the large monorepo, configure a partial, sparse
+checkout so you only fetch the ``projects/rccl`` project:
 
 .. code-block:: shell
 
