@@ -93,6 +93,18 @@ hrr:
   Unit_HRR_MemPoolExtendedRoundtrip:
     <<: *level_2
     tags: [capture, mempool, playback, roundtrip]
+  Unit_HRR_DeviceMemPoolRoundtrip:
+    <<: *level_2
+    tags: [capture, mempool, playback, roundtrip]
+  Unit_HRR_ExtMallocRoundtrip:
+    <<: *level_2
+    tags: [capture, alloc, playback, roundtrip]
+  Unit_HRR_StreamWaitEventSptRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, playback, roundtrip]
+  Unit_HRR_GraphLaunchSptRoundtrip:
+    <<: *level_2
+    tags: [capture, graph, playback, roundtrip]
   Unit_HRR_MemsetExtraRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -207,6 +219,18 @@ hrr:
   Unit_HRR_MemPoolExtended_Direct:
     <<: *level_2
     tags: [direct, mempool]
+  Unit_HRR_DeviceMemPool_Direct:
+    <<: *level_2
+    tags: [direct, mempool]
+  Unit_HRR_ExtMalloc_Direct:
+    <<: *level_2
+    tags: [direct, alloc]
+  Unit_HRR_StreamWaitEventSpt_Direct:
+    <<: *level_2
+    tags: [direct, stream]
+  Unit_HRR_GraphLaunchSpt_Direct:
+    <<: *level_2
+    tags: [direct, graph]
   Unit_HRR_MemcpyExtra_Direct:
     <<: *level_2
     tags: [direct, memcpy]

@@ -726,6 +726,30 @@ HIP_TEST_CASE(Unit_HRR_MemPoolExtendedRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_MemPoolExtended_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_DeviceMemPoolRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_devicemempool"};
+  // Exercises hipDeviceSetMemPool (device stream-ordered pool association),
+  // the one device mem-pool API left untested by Unit_HRR_DeviceInfo_Direct.
+  hrr_run_roundtrip("Unit_HRR_DeviceMemPool_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmalloc"};
+  // Exercises hipExtMallocWithFlags (device allocation, manual playback handler).
+  hrr_run_roundtrip("Unit_HRR_ExtMalloc_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
+  // Exercises hipStreamWaitEvent_spt (per-thread-stream cross-stream ordering).
+  hrr_run_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
+  // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
+  hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
+}
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);
