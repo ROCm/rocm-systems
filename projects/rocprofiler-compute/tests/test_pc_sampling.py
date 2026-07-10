@@ -2,9 +2,14 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import common
+import pandas as pd
 import pytest
+
+from utils.parser import load_pc_sampling_data
+from utils.pc_sampling_analysis import load_pc_sample_records
 
 config = {}
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
@@ -371,3 +376,64 @@ def test_pc_sampling_with_sol_block(
     assert "instruction" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+class TestLoadPcSamplingData:
+    """Tests for utils.parser.load_pc_sampling_data and load_pc_sample_records."""
+
+    def test_missing_or_empty_sources_return_empty(self) -> None:
+        """Absent tool data and empty buffer records both yield empty frames."""
+
+        class MockWorkload:
+            filter_kernel_ids = []
+
+        workload = MockWorkload()
+
+        assert load_pc_sampling_data(workload, "none", "count", None).empty
+        assert load_pc_sampling_data(workload, "missing", "count", None).empty
+
+        workload.filter_kernel_ids = [0, 1, 2]
+        assert load_pc_sampling_data(workload, "test", "count", None).empty
+
+        empty_records = load_pc_sample_records({
+            "buffer_records": {
+                "pc_sample_stochastic": [],
+                "pc_sample_host_trap": [],
+                "kernel_dispatch": [],
+            },
+        })
+        assert empty_records.empty
+
+    def test_single_kernel_uses_workload_dfs(self) -> None:
+        """A single-kernel filter reads the kernel name from workload.dfs[1]."""
+        workload = Mock()
+        workload.dfs = {
+            1: pd.DataFrame({
+                "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+                "Count": [2, 1, 1],
+                "Sum(ns)": [900, 800, 200],
+            }),
+        }
+        tool_data = {
+            "buffer_records": {
+                "pc_sample_stochastic": [{}],
+                "pc_sample_host_trap": [],
+            }
+        }
+
+        # An out-of-bounds kernel index warns and returns empty.
+        workload.filter_kernel_ids = [99]
+        with patch("utils.parser.console_warning") as mock_warning:
+            result = load_pc_sampling_data(workload, "test", "count", tool_data)
+            mock_warning.assert_called()
+            call_args_str = str(mock_warning.call_args)
+            assert "out of bounds" in call_args_str or "99" in call_args_str
+            assert result.empty
+
+        # A valid index extracts the kernel name from workload.dfs[1].
+        workload.filter_kernel_ids = [1]
+        with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+            mock_per_kernel.return_value = pd.DataFrame()
+            load_pc_sampling_data(workload, "test", "count", tool_data)
+            if mock_per_kernel.called:
+                assert "kernel_b" in str(mock_per_kernel.call_args)

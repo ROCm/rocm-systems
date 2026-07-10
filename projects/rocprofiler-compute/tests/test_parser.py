@@ -1,16 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for utils.parser.build_dfs, utils_analysis filter resolution,
-and utils_common.expand_placeholder_ranges."""
+"""Unit tests for utils.parser.build_dfs, apply_filters, apply_kernel_filter,
+utils_analysis filter resolution, and utils_common.expand_placeholder_ranges."""
 
 from collections import OrderedDict
 from typing import Any
+from unittest.mock import Mock, patch
 
+import pandas as pd
 import pytest
 
 from utils import schema
-from utils.parser import build_dfs
+from utils.parser import apply_filters, apply_kernel_filter, build_dfs
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
@@ -337,3 +339,145 @@ class TestExpandPlaceholderRanges:
 
         expanded = result[1800]["data source"][0]["metric_table"]["metric"]
         assert expanded == {}
+
+
+# =============================================================================
+# Tests for utils.parser.apply_filters
+# =============================================================================
+
+
+class _MockFilterWorkload:
+    """Minimal workload stub exposing raw_pmc and filter attributes."""
+
+    filter_gpu_ids = None
+    filter_kernel_ids = None
+    filter_dispatch_ids = None
+
+    def __init__(self) -> None:
+        self.raw_pmc = pd.DataFrame({
+            "GPU_ID": [0, 0, 1, 1],
+            "Kernel_Name": ["vecCopy", "vecAdd", "vecCopy", "vecMul"],
+            "Dispatch_ID": [0, 1, 2, 3],
+        })
+
+
+class TestApplyFilters:
+    """Tests for utils.parser.apply_filters."""
+
+    def test_gpu_string_filter(self) -> None:
+        """A string GPU filter keeps only matching rows."""
+        workload = _MockFilterWorkload()
+        workload.filter_gpu_ids = "0"
+        assert len(apply_filters(workload, "/tmp", False, False)) == 2
+
+    def test_kernel_name_filter(self) -> None:
+        """A kernel-name filter keeps only matching rows."""
+        workload = _MockFilterWorkload()
+        workload.filter_kernel_ids = ["vecCopy"]
+        assert len(apply_filters(workload, "/tmp", False, False)) == 2
+
+    def test_dispatch_id_filter(self) -> None:
+        """A dispatch-ID filter keeps only matching rows."""
+        workload = _MockFilterWorkload()
+        workload.filter_dispatch_ids = ["0", "1"]
+        assert len(apply_filters(workload, "/tmp", False, False)) == 2
+
+    def test_gpu_integer_list_filter(self) -> None:
+        """A GPU filter given as a list of integers keeps all matching rows."""
+        workload = _MockFilterWorkload()
+        workload.filter_gpu_ids = [0, 1]
+        assert len(apply_filters(workload, "/tmp", False, False)) == 4
+
+
+# =============================================================================
+# Tests for utils.parser.apply_kernel_filter
+# =============================================================================
+
+
+@pytest.fixture
+def mock_workload_for_filter() -> Mock:
+    """Mock workload with dfs populated for apply_kernel_filter tests."""
+    workload = Mock()
+    workload.dfs = {
+        1: pd.DataFrame({
+            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
+            "Count": [2, 1, 1],
+            "Sum(ns)": [900, 800, 200],
+            "Selected": ["", "", ""],
+        }),
+        2: pd.DataFrame({
+            "Dispatch_ID": [1, 2, 3, 4],
+            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+            "GPU_ID": [0, 0, 1, 0],
+        }),
+    }
+    workload.filter_kernel_ids = []
+    return workload
+
+
+class TestApplyKernelFilter:
+    """Tests for utils.parser.apply_kernel_filter."""
+
+    @pytest.fixture
+    def raw_df(self) -> pd.DataFrame:
+        """Flat single-index raw_pmc DataFrame."""
+        return pd.DataFrame({
+            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a", "kernel_c"],
+            "GPU_ID": [0, 0, 1, 0],
+            "Dispatch_ID": [1, 2, 3, 4],
+        })
+
+    def test_integer_ids_select_and_mark(
+        self, raw_df: pd.DataFrame, mock_workload_for_filter: Mock
+    ) -> None:
+        """Integer kernel IDs filter rows and set the Selected marker."""
+        mock_workload_for_filter.filter_kernel_ids = [0]
+        result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
+
+        assert len(result_df) == 2
+        assert all(result_df["Kernel_Name"] == "kernel_a")
+        assert mock_workload_for_filter.dfs[1].loc[0, "Selected"] == "*"
+
+    def test_multiple_integer_ids(
+        self, raw_df: pd.DataFrame, mock_workload_for_filter: Mock
+    ) -> None:
+        """Multiple integer kernel IDs keep the union of matching rows."""
+        mock_workload_for_filter.filter_kernel_ids = [0, 1]
+        mock_workload_for_filter.dfs[1]["Selected"] = ""
+        result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
+        assert len(result_df) == 3
+
+    def test_invalid_id_errors(
+        self, raw_df: pd.DataFrame, mock_workload_for_filter: Mock
+    ) -> None:
+        """An out-of-bounds kernel ID triggers console_error and exits."""
+        mock_workload_for_filter.filter_kernel_ids = [99]
+        mock_workload_for_filter.dfs[1]["Selected"] = ""
+        with patch("utils.parser.console_error") as mock_error:
+            mock_error.side_effect = SystemExit(1)
+            with pytest.raises(SystemExit):
+                apply_kernel_filter(raw_df, mock_workload_for_filter)
+            mock_error.assert_called_once()
+            assert "99" in str(mock_error.call_args)
+
+    def test_exact_name_match(
+        self, raw_df: pd.DataFrame, mock_workload_for_filter: Mock
+    ) -> None:
+        """A string kernel name filters to the exact match."""
+        mock_workload_for_filter.filter_kernel_ids = ["kernel_b"]
+        result_df = apply_kernel_filter(raw_df, mock_workload_for_filter)
+        assert len(result_df) == 1
+        assert result_df["Kernel_Name"].iloc[0] == "kernel_b"
+
+    def test_name_match_strips_whitespace(self, mock_workload_for_filter: Mock) -> None:
+        """Kernel names with surrounding whitespace are stripped before matching."""
+        raw_df_with_whitespace = pd.DataFrame({
+            "Kernel_Name": [" kernel_a ", "kernel_b", "kernel_a"],
+            "GPU_ID": [0, 0, 1],
+            "Dispatch_ID": [1, 2, 3],
+        })
+        mock_workload_for_filter.filter_kernel_ids = ["kernel_a"]
+        result_df = apply_kernel_filter(
+            raw_df_with_whitespace, mock_workload_for_filter
+        )
+        assert len(result_df) == 2
