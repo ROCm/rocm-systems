@@ -346,7 +346,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // queue (AQL, HOST) in the same process during its lifetime.
   amd_queue_.hsa_queue.id = this->GetQueueId();
 
-  MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { agent_->driver().DestroyQueue(queue_id_); });
+  MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() {
+    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+      // DRM queue was created — destroy it via the DRM path.
+      // Using queue_id_ (KFD) here leaves the kernel userq alive, which
+      // causes amdgpu_userq_evict to crash when RingGuard frees EOP/CWSR.
+      DrmDriver::DestroyQueueInParams queueIn(*agent_, drm_queue_id_, drm_doorbell_offset_);
+      static_cast<DrmDriver&>(agent_->driver()).DestroyQueue(&queueIn);
+      drm_queue_id_ = 0;
+      drm_doorbell_offset_ = 0;
+    } else {
+      agent_->driver().DestroyQueue(queue_id_);
+    }
+  });
 
   amd_queue_.scratch_max_use_index = UINT64_MAX;
   amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
