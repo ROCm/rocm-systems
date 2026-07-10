@@ -40,6 +40,7 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
     __has_builtin(__builtin_amdgcn_global_load_b128) && \
     __has_builtin(__builtin_amdgcn_global_store_b128) && \
     !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 1
 //#pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950/GFX1250"
 #else

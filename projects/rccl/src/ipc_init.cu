@@ -10,14 +10,14 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 #include "ipc_mem_handler.h"
 
 #include <cuda_runtime.h>
 
-using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_ipc_detail::kDdaNranks;
+using nccl_dda_detail::DdaIpcBarrierState;
+using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::kDdaNranks;
 
 
 #define HIP_CALL(cmd)                                                                   \
@@ -66,6 +66,13 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 #else
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
 #endif
+
+  // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
+  // false-matches leftover flag words (mirrors the fabric path). Harmless for
+  // the copy-based DDA collectives, which overwrite their staging area per op.
+  if (scratch != nullptr) {
+    HIP_CALL(hipMemset(scratch, 0, bytes));
+  }
 
   auto* handler = new (std::nothrow) ncclIpcMemHandler(
       comm->bootstrap, comm->rank, comm->nRanks);
@@ -154,10 +161,11 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   barrierState->barrierHost = barrierPair.second;
 
   comm->ddaIpcMemHandler = handler;
-  comm->ddaIpcScratch = scratch;
-  comm->ddaIpcScratchBytes = bytes;
-  comm->ddaIpcPeerPtrsDev = peerDev;
+  comm->ddaScratch = scratch;
+  comm->ddaScratchBytes = bytes;
+  comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpoch = 0;
   INFO(
       NCCL_INIT,
       "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",
@@ -174,14 +182,14 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
     comm->ddaIpcBarrierState = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcPeerPtrsDev));
-  comm->ddaIpcPeerPtrsDev = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
+  comm->ddaPeerPtrsDev = nullptr;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcScratch));
-  comm->ddaIpcScratch = nullptr;
-  comm->ddaIpcScratchBytes = 0;
+  CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
+  comm->ddaScratch = nullptr;
+  comm->ddaScratchBytes = 0;
   return ncclSuccess;
 }
