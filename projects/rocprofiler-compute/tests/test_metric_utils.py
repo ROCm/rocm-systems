@@ -852,12 +852,7 @@ class TestMetricEvaluator:
         )
 
     def test_eval_expression_returns_na_for_nullified_incomplete_kernel(self):
-        """Both numerator and denominator all-NaN yields NaN, mapped to 'N/A'.
-
-        Kernels with fewer dispatches than perfmon files have every counter
-        column set to NaN before metric evaluation, so SUM(all-NaN) /
-        SUM(all-NaN) = NaN must be caught as N/A.
-        """
+        """Both numerator and denominator all-NaN yields NaN, mapped to 'N/A'."""
         evaluator = self._make_evaluator({
             "NUMERATOR": [np.nan, np.nan, np.nan],
             "DENOMINATOR": [np.nan, np.nan, np.nan],
