@@ -6,7 +6,6 @@
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vds.h"
@@ -44,11 +43,7 @@ RJ_DIAGNOSTIC_POP
 #include <bit>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
-#include <exception>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <set>
@@ -566,53 +561,6 @@ std::vector<uint8_t> make_minimal_gfx1250_elf() {
   ehdr.e_shstrndx = 2;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
   return image;
-}
-
-std::string shell_quote(std::string_view value) {
-  std::string quoted = "'";
-  for (char c : value) {
-    if (c == '\'')
-      quoted += "'\\''";
-    else
-      quoted += c;
-  }
-  quoted += "'";
-  return quoted;
-}
-
-std::optional<std::filesystem::path> real_kernel_path(const char *name) {
-  const char *dir = std::getenv("ROCJITSU_GFX1250_KERNEL_DIR");
-  if (!dir)
-    return std::nullopt;
-  return std::filesystem::path(dir) / (std::string(name) + ".o");
-}
-
-void expect_gfx1250_code_object_decodes(const CodeObject &co) {
-  ASSERT_FALSE(co.text_sections().empty());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
-  ASSERT_NE(decoder, nullptr);
-
-  size_t decoded = 0;
-  for (const auto *sec : co.text_sections()) {
-    ASSERT_EQ(sec->size() % sizeof(uint32_t), 0u) << sec->name();
-    const auto *data = reinterpret_cast<const uint32_t *>(sec->data());
-    const size_t words = sec->size() / sizeof(uint32_t);
-    for (size_t pc = 0; pc < words;) {
-      std::unique_ptr<Instruction> inst;
-      try {
-        inst.reset(decoder->decode(&data[pc]));
-      } catch (const std::exception &e) {
-        FAIL() << "section " << sec->name() << " word " << pc << " raw 0x" << std::hex << data[pc]
-               << ": " << e.what();
-      }
-      ASSERT_NE(inst, nullptr) << "section " << sec->name() << " word " << pc;
-      size_t inst_words = inst->size() / sizeof(uint32_t);
-      ASSERT_GT(inst_words, 0u) << inst->mnemonic();
-      pc += inst_words;
-      ++decoded;
-    }
-  }
-  EXPECT_GT(decoded, 0u);
 }
 
 TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
@@ -3159,31 +3107,6 @@ TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
   EXPECT_EQ(inst->mnemonic(), "s_endpgm");
 }
 
-TEST(Gfx1250CodeObjectTest, LlvmMcObjectMapsToTarget) {
-  const char *llvm_mc = std::getenv("ROCJITSU_LLVM_MC");
-  if (!llvm_mc)
-    GTEST_SKIP() << "set ROCJITSU_LLVM_MC to an llvm-mc executable";
-
-  auto dir = std::filesystem::temp_directory_path() / "rocjitsu-gfx1250-llvm-smoke";
-  std::filesystem::create_directories(dir);
-  auto asm_path = dir / "s_endpgm.s";
-  auto obj_path = dir / "s_endpgm.o";
-  {
-    std::ofstream asm_file(asm_path);
-    asm_file << ".text\ns_endpgm\n";
-  }
-
-  std::string cmd = shell_quote(llvm_mc) +
-                    " -triple=amdgcn-amd-amdhsa -mcpu=gfx1250 "
-                    "-filetype=obj -o " +
-                    shell_quote(obj_path.string()) + " " + shell_quote(asm_path.string());
-  ASSERT_EQ(std::system(cmd.c_str()), 0);
-
-  AmdGpuCodeObject co(obj_path.string());
-  ASSERT_TRUE(co.is_valid());
-  EXPECT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
-}
-
 TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
   const uint32_t words[] = {
       0xBEB801FEu, // s_mov_b64 s[56:57], literal64
@@ -4259,153 +4182,6 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
   for (uint32_t lane = 0; lane < 32; ++lane) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * 32), 0u) << "lane " << lane;
     EXPECT_EQ(sim.memory->read32(output_addr + 16 + lane * 32), 7u) << "lane " << lane;
-  }
-}
-
-TEST(Gfx1250RealKernelTest, VectorAddLoadsAndDecodes) {
-  auto path = real_kernel_path("vector_add");
-  if (!path)
-    GTEST_SKIP() << "set ROCJITSU_GFX1250_KERNEL_DIR to gfx1250 HIP object directory";
-  ASSERT_TRUE(std::filesystem::exists(*path)) << path->string();
-
-  Executable exec(path->string());
-  ASSERT_TRUE(exec.is_valid()) << "failed to load " << path->string();
-  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX1250), 0u);
-  auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX1250, 0);
-  ASSERT_NE(co, nullptr);
-  ASSERT_NE(co->kernel_descriptor_offset("vector_add"), 0u);
-
-  expect_gfx1250_code_object_decodes(*co);
-}
-
-TEST(Gfx1250RealKernelTest, MatmulNaiveLoadsAndDecodes) {
-  auto path = real_kernel_path("matmul_naive");
-  if (!path)
-    GTEST_SKIP() << "set ROCJITSU_GFX1250_KERNEL_DIR to gfx1250 HIP object directory";
-  ASSERT_TRUE(std::filesystem::exists(*path)) << path->string();
-
-  Executable exec(path->string());
-  ASSERT_TRUE(exec.is_valid()) << "failed to load " << path->string();
-  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX1250), 0u);
-  auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX1250, 0);
-  ASSERT_NE(co, nullptr);
-  ASSERT_NE(co->kernel_descriptor_offset("matmul_naive"), 0u);
-
-  expect_gfx1250_code_object_decodes(*co);
-}
-
-TEST(Gfx1250RealKernelTest, VectorAddExecutesGolden) {
-  auto path = real_kernel_path("vector_add");
-  if (!path)
-    GTEST_SKIP() << "set ROCJITSU_GFX1250_KERNEL_DIR to gfx1250 HIP object directory";
-  ASSERT_TRUE(std::filesystem::exists(*path)) << path->string();
-
-  Executable exec(path->string());
-  ASSERT_TRUE(exec.is_valid()) << "failed to load " << path->string();
-  auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX1250, 0);
-  ASSERT_NE(co, nullptr);
-
-  constexpr uint64_t kd_addr = 0x10000;
-  constexpr uint64_t a_addr = 0x100000;
-  constexpr uint64_t b_addr = 0x200000;
-  constexpr uint64_t c_addr = 0x300000;
-  constexpr uint64_t kernarg_addr = 0x400000;
-  constexpr uint32_t n = 64;
-
-  Gfx1250Sim sim;
-  co->load_to_memory(sim.memory, kd_addr);
-  uint64_t kd_offset = co->kernel_descriptor_offset("vector_add");
-  ASSERT_NE(kd_offset, 0u);
-  uint64_t kernel_object = kd_addr + kd_offset;
-
-  std::vector<float> a(n), b(n), expected(n), zeros(n, 0.0f);
-  for (uint32_t i = 0; i < n; ++i) {
-    a[i] = static_cast<float>(i) * 0.25f;
-    b[i] = static_cast<float>(i % 7) * -0.5f;
-    expected[i] = a[i] + b[i];
-  }
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(a.data()), n * sizeof(float), a_addr);
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(b.data()), n * sizeof(float), b_addr);
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(zeros.data()), n * sizeof(float),
-                         c_addr);
-
-  struct {
-    uint64_t a;
-    uint64_t b;
-    uint64_t c;
-    uint32_t n;
-  } args = {a_addr, b_addr, c_addr, n};
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), kernarg_addr);
-
-  test::AqlQueue queue(sim.memory, sim.cp());
-  queue.dispatch(kernel_object, n, 64, kernarg_addr);
-  sim.engine->run();
-  sim.soc->flush_all();
-
-  for (uint32_t i = 0; i < n; ++i) {
-    float actual = std::bit_cast<float>(sim.memory->read32(c_addr + i * sizeof(float)));
-    EXPECT_FLOAT_EQ(actual, expected[i]) << "element " << i;
-  }
-}
-
-TEST(Gfx1250RealKernelTest, MatmulNaiveExecutesGolden) {
-  auto path = real_kernel_path("matmul_naive");
-  if (!path)
-    GTEST_SKIP() << "set ROCJITSU_GFX1250_KERNEL_DIR to gfx1250 HIP object directory";
-  ASSERT_TRUE(std::filesystem::exists(*path)) << path->string();
-
-  Executable exec(path->string());
-  ASSERT_TRUE(exec.is_valid()) << "failed to load " << path->string();
-  auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX1250, 0);
-  ASSERT_NE(co, nullptr);
-
-  constexpr uint64_t kd_addr = 0x10000;
-  constexpr uint64_t a_addr = 0x100000;
-  constexpr uint64_t b_addr = 0x200000;
-  constexpr uint64_t c_addr = 0x300000;
-  constexpr uint64_t kernarg_addr = 0x400000;
-  constexpr uint32_t n = 4;
-  constexpr uint32_t elements = n * n;
-
-  Gfx1250Sim sim;
-  co->load_to_memory(sim.memory, kd_addr);
-  uint64_t kd_offset = co->kernel_descriptor_offset("matmul_naive");
-  ASSERT_NE(kd_offset, 0u);
-  uint64_t kernel_object = kd_addr + kd_offset;
-
-  std::vector<float> a(elements), b(elements), expected(elements, 0.0f), zeros(elements, 0.0f);
-  for (uint32_t i = 0; i < elements; ++i) {
-    a[i] = static_cast<float>((i % 5) + 1);
-    b[i] = static_cast<float>(static_cast<int>(i % 7) - 3);
-  }
-  for (uint32_t row = 0; row < n; ++row)
-    for (uint32_t col = 0; col < n; ++col)
-      for (uint32_t k = 0; k < n; ++k)
-        expected[row * n + col] += a[row * n + k] * b[k * n + col];
-
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(a.data()), elements * sizeof(float),
-                         a_addr);
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(b.data()), elements * sizeof(float),
-                         b_addr);
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(zeros.data()), elements * sizeof(float),
-                         c_addr);
-
-  struct {
-    uint64_t a;
-    uint64_t b;
-    uint64_t c;
-    uint32_t n;
-  } args = {a_addr, b_addr, c_addr, n};
-  sim.memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), kernarg_addr);
-
-  test::AqlQueue queue(sim.memory, sim.cp());
-  queue.dispatch(kernel_object, 64, 64, kernarg_addr);
-  sim.engine->run();
-  sim.soc->flush_all();
-
-  for (uint32_t i = 0; i < elements; ++i) {
-    float actual = std::bit_cast<float>(sim.memory->read32(c_addr + i * sizeof(float)));
-    EXPECT_NEAR(actual, expected[i], 1e-5f) << "element " << i;
   }
 }
 

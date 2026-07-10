@@ -17,12 +17,15 @@ freed when the last reference to the tensor is dropped — which may differ
 across PEs and cause hangs during finalization.
 """
 
-from typing import Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 import rocshmem4py
 
+if TYPE_CHECKING:
+    import torch
 
-def create_tensor(shape: Sequence[int], dtype) -> 'torch.Tensor':
+
+def create_tensor(shape: Sequence[int], dtype: 'torch.dtype') -> 'torch.Tensor':
     """Collectively allocate symmetric memory and return it as a PyTorch tensor.
 
     **Collective operation** — all PEs must call this function with identical
@@ -144,19 +147,23 @@ def free_tensor(tensor: 'torch.Tensor') -> None:
 # Tensor-aware RMA wrappers (portable across every rocSHMEM backend)
 # ---------------------------------------------------------------------------
 
-def _stream_handle(stream) -> int:
+def _stream_handle(stream: Optional['torch.cuda.Stream'] = None) -> int:
     """Return the raw hipStream_t handle for a torch.cuda.Stream.
 
     Defaults to ``torch.cuda.current_stream()`` when *stream* is None.
     """
-    import torch
+    try:
+        import torch
+    except ImportError:
+        raise ImportError("PyTorch is required for rocshmem4py.interop.torch.")
+
     if stream is None:
         stream = torch.cuda.current_stream()
     return stream.cuda_stream
 
 
 def put(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
-        stream=None) -> None:
+        stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered put: copy *src* (local) -> *dst* on *peer*.
 
     Tensor-aware wrapper over ``rocshmem_putmem_on_stream`` that works on
@@ -186,7 +193,7 @@ def put(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
 
 
 def get(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
-        stream=None) -> None:
+        stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered get: copy *src* from *peer* -> *dst* (local).
 
     Tensor-aware wrapper over ``rocshmem_getmem_on_stream`` that works on
@@ -215,7 +222,7 @@ def get(dst: 'torch.Tensor', src: 'torch.Tensor', peer: int,
     )
 
 
-def barrier_all(stream=None) -> None:
+def barrier_all(stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered collective barrier across all PEs.
 
     Thin wrapper over ``rocshmem_barrier_all_on_stream``.
@@ -273,7 +280,7 @@ def get_heap_bases(tensor: 'torch.Tensor') -> 'torch.Tensor':
 # ---------------------------------------------------------------------------
 
 def alltoall(team: int, dst: 'torch.Tensor', src: 'torch.Tensor',
-             stream=None) -> None:
+             stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered all-to-all over a team.
 
     Each PE in *team* sends ``src.nbytes / team_size`` bytes to every
@@ -312,7 +319,7 @@ def alltoall(team: int, dst: 'torch.Tensor', src: 'torch.Tensor',
 
 
 def broadcast(team: int, dst: 'torch.Tensor', src: 'torch.Tensor',
-              pe_root: int, stream=None) -> None:
+              pe_root: int, stream: Optional['torch.cuda.Stream'] = None) -> None:
     """Stream-ordered broadcast over a team.
 
     On the root PE the contents of *src* are copied to *dst* on every

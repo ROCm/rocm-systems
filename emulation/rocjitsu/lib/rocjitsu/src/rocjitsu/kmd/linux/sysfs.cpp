@@ -3,6 +3,15 @@
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/kmd/linux/amdgpu_properties.h"
+#include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/rpc.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "linux/uapi/kfd_sysfs.h"
+RJ_DIAGNOSTIC_POP
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,10 +19,128 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
 namespace fs = std::filesystem;
+
+namespace {
+
+std::string make_runtime_temp_dir(const char *prefix) {
+  std::error_code ec;
+  fs::path base = rpc_default_runtime_dir();
+  fs::create_directories(base, ec);
+  if (ec)
+    return {};
+
+  // Synthetic sysfs/DRM trees are process-owned and removed by Sysfs::cleanup().
+  // Place them under the rocjitsu runtime directory so crashes leave state in a
+  // known per-user location instead of scattering entries directly under /tmp.
+  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
+  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
+  tmpl_buffer.push_back('\0');
+  char *dir = mkdtemp(tmpl_buffer.data());
+  if (!dir)
+    return {};
+  return dir;
+}
+
+/// @brief Debug-related topology bits derived from a GPU's GFXIP version.
+///
+/// @details Mirrors the per-node values the amdkfd driver programs in
+/// kfd_topology_set_capabilities() (drivers/gpu/drm/amd/amdkfd/kfd_topology.c):
+/// the trap-debugger capability flags, the capability2 flags, and the
+/// debug_prop address-watch-mask range that libhsakmt and rocdbgapi read back.
+struct DebugTopology {
+  uint32_t capability = 0;
+  uint32_t capability2 = 0;
+  uint64_t debug_prop = 0;
+};
+
+/// @brief Reproduces kfd_topology_set_capabilities() for the simulated GPU
+/// identified by @p gfx_target_version.
+///
+/// @details The driver keys every decision on the GC hardware IP version, which
+/// is not the same number as gfx_target_version for CDNA parts (see
+/// kmd::gc_ip_version_for_gfx_target_version), so we translate first and then
+/// apply the driver's exact IP_VERSION thresholds.
+///
+/// \NPI sync this with the KFD driver code in drivers/gpu/drm/amd/amdkfd/kfd_topology.c
+DebugTopology debug_topology_for(uint32_t gfx_target_version) {
+  using kmd::make_gc_ip_version;
+  const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(gfx_target_version);
+
+  DebugTopology topo;
+
+  // Trap-based debugging is advertised for every debug-capable GPU.
+  topo.capability = HSA_CAP_TRAP_DEBUG_SUPPORT |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_TRAP_OVERRIDE_SUPPORTED |
+                    HSA_CAP_TRAP_DEBUG_WAVE_LAUNCH_MODE_SUPPORTED;
+
+  // kfd_dbg_has_ttmps_always_setup(): dispatch info (ttmps) is always valid
+  // except on gfx9.4.2 (Aldebaran) below gfx11, and on gfx11 only with modern
+  // MES firmware (sched_version >= 70), which the simulator always models.
+  const bool ttmps_always_setup =
+      (gc < make_gc_ip_version(11, 0, 0) && gc != make_gc_ip_version(9, 4, 2)) ||
+      gc >= make_gc_ip_version(11, 0, 0);
+  if (ttmps_always_setup)
+    topo.debug_prop |= HSA_DBG_DISPATCH_INFO_ALWAYS_VALID;
+
+  if (gc < make_gc_ip_version(10, 0, 0)) {
+    // gfx9 (CDNA). The watch-address-mask range widens by one bit on the
+    // gfx9.4.3/gfx9.4.4 parts (LO 6->7, HI 29->30).
+    if (gc == make_gc_ip_version(9, 4, 3) || gc == make_gc_ip_version(9, 4, 4))
+      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx943 | kmd::kWatchAddrMaskHiBitGfx943;
+    else
+      topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx9 | kmd::kWatchAddrMaskHiBit;
+
+    if (gc >= make_gc_ip_version(9, 4, 2))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED;
+
+    // Per-queue reset is withheld only from SR-IOV virtual functions, which the
+    // simulator never models.
+    topo.capability |= HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+  } else {
+    // gfx10+ (RDNA).
+    topo.debug_prop |= kmd::kWatchAddrMaskLoBitGfx10 | kmd::kWatchAddrMaskHiBit;
+
+    if (gc >= make_gc_ip_version(12, 0, 0))
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_ALU_OPERATIONS_SUPPORTED;
+
+    if (gc >= make_gc_ip_version(12, 1, 0)) {
+      topo.capability |= HSA_CAP_TRAP_DEBUG_PRECISE_MEMORY_OPERATIONS_SUPPORTED |
+                         HSA_CAP_PER_QUEUE_RESET_SUPPORTED;
+      topo.capability2 |= HSA_CAP2_TRAP_DEBUG_LDS_OUT_OF_ADDR_RANGE_SUPPORTED;
+    }
+  }
+
+  // Firmware-backed trap debugging (kfd_topology_set_dbg_firmware_support()).
+  // The simulator always provides compatible "firmware", so advertise it.
+  topo.capability |= HSA_CAP_TRAP_DEBUG_FIRMWARE_SUPPORTED;
+
+  return topo;
+}
+
+/// @brief Non-debug capability bits advertised for the data-center compute GPUs
+/// the simulator models.
+///
+/// @details On real hardware these originate from the ASIC's CRAT tables rather
+/// than kfd_topology_set_capabilities(); reproducing per-ASIC CRAT variation is
+/// out of scope, so the simulator advertises the common data-center feature set
+/// (ECC/RAS, ATS, SVM, coherent host access). The version-specific debug bits
+/// are contributed separately by debug_topology_for().
+uint32_t default_non_debug_capability() {
+  return HSA_CAP_ATS_PRESENT | HSA_CAP_QUEUE_IDLE_EVENT | HSA_CAP_WATCH_POINTS_SUPPORTED |
+         ((4u << HSA_CAP_WATCH_POINTS_TOTALBITS_SHIFT) & HSA_CAP_WATCH_POINTS_TOTALBITS_MASK) |
+         ((HSA_CAP_DOORBELL_TYPE_2_0 << HSA_CAP_DOORBELL_TYPE_TOTALBITS_SHIFT) &
+          HSA_CAP_DOORBELL_TYPE_TOTALBITS_MASK) |
+         HSA_CAP_AQL_QUEUE_DOUBLE_MAP | HSA_CAP_MEM_EDCSUPPORTED | HSA_CAP_RASEVENTNOTIFY |
+         HSA_CAP_SRAM_EDCSUPPORTED | HSA_CAP_SVMAPI_SUPPORTED | HSA_CAP_FLAGS_COHERENTHOSTACCESS;
+}
+
+} // namespace
 
 Sysfs::~Sysfs() { cleanup(); }
 
@@ -46,6 +173,11 @@ void Sysfs::cleanup() {
     fs::remove_all(drm_dir_);
     drm_dir_.clear();
   }
+}
+
+void Sysfs::release_after_fork() {
+  topology_dir_.clear();
+  drm_dir_.clear();
 }
 
 void Sysfs::setup_environment() {}
@@ -163,14 +295,22 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
   write_file(node_dir + "/gpu_id", gpu_id.str());
   write_file(node_dir + "/name", gpu.marketing_name + "\n");
 
+  const DebugTopology dbg = debug_topology_for(gpu.gfx_target_version);
+
   uint32_t cap = gpu.capability;
-  if (cap == 0) {
-    cap = (1u << 1) | (1u << 5) | (1u << 7) | (4u << 8) | (2u << 12) | (1u << 14) | (1u << 15) |
-          (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20) | (1u << 21) | (1u << 26) | (1u << 27) |
-          (1u << 28) | (1u << 29) | (1u << 30) | (1u << 31);
-  }
+  if (cap == 0)
+    cap = default_non_debug_capability() | dbg.capability;
   const uint32_t asic_revision = gpu.revision_id;
-  cap = (cap & ~(0xFu << 22)) | ((asic_revision & 0xFu) << 22);
+  cap = (cap & ~HSA_CAP_ASIC_REVISION_MASK) |
+        ((asic_revision << HSA_CAP_ASIC_REVISION_SHIFT) & HSA_CAP_ASIC_REVISION_MASK);
+
+  uint32_t cap2 = gpu.capability2;
+  if (cap2 == 0)
+    cap2 = dbg.capability2;
+
+  uint64_t debug_prop = gpu.debug_prop;
+  if (debug_prop == 0)
+    debug_prop = dbg.debug_prop;
 
   uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
@@ -209,8 +349,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
         << "local_mem_size " << gpu.local_mem_size << "\n"
         << "fw_version " << gpu.fw_version << "\n"
         << "capability " << cap << "\n"
-        << "capability2 " << gpu.capability2 << "\n"
-        << "debug_prop " << gpu.debug_prop << "\n"
+        << "capability2 " << cap2 << "\n"
+        << "debug_prop " << debug_prop << "\n"
         << "sdma_fw_version " << gpu.sdma_fw_version << "\n"
         << "unique_id " << gpu.unique_id << "\n"
         << "num_xcc " << gpu.num_xcc << "\n"
@@ -323,11 +463,10 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 }
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
-  char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_drm");
+  if (dir.empty())
     return;
-  drm_dir_ = dir;
+  drm_dir_ = std::move(dir);
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -383,12 +522,11 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
-  char tmpl[] = "/tmp/rocjitsu_topology_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_topology");
+  if (dir.empty())
     return {};
 
-  topology_dir_ = dir;
+  topology_dir_ = std::move(dir);
   if (!gpus.empty())
     gpu_info_ = gpus[0];
 
@@ -407,6 +545,48 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   write_drm_tree(gpus);
 
   return topology_dir_;
+}
+
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc) {
+  Sysfs::GpuInfo gpu{};
+  gpu.gpu_id = dev.gpu_id;
+  gpu.gfx_target_version = dev.gfx_target_version;
+  gpu.vendor_id = dev.vendor_id;
+  gpu.device_id = dev.device_id;
+  gpu.family_id = dev.family_id;
+  gpu.unique_id = dev.unique_id;
+  gpu.location_id = dev.location_id;
+  gpu.domain = dev.domain;
+  gpu.hive_id = dev.hive_id;
+  gpu.drm_render_minor = dev.drm_render_minor;
+  gpu.marketing_name = dev.marketing_name;
+  gpu.revision_id = dev.revision_id;
+  gpu.pci_revision_id = dev.pci_revision_id;
+  gpu.simd_count = dev.simd_count;
+  gpu.max_waves_per_simd = dev.max_waves_per_simd;
+  gpu.num_shader_engines = dev.num_shader_engines;
+  gpu.num_shader_arrays_per_engine = dev.num_shader_arrays_per_engine;
+  gpu.num_cu_per_sh = dev.num_cu_per_sh;
+  gpu.simd_per_cu = dev.simd_per_cu;
+  gpu.wave_front_size = dev.wave_front_size;
+  gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
+  gpu.local_mem_size = dev.local_mem_size;
+  gpu.vram_type = dev.vram_type;
+  gpu.lds_size_kb = dev.lds_size_kb;
+  gpu.mem_width = dev.mem_width;
+  gpu.mem_clk_max = dev.mem_clk_max;
+  gpu.l1_size_kb = dev.l1_size_kb;
+  gpu.l1_line_size = dev.l1_line_size;
+  gpu.l1_assoc = dev.l1_assoc;
+  gpu.l2_size_kb = dev.l2_size_kb;
+  gpu.l2_line_size = dev.l2_line_size;
+  gpu.l2_assoc = dev.l2_assoc;
+  gpu.num_sdma_engines = dev.num_sdma_engines;
+  gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_cp_queues = dev.num_cp_queues;
+  gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
+  gpu.num_xcc = num_xcc;
+  return gpu;
 }
 
 } // namespace rocjitsu
