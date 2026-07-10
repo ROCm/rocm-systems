@@ -419,15 +419,16 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
             '::rocjitsu::amdgpu::write_vop3_true16_dst('
-            'vdst, wf, lane, inst_.opsel & 0x8u, src_half);' in result
+            'vdst, wf, lane, inst_.opsel, src_half, true);' in result
         )
 
     def test_true16_cndmask_keeps_selector_scalar(self):
@@ -468,6 +469,7 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
+            true16_vop3_opsel='inst_.opsel',
             vcc_read='src2.read_scalar64(wf)',
         )
 
@@ -475,10 +477,10 @@ class TestLowerVectorAdd:
 
         assert 'src2.read_scalar64(wf)' in result
         assert 'src2.read_lane' not in result
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
 
@@ -504,6 +506,7 @@ class TestLowerVectorAdd:
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
             true16_src_selects={0: 'inst_.opsel & 0x1u'},
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
@@ -514,7 +517,7 @@ class TestLowerVectorAdd:
             in result
         )
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
         assert 'std::cos' in result

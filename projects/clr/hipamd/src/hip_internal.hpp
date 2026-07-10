@@ -751,6 +751,7 @@ namespace hip {
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
                                        size_t size = 0);
+  extern bool IsManagedMemory(cl_mem_flags flags);
   extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
                                                          size_t count,
                                                          std::vector<size_t>& offsets);
