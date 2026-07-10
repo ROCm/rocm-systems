@@ -26,6 +26,7 @@
 
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/ompt/details/format.hpp"  // NOLINT(unused-includes)
 #include "lib/rocprofiler-sdk/registration.hpp"
