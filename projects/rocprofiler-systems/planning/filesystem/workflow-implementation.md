@@ -9,12 +9,18 @@ Automated, phase-gated plan for implementing
 > is a manual step the user performs themselves, after their own review. No phase, gate,
 > or auto-advance step may push.
 
-**Execution model: auto-advance on green gate.** Each phase runs its verification
-gate automatically; if the gate is green the next phase starts without waiting for
-sign-off. Execution **halts and reports** only on (a) a red gate, or (b) entry into
-the two designated manual-review phases (**P-dl**, **P-final**), which are too
-high-risk to auto-advance past. **Committing is allowed** (one commit per phase, local
-only); **pushing is never allowed** (see hard rule above).
+**Execution model: auto-advance on green gate, self-heal on red.** Each phase runs
+its verification gate automatically; if the gate is green the next phase starts without
+waiting for sign-off. **If a gate breaks (red), the agent attempts to fix it itself**
+(see §2.2) before halting. Execution **halts and reports** only on (a) a red gate that
+survives the bounded fix attempts, or (b) entry into the two designated manual-review
+phases (**P-dl**, **P-final**), which are too high-risk to auto-advance past.
+**Committing is allowed** (one commit per phase, local only); **pushing is never
+allowed** (see hard rule above).
+
+**Decision logging.** Every non-trivial decision, fix attempt, and gate result is
+appended to [`impl-log.md`](impl-log.md) as the run progresses (see §8). The log is the
+audit trail for what the automation did and why.
 
 ---
 
@@ -66,11 +72,31 @@ grep -rn 'tim::filepath\|namespace filepath\s*=' source/ | wc -l
 changes in §1), and CHECK 3 is `<=` the prior phase's count (`==` allowed for P0/P1
 which are additive/move-only; `<` required for every call-site phase).
 
-**Red gate → halt.** Report the failing check, the diff since the phase started, and
-whether the failure is a candidate "intended change" (§1) or a genuine regression.
-Do **not** auto-advance.
+**Red gate → try to fix, then halt if unresolved** (see §2.1). Do **not** auto-advance
+past a red gate.
 
-### 2.1 Extra gates for specific phases
+### 2.1 Red gate — self-heal protocol
+
+When a gate goes red, the agent attempts to fix it before halting, within these bounds:
+
+1. **Classify the failure first** and log it to `impl-log.md`:
+   - **Intended change** (§1 closed list) → update the test/expectation to match the
+     design (e.g. flip `Exists_BrokenSymlink`), log it as such, re-run the gate. This is
+     not a regression.
+   - **Genuine regression** → proceed to fix attempts.
+2. **Bounded fix attempts: up to 3 per phase.** Each attempt: form a hypothesis, apply
+   the smallest change that addresses it, re-run the gate, log the attempt and outcome.
+3. **Scope guard.** Fixes must stay within the current phase's semantics. The agent may
+   **not**, to make a gate pass: change the design's intended behavior, weaken/delete an
+   unrelated test, `#if 0`/comment out code, or silence a warning-as-error without a real
+   fix. If the only way to green is one of these → **halt** instead.
+4. **Escalate on exhaustion.** If 3 attempts do not restore green, or the fix would
+   breach the scope guard → **halt**, log the final state (failing check, diff since
+   phase start, hypotheses tried and why each failed), and await sign-off.
+5. Build-infra breakage (missing include, CMake target wiring, link error) is in-scope
+   to fix and does not count as a design deviation.
+
+### 2.2 Extra gates for specific phases
 
 - **P0**: the new pinned regression tests (design §7) must exist and pass —
   realpath verbatim-fallback, `exists` true-for-dirs + false-for-broken-link,
@@ -142,19 +168,53 @@ targets). Auto-advance is disabled here. The gate additionally requires:
 ## 5. Per-phase loop (what the agent does each phase)
 
 ```
-1. Read the phase's target files + the design's migration mapping (§8) for those spellings.
-2. Apply the migration (old spelling → new API) for that subsystem only.
-3. Run the gate (§2). Iterate until CHECK 1 & 2 are green.
-4. Verify CHECK 3 (ref counter strictly decreased for call-site phases).
-5. Commit the phase, **local only** (one commit per phase; P8/P-dl may be
+1. Append a "Phase Pn — START" entry to impl-log.md (goal, target files, baseline ref count).
+2. Read the phase's target files + the design's migration mapping (§8) for those spellings.
+3. Apply the migration (old spelling → new API) for that subsystem only.
+4. Run the gate (§2). If red → self-heal protocol (§2.1), logging each fix attempt.
+   Iterate until CHECK 1 & 2 are green or the self-heal bound is hit.
+5. Verify CHECK 3 (ref counter strictly decreased for call-site phases).
+6. Commit the phase, **local only** (one commit per phase; P8/P-dl may be
    multi-commit). **Never `git push`** — see the hard rule at the top of this doc.
-6. If phase ∈ {P-dl, P-final}: HALT, report, await sign-off.
+7. Append a "Phase Pn — DONE" entry to impl-log.md (result, new ref count, commit SHA,
+   any intended-change decisions, any deviations).
+8. If phase ∈ {P-dl, P-final}: HALT, report, await sign-off.
    Else if gate green: advance to next phase in ID order.
-   Else (red): HALT, report the regression vs. the §1 intended-change list.
+   Else (red, self-heal exhausted): HALT, report per §2.1.
 ```
 
 **Migration mapping** to apply is design doc §8 (old spelling → new). The before/after
 exemplars are design §9.
+
+---
+
+## 5a. Decision log (`impl-log.md`)
+
+The agent maintains [`impl-log.md`](impl-log.md) in this directory as an append-only
+run journal. **Append, never rewrite** prior entries — it is the audit trail.
+
+**What gets logged** (as it happens, not in a final batch):
+- Phase START / DONE markers (goal, files, baseline + resulting `tim::filepath` ref count,
+  commit SHA).
+- Every **decision**: an intended-change classification (§1), a design-interpretation
+  choice, a deviation from the plan and its justification, a deferred item.
+- Every **self-heal fix attempt** (§2.1): the red symptom, the hypothesis, the change
+  made, and the outcome (fixed / still red).
+- Every **halt**: why, the final failing state, and what sign-off is needed to resume.
+
+**Suggested entry format:**
+```markdown
+## Phase P2 — core  (2026-07-08)
+- START: baseline ref count = 137; targets: config.cpp, argparse.cpp, ...
+- DECISION: argparse.cpp:136 `_libdir` — intended dir-bug fix (§1.2); exists() now
+  true-for-dirs so guard works. Not a regression.
+- FIX ATTEMPT 1: link error `undefined ref path::make_dirs` → missing inline in header;
+  added `inline`. Re-ran gate → green.
+- DONE: gate green; ref count 137 → 121; commit abc1234.
+```
+
+Keep entries terse and factual. This file is planning scratch (gitignored region /
+not shipped); it exists so a human can reconstruct what the automation did and why.
 
 ---
 
