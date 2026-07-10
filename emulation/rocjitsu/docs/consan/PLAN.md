@@ -90,7 +90,7 @@ flowchart LR
   R1C["R1C: gfx1201 VGPR Spill Backend"]:::done
   R1D["R1D: Spill-Backed Access Probes"]:::done
   R1E["R1E: Persistent Owner And Epoch State"]:::done
-  R1F["R1F: Scalar And Special-State Policy"]:::todo
+  R1F["R1F: Scalar And Special-State Policy"]:::done
   R1G["R1G: Shared-Function Resource Plans"]:::todo
   R1H["R1H: MOI Resource Parity Rollout"]:::todo
   R1{"R1: Register/Spill Policy Ready"}:::todo
@@ -238,33 +238,32 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1F`'s scalar/special-state policy. `R1E` now covers both the
-   spare-capacity persistent VGPR pair and the descriptor-full private-epoch
-   fallback.
-2. Complete `R1G` after the direct-kernel resource slices. `R1F` and `R1G` may
-   be developed independently before they converge in `R1H`.
-3. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
-   register/spill policy, rather than only its first backend, is ready.
-4. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
+1. Complete `R1G` after the direct-kernel resource slices. `R1F` now provides
+   automatic scalar allocation and special-state preservation for direct
+   kernels.
+2. Converge the completed resource paths in `R1H`; reaching the `R1` diamond
+   means the whole register/spill policy, rather than only its first backend,
+   is ready.
+3. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
    branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
-5. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
+4. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
    taken in bounded slices when they unblock the main path. Freeze profiles in
    `O1B` only after the engine behavior and automatic resource choices named
    by its incoming edges are stable.
-6. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
+5. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
    and sampled checking paths are ready. Passing it reaches the `T1` parity
    milestone and permits the final `M0` broad-turn-on acceptance review.
-7. Refresh the durable team snapshot in `D1` after `M0` is accepted.
+6. Refresh the durable team snapshot in `D1` after `M0` is accepted.
 
 `A1` remains in the full project DAG, but it is intentionally outside the
 current local execution window while only `gfx1201` hardware is available. Its
 only incoming edge is the existing baseline; it neither gates nor is gated by
 the gfx1201 `M0` path.
 
-The most important design dependency is `R1`. Current ConSan works by manually
-selecting owner, epoch, scratch VGPRs, and sometimes explicit SGPR pairs. That
-is acceptable for a prototype, but it is the main reason broader instrumentation
-coverage is risky.
+The most important design dependency is `R1`. Direct-kernel access probes now
+have automatic ephemeral, persistent, scalar, and spill-backed resources. The
+remaining resource-policy risk is shared helper text, followed by migrating
+the non-access probe implementations through the same planner.
 
 ## M0: MOI Broad Turn-On Readiness - TARGET
 
@@ -403,11 +402,11 @@ Current MOI resource demand, before any future probe simplification:
 
 | Probe family | Ephemeral VGPR window | Other state |
 | --- | ---: | --- |
-| Record/replay access | 3 static-site; 8 dynamic | Dynamic append also needs an EXEC-save SGPR pair. |
+| Record/replay access | 3 static-site; 6 dynamic | Dynamic append uses an EXEC-save pair, a VCC-save pair, and one SCC snapshot SGPR. |
 | Sampled access | 5 | No persistent owner/epoch requirement in the current direct publication path. |
-| Inline shadow | 7 basic; 9 with rich diagnostics | Persistent owner and optional epoch VGPRs; diagnostic paths can use up to four temporary SGPR pairs. |
-| Barrier record / inline barrier | 6 for a record | Record mode needs an EXEC-save SGPR pair; inline mode updates persistent epoch state. |
-| Atomic record / inline atomic | 3 record; 5 inline | Inline mode needs owner/epoch and scalar save state. |
+| Inline shadow | 7 | Persistent owner and optional epoch VGPRs; diagnostic paths use four EXEC-save pairs, one VCC-save pair, and one SCC snapshot SGPR. |
+| Barrier record / inline barrier | 6 for a record | Record mode uses the five-SGPR EXEC/VCC/SCC window; inline mode updates persistent epoch state. |
+| Atomic record / inline atomic | 3 | Inline acquire uses the eleven-SGPR nested EXEC/VCC/SCC window and owner/epoch state. |
 
 The distinction between ephemeral and persistent state is important. A
 site-local spill lease can safely borrow a live VGPR around one probe, but it
@@ -793,7 +792,7 @@ Done criteria:
 - Barrier tests prove that the chosen epoch representation advances and is
   observed by subsequent access probes.
 
-## R1F: Scalar And Special-State Policy - TODO
+## R1F: Scalar And Special-State Policy - DONE
 
 Goal: remove manual SGPR windows while preserving EXEC, VCC, SCC, and other
 special state required by dynamic record, barrier, diagnostic, and atomic
@@ -821,6 +820,27 @@ Work:
   values before restoring the VGPR lease.
 - Do not generalize that fallback into an arbitrary SGPR stack unless more than
   one current probe family actually needs it.
+
+Landed boundary:
+
+- Direct-kernel resource contexts record descriptor and maximum referenced
+  SGPR counts. Automatic allocation places a fresh even scalar window above
+  guest references and grows only descriptors that own an emitted probe.
+- Dynamic access and barrier-record probes use five SGPRs: the original EXEC
+  pair, an original VCC pair, and a Boolean SCC snapshot. Inline diagnostics
+  and atomic acquire use eleven SGPRs: four nested EXEC pairs, VCC, and SCC.
+- VCC is preserved with scalar `s_mov_b64`, so restoration does not depend on
+  an active lane. SCC is captured before instrumentation with `s_cselect_b32`
+  and restored last with `s_cmp_lg_u32`; the same sequence works for wave32,
+  wave64, and an empty incoming EXEC mask.
+- The `hw_id` owner source receives a separate fresh scalar temporary when no
+  explicit debug override is supplied. It participates in the same targeted
+  descriptor requirement as the special-state window.
+- SGPR, VGPR, and private growth are combined in the pre-relocation descriptor
+  transaction. Applying scalar growth after `.text` expansion is forbidden
+  because original descriptor file offsets are no longer valid then.
+- No SGPR borrow/spill path was needed. A kernel that already references all
+  106 normal SGPRs receives a bounded, logged non-patching outcome.
 
 Done criteria:
 

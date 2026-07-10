@@ -13,8 +13,8 @@ experimental DBI atomic-record patch for selected RDNA4 no-SADDR
 current implementation can publish compact sampled watchpoint entries directly
 from DBI probes, without first writing full access records. Its
 `inline_shadow` engine can also publish exact-shadow entries directly from
-native dword LDS load/store probes. With `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` it can
-also emit a first compact inline diagnostic for a prior non-empty,
+native dword LDS load/store probes and emit a first compact inline diagnostic
+for a prior non-empty,
 different-owner conflict. ConSan is instrumentation-only on the local RDNA4 `gfx1201`
 device; it is not meant to translate the code object to another architecture.
 
@@ -132,8 +132,7 @@ The MVP uses this HSA tools loader path. A separate waitcheck-style
   path no longer writes full access records first.
   `inline_shadow` patches native LDS `ds_store_b32`/`ds_write_b32` and
   `ds_load_b32`/`ds_read_b32` sites to publish packed exact-shadow entries
-  directly from GPU code with RDNA4 `flat_atomic_swap_b64`. When
-  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` is provided, it also checks the returned prior
+  directly from GPU code with RDNA4 `flat_atomic_swap_b64`. It checks the returned prior
   shadow entry and emits one compact diagnostic for the first implemented
   conflict predicate: prior entry nonzero, prior owner different from the
   current owner, and not a read/read pair. It does not yet implement inline
@@ -154,14 +153,14 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain zero visible inline diagnostics, zero host-replay diagnostics, and zero sampled conflicts. The checked inline-shadow race and sampled-conflict controls use this guard. |
 | `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain any visible inline diagnostic, host-replay diagnostic, or sampled conflict. The checked inline-shadow barrier-order control uses this guard. |
 | `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT` | `record_replay` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto-buffer host replay emits no conflict. |
-| `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Required for current access/barrier/sampled/inline-shadow DBI probes. Static access probes use three scratch VGPRs, dynamic access probes use eight, barrier probes use six, direct sampled probes use five, inline-shadow publication probes use seven, inline-shadow diagnostic probes use nine, and inline-shadow atomic-ordering probes use five starting at this VGPR. |
+| `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Direct-kernel access probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
 | `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported RDNA4 barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
-| `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `record_replay` | Opt-in access-record append mode. Each active lane reserves its own access-record slot at runtime. Requires `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`. Dynamic probes preserve VCC and currently skip candidates immediately after `s_*_saveexec` while control-flow/liveness handling is still conservative. |
-| `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, `inline_shadow` diagnostics/atomics | Explicit even normal SGPR-pair base. `record_replay` dynamic probes require an even pair in `0..104`. `inline_shadow` diagnostics require an even base in `0..100` without epoch tracking, or `0..98` with `RJ_CONSAN_MOI_EPOCH_VGPR`, because they use up to four SGPR pairs while narrowing the old-entry, owner-mismatch, same-epoch, and access-kind predicates. Inline-shadow atomic acquire probes require an even base in `0..100`. |
+| `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `record_replay` | Opt-in access-record append mode. Each active lane reserves its own access-record slot at runtime. Dynamic probes automatically preserve EXEC, VCC, and SCC and currently skip candidates immediately after `s_*_saveexec` while control-flow/liveness handling is still conservative. |
+| `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, `inline_shadow` diagnostics/atomics | Optional explicit even-base debug override. Record/barrier probes reserve five SGPRs from an even base in `0..100`: EXEC, VCC, and SCC. Inline diagnostics/atomic acquire reserve eleven SGPRs from an even base in `0..94`: four nested EXEC pairs, VCC, and SCC. Without the override, ConSan places a fresh window above all guest scalar references and grows only owning descriptors. |
 | `RJ_CONSAN_MOI_TRACK_ATOMICS` | `record_replay`, `inline_shadow` | For `record_replay`, enable the experimental atomic-record patch for a narrow RDNA4 no-SADDR `flat_atomic*` subset; host replay models supported release/acquire atomic events, and live GPU smoke coverage checks one same-address handoff. For `inline_shadow`, enable the first one-slot address-scoped release/acquire metadata patch for the same flat-atomic subset; release atomics publish owner/epoch/address into the internal slot, and acquire atomics import `release_epoch + 1` only when the address matches. |
-| `RJ_CONSAN_MOI_OWNER_VGPR`, `RJ_CONSAN_MOI_EPOCH_VGPR`, `RJ_CONSAN_MOI_INIT_OWNER_EPOCH` | `record_replay`, `inline_shadow` experiments | For `inline_shadow`, `RJ_CONSAN_MOI_OWNER_VGPR` is required. The recommended prototype recipe is to set `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`, choose owner/epoch VGPRs below the scratch range, and let the DBI prologue initialize them. |
-| `RJ_CONSAN_MOI_OWNER_SOURCE`, `RJ_CONSAN_MOI_OWNER_SGPR` | owner/epoch prologue experiments | Select how `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1` initializes the owner VGPR. Default `workitem_id` uses the original `workitem_id_x >> log2(wavefront_size)` estimate. `hw_id` reads RDNA4 `HW_ID1` with `s_getreg_b32`, uses its low 10 bits as a wave-uniform owner, and requires `RJ_CONSAN_MOI_OWNER_SGPR=<0..105>` as a scalar temp. ConSan grows the descriptor SGPR allocation for that temp but still does not prove scalar-register liveness or spill it. |
+| `RJ_CONSAN_MOI_OWNER_VGPR`, `RJ_CONSAN_MOI_EPOCH_VGPR`, `RJ_CONSAN_MOI_INIT_OWNER_EPOCH` | `record_replay`, `inline_shadow` experiments | Optional explicit debug overrides. Direct-kernel inline shadow normally assigns a persistent pair above guest references or uses derived-owner/private-epoch state when the VGPR file is full. |
+| `RJ_CONSAN_MOI_OWNER_SOURCE`, `RJ_CONSAN_MOI_OWNER_SGPR` | owner/epoch prologue experiments | Select owner initialization. Default `workitem_id` uses `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads RDNA4 `HW_ID1` low bits and automatically receives a fresh scalar temporary; `RJ_CONSAN_MOI_OWNER_SGPR` is an optional debug override. |
 | `RJ_CONSAN_REQUIRE_PATCH` | all flavors | For MOI, currently guards supported access candidates for the selected engine. |
 
 The hook warns when MOI-only knobs are provided while `RJ_CONSAN_FLAVOR` is not
@@ -245,8 +244,8 @@ them.
   append for `record_replay`. The default access-record probe writes one static
   slot per patched site. Dynamic append atomically increments
   `access_record_count` per active lane, masks out lanes whose slot is beyond
-  capacity, writes per-lane records, and restores EXEC. This mode requires
-  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` and can consume report-buffer slots quickly.
+  capacity, writes per-lane records, and restores EXEC, VCC, and SCC. It can
+  consume report-buffer slots quickly.
 - `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`: demo guard for
   `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. At hook unload, fail the process with
   a nonzero exit code if every HSA-tool-owned MOI report buffer contains zero
@@ -290,11 +289,11 @@ them.
   initializes owner as `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads
   RDNA4 `HW_ID1` with `s_getreg_b32`, copies the low 10 bits into the owner
   VGPR, and is independent of 1D/2D/3D local invocation layout. The `hw_id`
-  path requires `RJ_CONSAN_MOI_OWNER_SGPR`.
+  path automatically chooses a scalar temporary when one is available.
 - `RJ_CONSAN_MOI_OWNER_SGPR=N`: scalar temp used by
   `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`. `N` must be a normal SGPR in `0..105`.
-  The prologue grows the kernel descriptor's SGPR allocation to cover it, but
-  ConSan still does not prove that the original kernel has no live value there.
+  It is a debug override; automatic mode chooses a fresh SGPR above all guest
+  scalar references and grows only the owning descriptor.
 - `RJ_CONSAN_MOI_EPOCH_VGPR=N`: experimental MOI first-light hook. When set,
   the injected LDS probe copies this VGPR into the access record's epoch field.
   With `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`, the kernel-entry prologue initializes
@@ -312,10 +311,8 @@ them.
   kernel.
 - `RJ_CONSAN_MOI_TRACK_BARRIERS=1`: experimental MOI barrier record patch.
   Requires a MOI report buffer, either explicit or
-  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`, plus `RJ_CONSAN_TMP_VGPR`. The
-  dynamic append prototype also requires `RJ_CONSAN_MOI_EXEC_SAVE_SGPR=N`,
-  where `N` is an even normal SGPR-pair base in `0..104` that the original
-  kernel is not using. Each decoded 32-bit barrier is rewritten to branch
+  `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE`. Register choices are automatic for
+  the standard direct-kernel path. Each decoded 32-bit barrier is rewritten to branch
   through an appended `.text` trampoline. The trampoline narrows record writes
   to one representative lane, dynamically reserves a barrier-record slot,
   skips only the record writes on overflow, restores EXEC, executes the
@@ -516,11 +513,6 @@ env HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjit
   RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
   RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
   RJ_CONSAN_REQUIRE_PATCH=1 \
-  RJ_CONSAN_TMP_VGPR=104 \
-  RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1 \
-  RJ_CONSAN_MOI_OWNER_VGPR=102 \
-  RJ_CONSAN_MOI_EPOCH_VGPR=103 \
-  RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30 \
   RJ_CONSAN_MAX_PATCHES=4 \
   RJ_CONSAN_LOG=1 \
   "$ROCJITSU_BUILD_DIR/tests/hip_consan_lds_test" \
@@ -640,12 +632,7 @@ env \
   RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
   RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
   RJ_CONSAN_REQUIRE_PATCH=1 \
-  RJ_CONSAN_TMP_VGPR=240 \
-  RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1 \
   RJ_CONSAN_MOI_OWNER_SOURCE=hw_id \
-  RJ_CONSAN_MOI_OWNER_SGPR=100 \
-  RJ_CONSAN_MOI_OWNER_VGPR=250 \
-  RJ_CONSAN_MOI_EPOCH_VGPR=251 \
   RJ_CONSAN_MAX_PATCHES=1 \
   ctest --test-dir "$IREE_BUILD_DIR" \
     -R 'iree/tests/e2e/matmul/e2e_matmul_rocm_.*rdna4_tileandfusewmma.*rocm_hip' \
@@ -673,10 +660,10 @@ Keep GPU test fanout near 8.
 - Appended trampoline/code-growth patching remains bring-up-only. Proof NOP
   mode is gated to candidate-bearing non-ROCclr code objects; use the padded or
   local-cave check/trap paths for MVP race checks.
-- Scratch selection is liveness-based and fail-closed. The patcher can grow the
-  native-DS kernel descriptor's VGPR allocation as a fallback, but it does not
-  spill arbitrary live registers; a site with no free scratch VGPR/SGPR run is
-  skipped.
+- Scratch selection is liveness-based and fail-closed. Direct-kernel access
+  probes can spill ordinary live VGPR windows through private scratch. A full
+  scalar file and unresolved shared-helper ownership are still explicit skips;
+  there is no general SGPR spill stack.
 - Fence-heavy, global-memory, async-copy, broad atomic coverage, and complex
   barrier-epoch cases are unsupported and should be skipped or rejected with
   diagnostics.

@@ -433,6 +433,39 @@ TEST(InstructionBuilder, BuildExecNarrowingScalarOps) {
   EXPECT_FALSE(build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildSccSnapshotAndRestoreOps) {
+  const auto save_scc = build_s_cselect_b32(
+      /*sdst=*/20, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(save_scc);
+  EXPECT_EQ(*save_scc, 0x98148081u);
+
+  const auto restore_scc = build_s_cmp_lg_u32(
+      /*ssrc0=*/20, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(restore_scc);
+  EXPECT_EQ(*restore_scc, 0xBF078014u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> save_inst(decoder->decode(&*save_scc));
+  ASSERT_NE(save_inst, nullptr);
+  EXPECT_EQ(std::string_view(save_inst->mnemonic()), "s_cselect_b32");
+  std::unique_ptr<Instruction> restore_inst(decoder->decode(&*restore_scc));
+  ASSERT_NE(restore_inst, nullptr);
+  EXPECT_EQ(std::string_view(restore_inst->mnemonic()), "s_cmp_lg_u32");
+
+  EXPECT_FALSE(build_s_cselect_b32(/*sdst=*/128, scalar_positive_inline_u32(1),
+                                   scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_s_cselect_b32(/*sdst=*/20, /*ssrc0=*/256, scalar_positive_inline_u32(0),
+                                   ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_s_cselect_b32(/*sdst=*/20, scalar_positive_inline_u32(1),
+                                   scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(
+      build_s_cmp_lg_u32(/*ssrc0=*/256, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(
+      build_s_cmp_lg_u32(/*ssrc0=*/20, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstructionBuilder, BuildSCbranchVccz) {
   const auto word = build_s_cbranch_vccz(/*offset_dwords=*/3, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(word);

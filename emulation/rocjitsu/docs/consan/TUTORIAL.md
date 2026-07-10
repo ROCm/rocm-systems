@@ -232,8 +232,8 @@ What this proves:
 Current limitations:
 
 - static record slots are the default;
-- dynamic per-lane append requires `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1` and
-  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`;
+- dynamic per-lane append requires `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`;
+  its scalar state is selected automatically;
 - IREE e2e tests are correctness tests, not intentional race tests.
 
 ## Tutorial 4: MOI Sampled Mode
@@ -246,7 +246,6 @@ teardown.
 export RJ_CONSAN_FLAVOR=moi
 export RJ_CONSAN_MOI_ENGINE=sampled
 export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
-export RJ_CONSAN_TMP_VGPR=104
 export RJ_CONSAN_MAX_PATCHES=4
 export RJ_CONSAN_REQUIRE_PATCH=1
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
@@ -285,12 +284,7 @@ export RJ_CONSAN_MOI_ENGINE=inline_shadow
 export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
 export RJ_CONSAN_REQUIRE_PATCH=1
-export RJ_CONSAN_TMP_VGPR=240
-export RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1
 export RJ_CONSAN_MOI_OWNER_SOURCE=hw_id
-export RJ_CONSAN_MOI_OWNER_SGPR=100
-export RJ_CONSAN_MOI_OWNER_VGPR=250
-export RJ_CONSAN_MOI_EPOCH_VGPR=251
 export RJ_CONSAN_MAX_PATCHES=1
 
 ctest --test-dir "$IREE_BUILD_DIR" \
@@ -366,12 +360,12 @@ Logs show `patches=0 modified=false`:
 - Broad applications often load many helper code objects, some of which have no
   supported sites or contain unsupported forms.
 
-MOI inline-shadow run fails with register-related errors:
+MOI inline-shadow reports a resource-plan skip:
 
-- The current inline-shadow recipes still require explicit scratch, owner,
-  epoch, and sometimes SGPR temp choices.
-- Make sure the selected register windows do not overlap.
-- The longer-term fix is the register/spill policy work tracked in `PLAN.md`.
+- Direct-kernel scratch, owner, epoch, and scalar choices are automatic.
+- A full SGPR file, dynamic private stack, or unresolved shared helper is
+  rejected explicitly rather than instrumented with an unsafe register.
+- `PLAN.md` tracks the remaining shared-function and rollout work.
 
 Sampled mode reports no conflicts:
 

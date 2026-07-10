@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay, sampled, and inline-shadow access probes. Direct-kernel sites can preserve a live victim window through gfx1201 private scratch (including zero-private kernels through dispatch rewriting). Inline shadow uses dedicated owner/epoch VGPRs when capacity exists and derived-owner/private-epoch state when it does not. | Add scalar/special state and shared-function plans, then converge every probe family on the common policy. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay, sampled, and inline-shadow access probes. Direct-kernel sites can preserve a live victim window through gfx1201 private scratch (including zero-private kernels through dispatch rewriting). Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Dynamic, barrier, diagnostic, and atomic probes automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Add shared-function plans, then converge every probe family on the common policy. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -129,13 +129,12 @@ The gap is not one feature. It is a set of concrete blockers:
   probes now choose per-site dead or fresh descriptor-backed VGPR windows and
   can spill live windows for direct kernels that already establish private
   scratch.
-  Dynamic, barrier, atomic, inline-shadow, and persistent-state paths still use
-  explicit knobs such as `RJ_CONSAN_TMP_VGPR`, `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`,
-  `RJ_CONSAN_MOI_OWNER_SGPR`, `RJ_CONSAN_MOI_OWNER_VGPR`, and
-  `RJ_CONSAN_MOI_EPOCH_VGPR` for important paths. Broad operation needs a
-  single scratch-planning policy across those remaining families. Private
-  fallback also needs entry setup for kernels compiled with a zero-byte private
-  segment. The first implementation reference is Kunwar Grover's
+  Dynamic access, inline diagnostics, and inline atomic tests now receive
+  automatic scalar and persistent state too. Barrier and atomic patchers still
+  have duplicated VGPR/descriptor logic even though the standard targeted
+  recipes no longer select registers. Broad operation needs those remaining
+  families and shared functions to consume one planner. The first
+  implementation reference is Kunwar Grover's
   `origin/users/Groverkss/text-relocation-land` branch, whose reusable
   contribution is the initial VGPR spill-slot allocator.
 - **Owner and epoch state.** `inline_shadow` needs an owner and epoch live at
@@ -263,9 +262,10 @@ Current register policy:
   the loaded kernel object and rewrites its AQL dispatch packet, so a compiled
   private size of zero can become nonzero without relying on the runtime's
   original symbol metadata.
-- Dynamic record, diagnostic/atomic scalar state, and EXEC-save paths still
-  rely on explicit env knobs. Inline-shadow access scratch now uses the common
-  planner.
+- Dynamic record, barrier-record, inline diagnostic, and inline atomic acquire
+  paths allocate fresh descriptor-backed scalar windows. Scalar VCC snapshots
+  make restoration independent of active lanes; SCC is captured before the
+  probe and restored last. Explicit SGPR knobs remain debug overrides.
 - When no explicit inline-shadow owner/epoch pair is supplied, ConSan first
   places a dedicated pair above guest references and the selected scratch
   window, replans scratch with that pair forbidden, and injects a kernel-entry
@@ -280,8 +280,10 @@ Current register policy:
   private segment. Dynamic-stack kernels are detected from compiler-emitted
   symbols and rejected by this first backend.
 - Static record/replay, sampled, and descriptor-full inline-shadow access
-  probes consume that backend for direct kernels. Shared functions, scalar
-  state, and dynamic stacks remain outside the current resource slice.
+  probes consume that backend for direct kernels. Shared functions and dynamic
+  stacks remain outside the current resource slice. No SGPR spill backend is
+  present because the current direct-kernel tier can fail safely when all 106
+  normal SGPRs are occupied.
 
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
 first reference for spilling work. Its directly reusable piece is the
@@ -296,9 +298,9 @@ This code should be treated as prototype integration work. Other rocJITsu work
 is expected to make spilling more comprehensive, so ConSan should avoid
 over-engineering interfaces that may be replaced by shared DBI infrastructure.
 
-Completing the same policy for persistent, scalar, and shared-function state is
-still the biggest gap between current implementation and the intended
-architecture.
+Completing compatible shared-function assignments and migrating the remaining
+standalone barrier/atomic patchers through the same plan are the largest
+resource gaps between current implementation and the intended architecture.
 
 ## SuperCollider Flavor
 
@@ -531,7 +533,8 @@ Current implementation:
 Important current simplifications:
 
 - Static access-record slots overwrite on repeated execution of the same site.
-- Dynamic access append requires `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`.
+- Dynamic access append automatically allocates its EXEC/VCC/SCC scalar window;
+  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` is an optional debug override.
 - Dynamic append can consume records quickly because it writes per active lane.
 - Some candidates are skipped near compiler-generated EXEC-mask regions until
   control-flow and liveness handling are stronger.
@@ -582,9 +585,10 @@ Current diagnostic shape:
 Important current simplifications:
 
 - Only native dword LDS accesses are covered.
-- Owner, epoch, scratch VGPRs, and SGPR temporaries are mostly explicit knobs.
-- `hw_id` owner source makes owner wave-uniform but still requires a manually
-  selected scalar temporary.
+- Direct-kernel owner, epoch, scratch VGPRs, and SGPR temporaries are automatic;
+  explicit register variables remain debug overrides.
+- `hw_id` owner source makes owner wave-uniform and automatically receives a
+  fresh scalar temporary when the kernel has capacity.
 - The atomic ordering path has one release slot.
 - Diagnostics are first-conflict style, not rich multi-record reporting.
 
@@ -647,16 +651,16 @@ Current owner options:
 - explicit owner VGPR with `RJ_CONSAN_MOI_OWNER_VGPR`;
 - prologue initialization with `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`;
 - `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id` default for prologue init;
-- `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` for RDNA4 `HW_ID1` low bits, requiring
-  `RJ_CONSAN_MOI_OWNER_SGPR`.
+- `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` for RDNA4 `HW_ID1` low bits; an explicit
+  `RJ_CONSAN_MOI_OWNER_SGPR` is only a debug override.
 
 The `workitem_id` estimate is adequate for current 1D two-wave controls. It is
 not a complete owner derivation for arbitrary 2D/3D local invocation layouts.
 
 The `hw_id` source is useful for targeted inline-shadow experiments because it
-is wave-uniform and does not depend on local invocation dimensionality. It is
-not the final policy because it still requires manual SGPR selection and does
-not perform liveness or spilling.
+is wave-uniform and does not depend on local invocation dimensionality. Its
+temporary is chosen above all guest scalar references and descriptor-backed;
+full-SGPR kernels fail visibly rather than borrowing an unproven register.
 
 Intended direction:
 
@@ -757,9 +761,9 @@ What it does not mean:
 ## Immediate Engineering Gaps
 
 The non-spill scratch policy, gfx1201 spill-backed access path, zero-to-nonzero
-dispatch scratch, spare-capacity persistent VGPR placement, and descriptor-full
-private epoch fallback are now in place. The immediate resource gap is
-scalar/special state, followed by compatible assignments for shared functions.
+dispatch scratch, persistent-state fallbacks, and scalar/special-state policy
+are now in place for direct kernels. The immediate resource gap is compatible
+assignments for shared functions.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:
@@ -771,8 +775,8 @@ instructions or spill/fill placement. ConSan now reuses that allocator beneath
 its gfx1201 B32 backend and the record/replay and sampled access integrations.
 `origin/users/Groverkss/dbt-tooling` and
 `origin/users/Groverkss/dbt_interposer` remain useful background references;
-the remaining work is persistent/scalar/shared resource integration rather than
-another allocator.
+the remaining work is shared resource integration and planner convergence
+rather than another allocator.
 
 If ConSan needs SGPR spilling, assume it is not already covered there. Implement
 only the minimal SGPR support needed for the current probe family, keep it

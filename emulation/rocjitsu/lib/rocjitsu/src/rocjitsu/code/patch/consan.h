@@ -91,6 +91,10 @@ struct ConSanOptions {
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
+  /// Internal marker set after ConSan assigns the scalar EXEC-save window.
+  bool automatic_moi_exec_save_sgprs = false;
+  /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
+  bool automatic_moi_owner_sgpr = false;
   uint32_t fault_barrier_index = 0;
   ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
   uint16_t delay_var_ssrc = 106;
@@ -367,6 +371,8 @@ struct ConSanCandidateResourcePlan {
   uint16_t current_vgpr_count = 0;
   uint16_t max_referenced_vgpr_count = 0;
   uint16_t required_vgpr_count = 0;
+  uint16_t current_sgpr_count = 0;
+  uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
 };
 
@@ -377,8 +383,12 @@ struct ConSanResult {
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
+  std::optional<uint16_t> resolved_moi_exec_save_sgpr;
+  std::optional<uint16_t> resolved_moi_owner_sgpr;
   bool moi_persistent_vgprs_automatic = false;
   bool moi_private_epoch_automatic = false;
+  bool moi_exec_save_sgprs_automatic = false;
+  bool moi_owner_sgpr_automatic = false;
   size_t input_size = 0;
   std::string target_name;
   std::string arch_name;

@@ -2463,19 +2463,24 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "ConSan MOI resource reader=%llu candidate=%zu text_offset=0x%llx "
             "source=%u reason=%u owners=%zu scratch_vgpr=%s scratch_count=%u "
             "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
+            "current_sgprs=%u max_referenced_sgprs=%u "
             "private_bytes=%u",
             static_cast<unsigned long long>(code_object_reader.handle), plan.candidate_index,
             static_cast<unsigned long long>(plan.text_offset), static_cast<unsigned>(plan.source),
             static_cast<unsigned>(plan.reason), plan.owner_descriptor_file_offsets.size(),
             plan.scratch_vgpr ? std::to_string(*plan.scratch_vgpr).c_str() : "-",
             plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
-            plan.required_vgpr_count, plan.original_private_segment_size);
+            plan.required_vgpr_count, plan.current_sgpr_count, plan.max_referenced_sgpr_count,
+            plan.original_private_segment_size);
       }
       if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||
+          patch_result.resolved_moi_exec_save_sgpr || patch_result.resolved_moi_owner_sgpr ||
           patch_result.moi_private_epoch_automatic) {
         log_message(kLogInfo,
                     "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
-                    "automatic_vgprs=%s automatic_private_epoch=%s",
+                    "exec_save_sgpr=%s owner_sgpr=%s automatic_vgprs=%s "
+                    "automatic_private_epoch=%s automatic_exec_save=%s "
+                    "automatic_owner_sgpr=%s",
                     static_cast<unsigned long long>(code_object_reader.handle),
                     patch_result.resolved_moi_owner_vgpr
                         ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
@@ -2483,8 +2488,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     patch_result.resolved_moi_epoch_vgpr
                         ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
                         : "-",
+                    patch_result.resolved_moi_exec_save_sgpr
+                        ? std::to_string(*patch_result.resolved_moi_exec_save_sgpr).c_str()
+                        : "-",
+                    patch_result.resolved_moi_owner_sgpr
+                        ? std::to_string(*patch_result.resolved_moi_owner_sgpr).c_str()
+                        : "-",
                     patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
-                    patch_result.moi_private_epoch_automatic ? "true" : "false");
+                    patch_result.moi_private_epoch_automatic ? "true" : "false",
+                    patch_result.moi_exec_save_sgprs_automatic ? "true" : "false",
+                    patch_result.moi_owner_sgpr_automatic ? "true" : "false");
       }
     }
     size_t candidate_kernel_count = 0;

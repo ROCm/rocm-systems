@@ -46,6 +46,7 @@ class Instruction;
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = cdna4::encoding::kSopp;
 inline constexpr uint32_t kSop1EncodingPrefix = cdna4::encoding::kSop1;
+inline constexpr uint32_t kSopcEncodingPrefix = cdna4::encoding::kSopc;
 // SOP2 stores only a two-bit fixed prefix in MachineInst::encoding. Generated
 // encoding::kSop2 is instead the wider primary-decode selector (word0 >> 23),
 // so using it directly here would conflate two different representations.
@@ -82,6 +83,12 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
                                                   uint32_t ssrc1) {
   return (kSop2EncodingPrefix << 30) | ((op & 0x7Fu) << 23) | ((sdst & 0x7Fu) << 16) |
          ((ssrc1 & 0xFFu) << 8) | (ssrc0 & 0xFFu);
+}
+
+/// @brief Pack a SOPC instruction word from its constituent fields.
+[[nodiscard]] inline constexpr uint32_t pack_sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
+  return (kSopcEncodingPrefix << 23) | ((op & 0x7Fu) << 16) | ((ssrc1 & 0xFFu) << 8) |
+         (ssrc0 & 0xFFu);
 }
 
 /// @brief Pack a SOPK instruction word from its constituent fields.
@@ -752,6 +759,30 @@ build_s_and_saveexec_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 126 || ssrc0 > 255)
     return std::nullopt;
   return pack_sop1(0x21, sdst, ssrc0);
+}
+
+/// @brief Encode RDNA4 `s_cselect_b32 sdst, ssrc0, ssrc1`.
+///
+/// This is useful for materializing SCC without changing it: choose inline 1
+/// when SCC is set and inline 0 otherwise.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 127 || ssrc0 > 255 || ssrc1 > 255)
+    return std::nullopt;
+  constexpr uint32_t kRdna4Sop2CselectB32 = 0x30;
+  return pack_sop2(kRdna4Sop2CselectB32, sdst, ssrc0, ssrc1);
+}
+
+/// @brief Encode RDNA4 `s_cmp_lg_u32 ssrc0, ssrc1`.
+///
+/// Comparing a previously materialized SCC value with inline zero restores
+/// SCC to that saved Boolean value.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || ssrc0 > 255 || ssrc1 > 255)
+    return std::nullopt;
+  constexpr uint32_t kRdna4SopcCmpLgU32 = 7;
+  return pack_sopc(kRdna4SopcCmpLgU32, ssrc0, ssrc1);
 }
 
 /// @brief Encode RDNA4 `s_cbranch_vccz`.

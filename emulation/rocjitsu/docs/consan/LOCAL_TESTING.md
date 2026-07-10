@@ -58,8 +58,9 @@ Known local result:
 
 - Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
   passed after the R1D implementation.
-- Current resource/MOI/spill-manager focus: 151/151 passed after adding the
-  descriptor-full private-epoch fallback.
+- Current resource/MOI/spill-manager focus: 155/155 passed after adding
+  automatic scalar resources, lane-independent VCC preservation, SCC
+  preservation, wave32/wave64 shapes, and the bounded full-SGPR failure case.
 
 Focused gfx1201 spill hardware smoke:
 
@@ -103,11 +104,26 @@ ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/
 
 Known local result:
 
-- 3/3 passed without scratch, owner, or epoch VGPR numbers or
+- 3/3 passed without scratch, owner, epoch, or SGPR numbers or
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH`. The private-epoch control forces the
   zero-private entry/access/barrier representation and raises its dispatch
-  private size to 20 bytes. The diagnostic EXEC-save SGPR remains explicit and
-  belongs to `R1F`.
+  private size to 20 bytes.
+
+Full targeted MOI resource hardware tier:
+
+```sh
+ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+  -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.' \
+  --parallel 8 --output-on-failure
+```
+
+Known local result:
+
+- 24/24 passed on gfx1201. The inline-shadow race, barrier, atomic, private
+  epoch, and `hw_id` variants carry no register-number environment variables.
+  Dynamic access and barrier-record variants also choose their EXEC/VCC/SCC
+  scalar state automatically. Forced record/replay and sampled spill controls
+  remain in the tier.
 
 ## SuperCollider Coverage
 
