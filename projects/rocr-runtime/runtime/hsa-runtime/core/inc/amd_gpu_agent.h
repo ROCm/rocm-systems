@@ -813,13 +813,6 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Multi-linear copy: LINEAR op with num_entries > 0, independent copies
-  // (different src/dst/size per entry) sharing a single completion signal.
-  // Uses prologue/body/epilogue fan-out across available SDMA engines.
-  hsa_status_t DmaCopyMulti(
-      const hsa_amd_memory_copy_op_t& op,
-      std::vector<core::Signal*>& dep_signals);
-
   // Linear swap: exchanges the contents of src and dst buffers.
   // Only supported on gfx94X / gfx95X.  Uses DmaCopyFanOutOp with
   // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP.
@@ -838,7 +831,7 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
-  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
+  // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyBatch,
   // swap and indirect operations.  Submits prologue, per-entry bodies
   // (selected by @p op), and epilogue with one signal.
   // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
@@ -853,7 +846,9 @@ class GpuAgent : public GpuAgentInt {
       const void* const* src_list,
       void* const* dst_list,
       const hsa_agent_t* dst_agent_list,
-      const size_t* size_list);
+      const size_t* size_list,
+      uint32_t coord_engine = 0,
+      uint32_t max_engines = 0);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
