@@ -38,7 +38,7 @@ public:
   /// pointers, and kernel descriptor entry offsets coherent.
   [[nodiscard]] bool replace_text(std::span<const uint8_t> new_text);
 
-  void update_elf_flags(uint32_t new_flags);
+  void update_elf_flags(uint32_t new_mach);
 
   /// @brief Replace same-length AMDHSA metadata target ISA strings in-place.
   ///

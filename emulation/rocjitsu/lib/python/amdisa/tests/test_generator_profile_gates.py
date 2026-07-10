@@ -29,6 +29,9 @@ from amdisa.codegen.execute.vector_cmp import (
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.cross_isa import CrossIsaAnalyzer
+from amdisa.encoding_translator_codegen import (
+    _emit_gfx1250_rdna4_vop3_src2_helpers,
+)
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import (
     CdnaProfile,

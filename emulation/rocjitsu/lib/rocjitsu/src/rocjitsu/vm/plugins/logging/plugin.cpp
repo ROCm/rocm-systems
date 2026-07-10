@@ -24,6 +24,33 @@ void KernelLoggingPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchIn
                            info.sgprs_per_wf, info.vgprs_per_wf));
 }
 
+void KernelLoggingPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sink().write(std::format("[rocjitsu] dispatch {} execution begin\n", dispatch_id));
+}
+
+void KernelLoggingPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sink().write(std::format("[rocjitsu] dispatch {} execution end\n", dispatch_id));
+}
+
+void KernelLoggingPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sink().write(std::format("[rocjitsu] dispatch {} workgroup {} completed\n", dispatch_id, wg_id));
+}
+
+void KernelLoggingPlugin::onAmdgpuWavefrontDispatched(Wavefront &wf) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sink().write(std::format("[rocjitsu] dispatch {} workgroup {} wave {} dispatched\n",
+                           wf.dispatch_id(), wf.wg_id(), wf.wf_id()));
+}
+
+void KernelLoggingPlugin::onAmdgpuWavefrontHalted(Wavefront &wf) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  sink().write(std::format("[rocjitsu] dispatch {} workgroup {} wave {} halted\n", wf.dispatch_id(),
+                           wf.wg_id(), wf.wf_id()));
+}
+
 void KernelLoggingPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                           Wavefront &wf) {
   auto dispatch_id = wf.dispatch_id();

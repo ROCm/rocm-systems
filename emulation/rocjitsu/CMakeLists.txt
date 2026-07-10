@@ -311,15 +311,36 @@ target_include_directories(rocjitsu_shared SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(
         rocjitsu_shared
-        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+        PRIVATE
+            ${ROCJITSU_SRC_DIR}/rocjitsu/hooks/rj_hip_dbt_interposer.cpp
+            ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
     )
     target_include_directories(rocjitsu_shared PRIVATE ${DRM_INCLUDE_DIR})
+    target_include_directories(
+        rocjitsu_shared
+        SYSTEM
+        PRIVATE ${ROCM_PATH}/include
+    )
     target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
     target_link_libraries(rocjitsu_shared PRIVATE dl)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
+    set(_rj_hip_interposer_map
+        ${ROCJITSU_SRC_DIR}/rocjitsu/hooks/rj_hip_dbt_interposer.map
+    )
+    target_link_options(
+        rocjitsu_shared
+        PRIVATE
+            "LINKER:--exclude-libs,ALL"
+            "LINKER:--version-script=${_rj_hip_interposer_map}"
+    )
+    set_property(
+        TARGET rocjitsu_shared
+        APPEND
+        PROPERTY LINK_DEPENDS ${_rj_hip_interposer_map}
+    )
+    unset(_rj_hip_interposer_map)
 endif()
 
 add_dependencies(rocjitsu_shared flatbuffers_schemas)

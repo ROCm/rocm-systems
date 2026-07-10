@@ -43,6 +43,7 @@ class AmdGpuCodeObject;
 class CodeObjectPatcher;
 class SemanticTranslator;
 class Instruction;
+struct TranslationContext;
 struct InstructionLegalization;
 
 struct CaveBranchIslandState {
@@ -234,25 +235,26 @@ private:
   [[nodiscard]] bool handle_encoding(
       const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text, uint16_t dst_opcode,
       CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text, PlacementState &placement,
-      int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr,
-      InstructionList::Iterator block_begin, InstructionList::Iterator inst_it,
-      std::span<BasicBlock *const> scope_blocks);
+      int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr, InstructionList::Iterator block_begin,
+      InstructionList::Iterator inst_it, std::span<BasicBlock *const> scope_blocks);
 
   /// @brief Translate one instruction to host instruction words.
   ///
   /// @details Used by the expanded-copy path where size-growing replacements
   /// can be emitted inline and later direct-branch fixups rewrite the copied
   /// branch immediates.
-  [[nodiscard]] std::vector<uint32_t> translate_instruction_words(
-      const Instruction &inst, uint64_t offset, const class LivenessAnalysis &liveness,
-      std::span<const uint8_t> orig_text, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr);
+  [[nodiscard]] std::vector<uint32_t>
+  translate_instruction_words(const Instruction &inst, uint64_t offset,
+                              const class LivenessAnalysis &liveness, TranslationContext &context,
+                              std::span<const uint8_t> orig_text, int16_t rdna4_grid_x_sgpr,
+                              int16_t rdna4_grid_yz_sgpr);
 
   /// @brief Decode remapped guest words and translate them with @p inst's liveness.
   ///
   /// @details High-bank virtualization may rewrite only operand encodings and
   /// then hand the instruction back to the normal semantic translator.
   [[nodiscard]] std::vector<uint32_t> translate_remapped_guest_instruction_words(
-      const Instruction &inst, class LivenessAnalysis &liveness,
+      const Instruction &inst, class LivenessAnalysis &liveness, TranslationContext &context,
       std::span<const uint32_t> guest_words, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr);
 
   rj_code_arch_t guest_arch_;                               ///< Source ISA.

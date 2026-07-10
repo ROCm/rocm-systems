@@ -104,7 +104,8 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t kernel_code_properties = 0, uint32_t vgpr_encoding_granule = 8,
-                        uint32_t enable_vgpr_workitem_id = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0, uint32_t group_segment_fixed_size = 0,
+                        bool wgp_mode = false) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
@@ -115,7 +116,9 @@ struct VmFixture {
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
+    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
     kd.kernel_code_properties = kernel_code_properties;
+    kd.group_segment_fixed_size = group_segment_fixed_size;
 
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
@@ -509,6 +512,104 @@ TEST(RdnaDispatchTest, PackedTidInitializesV0WithWorkitemTuple) {
     EXPECT_EQ(f.cu()->read_vgpr(vbase, 40), (1u << 10) | (1u << 20));
     EXPECT_EQ(f.cu()->read_vgpr(vbase, 63), 7u | (3u << 10) | (1u << 20));
   }
+}
+
+TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
+  constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
+  constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, kWgpLdsBytes,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.se()->spi().max_cu_lds_bytes(), kPerCuLdsBytes);
+  EXPECT_EQ(f.se()->spi().max_wgp_lds_bytes(), kWgpLdsBytes);
+
+  amdgpu::Wavefront *wf = nullptr;
+  for (uint32_t cu_idx = 0; cu_idx < 2 && !wf; ++cu_idx) {
+    auto *cu = f.cu(cu_idx);
+    for (uint32_t wf_idx = 0; wf_idx < cu->num_wf_slots(); ++wf_idx) {
+      if (cu->wf(wf_idx)->sgpr_alloc().count != 0) {
+        wf = cu->wf(wf_idx);
+        break;
+      }
+    }
+  }
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
+  wf->lds().write32(kPerCuLdsBytes + 4, 0xC001D00Du);
+  EXPECT_EQ(wf->lds().read32(kPerCuLdsBytes + 4), 0xC001D00Du);
+}
+
+TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 64 * 1024 + 1,
+                               /*wgp_mode=*/false);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized CU-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 65537 bytes of LDS (65792 bytes after alignment) in CU mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 65536 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 128 * 1024 + 1,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  try {
+    (void)f.engine->step();
+    FAIL() << "oversized WGP-mode LDS request should fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what())
+                  .find("requests 131073 bytes of LDS (131328 bytes after alignment) in WGP mode"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("at most 131072 bytes"), std::string::npos);
+  }
+}
+
+TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 0,
+                               /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, 64, 64);
+
+  EXPECT_THROW((void)f.engine->step(), std::runtime_error);
+}
+
+TEST(RdnaDispatchTest, WgpModeSupportsAtomicWorkgroupClusterPlacement) {
+  constexpr uint32_t kPerWorkgroupLdsBytes = 64 * 1024;
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+  VmFixture f("rdna4", 4, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0,
+                               kPerWorkgroupLdsBytes, /*wgp_mode=*/true);
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/64);
+
+  EXPECT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_FALSE(f.cu(0)->has_active_wfs());
+  EXPECT_FALSE(f.cu(1)->has_active_wfs());
+  EXPECT_FALSE(f.cu(2)->has_active_wfs());
+  EXPECT_FALSE(f.cu(3)->has_active_wfs());
 }
 
 TEST_P(IsaTest, RegisterFileIsolation) {

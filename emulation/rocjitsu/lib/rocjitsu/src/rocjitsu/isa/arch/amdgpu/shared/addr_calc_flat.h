@@ -16,11 +16,45 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <cassert>
 #include <cstdint>
 
 namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
+
+/// Decode the GFX12 flat-private address form used by LLVM-generated code.
+///
+/// The address is based on the wave scratch address, with the lane id encoded
+/// in high address bits (bits 52:56 for wave32 and 51:56 for wave64). The
+/// simulator stores scratch in contiguous per-lane slices, so translate the
+/// encoded lane back to the corresponding slice before accessing memory.
+inline bool decode_gfx12_flat_private_address(const amdgpu::Wavefront &wf, uint64_t addr,
+                                              uint64_t *translated) {
+  const uint32_t lane_stride = wf.scratch_lane_size();
+  if (lane_stride == 0)
+    return false;
+
+  const uint32_t wf_size = wf.wf_size();
+  assert(wf_size == 32 || wf_size == 64);
+  const uint32_t lane_shift = wf_size == 64 ? 51 : 52;
+  const uint64_t lane_mask = static_cast<uint64_t>(wf_size - 1) << lane_shift;
+  const uint64_t scratch_base = wf.scratch_base();
+  const uint64_t base_without_lane = scratch_base & ~lane_mask;
+  const uint64_t addr_without_lane = addr & ~lane_mask;
+  if (addr_without_lane < base_without_lane)
+    return false;
+
+  const uint64_t private_offset = addr_without_lane - base_without_lane;
+  if (private_offset > 0xFFFF'FFFFULL)
+    return false;
+
+  if (translated != nullptr) {
+    const uint32_t encoded_lane = static_cast<uint32_t>((addr & lane_mask) >> lane_shift);
+    *translated = scratch_base + static_cast<uint64_t>(encoded_lane) * lane_stride + private_offset;
+  }
+  return true;
+}
 
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 ///

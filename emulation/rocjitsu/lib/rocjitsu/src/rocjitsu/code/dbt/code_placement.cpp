@@ -99,6 +99,38 @@ unprotected_text_gaps(uint64_t text_size,
   return gaps;
 }
 
+[[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
+available_text_gaps(uint64_t text_size,
+                    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
+                    std::span<const std::pair<uint64_t, uint64_t>> reserved_ranges) {
+  const auto unprotected = unprotected_text_gaps(text_size, protected_ranges);
+  if (reserved_ranges.empty())
+    return unprotected;
+
+  std::vector<std::pair<uint64_t, uint64_t>> available;
+  size_t reserved_index = 0;
+  for (const auto &[gap_start, gap_end] : unprotected) {
+    while (reserved_index < reserved_ranges.size() &&
+           reserved_ranges[reserved_index].second <= gap_start) {
+      ++reserved_index;
+    }
+
+    uint64_t cursor = gap_start;
+    for (size_t index = reserved_index;
+         index < reserved_ranges.size() && reserved_ranges[index].first < gap_end; ++index) {
+      const auto &[reserved_start, reserved_end] = reserved_ranges[index];
+      if (reserved_start > cursor)
+        available.emplace_back(cursor, std::min(reserved_start, gap_end));
+      cursor = std::max(cursor, reserved_end);
+      if (cursor >= gap_end)
+        break;
+    }
+    if (cursor < gap_end)
+      available.emplace_back(cursor, gap_end);
+  }
+  return available;
+}
+
 [[nodiscard]] std::optional<uint64_t>
 find_offset_mapping(std::span<const std::pair<uint64_t, uint64_t>> offset_map,
                     uint64_t source_offset) {
@@ -165,16 +197,11 @@ find_local_text_cave(std::span<const uint8_t> text, const LocalTextCaveRequest &
     return std::nullopt;
 
   const uint64_t stub_next = request.source.end;
-  const uint64_t last_start = text.size() - cave_size;
 
   auto try_candidate = [&](uint64_t candidate) -> std::optional<BranchableTextPlacement> {
     const uint64_t candidate_end = candidate + cave_size;
     if (ranges_overlap(candidate, candidate_end, request.source.start, request.source.end))
       return std::nullopt;
-    if (overlaps_any_range(candidate, candidate_end, reserved_ranges) ||
-        overlaps_any_range(candidate, candidate_end, protected_ranges)) {
-      return std::nullopt;
-    }
     if (!allow_unreachable_text_caves && !is_local_cave_padding_run(text, candidate, cave_size))
       return std::nullopt;
 
@@ -190,71 +217,46 @@ find_local_text_cave(std::span<const uint8_t> text, const LocalTextCaveRequest &
     return placement;
   };
 
-  if (allow_unreachable_text_caves) {
-    const auto gaps = unprotected_text_gaps(text.size(), protected_ranges);
-
-    auto scan_forward = [&](uint64_t start,
-                            uint64_t end) -> std::optional<BranchableTextPlacement> {
-      if (end < start || end - start < cave_size)
-        return std::nullopt;
-      for (uint64_t candidate = align_up_to_word(start); candidate + cave_size <= end;
-           candidate += sizeof(uint32_t)) {
-        if (auto cave = try_candidate(candidate))
-          return cave;
-      }
+  const auto gaps = available_text_gaps(text.size(), protected_ranges, reserved_ranges);
+  auto scan_forward = [&](uint64_t start, uint64_t end) -> std::optional<BranchableTextPlacement> {
+    if (end < start || end - start < cave_size)
       return std::nullopt;
-    };
-
-    auto scan_backward = [&](uint64_t start,
-                             uint64_t end) -> std::optional<BranchableTextPlacement> {
-      if (end < start || end - start < cave_size || request.source.start < cave_size)
-        return std::nullopt;
-      uint64_t candidate = std::min(end - cave_size, request.source.start - cave_size);
-      candidate -= candidate % sizeof(uint32_t);
-      while (candidate >= start) {
-        if (auto cave = try_candidate(candidate))
-          return cave;
-        if (candidate < start + sizeof(uint32_t))
-          break;
-        candidate -= sizeof(uint32_t);
-      }
-      return std::nullopt;
-    };
-
-    const uint64_t forward_start = align_up_to_word(request.source.end);
-    for (const auto &[gap_start, gap_end] : gaps) {
-      if (gap_end <= forward_start)
-        continue;
-      if (auto cave = scan_forward(std::max(gap_start, forward_start), gap_end))
-        return cave;
-    }
-
-    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
-      if (it->first >= request.source.start)
-        continue;
-      if (auto cave = scan_backward(it->first, std::min(it->second, request.source.start)))
-        return cave;
-    }
-
-    return std::nullopt;
-  }
-
-  for (uint64_t candidate = align_up_to_word(request.source.end); candidate <= last_start;
-       candidate += sizeof(uint32_t)) {
-    if (auto cave = try_candidate(candidate))
-      return cave;
-  }
-
-  if (request.source.start >= cave_size) {
-    uint64_t candidate = std::min(last_start, request.source.start - cave_size);
-    candidate -= candidate % sizeof(uint32_t);
-    while (true) {
+    for (uint64_t candidate = align_up_to_word(start); candidate + cave_size <= end;
+         candidate += sizeof(uint32_t)) {
       if (auto cave = try_candidate(candidate))
         return cave;
-      if (candidate < sizeof(uint32_t))
+    }
+    return std::nullopt;
+  };
+
+  auto scan_backward = [&](uint64_t start, uint64_t end) -> std::optional<BranchableTextPlacement> {
+    if (end < start || end - start < cave_size || request.source.start < cave_size)
+      return std::nullopt;
+    uint64_t candidate = std::min(end - cave_size, request.source.start - cave_size);
+    candidate -= candidate % sizeof(uint32_t);
+    while (candidate >= start) {
+      if (auto cave = try_candidate(candidate))
+        return cave;
+      if (candidate < start + sizeof(uint32_t))
         break;
       candidate -= sizeof(uint32_t);
     }
+    return std::nullopt;
+  };
+
+  const uint64_t forward_start = align_up_to_word(request.source.end);
+  for (const auto &[gap_start, gap_end] : gaps) {
+    if (gap_end <= forward_start)
+      continue;
+    if (auto cave = scan_forward(std::max(gap_start, forward_start), gap_end))
+      return cave;
+  }
+
+  for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
+    if (it->first >= request.source.start)
+      continue;
+    if (auto cave = scan_backward(it->first, std::min(it->second, request.source.start)))
+      return cave;
   }
 
   return std::nullopt;
@@ -269,16 +271,39 @@ find_local_branch_island(std::span<const uint8_t> text, const LocalBranchIslandR
   if (text.size() < kIslandSize)
     return std::nullopt;
 
-  const uint64_t last_start = text.size() - kIslandSize;
+  constexpr uint64_t kMaxBranchDelta =
+      static_cast<uint64_t>(std::numeric_limits<int16_t>::max()) * sizeof(uint32_t);
+  constexpr uint64_t kMinBranchDelta =
+      static_cast<uint64_t>(-(static_cast<int64_t>(std::numeric_limits<int16_t>::min()))) *
+      sizeof(uint32_t);
+  const auto saturating_add = [](uint64_t lhs, uint64_t rhs) {
+    return lhs > std::numeric_limits<uint64_t>::max() - rhs ? std::numeric_limits<uint64_t>::max()
+                                                            : lhs + rhs;
+  };
+  const auto saturating_sub = [](uint64_t lhs, uint64_t rhs) {
+    return lhs < rhs ? uint64_t{0} : lhs - rhs;
+  };
+
+  // An island must be reachable from the source and must itself reach the
+  // appended target. Intersect those two SOPP ranges before looking at text;
+  // if they do not overlap, no amount of word-by-word scanning can succeed.
+  const uint64_t source_min =
+      saturating_sub(request.source.start + sizeof(uint32_t), kMinBranchDelta);
+  const uint64_t source_max =
+      saturating_add(request.source.start + sizeof(uint32_t), kMaxBranchDelta);
+  const uint64_t target_min =
+      saturating_sub(request.island_target, sizeof(uint32_t) + kMaxBranchDelta);
+  const uint64_t target_max =
+      saturating_add(saturating_sub(request.island_target, sizeof(uint32_t)), kMinBranchDelta);
+  const uint64_t candidate_min = std::max(source_min, target_min);
+  const uint64_t candidate_max = std::min({source_max, target_max, text.size() - kIslandSize});
+  if (candidate_min > candidate_max)
+    return std::nullopt;
 
   auto try_candidate = [&](uint64_t candidate) -> std::optional<BranchableTextPlacement> {
     const uint64_t candidate_end = candidate + kIslandSize;
     if (ranges_overlap(candidate, candidate_end, request.source.start, request.source.end))
       return std::nullopt;
-    if (overlaps_any_range(candidate, candidate_end, reserved_ranges) ||
-        overlaps_any_range(candidate, candidate_end, protected_ranges)) {
-      return std::nullopt;
-    }
     if (!allow_unreachable_text_caves && !is_local_cave_padding_run(text, candidate, kIslandSize))
       return std::nullopt;
 
@@ -294,49 +319,31 @@ find_local_branch_island(std::span<const uint8_t> text, const LocalBranchIslandR
     return placement;
   };
 
-  auto scan_forward = [&](uint64_t start, uint64_t end) -> std::optional<BranchableTextPlacement> {
-    if (end < start || end - start < kIslandSize)
-      return std::nullopt;
-    for (uint64_t candidate = align_up_to_word(start); candidate + kIslandSize <= end;
-         candidate += kIslandSize) {
-      if (auto island = try_candidate(candidate))
-        return island;
-    }
-    return std::nullopt;
-  };
-
   auto scan_backward = [&](uint64_t start, uint64_t end) -> std::optional<BranchableTextPlacement> {
     if (end < start || end - start < kIslandSize)
       return std::nullopt;
-    uint64_t candidate = std::min(end - kIslandSize, last_start);
+    uint64_t candidate = std::min(end - kIslandSize, candidate_max);
     candidate -= candidate % kIslandSize;
-    while (candidate >= start) {
+    const uint64_t bounded_start = std::max(start, candidate_min);
+    while (candidate >= bounded_start) {
       if (auto island = try_candidate(candidate))
         return island;
-      if (candidate < start + kIslandSize)
+      if (candidate < bounded_start + kIslandSize)
         break;
       candidate -= kIslandSize;
     }
     return std::nullopt;
   };
 
-  if (allow_unreachable_text_caves) {
-    const auto gaps = unprotected_text_gaps(text.size(), protected_ranges);
-
-    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
-      if (auto island = scan_backward(it->first, it->second))
-        return island;
-    }
-    for (const auto &[gap_start, gap_end] : gaps) {
-      if (auto island = scan_forward(gap_start, gap_end))
-        return island;
-    }
-    return std::nullopt;
+  const auto gaps = available_text_gaps(text.size(), protected_ranges, reserved_ranges);
+  for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
+    const uint64_t start = std::max(it->first, candidate_min);
+    const uint64_t end = std::min(it->second, candidate_max + kIslandSize);
+    if (auto island = scan_backward(start, end))
+      return island;
   }
 
-  if (auto island = scan_backward(0, text.size()))
-    return island;
-  return scan_forward(0, text.size());
+  return std::nullopt;
 }
 
 std::optional<ExpandedTextScopePlacement>
@@ -400,11 +407,27 @@ plan_expanded_text_scope_placement(const ExpandedTextScopePlacementRequest &requ
     return std::nullopt;
 
   int16_t entry_branch = 0;
-  if (!compute_sopp_branch_offset(branch_pc, body_entry, entry_branch))
-    return std::nullopt;
+  if (compute_sopp_branch_offset(branch_pc, body_entry, entry_branch)) {
+    placement.prologue_branch_dwords = entry_branch;
+    placement.prologue_branch_words = {build_s_branch(entry_branch, ROCJITSU_CODE_ARCH_RDNA4)};
+  } else {
+    if (!request.long_branch_sgpr_pair || !request.long_branch_scc_sgpr)
+      return std::nullopt;
+    const auto size_probe = build_s_setpc_long_branch_preserving_scc(
+        branch_pc, branch_pc, *request.long_branch_sgpr_pair, *request.long_branch_scc_sgpr);
+    if (size_probe.empty())
+      return std::nullopt;
+    if (!checked_add(branch_pc, size_probe.size() * sizeof(uint32_t), placement.body_offset))
+      return std::nullopt;
+    if (!checked_add(placement.body_offset, request.translated_entry_offset, body_entry))
+      return std::nullopt;
+    placement.prologue_branch_words = build_s_setpc_long_branch_preserving_scc(
+        branch_pc, body_entry, *request.long_branch_sgpr_pair, *request.long_branch_scc_sgpr);
+    if (placement.prologue_branch_words.size() != size_probe.size())
+      return std::nullopt;
+  }
 
   placement.descriptor_entry_offset = *placement.launch_stub_offset;
-  placement.prologue_branch_dwords = entry_branch;
   return placement;
 }
 
@@ -627,6 +650,9 @@ relocate_expanded_text_pc_relative_fixups(const ExpandedTextPcRelativeRelocation
   };
 
   constexpr uint32_t kOpSAddCoI32 = 2;
+  constexpr uint32_t kOpSAddCoU32 = 0;
+  constexpr uint32_t kOpSAddCoCiU32 = 4;
+  constexpr uint16_t kScalarInlineMinusOne = 193;
   for (const ExpandedTextPcRelativeFixup &fixup : request.fixups) {
     const auto getpc_offset = find_offset_mapping(request.offset_map, fixup.getpc_offset);
     const auto add_tmp_offset = find_offset_mapping(request.offset_map, fixup.add_tmp_offset);
@@ -636,7 +662,44 @@ relocate_expanded_text_pc_relative_fixups(const ExpandedTextPcRelativeRelocation
       return fail("expanded text copy cannot relocate unaligned pc-relative " + fixup.kind);
     }
 
+    const auto copied_target_offset =
+        fixup.original_target_offset ? std::nullopt
+                                     : find_offset_mapping(request.offset_map, fixup.target_offset);
+    const int64_t target =
+        fixup.original_target_offset ? *fixup.original_target_offset
+        : copied_target_offset
+            ? static_cast<int64_t>(request.original_text_size_bytes + request.scope_base_bytes +
+                                   *copied_target_offset)
+            : static_cast<int64_t>(fixup.target_offset);
+    const int64_t getpc_pc = static_cast<int64_t>(request.original_text_size_bytes +
+                                                  request.scope_base_bytes + *getpc_offset);
+    const int64_t pc_bias =
+        fixup.form == ExpandedTextPcRelativeFixup::Form::DirectSAddNcU64Literal64
+            ? static_cast<int64_t>(sizeof(uint32_t))
+            : 2 * static_cast<int64_t>(sizeof(uint32_t));
+    const int64_t literal = target - getpc_pc - pc_bias;
+    if (literal < std::numeric_limits<int32_t>::min() ||
+        literal > std::numeric_limits<int32_t>::max()) {
+      return fail("expanded text copy pc-relative " + fixup.kind + " exceeds literal range");
+    }
+
     const size_t add_tmp_word = *add_tmp_offset / sizeof(uint32_t);
+    if (fixup.form == ExpandedTextPcRelativeFixup::Form::DirectSAddNcU64Literal64) {
+      if (fixup.sgpr_pair >= 127 || add_tmp_word + 5 >= request.words.size() ||
+          request.words[add_tmp_word + 1] !=
+              pack_sop2(kOpSAddCoU32, fixup.sgpr_pair, fixup.sgpr_pair, 255)) {
+        return fail("expanded text copy pc-relative " + fixup.kind +
+                    " direct literal64 add was rewritten");
+      }
+
+      request.words[add_tmp_word + 2] = static_cast<uint32_t>(static_cast<int32_t>(literal));
+      const uint16_t high = literal < 0 ? kScalarInlineMinusOne : scalar_positive_inline_u32(0);
+      request.words[add_tmp_word + 5] =
+          pack_sop2(kOpSAddCoCiU32, static_cast<uint16_t>(fixup.sgpr_pair + 1u),
+                    static_cast<uint16_t>(fixup.sgpr_pair + 1u), high);
+      continue;
+    }
+
     if (add_tmp_word + 1 >= request.words.size())
       return fail("expanded text copy pc-relative " + fixup.kind + " literal is out of range");
 
@@ -646,21 +709,6 @@ relocate_expanded_text_pc_relative_fixups(const ExpandedTextPcRelativeRelocation
       return fail("expanded text copy pc-relative " + fixup.kind +
                   " materialization was rewritten");
     }
-
-    const auto copied_target_offset = find_offset_mapping(request.offset_map, fixup.target_offset);
-    const int64_t target =
-        copied_target_offset
-            ? static_cast<int64_t>(request.original_text_size_bytes + request.scope_base_bytes +
-                                   *copied_target_offset)
-            : static_cast<int64_t>(fixup.target_offset);
-    const int64_t getpc_pc = static_cast<int64_t>(request.original_text_size_bytes +
-                                                  request.scope_base_bytes + *getpc_offset);
-    const int64_t literal = target - getpc_pc - 2 * static_cast<int64_t>(sizeof(uint32_t));
-    if (literal < std::numeric_limits<int32_t>::min() ||
-        literal > std::numeric_limits<int32_t>::max()) {
-      return fail("expanded text copy pc-relative " + fixup.kind + " exceeds literal range");
-    }
-
     request.words[add_tmp_word + 1] = static_cast<uint32_t>(static_cast<int32_t>(literal));
   }
 

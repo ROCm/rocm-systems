@@ -92,6 +92,125 @@ rocjitsu DBT guest mode has two layers:
 
 These layers solve different problems and should stay separate.
 
+### Execution Backends
+
+The guest/HSA layers do not require the execution agent to be backed by a
+physical GPU. `dbt_guest.execution_backend` selects one of two implementations
+of the same execution contract:
+
+| Backend | Execution topology | KFD execution | Code-object load |
+| --- | --- | --- | --- |
+| `hardware` | Real KFD topology plus the synthetic guest | Forwarded to real `/dev/kfd` | Translated ELF loaded on the selected physical host agent |
+| `simulator` | Simulated target topology plus the synthetic guest | Forwarded to `SimulatedKfd` | Translated ELF loaded by ROCR on the simulated target agent |
+
+In simulator mode, `simulator_config` names a normal RocJITsu VM config. A
+relative path is resolved relative to the DBT guest config, which keeps the
+guest/translation policy separate from the reusable target-machine model:
+
+```json
+{
+  "dbt_guest": {
+    "enabled": true,
+    "guest_isa": "gfx1250",
+    "host_isa": "gfx1201",
+    "execution_backend": "simulator",
+    "simulator_config": "gfx1201_r9700.json",
+    "guest_device": {
+      "gpu_id": 1250,
+      "gfx_target_version": 120500
+    }
+  }
+}
+```
+
+The simulator backend is composition rather than a separate DBT runtime:
+
+1. The interposer creates the target VM from `simulator_config`. This creates
+   the normal `SimulatedKfd`, target topology, GPU memory, command processor,
+   and simulation engine.
+2. `GuestKfd` wraps that `SimulatedKfd`. It copies the simulated target
+   topology, appends the guest node, and delegates host-target ioctls, mmaps,
+   DRM metadata, doorbells, and unmaps to the wrapped driver.
+3. ROCR discovers both agents internally. The HSA hook presents the guest in
+   the target agent's public slot and maps execution-facing calls back to the
+   target agent exactly as it does for hardware.
+4. The shared DBT hook translates the guest ELF once. Normal ROCR queue and
+   code-object operations then reach `SimulatedKfd`, so dispatch, memory,
+   signals, faults, and completion use the production simulator path.
+
+This preserves the central identity invariant for both backends:
+
+```text
+public identity:    configured guest agent and ISA
+execution identity: selected physical or simulated target agent and ISA
+```
+
+The gfx1250 example selects the hardware-shaped `gfx1201_r9700.json` model.
+Each physical RDNA4 CU contributes 64 KiB of LDS. A translated descriptor with
+`COMPUTE_PGM_RSRC1.WGP_MODE=1` is placed on an adjacent CU pair and sees the
+combined 128 KiB WGP capacity, matching LLVM's GFX10+ local-memory model. CU
+mode remains limited to one CU's 64 KiB. Requests larger than the selected
+mode's capacity, or WGP requests on a topology without a sibling pair, fail at
+dispatch with an explicit capacity diagnostic instead of remaining queued.
+
+`GuestKfd` owns one application-facing open-reference domain and keeps the
+wrapped driver's primary fd private. The first application open retains the
+simulator process; duplicate KFD fds retain only the wrapper reference; the
+last wrapper close releases the simulator reference. After `fork()`, the child
+drops inherited wrapper/VM state and creates a fresh VM on its next launch so
+it never reuses an engine thread that existed only in the parent.
+
+Backend selection is explicit and never falls back. `simulator` requires a
+non-empty `simulator_config`; `hardware` rejects one. Invalid configuration or
+failure to construct the selected backend stops discovery rather than silently
+using the other path.
+
+The tree includes complete example configurations for both supported
+simulator-backed development paths:
+
+- `configs/guest_gfx1250_on_simulated_gfx1201.json`
+- `configs/guest_gfx950_on_simulated_gfx942.json`
+
+The peer hardware-backed gfx1250 configuration is
+`configs/guest_gfx1250_on_gfx1201.json`; omitting `execution_backend` selects
+the backward-compatible `hardware` default.
+
+Use the ROCm SDK from the workspace's TheRock virtual environment, not a system
+ROCm installation. A launch from the workspace root looks like:
+
+```bash
+source venv/bin/activate
+sdk_root=$(rocm-sdk path --root)
+export ROCM_PATH="$sdk_root"
+export HIP_PATH="$sdk_root"
+export PATH="$PWD/venv/bin:$sdk_root/bin:$sdk_root/lib/llvm/bin:$PATH"
+export LD_LIBRARY_PATH="$sdk_root/lib:$sdk_root/lib64:$sdk_root/lib/llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+build/tools/rocjitsu/rocjitsu \
+  --config rocm-systems/emulation/rocjitsu/configs/guest_gfx1250_on_simulated_gfx1201.json \
+  -- rocminfo
+```
+
+`rocminfo` should report the configured guest publicly. The target simulator
+agent remains internal to the hook mapping. Application launches use the same
+command shape after `--`; no target GPU is required.
+
+The functional simulator is much slower than hardware, especially for large
+matmul modules. A long-running dispatch that continues to retire instructions
+is not treated as a backend fallback or semantic success: the local validation
+helper uses a bounded 1,800-second per-module timeout and still requires the
+application's numerical checks to pass. The default RocJITsu regression command
+remains:
+
+```bash
+ctest --test-dir build -j4 --output-on-failure -E '^(Rocblas|Rccl)'
+```
+
+CDNA4-to-CDNA3 dynamic-copy dispatches are registered by default for both
+direct simulated execution and DBT guest execution. The larger Triton cases
+remain opt-in with `RJ_ENABLE_EXPERIMENTAL_CDNA3_SIM_DBT_TESTS=ON` because they
+exercise separately tracked CDNA3 simulator/semantic gaps.
+
 ### KMD Driver Interposer
 
 Applications do not always use HSA as their only GPU discovery path. Some

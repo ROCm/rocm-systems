@@ -7,6 +7,7 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
+#include <string_view>
 
 namespace rocjitsu {
 
@@ -50,6 +51,8 @@ inline constexpr Elf_Half SHN_ABS = 0xfff1;
 
 inline constexpr uint32_t EF_AMDGPU_MACH = 0x0ff;
 inline constexpr uint32_t EF_AMDGPU_MACH_NONE = 0;
+inline constexpr uint32_t EF_AMDGPU_FEATURE_XNACK_V4 = 0x00000300;
+inline constexpr uint32_t EF_AMDGPU_FEATURE_SRAMECC_V4 = 0x00000c00;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX908 = 0x30;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX90A = 0x3f;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX940 = 0x40;
@@ -124,9 +127,29 @@ inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
   case EF_AMDGPU_MACH_AMDGCN_GFX1200:
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+    return ROCJITSU_CODE_ARCH_GFX1250;
   default:
     return ROCJITSU_CODE_ARCH_INVALID;
   }
+}
+
+/// @brief Retarget AMDGPU ELF flags without carrying unsupported feature bits.
+inline constexpr uint32_t elf_flags_for_target(uint32_t source_flags, uint32_t target_mach) {
+  uint32_t features = source_flags & ~EF_AMDGPU_MACH;
+  switch (arch_for_elf_mach(target_mach)) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    features &= ~(EF_AMDGPU_FEATURE_XNACK_V4 | EF_AMDGPU_FEATURE_SRAMECC_V4);
+    break;
+  default:
+    break;
+  }
+  return features | (target_mach & EF_AMDGPU_MACH);
 }
 
 /// @brief Return the canonical gfx name for an AMDGPU ELF MACH value.
@@ -156,9 +179,27 @@ inline constexpr const char *elf_mach_name(uint32_t mach) {
     return "gfx1200";
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return "gfx1201";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+    return "gfx1250";
   default:
     return "unknown";
   }
+}
+
+/// @brief Return the AMDGPU ELF MACH value for a canonical gfx name.
+inline constexpr uint32_t elf_mach_for_name(std::string_view name) {
+  constexpr uint32_t known_machs[] = {
+      EF_AMDGPU_MACH_AMDGCN_GFX908,  EF_AMDGPU_MACH_AMDGCN_GFX90A,  EF_AMDGPU_MACH_AMDGCN_GFX940,
+      EF_AMDGPU_MACH_AMDGCN_GFX941,  EF_AMDGPU_MACH_AMDGCN_GFX942,  EF_AMDGPU_MACH_AMDGCN_GFX950,
+      EF_AMDGPU_MACH_AMDGCN_GFX1010, EF_AMDGPU_MACH_AMDGCN_GFX1030, EF_AMDGPU_MACH_AMDGCN_GFX1100,
+      EF_AMDGPU_MACH_AMDGCN_GFX1150, EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+      EF_AMDGPU_MACH_AMDGCN_GFX1250,
+  };
+  for (uint32_t mach : known_machs) {
+    if (name == elf_mach_name(mach))
+      return mach;
+  }
+  return EF_AMDGPU_MACH_NONE;
 }
 
 inline constexpr uint32_t SHT_NULL = 0;

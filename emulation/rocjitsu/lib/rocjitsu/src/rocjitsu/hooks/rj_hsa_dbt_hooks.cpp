@@ -96,10 +96,6 @@ struct TargetInfo {
   uint32_t mach;
 };
 
-constexpr std::array<uint32_t, 6> kAcceptedConcreteTargetMachs = {
-    EF_AMDGPU_MACH_AMDGCN_GFX942,  EF_AMDGPU_MACH_AMDGCN_GFX950,  EF_AMDGPU_MACH_AMDGCN_GFX1100,
-    EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201, EF_AMDGPU_MACH_AMDGCN_GFX1250};
-
 constexpr std::array<TargetInfo, 5> kArchAliases = {{
     {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA3)},
     {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA4)},
@@ -143,13 +139,11 @@ struct HookConfig {
 
 /// @brief Parse a config ISA name or architecture alias into a DBT target.
 [[nodiscard]] std::optional<TargetInfo> parse_target(std::string_view value) {
-  for (uint32_t mach : kAcceptedConcreteTargetMachs) {
-    std::string_view name = elf_mach_name(mach);
-    if (value == name) {
-      const rj_code_arch_t arch = arch_for_elf_mach(mach);
-      if (arch != ROCJITSU_CODE_ARCH_INVALID)
-        return TargetInfo{name, arch, mach};
-    }
+  const uint32_t mach = rocjitsu::elf_mach_for_name(value);
+  if (mach != rocjitsu::EF_AMDGPU_MACH_NONE) {
+    const rj_code_arch_t arch = arch_for_elf_mach(mach);
+    if (arch != ROCJITSU_CODE_ARCH_INVALID)
+      return TargetInfo{elf_mach_name(mach), arch, mach};
   }
   for (const TargetInfo &target : kArchAliases) {
     if (value == target.name)
@@ -2533,9 +2527,12 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return status;
   }
 
-  log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
+  log_message(kLogInfo,
+              "translating reader=%llu detected=%s/%s mach=0x%x source=%s/%s mach=0x%x "
+              "-> %s/%s mach=0x%x",
               static_cast<unsigned long long>(code_object_reader.handle),
-              elf_mach_name(source_target.mach), arch_name(source_target.arch),
+              elf_mach_name(detected.mach), arch_name(detected.arch), detected.mach,
+              elf_mach_name(source_target.mach), arch_name(source_target.arch), source_target.mach,
               config->target.name.data(), arch_name(config->target.arch), config->target.mach);
 
   AmdGpuCodeObject source_object(bytes, size);

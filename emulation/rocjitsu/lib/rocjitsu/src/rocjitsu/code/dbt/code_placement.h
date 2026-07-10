@@ -41,6 +41,8 @@ struct ExpandedTextScopePlacementRequest {
   uint64_t translated_entry_offset = 0;
   uint64_t prologue_size_bytes = 0;
   uint64_t entry_alignment_bytes = 256;
+  std::optional<uint16_t> long_branch_sgpr_pair;
+  std::optional<uint16_t> long_branch_scc_sgpr;
 };
 
 struct ExpandedTextScopePlacement {
@@ -49,6 +51,7 @@ struct ExpandedTextScopePlacement {
   uint64_t body_offset = 0;
   uint64_t descriptor_entry_offset = 0;
   std::optional<int16_t> prologue_branch_dwords;
+  std::vector<uint32_t> prologue_branch_words;
 };
 
 struct ExpandedTextBranchFixup {
@@ -72,10 +75,18 @@ struct ExpandedTextBranchRelocation {
 };
 
 struct ExpandedTextPcRelativeFixup {
+  enum class Form {
+    MaterializedSAddCoI32,
+    DirectSAddNcU64Literal64,
+  };
+
   uint64_t getpc_offset = 0;
   uint64_t add_tmp_offset = 0;
   uint64_t target_offset = 0;
+  std::optional<int64_t> original_target_offset;
   std::string kind;
+  Form form = Form::MaterializedSAddCoI32;
+  uint16_t sgpr_pair = 0;
 };
 
 struct ExpandedTextPcRelativeRelocationRequest {

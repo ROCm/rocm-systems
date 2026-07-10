@@ -138,6 +138,8 @@ TEST(CodePlacement, PlansExpandedTextScopeWithoutPrologue) {
       .current_tail_size_bytes = sizeof(uint32_t),
       .original_entry_offset = 0x40,
       .translated_entry_offset = 3 * sizeof(uint32_t),
+      .long_branch_sgpr_pair = std::nullopt,
+      .long_branch_scc_sgpr = std::nullopt,
   };
 
   const auto placement = plan_expanded_text_scope_placement(request);
@@ -156,6 +158,8 @@ TEST(CodePlacement, PlansExpandedTextScopeWithPrologue) {
       .original_entry_offset = 0x40,
       .translated_entry_offset = 2 * sizeof(uint32_t),
       .prologue_size_bytes = 3 * sizeof(uint32_t),
+      .long_branch_sgpr_pair = std::nullopt,
+      .long_branch_scc_sgpr = std::nullopt,
   };
 
   const auto placement = plan_expanded_text_scope_placement(request);
@@ -167,6 +171,8 @@ TEST(CodePlacement, PlansExpandedTextScopeWithPrologue) {
   EXPECT_EQ(placement->descriptor_entry_offset, 64u);
   ASSERT_TRUE(placement->prologue_branch_dwords.has_value());
   EXPECT_EQ(*placement->prologue_branch_dwords, 2);
+  ASSERT_EQ(placement->prologue_branch_words.size(), 1u);
+  EXPECT_EQ(placement->prologue_branch_words.front(), build_s_branch(2, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(CodePlacement, RejectsExpandedTextScopeWhenPrologueBranchIsOutOfRange) {
@@ -176,9 +182,31 @@ TEST(CodePlacement, RejectsExpandedTextScopeWhenPrologueBranchIsOutOfRange) {
       .original_entry_offset = 0,
       .translated_entry_offset = 0x40000,
       .prologue_size_bytes = sizeof(uint32_t),
+      .long_branch_sgpr_pair = std::nullopt,
+      .long_branch_scc_sgpr = std::nullopt,
   };
 
   EXPECT_FALSE(plan_expanded_text_scope_placement(request).has_value());
+}
+
+TEST(CodePlacement, PlansExpandedTextScopeWithLongPrologueBranch) {
+  const ExpandedTextScopePlacementRequest request{
+      .original_text_size_bytes = 0,
+      .current_tail_size_bytes = 0,
+      .original_entry_offset = 0,
+      .translated_entry_offset = 0x40000,
+      .prologue_size_bytes = sizeof(uint32_t),
+      .long_branch_sgpr_pair = 8,
+      .long_branch_scc_sgpr = 10,
+  };
+
+  const auto placement = plan_expanded_text_scope_placement(request);
+  ASSERT_TRUE(placement.has_value());
+  EXPECT_FALSE(placement->prologue_branch_dwords.has_value());
+  EXPECT_GT(placement->prologue_branch_words.size(), 1u);
+  EXPECT_EQ(placement->body_offset,
+            sizeof(uint32_t) + placement->prologue_branch_words.size() * sizeof(uint32_t));
+  EXPECT_EQ(placement->descriptor_entry_offset, 0u);
 }
 
 TEST(CodePlacement, RelocatesExpandedTextShortDirectBranch) {
@@ -198,8 +226,8 @@ TEST(CodePlacement, RelocatesExpandedTextShortDirectBranch) {
       {2 * sizeof(uint32_t), 2 * sizeof(uint32_t)},
   };
 
-  const auto relocation =
-      relocate_expanded_text_branches({.words = words, .branches = branches, .offset_map = offsets});
+  const auto relocation = relocate_expanded_text_branches(
+      {.words = words, .branches = branches, .offset_map = offsets});
   ASSERT_TRUE(relocation.success) << relocation.message;
   ASSERT_EQ(relocation.words.size(), words.size());
   EXPECT_EQ(relocation.words[0], pack_sopp(sopp_op_branch(ROCJITSU_CODE_ARCH_RDNA4), 1));
@@ -222,8 +250,8 @@ TEST(CodePlacement, RelocatesExpandedTextLongDirectBranchAndUpdatesOffsets) {
       {kTargetWord * sizeof(uint32_t), kTargetWord * sizeof(uint32_t)},
   };
 
-  const auto relocation =
-      relocate_expanded_text_branches({.words = words, .branches = branches, .offset_map = offsets});
+  const auto relocation = relocate_expanded_text_branches(
+      {.words = words, .branches = branches, .offset_map = offsets});
   ASSERT_TRUE(relocation.success) << relocation.message;
   ASSERT_EQ(relocation.words.size(), words.size() + 5);
   EXPECT_EQ(relocation.words[0], pack_sop1(71, 10, 0));
@@ -246,8 +274,8 @@ TEST(CodePlacement, RejectsExpandedTextLongDirectBranchWithoutScratchSgpr) {
       {kTargetWord * sizeof(uint32_t), kTargetWord * sizeof(uint32_t)},
   };
 
-  const auto relocation =
-      relocate_expanded_text_branches({.words = words, .branches = branches, .offset_map = offsets});
+  const auto relocation = relocate_expanded_text_branches(
+      {.words = words, .branches = branches, .offset_map = offsets});
   EXPECT_FALSE(relocation.success);
   EXPECT_EQ(relocation.message,
             "expanded text copy needs a dead SGPR pair for long branch s_branch");
@@ -272,15 +300,16 @@ TEST(CodePlacement, RelocatesExpandedTextPcRelativeFixupToCopiedTarget) {
       .getpc_offset = 0,
       .add_tmp_offset = sizeof(uint32_t),
       .target_offset = 4 * sizeof(uint32_t),
+      .original_target_offset = std::nullopt,
       .kind = "setpc",
   }};
 
-  const auto relocation = relocate_expanded_text_pc_relative_fixups(
-      {.words = words,
-       .offset_map = offsets,
-       .fixups = fixups,
-       .original_text_size_bytes = 0x1000,
-       .scope_base_bytes = 0x40});
+  const auto relocation =
+      relocate_expanded_text_pc_relative_fixups({.words = words,
+                                                 .offset_map = offsets,
+                                                 .fixups = fixups,
+                                                 .original_text_size_bytes = 0x1000,
+                                                 .scope_base_bytes = 0x40});
   ASSERT_TRUE(relocation.success) << relocation.message;
   EXPECT_EQ(words[2], 8u);
 }
@@ -301,17 +330,57 @@ TEST(CodePlacement, RelocatesExpandedTextPcRelativeFixupToOriginalTarget) {
       .getpc_offset = 0,
       .add_tmp_offset = sizeof(uint32_t),
       .target_offset = 0x200,
+      .original_target_offset = std::nullopt,
       .kind = "address",
   }};
 
-  const auto relocation = relocate_expanded_text_pc_relative_fixups(
-      {.words = words,
-       .offset_map = offsets,
-       .fixups = fixups,
-       .original_text_size_bytes = 0x1000,
-       .scope_base_bytes = 0x40});
+  const auto relocation =
+      relocate_expanded_text_pc_relative_fixups({.words = words,
+                                                 .offset_map = offsets,
+                                                 .fixups = fixups,
+                                                 .original_text_size_bytes = 0x1000,
+                                                 .scope_base_bytes = 0x40});
   ASSERT_TRUE(relocation.success) << relocation.message;
   EXPECT_EQ(static_cast<int32_t>(words[2]), -3656);
+}
+
+TEST(CodePlacement, RelocatesExpandedTextDirectSAddNcU64Literal64ToOriginalTarget) {
+  constexpr uint16_t kPcSgpr = 20;
+  constexpr uint16_t kSccSaveSgpr = 30;
+  constexpr uint16_t kScalarInlineMinusOne = 193;
+  std::vector<uint32_t> words{
+      pack_sop1(71, kPcSgpr, 0),
+      pack_sop2(48, kSccSaveSgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0)),
+      pack_sop2(0, kPcSgpr, kPcSgpr, 255),
+      0,
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_wait_alu(kWaitAluDepctrSaSdst0, ROCJITSU_CODE_ARCH_RDNA4),
+      pack_sop2(4, kPcSgpr + 1u, kPcSgpr + 1u, scalar_positive_inline_u32(0)),
+  };
+  const std::vector<std::pair<uint64_t, uint64_t>> offsets{
+      {0, 0},
+      {sizeof(uint32_t), sizeof(uint32_t)},
+  };
+  const std::vector<ExpandedTextPcRelativeFixup> fixups{{
+      .getpc_offset = 0,
+      .add_tmp_offset = sizeof(uint32_t),
+      .target_offset = 0x200,
+      .original_target_offset = std::nullopt,
+      .kind = "address",
+      .form = ExpandedTextPcRelativeFixup::Form::DirectSAddNcU64Literal64,
+      .sgpr_pair = kPcSgpr,
+  }};
+
+  const auto relocation =
+      relocate_expanded_text_pc_relative_fixups({.words = words,
+                                                 .offset_map = offsets,
+                                                 .fixups = fixups,
+                                                 .original_text_size_bytes = 0x1000,
+                                                 .scope_base_bytes = 0x40});
+  ASSERT_TRUE(relocation.success) << relocation.message;
+  EXPECT_EQ(static_cast<int32_t>(words[3]), -3652);
+  EXPECT_EQ(words[2], pack_sop2(0, kPcSgpr, kPcSgpr, 255));
+  EXPECT_EQ(words[6], pack_sop2(4, kPcSgpr + 1u, kPcSgpr + 1u, kScalarInlineMinusOne));
 }
 
 TEST(CodePlacement, PlansExpandedTextDescriptorRedirectionsAndDeduplicatesDescriptors) {
@@ -325,8 +394,7 @@ TEST(CodePlacement, PlansExpandedTextDescriptorRedirectionsAndDeduplicatesDescri
       {0x40, 0x300},
   };
 
-  const auto plan =
-      plan_expanded_text_descriptor_redirections(descriptors, copied_entries, 0x1000);
+  const auto plan = plan_expanded_text_descriptor_redirections(descriptors, copied_entries, 0x1000);
   ASSERT_TRUE(plan.success) << plan.message;
   ASSERT_EQ(plan.redirections.size(), 2u);
   EXPECT_EQ(plan.redirections[0].descriptor_file_offset, 0x100u);
@@ -343,8 +411,7 @@ TEST(CodePlacement, RejectsExpandedTextDescriptorRedirectionForMissingCopiedEntr
   };
   const std::vector<std::pair<uint64_t, uint64_t>> copied_entries;
 
-  const auto plan =
-      plan_expanded_text_descriptor_redirections(descriptors, copied_entries, 0x1000);
+  const auto plan = plan_expanded_text_descriptor_redirections(descriptors, copied_entries, 0x1000);
   EXPECT_FALSE(plan.success);
   EXPECT_EQ(plan.message,
             "expanded text copy could not map a kernel descriptor entry; leaving code object "

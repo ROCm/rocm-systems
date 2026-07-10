@@ -1,0 +1,4 @@
+hip_4.2 {
+  global:
+    hipModuleLoad;
+};

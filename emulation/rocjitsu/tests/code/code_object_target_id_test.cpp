@@ -203,6 +203,15 @@ TEST(GfxCodeObjectTargets, LoadsGfx1250FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
 }
 
+TEST(GfxCodeObjectTargets, CanonicalElfMachHelpersRecognizeGfx1250) {
+  EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_STREQ(elf_mach_name(EF_AMDGPU_MACH_AMDGCN_GFX1250), "gfx1250");
+  EXPECT_EQ(elf_mach_for_name("gfx1250"), EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  EXPECT_EQ(elf_mach_for_name("gfx1201"), EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  EXPECT_EQ(elf_mach_for_name("gfx942"), EF_AMDGPU_MACH_AMDGCN_GFX942);
+  EXPECT_EQ(elf_mach_for_name("unknown"), EF_AMDGPU_MACH_NONE);
+}
+
 // Machine flags outside the supported set must surface as
 // ROCJITSU_CODE_TARGET_INVALID rather than silently aliasing onto a real
 // target (which would happen if someone accidentally made a real target the

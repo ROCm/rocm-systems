@@ -2887,7 +2887,7 @@ TEST(Gfx1250ExecutionTest, DsAtomicAsyncBarrierArriveFlipsRawBarrierPhase) {
   const std::array<uint32_t, 2> words = {0xd9580000u, 0x00000000u};
   auto *arrive_inst = new gfx1250::DsAtomicAsyncBarrierArriveB64Vds(words.data());
   arrive_inst->execute_impl(*wf);
-  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  amdgpu::LocalMemPipeline local_pipeline;
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t state = cu->lds().read64(wf->lds_base() + kBarrierLdsAddr);
@@ -2917,7 +2917,7 @@ TEST(Gfx1250ExecutionTest, LocalMemPipelineUsesInjectedBarrierDecrementPayload) 
   state->store_data.resize(static_cast<size_t>(wf->wf_size()) * sizeof(decrement));
   std::memcpy(state->store_data.data(), &decrement, sizeof(decrement));
 
-  amdgpu::LocalMemPipeline local_pipeline(&cu->lds());
+  amdgpu::LocalMemPipeline local_pipeline;
   local_pipeline.issue(arrive_inst, *wf);
 
   const uint64_t expected =

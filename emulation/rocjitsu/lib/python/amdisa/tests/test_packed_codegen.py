@@ -22,6 +22,22 @@ def test_dot4_iu8_uses_operand_signedness_modifiers():
     assert 'static_cast<int8_t>(raw_b)' in cpp
 
 
+def test_dot4_f32_fp8_uses_each_operands_encoded_format():
+    expected = {
+        'dot4_f32_fp8_fp8': ('fp8_e4m3_to_f32', 'fp8_e4m3_to_f32'),
+        'dot4_f32_fp8_bf8': ('fp8_e4m3_to_f32', 'bf8_e5m2_to_f32'),
+        'dot4_f32_bf8_fp8': ('bf8_e5m2_to_f32', 'fp8_e4m3_to_f32'),
+        'dot4_f32_bf8_bf8': ('bf8_e5m2_to_f32', 'bf8_e5m2_to_f32'),
+    }
+
+    for cls, (decode_a, decode_b) in expected.items():
+        cpp = gen_dot4(['vdst'], ['src0', 'src1', 'src2'], cls)
+        a_line = next(line for line in cpp.splitlines() if 'float a =' in line)
+        b_line = next(line for line in cpp.splitlines() if 'float b =' in line)
+        assert decode_a in a_line
+        assert decode_b in b_line
+
+
 def test_dot8_iu4_uses_operand_signedness_modifiers():
     cpp = gen_dot8(['vdst'], ['src0', 'src1', 'src2'], 'dot8_i32_iu4')
 

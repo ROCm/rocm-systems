@@ -36,7 +36,9 @@ namespace rocjitsu {
 class GuestKfd : public LinuxKfd {
 public:
   /// @brief Construct a guest discovery driver from parsed DBT configuration.
-  explicit GuestKfd(config::DbtGuestConfig config);
+  /// @param execution_driver Optional simulated host KFD. When null, host
+  ///        execution is forwarded to the real `/dev/kfd`.
+  explicit GuestKfd(config::DbtGuestConfig config, LinuxKfd *execution_driver = nullptr);
 
   /// @brief Close the real KFD fd and remove generated overlay state.
   ~GuestKfd() override;
@@ -77,8 +79,8 @@ public:
   /// @brief Return the generated KFD topology root.
   [[nodiscard]] std::string topology_path() const override;
 
-  /// @brief Return an empty DRM root because host DRM paths stay real.
-  [[nodiscard]] std::string drm_path() const override { return {}; }
+  /// @brief Return the simulated host DRM root, or empty for real hardware.
+  [[nodiscard]] std::string drm_path() const override;
 
   /// @brief Detach inherited child-process state before destroying this copy.
   void reset_after_fork() override;
@@ -141,11 +143,14 @@ private:
   kfd_process_device_apertures guest_apertures() const;
 
   config::DbtGuestConfig config_;
+  /// @brief Non-owning simulated execution driver owned by the local VM.
+  LinuxKfd *execution_driver_ = nullptr;
   Sysfs::GpuInfo guest_{};
   std::unique_ptr<TopologyOverlay> overlay_;
   mutable std::mutex mutex_;
   std::atomic<int> real_kfd_fd_{-1};
   uint32_t open_refs_ = 0;
+  bool execution_driver_opened_ = false;
   uint32_t host_gpu_id_ = 0;
   static constexpr uint64_t kSyntheticHandleBase = 1ULL << 63;
   uint64_t next_synthetic_handle_ = kSyntheticHandleBase;

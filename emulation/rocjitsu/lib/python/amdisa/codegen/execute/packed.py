@@ -917,15 +917,26 @@ def gen_dot4(dst: list[str], src: list[str], cls: str) -> str:
         L.append('      if (signed_sum < 0) sum = 0u;')
         L.append('    }')
         L.append(f'    {d}.write_lane(wf, lane, sum);')
-    elif cls == 'dot4_f32_fp8':
+    elif cls.startswith('dot4_f32_'):
         # FP8 dot product: D.f32 += sum(A.fp8[i] * B.fp8[i]) for i in 0..3
+        formats = cls.removeprefix('dot4_f32_').split('_')
+        # Preserve compatibility with the original same-format class while the
+        # semantic catalog now carries both operand formats explicitly.
+        if len(formats) == 1:
+            formats *= 2
+        if len(formats) != 2 or any(fmt not in ('fp8', 'bf8') for fmt in formats):
+            raise ValueError(f'unsupported FP8 dot4 class: {cls}')
+        decode = {
+            'fp8': 'util::fp8_e4m3_to_f32',
+            'bf8': 'util::bf8_e5m2_to_f32',
+        }
         L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
         L.append('    for (int i = 0; i < 4; ++i) {')
         L.append(
-            '      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
+            f'      float a = {decode[formats[0]]}(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
         )
         L.append(
-            '      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
+            f'      float b = {decode[formats[1]]}(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
         )
         L.append('      acc += a * b;')
         L.append('    }')

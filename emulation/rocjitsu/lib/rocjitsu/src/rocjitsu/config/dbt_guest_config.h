@@ -19,6 +19,12 @@ struct DbtGuestConfig;
 
 namespace rocjitsu::config {
 
+/// @brief Execution target used by DBT guest mode.
+enum class DbtExecutionBackend {
+  Hardware,  ///< Forward execution-facing operations to a real host GPU.
+  Simulator, ///< Forward execution-facing operations to a RocJITsu simulated GPU.
+};
+
 /// @brief DBT guest-GPU discovery configuration.
 ///
 /// @details When enabled, the Linux KFD interposer exposes one synthetic guest
@@ -26,14 +32,20 @@ namespace rocjitsu::config {
 /// execution calls to the host agent. The KFD layer only owns discovery; DBT and
 /// HSA forwarding happen in the HSA hook.
 struct DbtGuestConfig {
-  bool enabled = false;          ///< True when GuestKfd mode is active.
-  std::string guest_isa;         ///< Guest ISA advertised by the synthetic agent.
-  std::string host_isa;          ///< Host ISA used for actual ROCR execution.
-  uint32_t host_gpu_id = 0;      ///< Host KFD topology gpu_id; 0 matches topology to host_isa.
-  int log_level = 0;             ///< DBT hook logging level loaded from the config file.
-  bool signal_backtrace = false; ///< Install a best-effort HSA-hook crash backtrace handler.
-  KfdDeviceConfig guest_device;  ///< Synthetic guest device appended to KFD topology.
+  bool enabled = false;     ///< True when GuestKfd mode is active.
+  std::string guest_isa;    ///< Guest ISA advertised by the synthetic agent.
+  std::string host_isa;     ///< Host ISA used for actual ROCR execution.
+  uint32_t host_gpu_id = 0; ///< Host KFD topology gpu_id; 0 matches topology to host_isa.
+  DbtExecutionBackend execution_backend =
+      DbtExecutionBackend::Hardware; ///< Execution backend selected for the host agent.
+  std::string simulator_config;      ///< Simulator VM config path for the simulator backend.
+  int log_level = 0;                 ///< DBT hook logging level loaded from the config file.
+  bool signal_backtrace = false;     ///< Install a best-effort HSA-hook crash backtrace handler.
+  KfdDeviceConfig guest_device;      ///< Synthetic guest device appended to KFD topology.
 };
+
+/// @brief Return the stable configuration spelling for an execution backend.
+const char *dbt_execution_backend_name(DbtExecutionBackend backend);
 
 /// @brief Convert a generated FlatBuffers DBT guest table into runtime config.
 ///

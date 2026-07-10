@@ -20,6 +20,17 @@ namespace rocjitsu {
 namespace config {
 namespace {
 
+DbtExecutionBackend parse_execution_backend(const fb::DbtGuestConfig *guest) {
+  const std::string value =
+      guest->execution_backend() ? guest->execution_backend()->str() : std::string("hardware");
+  if (value.empty() || value == "hardware")
+    return DbtExecutionBackend::Hardware;
+  if (value == "simulator")
+    return DbtExecutionBackend::Simulator;
+  throw std::runtime_error("dbt_guest.execution_backend must be 'hardware' or 'simulator', got '" +
+                           value + "'");
+}
+
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
   if (!device.present || device.simd_count == 0)
     return;
@@ -71,10 +82,19 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
   if (guest->host_isa())
     config.host_isa = guest->host_isa()->str();
   config.host_gpu_id = guest->host_gpu_id();
+  config.execution_backend = parse_execution_backend(guest);
+  if (guest->simulator_config())
+    config.simulator_config = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
   config.guest_device = kfd_device_from_fb(guest->guest_device());
   validate_guest_device_geometry(config.guest_device);
+  if (config.enabled && config.execution_backend == DbtExecutionBackend::Simulator &&
+      config.simulator_config.empty())
+    throw std::runtime_error(
+        "dbt_guest.simulator_config is required when execution_backend is 'simulator'");
+  if (config.execution_backend == DbtExecutionBackend::Hardware && !config.simulator_config.empty())
+    throw std::runtime_error("dbt_guest.simulator_config requires execution_backend 'simulator'");
   return config;
 }
 

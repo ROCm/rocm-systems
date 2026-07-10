@@ -43,6 +43,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -302,6 +303,187 @@ TEST(InstructionExecutionHarness, Rdna3_5) {
   RUN_HARNESS(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5");
 }
 TEST(InstructionExecutionHarness, Rdna4) { RUN_HARNESS(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
+
+TEST(InstructionExecutionHarness, Rdna4FlatPrivateDecodesGfx12LaneAddress) {
+  amdgpu::GpuMemory memory("rdna4_flat_private_mem");
+  amdgpu::L2Cache l2("rdna4_flat_private_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 136;
+  config.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_flat_private", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  constexpr uint64_t kScratchBase = 0x4c00000000ULL;
+  constexpr uint32_t kLaneStride = 0x1000;
+  constexpr uint64_t kPrivateOffset = 0x34;
+  constexpr uint64_t kLaneMask = 0x1fULL << 52;
+  wf->set_exec(0x3);
+  wf->set_scratch_base(kScratchBase);
+  wf->set_scratch_lane_size(kLaneStride);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 2; ++lane) {
+    const uint64_t encoded =
+        (kScratchBase & ~kLaneMask) | (static_cast<uint64_t>(lane) << 52) | kPrivateOffset;
+    cu->write_vgpr(vb + 22, lane, static_cast<uint32_t>(encoded));
+    cu->write_vgpr(vb + 23, lane, static_cast<uint32_t>(encoded >> 32));
+  }
+
+  rdna4::VflatMachineInst inst{};
+  inst.saddr = rdna4::OPR_SREG_NULL;
+  inst.vaddr = 22;
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  rdna4::flat_calculate_addresses(inst, *wf, state);
+
+  EXPECT_EQ(state.per_lane_addr[0], kScratchBase + kPrivateOffset);
+  EXPECT_EQ(state.per_lane_addr[1], kScratchBase + kLaneStride + kPrivateOffset);
+  cu->reset_all_wf();
+}
+
+TEST(InstructionExecutionHarness, Rdna4Unsigned64CompareSelectImplementsMax) {
+  amdgpu::GpuMemory memory("rdna4_minmax_mem");
+  amdgpu::L2Cache l2("rdna4_minmax_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_minmax", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, 0, 2);
+  cu->write_vgpr(vgpr_base + 1, 0, 0);
+  cu->write_vgpr(vgpr_base + 2, 0, 1);
+  cu->write_vgpr(vgpr_base + 3, 0, 0);
+
+  auto execute = [&](const std::array<uint32_t, 2> &words) {
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+  };
+  execute(encode_vop3(92, 20, 256 + 2, 256 + 0, 0));
+  execute(encode_vop3(257, 0, 256 + 0, 256 + 2, 20));
+  execute(encode_vop3(257, 1, 256 + 1, 256 + 3, 20));
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 0, 0), 2u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, 0), 0u);
+}
+
+TEST(InstructionExecutionHarness, Rdna4Signed64CompareSelectImplementsMaxWithAliasedDst) {
+  amdgpu::GpuMemory memory("rdna4_signed_minmax_mem");
+  amdgpu::L2Cache l2("rdna4_signed_minmax_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_signed_minmax", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0xffffffffu);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  std::array<int64_t, 32> expected{};
+  for (uint32_t lane = 0; lane < expected.size(); ++lane) {
+    int64_t current = (lane & 1u) != 0 ? static_cast<int64_t>(0x100000001ull * (lane + 1u))
+                                       : -static_cast<int64_t>(0x200000003ull * (lane + 1u));
+    int64_t candidate = (lane % 3u) != 0 ? static_cast<int64_t>(0x300000007ull * (lane + 1u))
+                                         : -static_cast<int64_t>(0x400000009ull * (lane + 1u));
+    if (lane == 0) {
+      current = std::numeric_limits<int64_t>::min();
+      candidate = 5;
+    } else if (lane == 1) {
+      current = 10;
+      candidate = -3;
+    }
+    expected[lane] = std::max(current, candidate);
+    const uint64_t current_bits = std::bit_cast<uint64_t>(current);
+    const uint64_t candidate_bits = std::bit_cast<uint64_t>(candidate);
+    cu->write_vgpr(vgpr_base + 0, lane, static_cast<uint32_t>(current_bits));
+    cu->write_vgpr(vgpr_base + 1, lane, static_cast<uint32_t>(current_bits >> 32));
+    cu->write_vgpr(vgpr_base + 2, lane, static_cast<uint32_t>(candidate_bits));
+    cu->write_vgpr(vgpr_base + 3, lane, static_cast<uint32_t>(candidate_bits >> 32));
+  }
+
+  auto execute = [&](const std::array<uint32_t, 2> &words) {
+    std::unique_ptr<Instruction> inst(decoder->decode(words.data()));
+    ASSERT_NE(inst, nullptr);
+    cu->execute_instruction(inst.get(), *wf);
+  };
+  execute(encode_vop3(84, 20, 256 + 0, 256 + 2, 0));
+  execute(encode_vop3(257, 0, 256 + 2, 256 + 0, 20));
+  execute(encode_vop3(257, 1, 256 + 3, 256 + 1, 20));
+
+  for (uint32_t lane = 0; lane < expected.size(); ++lane) {
+    SCOPED_TRACE(lane);
+    const uint64_t result = static_cast<uint64_t>(cu->read_vgpr(vgpr_base + 0, lane)) |
+                            (static_cast<uint64_t>(cu->read_vgpr(vgpr_base + 1, lane)) << 32);
+    EXPECT_EQ(std::bit_cast<int64_t>(result), expected[lane]);
+  }
+}
+
+TEST(Rdna4ExecMaskTest, Wave32ExecHiRemainsAvailableAsScalarScratch) {
+  amdgpu::GpuMemory gpu_mem("rdna4_exec_hi_mem");
+  amdgpu::L2Cache l2("rdna4_exec_hi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 128;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4_exec_hi", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  cu->write_sgpr(wf->sgpr_alloc().base, 0xffffffffu);
+  wf->set_exec(0xffffffffu);
+
+  constexpr uint32_t kInline16 = 128u + 16u;
+  const std::array<std::pair<uint32_t, std::string_view>, 3> sequence{{
+      {encode_sop2(/*s_lshr_b32=*/10, /*exec_lo=*/126, /*s0=*/0, kInline16)[0], "s_lshr_b32"},
+      {encode_sop2(/*s_lshl_b32=*/8, /*exec_hi=*/127, /*s0=*/0, kInline16)[0], "s_lshl_b32"},
+      {encode_sop2(/*s_or_b32=*/24, /*exec_lo=*/126, /*exec_lo=*/126, /*exec_hi=*/127)[0],
+       "s_or_b32"},
+  }};
+
+  for (size_t i = 0; i < sequence.size(); ++i) {
+    const uint32_t words[] = {sequence[i].first, 0};
+    std::unique_ptr<Instruction> inst(decoder->decode(words));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), sequence[i].second);
+    cu->execute_instruction(inst.get(), *wf);
+    if (i == 1) {
+      EXPECT_EQ(wf->exec(), 0x0000ffffu);
+      EXPECT_EQ(wf->exec_raw(), 0xffff0000'0000ffffULL);
+    }
+  }
+
+  EXPECT_EQ(wf->exec(), 0xffffffffu);
+  EXPECT_EQ(wf->exec_raw(), 0xffff0000'ffffffffULL);
+}
 TEST(InstructionExecutionHarness, Gfx1250) {
   RUN_HARNESS(gfx1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
 }

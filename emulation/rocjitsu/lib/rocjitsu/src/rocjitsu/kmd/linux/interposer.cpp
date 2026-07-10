@@ -7,12 +7,11 @@
 /// @details Intercepts open, close, ioctl, mmap, munmap, and filesystem access
 /// to route /dev/kfd operations and sysfs topology reads through one of two
 /// strategies. Normal simulation creates a VM and uses SimulatedKfd to own all
-/// visible GPU discovery and queue execution. DBT guest mode does not create a
-/// VM: GuestKfd forwards host-GPU KFD work to the real /dev/kfd while appending
-/// one synthetic guest GPU for ROCR discovery. The HSA tools hook then maps
-/// guest-agent API calls to the selected host agent and translates guest code
-/// objects before loading them. All mutable state is consolidated in
-/// InterposerContext.
+/// visible GPU discovery and queue execution. DBT guest mode uses GuestKfd to
+/// append one synthetic guest GPU over either real KFD hardware or an existing
+/// SimulatedKfd target. The HSA tools hook maps guest-agent API calls to that
+/// execution agent and translates guest code objects before loading them. All
+/// mutable state is consolidated in InterposerContext.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -58,6 +57,7 @@ RJ_DIAGNOSTIC_POP
 #include <dlfcn.h>
 #include <exception>
 #include <fcntl.h>
+#include <filesystem>
 #include <linux/memfd.h>
 #include <memory>
 #include <mutex>
@@ -466,6 +466,67 @@ public:
     return drm_fds_.erase(fd) != 0;
   }
 
+  bool create_local_vm(const std::string &config_path) {
+    rj_vm_t *created_vm = nullptr;
+    if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+        ROCJITSU_STATUS_SUCCESS) {
+      util::Logger::debug_print("rocjitsu: failed to create VM from ", config_path);
+      return false;
+    }
+    rj_vm_ = created_vm;
+
+    // Set up execution plugins based on environment variables.
+    if (rj_vm_->soc) {
+      std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
+      if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
+        pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
+      else
+        pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
+
+      std::string sinks_str = "stderr";
+      if (const char *s = std::getenv("RJ_SINKS"))
+        sinks_str = s;
+      std::istringstream ss(sinks_str);
+      std::string token;
+      while (std::getline(ss, token, ',')) {
+        if (token == "stderr")
+          pg->add_sink(&rocjitsu::StderrSink::instance());
+        else if (token == "stdout")
+          pg->add_sink(&rocjitsu::StdoutSink::instance());
+        else if (token == "file") {
+          const char *dir = std::getenv("RJ_SINK_DIR");
+          if (dir)
+            pg->set_sink_dir(dir);
+        }
+      }
+
+      if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
+        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
+        fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
+      }
+
+      if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
+        pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
+        fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
+      }
+      rj_vm_->soc->set_plugin_group(pg);
+    }
+    return true;
+  }
+
+  void start_local_vm() {
+    assert(rj_vm_ != nullptr);
+    std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+  }
+
+  static std::string resolve_simulator_config(const std::string &dbt_config_path,
+                                              const std::string &simulator_config) {
+    std::filesystem::path resolved(simulator_config);
+    if (resolved.is_relative())
+      resolved = std::filesystem::path(dbt_config_path).parent_path() / resolved;
+    return resolved.lexically_normal().string();
+  }
+
   LinuxKfd *get_or_create() {
     std::lock_guard lock(init_mutex_);
     if (active_driver_.load(std::memory_order_acquire) == nullptr) {
@@ -480,14 +541,33 @@ public:
       try {
         auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(*cfg_path);
         if (dbt_guest.enabled) {
-          auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest));
+          LinuxKfd *execution_driver = nullptr;
+          const bool simulator_backend =
+              dbt_guest.execution_backend == rocjitsu::config::DbtExecutionBackend::Simulator;
+          if (simulator_backend) {
+            const std::string simulator_path =
+                resolve_simulator_config(*cfg_path, dbt_guest.simulator_config);
+            if (!create_local_vm(simulator_path)) {
+              in_construction = false;
+              return nullptr;
+            }
+            execution_driver = rj_vm_->vm->driver();
+          }
+
+          auto guest_driver = std::make_unique<GuestKfd>(std::move(dbt_guest), execution_driver);
           if (!guest_driver->prepare_for_discovery()) {
+            if (rj_vm_) {
+              rj_vm_destroy(rj_vm_);
+              rj_vm_ = nullptr;
+            }
             in_construction = false;
             return nullptr;
           }
           auto *driver = guest_driver.get();
           guest_driver_ = std::move(guest_driver);
           active_driver_.store(driver, std::memory_order_release);
+          if (simulator_backend)
+            start_local_vm();
           in_construction = false;
           return driver;
         }
@@ -497,57 +577,14 @@ public:
         return nullptr;
       }
 
-      rj_vm_t *created_vm = nullptr;
-      if (rj_vm_create(cfg_path->c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
-          ROCJITSU_STATUS_SUCCESS) {
-        util::Logger::debug_print("rocjitsu: failed to create VM");
+      if (!create_local_vm(*cfg_path)) {
         in_construction = false;
         return nullptr;
-      }
-      rj_vm_ = created_vm;
-
-      // Set up execution plugins based on environment variables.
-      if (rj_vm_->soc) {
-        std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
-        if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
-          pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
-        else
-          pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
-
-        std::string sinks_str = "stderr";
-        if (const char *s = std::getenv("RJ_SINKS"))
-          sinks_str = s;
-        {
-          std::istringstream ss(sinks_str);
-          std::string token;
-          while (std::getline(ss, token, ',')) {
-            if (token == "stderr")
-              pg->add_sink(&rocjitsu::StderrSink::instance());
-            else if (token == "stdout")
-              pg->add_sink(&rocjitsu::StdoutSink::instance());
-            else if (token == "file") {
-              const char *dir = std::getenv("RJ_SINK_DIR");
-              if (dir)
-                pg->set_sink_dir(dir);
-            }
-          }
-        }
-
-        if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
-          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
-          fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
-        }
-
-        if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
-          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
-          fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
-        }
-        rj_vm_->soc->set_plugin_group(pg);
       }
 
       LinuxKfd *driver = rj_vm_->vm->driver();
       active_driver_.store(driver, std::memory_order_release);
-      std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+      start_local_vm();
       in_construction = false;
     }
     return driver();

@@ -1561,13 +1561,14 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_DOT4_U32_U8':
         return InstructionSemantics(name, 'dot4_u32_u8')
     # FP8 dot products (RDNA4)
-    if name in (
-        'V_DOT4_F32_FP8_FP8',
-        'V_DOT4_F32_FP8_BF8',
-        'V_DOT4_F32_BF8_FP8',
-        'V_DOT4_F32_BF8_BF8',
-    ):
-        return InstructionSemantics(name, 'dot4_f32_fp8')
+    fp8_dot4_formats = {
+        'V_DOT4_F32_FP8_FP8': 'dot4_f32_fp8_fp8',
+        'V_DOT4_F32_FP8_BF8': 'dot4_f32_fp8_bf8',
+        'V_DOT4_F32_BF8_FP8': 'dot4_f32_bf8_fp8',
+        'V_DOT4_F32_BF8_BF8': 'dot4_f32_bf8_bf8',
+    }
+    if name in fp8_dot4_formats:
+        return InstructionSemantics(name, fp8_dot4_formats[name])
     if name == 'V_DOT8_I32_I4':
         return InstructionSemantics(name, 'dot8_i32_i4')
     if name == 'V_DOT8_U32_U4':

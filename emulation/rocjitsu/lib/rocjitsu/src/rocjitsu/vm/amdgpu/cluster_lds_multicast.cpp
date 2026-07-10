@@ -25,7 +25,7 @@ void write_cluster_lds_target(const ClusterLdsMulticastTransaction &txn,
   if (!target.cu)
     return;
 
-  auto &lds = target.cu->lds();
+  auto &lds = target.lds ? *target.lds : target.cu->lds();
   for (uint32_t lane = 0; lane < txn.wf_size; ++lane) {
     if ((txn.lane_mask & (1ULL << lane)) == 0)
       continue;

@@ -191,6 +191,19 @@ uint32_t kernel_dispatch_wave_size(rj_code_arch_t arch, uint32_t kernel_code_pro
   }
 }
 
+bool arch_supports_wgp_mode(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
 uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wave_size,
                                                    uint32_t fallback_granularity) {
   // This is the AMDHSA kernel descriptor encoding granularity for
@@ -646,7 +659,7 @@ bool CommandProcessor::barrier_satisfied(const HwQueueState &qs, size_t idx) con
 
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
                                                   uint32_t global_wg_id, ComputeUnitCore *cu,
-                                                  uint32_t lds_base) {
+                                                  Lds *lds, uint32_t lds_base) {
   if (!entry.has_workgroup_clusters())
     return;
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
@@ -656,6 +669,7 @@ void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, ui
   cu->pin_lds_until_cluster_retired(cluster_key);
   ClusterWorkgroupPlacement placement{};
   placement.cu = cu;
+  placement.lds = lds;
   placement.lds_base = lds_base;
   placement.cluster_key = cluster_key;
   placement.cluster_rank = entry.cluster_rank_for_local_wg(local_wg_id);
@@ -684,8 +698,12 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
 
   for (uint32_t peer_wg_id : peer_wg_ids) {
     auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu)
+    if (peer_it != cluster_wg_placements_.end() && peer_it->second.cu) {
       peer_it->second.cu->unpin_lds_for_cluster(cluster_key);
+      for (auto *spi : spis_)
+        if (spi->release_wgp_workgroup(dispatch_id, peer_wg_id))
+          break;
+    }
   }
   for (uint32_t peer_wg_id : peer_wg_ids)
     cluster_wg_placements_.erase(wg_key(dispatch_id, peer_wg_id));
@@ -697,6 +715,9 @@ void CommandProcessor::erase_cluster_workgroups(uint32_t dispatch_id) {
     if ((it->first >> 32) == dispatch_id) {
       if (it->second.cu)
         it->second.cu->unpin_lds_for_cluster(it->second.cluster_key);
+      for (auto *spi : spis_)
+        if (spi->release_wgp_workgroup(dispatch_id, static_cast<uint32_t>(it->first)))
+          break;
       it = cluster_wg_placements_.erase(it);
     } else {
       ++it;
@@ -716,7 +737,7 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
   const uint32_t self_mask = cluster_multicast_rank_mask(src.cluster_rank);
   // Defensive for direct helper callers; the issue path handles mask 0 locally.
   if (mcast_mask == 0 || (src.cluster_size <= 1 && (mcast_mask & self_mask) != 0)) {
-    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
+    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank, src.lds});
     return targets;
   }
   if (src.cluster_size <= 1)
@@ -733,11 +754,11 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
           dispatch_id, wg_id, peer_wg_id, rank));
     }
     const auto &peer = peer_it->second;
-    targets.push_back({peer.cu, peer_wg_id, peer.lds_base, peer.cluster_rank});
+    targets.push_back({peer.cu, peer_wg_id, peer.lds_base, peer.cluster_rank, peer.lds});
   }
 
   if (targets.empty() && (mcast_mask & self_mask) != 0)
-    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank});
+    targets.push_back({src.cu, wg_id, src.lds_base, src.cluster_rank, src.lds});
   return targets;
 }
 
@@ -745,14 +766,17 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
 
   // Activate wavefront slots for each workgroup, distributing across CUs.
-  // Entire workgroups must land on a single CU (programming model requirement:
-  // LDS is per-CU and s_barrier synchronises within a CU). Query each CU for
-  // capacity before dispatching to guarantee all-or-nothing placement.
+  // All waves in one workgroup currently land on one physical CU so the
+  // existing barrier implementation remains local. WGP mode additionally
+  // reserves that CU's sibling and binds the waves to their shared LDS pool.
+  // Query the complete placement before dispatching for all-or-nothing setup.
   uint32_t dispatched = 0;
-  auto dispatch_to_cu = [&](uint32_t local_wg_id, uint32_t global_wg_id, ComputeUnitCore *cu) {
-    uint32_t lds_base = cu->allocate_lds(entry.group_segment_fixed_size);
+  auto dispatch_to_placement = [&](uint32_t local_wg_id, uint32_t global_wg_id,
+                                   const ShaderProcessorInput::WorkgroupPlacement &placement) {
+    ComputeUnitCore *cu = placement.cu;
+    uint32_t lds_base = placement.lds_base;
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
-    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
+    register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, placement.lds, lds_base);
 
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
@@ -761,6 +785,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                                       entry.vgprs_per_wf, entry.wave_size);
       assert(wf && "dispatch_wf failed after can_accept_workgroup returned true");
       wf->set_lds_base(lds_base);
+      wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
       wf->set_exec(initial_exec_mask_for_wave(entry, global_wg_id, w, entry.wave_size));
@@ -783,6 +808,51 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     uint32_t global_wg_id = local_wg_id + entry.workgroup_id_offset;
 
     if (entry.has_workgroup_clusters()) {
+      if (entry.wgp_mode) {
+        struct PlannedWgpWorkgroup {
+          uint32_t local_wg_id = 0;
+          uint32_t global_wg_id = 0;
+          ShaderProcessorInput::WorkgroupPlacement placement;
+        };
+        const uint32_t cluster_size = entry.cluster_size();
+        assert(entry.dispatched_wgs % cluster_size == 0 &&
+               "clustered dispatch advances by whole clusters");
+        const uint32_t cluster_ordinal = entry.dispatched_wgs / cluster_size;
+        const uint32_t cluster_base = entry.cluster_base_local_wg_id_for_ordinal(cluster_ordinal);
+        std::vector<PlannedWgpWorkgroup> plan;
+        plan.reserve(cluster_size);
+        bool planned = true;
+        for (uint32_t rank = 0; rank < cluster_size; ++rank) {
+          const uint32_t peer_local_wg_id = entry.cluster_peer_local_wg_id(cluster_base, rank);
+          const uint32_t peer_global_wg_id = peer_local_wg_id + entry.workgroup_id_offset;
+          std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
+          for (auto *spi : spis_) {
+            placement = spi->allocate_workgroup(entry, peer_global_wg_id);
+            if (placement)
+              break;
+          }
+          if (!placement) {
+            planned = false;
+            break;
+          }
+          plan.push_back({peer_local_wg_id, peer_global_wg_id, *placement});
+        }
+        if (!planned) {
+          for (const auto &wg : plan)
+            for (auto *spi : spis_)
+              if (spi->release_wgp_workgroup(entry.dispatch_id, wg.global_wg_id))
+                break;
+          if (!any_active_wavefronts(cus_)) {
+            throw std::runtime_error(std::format(
+                "WGP-mode workgroup cluster {}x{}x{} cannot fit in available paired-CU resources",
+                entry.cluster_size_x, entry.cluster_size_y, entry.cluster_size_z));
+          }
+          break;
+        }
+        for (const auto &wg : plan)
+          dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, wg.placement);
+        continue;
+      }
       // The SPI interface chooses one WG at a time and cannot reserve all peers
       // in a cluster atomically. Plan clusters directly across the CP-visible CU
       // list until SPI grows an all-or-nothing cluster placement API.
@@ -804,36 +874,49 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         break;
       }
       next_cu_ = planned_next_cu;
-      for (const auto &wg : plan)
-        dispatch_to_cu(wg.local_wg_id, wg.global_wg_id, wg.cu);
+      for (const auto &wg : plan) {
+        ShaderProcessorInput::WorkgroupPlacement placement{
+            wg.cu, &wg.cu->lds(), wg.cu->allocate_lds(entry.group_segment_fixed_size)};
+        dispatch_to_placement(wg.local_wg_id, wg.global_wg_id, placement);
+      }
       continue;
     }
 
-    // SPI selects the CU based on resource availability.
-    ComputeUnitCore *cu = nullptr;
+    // SPI selects the CU or sibling-CU WGP based on descriptor mode and
+    // resource availability.
+    std::optional<ShaderProcessorInput::WorkgroupPlacement> placement;
     if (!spis_.empty()) {
       for (auto *spi : spis_) {
-        cu = spi->dispatch_workgroup(entry);
-        if (cu)
+        placement = spi->allocate_workgroup(entry, global_wg_id);
+        if (placement)
           break;
       }
-    } else {
+    } else if (!entry.wgp_mode) {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
         size_t cu_idx = (next_cu_ + attempt) % cus_.size();
         cus_[cu_idx]->retire_halted_wfs();
         if (cus_[cu_idx]->can_accept_workgroup(entry.wfs_per_workgroup,
                                                entry.group_segment_fixed_size)) {
-          cu = cus_[cu_idx];
+          auto *cu = cus_[cu_idx];
+          placement = ShaderProcessorInput::WorkgroupPlacement{
+              cu, &cu->lds(), cu->allocate_lds(entry.group_segment_fixed_size)};
           next_cu_ = (cu_idx + 1) % cus_.size();
           break;
         }
       }
     }
 
-    if (!cu)
+    if (!placement) {
+      if (!any_active_wavefronts(cus_)) {
+        throw std::runtime_error(
+            std::format("workgroup cannot fit in available {} resources: waves={} LDS={} bytes",
+                        entry.wgp_mode ? "WGP" : "CU", entry.wfs_per_workgroup,
+                        entry.group_segment_fixed_size));
+      }
       break;
+    }
 
-    dispatch_to_cu(local_wg_id, global_wg_id, cu);
+    dispatch_to_placement(local_wg_id, global_wg_id, *placement);
   }
   return dispatched;
 }
@@ -846,6 +929,14 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
   util::Logger::cp(
       [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  // Cluster workgroups retain their placement (including paired-WGP LDS)
+  // until every peer completes because late peer multicast may still target
+  // an already halted workgroup's LDS window.
+  if (!cluster_wg_placements_.contains(wg_key(dispatch_id, wg_id))) {
+    for (auto *spi : spis_)
+      if (spi->release_wgp_workgroup(dispatch_id, wg_id))
+        break;
+  }
   mark_cluster_workgroup_complete(dispatch_id, wg_id);
   if (completion_)
     completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
@@ -1005,6 +1096,30 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.kernarg_preload = kd.kernarg_preload;
   dp.private_segment_fixed_size = std::max(kd.private_segment_fixed_size, pkt.private_segment_size);
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
+  dp.wgp_mode = arch_supports_wgp_mode(arch) &&
+                AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE) != 0;
+
+  uint64_t lds_capacity = 0;
+  if (dp.wgp_mode) {
+    for (const auto *spi : spis_)
+      lds_capacity = std::max<uint64_t>(lds_capacity, spi->max_wgp_lds_bytes());
+  } else {
+    for (const auto *cu : cus_)
+      lds_capacity =
+          std::max<uint64_t>(lds_capacity, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
+  }
+  const uint64_t aligned_lds =
+      (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
+  if (dp.wgp_mode && lds_capacity == 0) {
+    throw std::runtime_error(
+        "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured");
+  }
+  if (aligned_lds > lds_capacity) {
+    throw std::runtime_error(std::format(
+        "kernel dispatch requests {} bytes of LDS ({} bytes after alignment) in {} mode, but "
+        "the simulator topology provides at most {} bytes",
+        dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", lds_capacity));
+  }
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
   // The queue_ptr and dispatch_ptr are GPU VAs that the kernel reads via SMEM.
@@ -1100,12 +1215,12 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   util::Logger::vm([&](auto &os) {
     os << std::format("dispatch #{} d={} \"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
-                      "lds={} sgpr={} vgpr={} sig={:#x}",
+                      "lds={} mode={} sgpr={} vgpr={} sig={:#x}",
                       total_dispatched_, dp.dispatch_id, kernel_sym.empty() ? "?" : kernel_sym,
                       pkt.grid_size_x, pkt.grid_size_y, pkt.grid_size_z, pkt.workgroup_size_x,
                       pkt.workgroup_size_y, pkt.workgroup_size_z, total_wgs,
-                      kd.group_segment_fixed_size, dp.sgprs_per_wf, dp.vgprs_per_wf,
-                      dp.completion_signal);
+                      kd.group_segment_fixed_size, dp.wgp_mode ? "WGP" : "CU", dp.sgprs_per_wf,
+                      dp.vgprs_per_wf, dp.completion_signal);
   });
   util::Logger::cp([&](auto &os) {
     os << std::format("DISPATCH #{} d={} \"{}\" wgs={} wfs/wg={} sig={:#x} pid={} ko={:#x} pc={:#x}"

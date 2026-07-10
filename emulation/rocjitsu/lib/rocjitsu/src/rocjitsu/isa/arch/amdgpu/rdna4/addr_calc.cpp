@@ -4,6 +4,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -89,7 +90,10 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
+    uint64_t translated = 0;
+    if (amdgpu::addr_calc::decode_gfx12_flat_private_address(wf, addr, &translated))
+      addr = translated;
+    else if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
       addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
     d.per_lane_addr[lane] = addr;
   }

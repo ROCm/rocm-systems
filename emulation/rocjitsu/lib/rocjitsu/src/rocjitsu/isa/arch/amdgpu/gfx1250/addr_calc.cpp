@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -83,32 +84,6 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
   d.cu_path = wf.cu().full_path();
 }
 
-bool decode_flat_private_address(amdgpu::Wavefront &wf, uint64_t addr, uint64_t *translated) {
-  uint32_t lane_stride = wf.scratch_lane_size();
-  if (lane_stride == 0)
-    return false;
-
-  uint32_t wf_size = wf.wf_size();
-  assert(wf_size == 32 || wf_size == 64);
-  uint32_t lane_shift = wf_size == 64 ? 51 : 52;
-  uint64_t lane_mask = static_cast<uint64_t>(wf_size - 1) << lane_shift;
-  uint64_t scratch_base = wf.scratch_base();
-  uint64_t base_without_lane = scratch_base & ~lane_mask;
-  uint64_t addr_without_lane = addr & ~lane_mask;
-  if (addr_without_lane < base_without_lane)
-    return false;
-
-  uint64_t private_offset = addr_without_lane - base_without_lane;
-  if (private_offset > 0xFFFF'FFFFULL)
-    return false;
-
-  if (translated != nullptr) {
-    uint32_t encoded_lane = static_cast<uint32_t>((addr & lane_mask) >> lane_shift);
-    *translated = scratch_base + static_cast<uint64_t>(encoded_lane) * lane_stride + private_offset;
-  }
-  return true;
-}
-
 template <typename Inst>
 void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
                                      amdgpu::VectorMemState &d, bool decode_flat_private) {
@@ -134,10 +109,10 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
       uint64_t translated = 0;
-      if (decode_flat_private_address(wf, addr, &translated))
+      if (amdgpu::addr_calc::decode_gfx12_flat_private_address(wf, addr, &translated))
         addr = translated;
     } else {
-      assert(!decode_flat_private_address(wf, addr, nullptr) &&
+      assert(!amdgpu::addr_calc::decode_gfx12_flat_private_address(wf, addr, nullptr) &&
              "gfx1250 global memory address must not use flat private scratch encoding");
     }
     d.per_lane_addr[lane] = addr;

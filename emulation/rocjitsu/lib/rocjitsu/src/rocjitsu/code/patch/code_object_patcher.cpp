@@ -914,8 +914,7 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
     shift_symbols_in_moved_sections(image_, header, shdrs, shift_section_vaddr, padded_file_delta);
     shift_relocation_offsets_in_moved_sections(image_, header, shdrs, shift_section_vaddr,
                                                padded_file_delta);
-    shift_dynamic_pointers_in_moved_sections(image_, shdrs, shift_section_vaddr,
-                                             padded_file_delta);
+    shift_dynamic_pointers_in_moved_sections(image_, shdrs, shift_section_vaddr, padded_file_delta);
     adjust_kernel_descriptor_entry_offsets_in_moved_sections(image_, shdrs, shift_section_vaddr,
                                                              padded_file_delta);
 
@@ -949,8 +948,9 @@ bool CodeObjectPatcher::replace_text(std::span<const uint8_t> new_text) {
 
 void CodeObjectPatcher::update_elf_flags(uint32_t new_mach) {
   auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image_.data());
-  // Preserve upper bits (XNACK, SRAMECC feature flags); only replace EF_AMDGPU_MACH in low byte.
-  ehdr->e_flags = (ehdr->e_flags & ~0xFFu) | (new_mach & 0xFFu);
+  // XNACK and SRAMECC selections describe target hardware capabilities, not
+  // source-code semantics. Normalize them along with the exact target MACH.
+  ehdr->e_flags = elf_flags_for_target(ehdr->e_flags, new_mach);
 }
 
 bool CodeObjectPatcher::patch_metadata_target_isa(std::string_view old_isa,

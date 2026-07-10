@@ -591,7 +591,6 @@ int main(int argc, char **argv) {
     HsaState state = init_hsa();
     std::vector<std::string> warnings;
     std::vector<uint8_t> translated = translate_code_object(opts, state.target, warnings);
-
     hsa_executable_t executable{};
     hsa_code_object_reader_t reader{};
     uint32_t group_segment_size = 0;

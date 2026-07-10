@@ -44,7 +44,9 @@ inline bool rdna4_vop3_has_unused_src2(uint16_t op) {
          (op >= 833 && op <= 834) || (op >= 864 && op <= 876);
 }
 
-inline bool rdna4_vop3_sdst_has_unused_src2(uint16_t op) { return op >= 768 && op <= 770; }
+inline bool rdna4_vop3_uses_opsel2_without_src2(uint16_t op) { return (op >= 875 && op <= 876); }
+
+inline bool rdna4_vop3_sdst_has_unused_src2(uint16_t op) { return (op >= 768 && op <= 770); }
 
 inline bool rdna4_vop3_sdst_opcode(uint16_t op) {
   return (op >= 288 && op <= 290) || (op >= 764 && op <= 770);
@@ -56,7 +58,7 @@ inline void canonicalize_gfx1250_rdna4_unused_vop3_src2(rocjitsu::rdna4::Vop3Mac
     return;
   dst.src2 = 0;
   dst.abs &= 0x3;
-  dst.opsel &= 0xB;
+  dst.opsel &= rdna4_vop3_uses_opsel2_without_src2(dst_op) ? 0xF : 0xB;
   dst.neg &= 0x3;
 }
 

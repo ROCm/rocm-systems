@@ -15,6 +15,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class ComputeUnitCore;
+class Lds;
 struct VectorMemState;
 class Wavefront;
 
@@ -25,6 +26,8 @@ struct ClusterLdsTarget {
   /// Informational placement rank for diagnostics and future rank-sensitive
   /// cluster operations; current multicast writes need only CU and LDS base.
   uint32_t cluster_rank = 0;
+  /// Placement-selected backing. Null means the target CU's local LDS.
+  Lds *lds = nullptr;
 };
 
 /// @brief Fully described LDS writeback request produced by an async cluster load.

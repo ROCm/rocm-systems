@@ -53,10 +53,10 @@ namespace {
 
 constexpr uint32_t kConservativeLoweringMinimumVgprs = 128;
 constexpr uint32_t kGfx1250Rdna4SemanticMinimumVgprs = 128;
-// The f16 K32 WMMA split searches for scratch at v208 so the worst
+// The 16-bit K32 WMMA splits search for scratch at v208 so the worst
 // non-accumulating form fits in v208..v224. RDNA4 wave32 descriptors granulate
 // VGPRs by 8, so those scopes need a 232-VGPR floor to make v224 addressable.
-constexpr uint32_t kGfx1250F16WmmaScratchMinimumVgprs = 232;
+constexpr uint32_t kGfx1250K32WmmaScratchMinimumVgprs = 232;
 constexpr uint32_t kMaxInPlaceMetadataVgprs = 127;
 constexpr uint16_t kGfx1250VopdEncodingId = 0x032u;
 constexpr uint16_t kGfx1250Vopd3EncodingId = 0x0CFu;
@@ -74,20 +74,31 @@ constexpr uint16_t kGfx1250VMulU64E32Opcode = 42u;
 constexpr uint8_t kGfx1250VAddF16E32Opcode = 50u;
 constexpr uint32_t kVop3Encoding = 0x35u;
 constexpr uint16_t kGfx1250VPkFmaF32Vop3pOpcode = 31u;
+constexpr uint16_t kGfx1250VPkFmaBf16Vop3pOpcode = 17u;
 constexpr uint16_t kGfx1250VPkMulF32Vop3pOpcode = 40u;
 constexpr uint16_t kGfx1250VPkAddF32Vop3pOpcode = 41u;
+constexpr uint16_t kGfx1250VFmaMixloBf16Vop3pOpcode = 0x3Eu;
 constexpr uint16_t kGfx1250VCvtPkF16F32Vop3Opcode = 879u;
 constexpr uint16_t kGfx1250VAddCoU32Vop3SdstOpcode = 768u;
 constexpr uint16_t kGfx1250WmmaF32F8f6f4K128Opcode = 0x33u;
 constexpr uint16_t kGfx1250WmmaScaleF32F8f6f4K128Opcode = 0x35u;
+constexpr uint16_t kGfx1250WmmaScale16F32F8f6f4K128Opcode = 0x3Au;
 constexpr uint16_t kGfx1250WmmaF32F16K32Opcode = 0x60u;
+constexpr uint16_t kGfx1250WmmaF16F16K32Opcode = 0x61u;
+constexpr uint16_t kGfx1250WmmaF32Bf16K32Opcode = 0x62u;
+constexpr uint16_t kGfx1250WmmaBf16Bf16K32Opcode = 0x63u;
+constexpr uint16_t kGfx1250WmmaBf16F32Bf16K32Opcode = 0x64u;
 constexpr uint16_t kGfx1250SwmmacF32F16K64Opcode = 0x65u;
+constexpr uint16_t kGfx1250SwmmacBf16f32K64LastOpcode = 0x69u;
 constexpr uint16_t kGfx1250WmmaI32Iu8K64Opcode = 0x72u;
+constexpr uint16_t kGfx1250SwmmacF32Fp8K128Opcode = 0x73u;
+constexpr uint16_t kGfx1250SwmmacF16Bf8K128LastOpcode = 0x7Au;
 constexpr uint16_t kGfx1250SwmmacI32Iu8K128Opcode = 0x7Bu;
 constexpr uint16_t kGfx1250WmmaF32Fp8Fp8K128Opcode = 0x80u;
+constexpr uint16_t kGfx1250WmmaF32F4M32K128Opcode = 0x88u;
 constexpr uint32_t kGfx1250HighBankBaseVgpr = 256u;
 constexpr uint32_t kGfx1250VMulU64HighBankScratchCount = 2u;
-constexpr uint32_t kGfx1250SemanticPrivateBorrowedVgprCount = 21u;
+constexpr uint32_t kGfx1250SemanticPrivateBorrowedVgprCount = 22u;
 constexpr uint32_t kGfx1250RedirectPrivateBorrowedVgprCount = 16u;
 constexpr uint32_t kGfx1250PrivateBorrowedVgprCount =
     kGfx1250SemanticPrivateBorrowedVgprCount + kGfx1250RedirectPrivateBorrowedVgprCount;
@@ -190,16 +201,19 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
          inst.opcode() == kGfx1250WmmaF32Fp8Fp8K128Opcode;
 }
 
-[[nodiscard]] bool is_gfx1250_k32_f16_wmma(const Instruction &inst) {
+[[nodiscard]] bool is_gfx1250_k32_16bit_wmma(const Instruction &inst) {
   return inst.encoding_id() == kGfx1250Vop3pEncodingId &&
-         inst.opcode() == kGfx1250WmmaF32F16K32Opcode;
+         inst.opcode() >= kGfx1250WmmaF32F16K32Opcode &&
+         inst.opcode() <= kGfx1250WmmaBf16F32Bf16K32Opcode;
 }
 
 [[nodiscard]] uint32_t
 gfx1250_wmma_f8f6f4_matrix_tmp_vgpr_count(const gfx1250::Vop3pMachineInst &src) {
   const uint32_t matrix_a_fmt = src.opsel;
   const uint32_t matrix_b_fmt = (src.pad_14 << 2u) | src.opsel_hi;
-  if (matrix_a_fmt == 4u && matrix_b_fmt == 4u)
+  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u)
+    return 0;
+  if (matrix_a_fmt > 1u || matrix_b_fmt > 1u)
     return 10;
   if (matrix_a_fmt == 0u && matrix_b_fmt == 0u)
     return 4;
@@ -219,11 +233,18 @@ gfx1250_wmma_f8f6f4_matrix_tmp_vgpr_count(const gfx1250::Vop3pMachineInst &src) 
     return gfx1250_wmma_f8f6f4_matrix_tmp_vgpr_count(src);
   }
 
+  if (inst.encoding_id() == kGfx1250Vop3p1EncodingId &&
+      inst.opcode() == kGfx1250WmmaF32F4M32K128Opcode)
+    return 10;
+
   if (inst.encoding_id() == kGfx1250Vop3pEncodingId &&
-      inst.opcode() == kGfx1250WmmaScaleF32F8f6f4K128Opcode &&
+      (inst.opcode() == kGfx1250WmmaScaleF32F8f6f4K128Opcode ||
+       inst.opcode() == kGfx1250WmmaScale16F32F8f6f4K128Opcode) &&
       inst.size() >= static_cast<int>(2 * sizeof(gfx1250::Vop3pMachineInst))) {
     gfx1250::Vop3pMachineInst src{};
     std::memcpy(&src, raw + 2, sizeof(src));
+    if (src.op == kGfx1250WmmaF32F4M32K128Opcode)
+      return 10;
     if (src.op != kGfx1250WmmaF32F8f6f4K128Opcode)
       return 0;
     return gfx1250_wmma_f8f6f4_matrix_tmp_vgpr_count(src);
@@ -333,6 +354,8 @@ struct StaticPcRelativeAddress {
   uint64_t getpc_offset = 0;
   uint64_t add_tmp_offset = 0;
   uint64_t target_offset = 0;
+  std::optional<int64_t> original_target_offset;
+  ExpandedTextPcRelativeFixup::Form form = ExpandedTextPcRelativeFixup::Form::MaterializedSAddCoI32;
 };
 
 struct StaticPcRelativeCallEdge {
@@ -448,6 +471,7 @@ static_pc_relative_address_edges(std::span<const uint8_t> text) {
   constexpr uint32_t kOpSAddCoU32 = 0;
   constexpr uint32_t kOpSAddCoI32 = 2;
   constexpr uint32_t kOpSAddCoCiU32 = 4;
+  constexpr uint32_t kOpSAddNcU64 = 83;
   constexpr uint32_t kOpSGetPcB64 = 71;
   constexpr uint32_t kOpSSetPcB64 = 72;
 
@@ -460,6 +484,25 @@ static_pc_relative_address_edges(std::span<const uint8_t> text) {
 
     const uint64_t add_tmp_offset = offset + sizeof(uint32_t);
     const uint32_t add_tmp_word = read_u32(text, add_tmp_offset);
+    if (add_tmp_word == pack_sop2(kOpSAddNcU64, sgpr_pair, sgpr_pair, 254)) {
+      const uint64_t literal_bits =
+          static_cast<uint64_t>(read_u32(text, offset + 2 * sizeof(uint32_t))) |
+          (static_cast<uint64_t>(read_u32(text, offset + 3 * sizeof(uint32_t))) << 32u);
+      const int64_t literal = std::bit_cast<int64_t>(literal_bits);
+      const auto literal_lo = static_cast<int32_t>(literal_bits & 0xFFFF'FFFFu);
+      if (static_cast<int64_t>(literal_lo) == literal) {
+        const int64_t target = static_cast<int64_t>(offset + sizeof(uint32_t)) + literal;
+        if (auto aligned = aligned_text_target(target, text.size())) {
+          edges.push_back({sgpr_pair, offset, add_tmp_offset, *aligned, std::nullopt,
+                           ExpandedTextPcRelativeFixup::Form::DirectSAddNcU64Literal64});
+        } else {
+          edges.push_back({sgpr_pair, offset, add_tmp_offset, 0, target,
+                           ExpandedTextPcRelativeFixup::Form::DirectSAddNcU64Literal64});
+        }
+      }
+      continue;
+    }
+
     const uint16_t tmp = static_cast<uint16_t>((add_tmp_word >> 16) & 0x7Fu);
     if (tmp >= 128 ||
         add_tmp_word != pack_sop2(kOpSAddCoI32, tmp, 255, scalar_positive_inline_u32(4)))
@@ -487,7 +530,7 @@ static_pc_relative_address_edges(std::span<const uint8_t> text) {
     const int64_t target =
         static_cast<int64_t>(offset + 2 * sizeof(uint32_t)) + static_cast<int64_t>(literal);
     if (auto aligned = aligned_text_target(target, text.size()))
-      edges.push_back({sgpr_pair, offset, add_tmp_offset, *aligned});
+      edges.push_back({sgpr_pair, offset, add_tmp_offset, *aligned, std::nullopt});
   }
   return edges;
 }
@@ -2030,7 +2073,9 @@ descriptor_range_from_gfx1250_high_literal(uint32_t literal_hi) {
 
   gfx1250::SmemMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
-  if (src.nv == 0)
+  // Scaled SMEM needs a semantic expansion because RDNA4 has no equivalent
+  // scale_offset bit.  Let that lowering clear nv as part of the replacement.
+  if (src.nv == 0 || src.scale_offset != 0)
     return {};
   src.nv = 0;
 
@@ -5402,68 +5447,75 @@ void ensure_cave_branch_islands(CodeObjectPatcher &patcher, CaveBranchIslandStat
                                               int16_t &entry_branch_dwords) {
   ensure_cave_branch_islands(patcher, state, host_arch);
 
+  const uint64_t cave_start = patcher.cave_start();
+  const auto island_pc = [&](size_t index) { return cave_start + state.body_offsets[index]; };
+  const auto upper_index_for_pc = [&](uint64_t pc) {
+    return static_cast<size_t>(
+        std::ranges::upper_bound(state.body_offsets, pc, {},
+                                 [&](uint64_t offset) { return cave_start + offset; }) -
+        state.body_offsets.begin());
+  };
+
+  // Return the furthest unused island that advances the chain and is reachable
+  // by one SOPP branch. body_offsets is sorted, so this normally examines only
+  // one slot instead of rescanning the entire island slab for every hop.
+  const auto furthest_reachable_island = [&](uint64_t current_pc) -> std::optional<size_t> {
+    constexpr uint64_t kBranchPcBiasBytes = sizeof(uint32_t);
+    const uint64_t max_delta = kSoppBranchMaxForwardBytes + kBranchPcBiasBytes;
+    const uint64_t max_reachable = current_pc > std::numeric_limits<uint64_t>::max() - max_delta
+                                       ? std::numeric_limits<uint64_t>::max()
+                                       : current_pc + max_delta;
+    const uint64_t last_candidate_pc =
+        island_target == 0 ? 0 : std::min(max_reachable, island_target - 1);
+
+    const size_t first = upper_index_for_pc(current_pc);
+    size_t end = upper_index_for_pc(last_candidate_pc);
+    while (end > first) {
+      const size_t index = --end;
+      if (state.used[index])
+        continue;
+      int16_t ignored = 0;
+      if (compute_sopp_branch_offset(current_pc, island_pc(index), ignored))
+        return index;
+    }
+    return std::nullopt;
+  };
+
   uint64_t current_pc = repl.start_offset;
   std::vector<size_t> chain;
 
   for (;;) {
     int16_t direct_dwords = 0;
     if (compute_sopp_branch_offset(current_pc, island_target, direct_dwords)) {
-      if (chain.empty()) {
-        entry_branch_dwords = direct_dwords;
-      } else {
-        const size_t last_index = chain.back();
-        const std::array<uint32_t, 1> island_words{build_s_branch(direct_dwords, host_arch)};
-        patcher.overwrite_cave_body(state.body_offsets[last_index], island_words);
-      }
       break;
     }
 
-    std::optional<size_t> best_index;
-    uint64_t best_pc = 0;
-    for (size_t index = 0; index < state.body_offsets.size(); ++index) {
-      if (state.used[index] || std::find(chain.begin(), chain.end(), index) != chain.end()) {
-        continue;
-      }
-
-      const uint64_t island_pc = patcher.cave_start() + state.body_offsets[index];
-      if (island_pc <= current_pc || island_pc >= island_target)
-        continue;
-
-      int16_t island_dwords = 0;
-      if (!compute_sopp_branch_offset(current_pc, island_pc, island_dwords))
-        continue;
-
-      if (!best_index || island_pc > best_pc) {
-        best_index = index;
-        best_pc = island_pc;
-      }
-    }
-
+    const auto best_index = furthest_reachable_island(current_pc);
     if (!best_index)
       return false;
-
-    if (chain.empty()) {
-      int16_t entry_dwords = 0;
-      if (!compute_sopp_branch_offset(repl.start_offset, best_pc, entry_dwords))
-        return false;
-      entry_branch_dwords = entry_dwords;
-    } else {
-      const size_t prev_index = chain.back();
-      const uint64_t prev_pc = patcher.cave_start() + state.body_offsets[prev_index];
-      int16_t prev_dwords = 0;
-      if (!compute_sopp_branch_offset(prev_pc, best_pc, prev_dwords))
-        return false;
-      const std::array<uint32_t, 1> island_words{build_s_branch(prev_dwords, host_arch)};
-      patcher.overwrite_cave_body(state.body_offsets[prev_index], island_words);
-    }
-
     chain.push_back(*best_index);
-    current_pc = best_pc;
+    current_pc = island_pc(*best_index);
   }
 
-  for (size_t index : chain)
+  if (chain.empty())
+    return false;
+
+  if (!compute_sopp_branch_offset(repl.start_offset, island_pc(chain.front()),
+                                  entry_branch_dwords)) {
+    return false;
+  }
+  for (size_t position = 0; position < chain.size(); ++position) {
+    const size_t index = chain[position];
+    const uint64_t target =
+        position + 1 < chain.size() ? island_pc(chain[position + 1]) : island_target;
+    int16_t branch_dwords = 0;
+    if (!compute_sopp_branch_offset(island_pc(index), target, branch_dwords))
+      return false;
+    const std::array<uint32_t, 1> island_words{build_s_branch(branch_dwords, host_arch)};
+    patcher.overwrite_cave_body(state.body_offsets[index], island_words);
     state.used[index] = true;
-  return !chain.empty();
+  }
+  return true;
 }
 
 [[nodiscard]] bool allocate_cave_long_branch_island(CodeObjectPatcher &patcher,
@@ -5474,12 +5526,29 @@ void ensure_cave_branch_islands(CodeObjectPatcher &patcher, CaveBranchIslandStat
                                                     int16_t &entry_branch_dwords) {
   ensure_cave_branch_islands(patcher, state, host_arch);
 
+  const uint64_t cave_start = patcher.cave_start();
+  constexpr uint64_t kBranchPcBiasBytes = sizeof(uint32_t);
+  const uint64_t max_delta = kSoppBranchMaxForwardBytes + kBranchPcBiasBytes;
+  const uint64_t max_reachable =
+      repl.start_offset > std::numeric_limits<uint64_t>::max() - max_delta
+          ? std::numeric_limits<uint64_t>::max()
+          : repl.start_offset + max_delta;
+  const auto project_pc = [&](uint64_t offset) { return cave_start + offset; };
+  const size_t reachable_begin = static_cast<size_t>(
+      std::ranges::upper_bound(state.body_offsets, repl.start_offset, {}, project_pc) -
+      state.body_offsets.begin());
+  const size_t reachable_end = static_cast<size_t>(
+      std::ranges::upper_bound(state.body_offsets, max_reachable, {}, project_pc) -
+      state.body_offsets.begin());
+  if (reachable_begin == reachable_end)
+    return false;
+
   const auto try_range = [&](size_t begin, size_t end) -> std::optional<size_t> {
     for (size_t index = begin; index < end; ++index) {
       if (state.used[index])
         continue;
 
-      const uint64_t island_pc = patcher.cave_start() + state.body_offsets[index];
+      const uint64_t island_pc = cave_start + state.body_offsets[index];
       int16_t entry_dwords = 0;
       if (!compute_sopp_branch_offset(repl.start_offset, island_pc, entry_dwords))
         continue;
@@ -5511,12 +5580,13 @@ void ensure_cave_branch_islands(CodeObjectPatcher &patcher, CaveBranchIslandStat
     return std::nullopt;
   };
 
-  const size_t search_start = std::min(state.next_long_search_index, state.body_offsets.size());
-  if (try_range(search_start, state.body_offsets.size()))
+  const size_t search_start =
+      std::clamp(state.next_long_search_index, reachable_begin, reachable_end);
+  if (try_range(search_start, reachable_end))
     return true;
-  if (search_start == 0)
+  if (search_start == reachable_begin)
     return false;
-  return try_range(0, search_start).has_value();
+  return try_range(reachable_begin, search_start).has_value();
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
@@ -5802,9 +5872,6 @@ gfx1250_high_bank_entry_modes_for_scope(const KernelTranslationScope &scope) {
     for (BasicBlock *succ : block->successors()) {
       if (succ == nullptr || !scope_blocks.contains(succ))
         continue;
-      if (gfx1250_block_ends_with_s_setpc(*block) &&
-          gfx1250_has_call_fallthrough_predecessor(*succ))
-        continue;
       auto &succ_modes = entry_mode_sets[succ];
       const auto old_modes = succ_modes;
       succ_modes |= *exit_modes;
@@ -5920,12 +5987,13 @@ struct HighBankScratchPlan {
     return true;
 
   if (inst.encoding_id() == kGfx1250Vop3pEncodingId) {
-    switch (inst.opcode()) {
-    case kGfx1250SwmmacF32F16K64Opcode:
+    if (inst.opcode() >= kGfx1250SwmmacF32F16K64Opcode &&
+        inst.opcode() <= kGfx1250SwmmacBf16f32K64LastOpcode)
       return true;
-    default:
-      return false;
-    }
+    if (inst.opcode() >= kGfx1250SwmmacF32Fp8K128Opcode &&
+        inst.opcode() <= kGfx1250SwmmacF16Bf8K128LastOpcode)
+      return true;
+    return false;
   }
 
   const auto *raw = inst.raw_encoding();
@@ -5950,16 +6018,46 @@ scope_contains_gfx1250_private_borrow_semantic(const KernelTranslationScope &sco
   return false;
 }
 
-[[nodiscard]] bool scope_contains_gfx1250_k32_f16_wmma(const KernelTranslationScope &scope) {
+[[nodiscard]] bool scope_contains_gfx1250_k32_16bit_wmma(const KernelTranslationScope &scope) {
   for (BasicBlock *block : scope.blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
-      if (is_gfx1250_k32_f16_wmma(inst))
+      if (is_gfx1250_k32_16bit_wmma(inst))
         return true;
     }
   }
   return false;
+}
+
+[[nodiscard]] bool scope_contains_relative_vgpr_access(const KernelTranslationScope &scope) {
+  for (BasicBlock *block : scope.blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (starts_with(inst.mnemonic(), "v_movrel"))
+        return true;
+    }
+  }
+  return false;
+}
+
+void reserve_source_vgprs_for_relative_access(const KernelTranslationScope &scope,
+                                              LivenessAnalysis &liveness) {
+  if (scope.translation == nullptr || !scope_contains_relative_vgpr_access(scope))
+    return;
+
+  // M0 makes the actual v_movrel source or destination register dynamic. The
+  // decoded operand exposes only the encoded base, so ordinary liveness cannot
+  // safely lend any source-level VGPR to a semantic expansion in this scope.
+  // Reserve the full descriptor-backed source file and let descriptor growth
+  // provide scratch registers above it.
+  const uint32_t count =
+      std::min<uint32_t>(scope.translation->guest_vgpr_count, REGISTER_SET_MAX_VGPRS);
+  for (uint32_t base = 0; base < count; base += 32u) {
+    const auto width = static_cast<uint8_t>(std::min<uint32_t>(32u, count - base));
+    liveness.reserve_scratch_registers({RegClass::VGPR, static_cast<uint16_t>(base), width});
+  }
 }
 
 [[nodiscard]] bool
@@ -6030,17 +6128,43 @@ void grow_required_sgpr_count_for_register_set(const RegisterSet &registers,
     return 0;
 
   switch (inst.opcode()) {
+  case kGfx1250VPkFmaBf16Vop3pOpcode:
+    return 7;
   case kGfx1250WmmaF32F8f6f4K128Opcode:
   case kGfx1250WmmaScaleF32F8f6f4K128Opcode:
+  case kGfx1250WmmaScale16F32F8f6f4K128Opcode:
     return gfx1250_wmma_f8f6f4_tmp_vgpr_count(inst);
+  case kGfx1250WmmaF32F16K32Opcode:
+  case kGfx1250WmmaF32Bf16K32Opcode:
+    return 8;
+  case kGfx1250WmmaF16F16K32Opcode:
+  case kGfx1250WmmaBf16Bf16K32Opcode:
+    return 4;
+  case kGfx1250WmmaBf16F32Bf16K32Opcode:
+    return 10;
+  case kGfx1250VFmaMixloBf16Vop3pOpcode:
+    return 5;
   case kGfx1250WmmaI32Iu8K64Opcode:
     // Worst-case K64 i8 lowering uses an aligned scratch accumulator plus A/B
     // relayout and lane-xor address temporaries.
     return 13;
+  case kGfx1250SwmmacF32Fp8K128Opcode:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 1u:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 2u:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 3u:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 4u:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 5u:
+  case kGfx1250SwmmacF32Fp8K128Opcode + 6u:
+  case kGfx1250SwmmacF16Bf8K128LastOpcode:
+    return 17;
   case kGfx1250SwmmacI32Iu8K128Opcode:
     return 15;
   case kGfx1250SwmmacF32F16K64Opcode:
-    return 21;
+  case kGfx1250SwmmacF32F16K64Opcode + 1u:
+  case kGfx1250SwmmacF32F16K64Opcode + 2u:
+  case kGfx1250SwmmacF32F16K64Opcode + 3u:
+  case kGfx1250SwmmacBf16f32K64LastOpcode:
+    return 22;
   default:
     return 0;
   }
@@ -6118,6 +6242,7 @@ void configure_liveness_scratch(rj_code_arch_t guest_arch, rj_code_arch_t host_a
     liveness.reserve_scratch_registers(
         {RegClass::SGPR, static_cast<uint16_t>(scope.translation->rdna4_grid_yz_sgpr), 1});
   }
+  reserve_source_vgprs_for_relative_access(scope, liveness);
   const uint32_t scratch_count = gfx1250_high_bank_scratch_count_for_scope(scope, liveness);
   if (auto plan = gfx1250_high_bank_scratch_plan(*scope.translation, scratch_count)) {
     liveness.set_high_vgpr_scratch_base(plan->encoded_base);
@@ -6150,6 +6275,7 @@ void configure_shared_liveness_scratch(rj_code_arch_t guest_arch, rj_code_arch_t
     reserved_source_sgprs =
         std::max({reserved_source_sgprs, scope.translation->target_abi_sgpr_count,
                   scope.translation->target_source_sgpr_count});
+    reserve_source_vgprs_for_relative_access(scope, liveness);
 
     if (scope.translation->rdna4_grid_x_sgpr >= 0) {
       liveness.reserve_scratch_registers(
@@ -6228,8 +6354,8 @@ descriptor_resource_overrides_for_scopes(rj_code_arch_t guest_arch, rj_code_arch
       continue;
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
     uint32_t minimum_vgprs = required_vgpr_count_for_gfx1250_rdna4_scope(scope);
-    if (scope_contains_gfx1250_k32_f16_wmma(scope))
-      minimum_vgprs = std::max(minimum_vgprs, kGfx1250F16WmmaScratchMinimumVgprs);
+    if (scope_contains_gfx1250_k32_16bit_wmma(scope))
+      minimum_vgprs = std::max(minimum_vgprs, kGfx1250K32WmmaScratchMinimumVgprs);
     const uint32_t minimum_sgprs = required_sgpr_count_for_gfx1250_rdna4_scope(scope);
     const uint32_t scratch_count = gfx1250_high_bank_scratch_count_for_scope(scope, liveness);
     if (const auto plan = gfx1250_high_bank_scratch_plan(*scope.translation, scratch_count)) {
@@ -6462,8 +6588,10 @@ static_call_targets_by_offset(std::vector<std::unique_ptr<BasicBlock>> &blocks,
                               std::span<const StaticPcRelativeAddress> pc_relative_addresses,
                               std::span<const StaticPcRelativeCallEdge> call_edges) {
   std::unordered_map<uint64_t, std::vector<const StaticPcRelativeAddress *>> addresses_by_offset;
-  for (const StaticPcRelativeAddress &address : pc_relative_addresses)
-    addresses_by_offset[address.add_tmp_offset].push_back(&address);
+  for (const StaticPcRelativeAddress &address : pc_relative_addresses) {
+    if (!address.original_target_offset)
+      addresses_by_offset[address.add_tmp_offset].push_back(&address);
+  }
 
   std::unordered_map<uint64_t, std::vector<const StaticPcRelativeCallEdge *>> calls_by_offset;
   for (const StaticPcRelativeCallEdge &edge : call_edges)
@@ -6726,13 +6854,17 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     static_pc_relative_fixups.push_back({.getpc_offset = edge.getpc_offset,
                                          .add_tmp_offset = edge.add_tmp_offset,
                                          .target_offset = edge.target_offset,
+                                         .original_target_offset = std::nullopt,
                                          .kind = "setpc"});
   }
   for (const StaticPcRelativeAddress &address : static_pc_relative_addresses) {
     static_pc_relative_fixups.push_back({.getpc_offset = address.getpc_offset,
                                          .add_tmp_offset = address.add_tmp_offset,
                                          .target_offset = address.target_offset,
-                                         .kind = "address"});
+                                         .original_target_offset = address.original_target_offset,
+                                         .kind = "address",
+                                         .form = address.form,
+                                         .sgpr_pair = address.sgpr_pair});
   }
   std::vector<uint64_t> block_leaders(entry_offsets.begin(), entry_offsets.end());
   block_leaders.reserve(block_leaders.size() + static_setpc_edges.size() +
@@ -6742,7 +6874,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     block_leaders.push_back(edge.target_offset);
   for (const StaticPcRelativeAddress &address : static_pc_relative_addresses) {
     block_leaders.push_back(address.add_tmp_offset);
-    block_leaders.push_back(address.target_offset);
+    if (!address.original_target_offset)
+      block_leaders.push_back(address.target_offset);
   }
   for (const StaticPcRelativeCallEdge &edge : static_pc_relative_calls)
     block_leaders.push_back(edge.return_offset);
@@ -6864,6 +6997,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
       LivenessAnalysis liveness(KernelBlockScope(scope.blocks));
       configure_liveness_scratch(guest_arch_, host_arch_, scope, liveness);
+      TranslationContext expanded_context(
+          scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
+          scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
       std::optional<HighBankBlockModeMap> high_bank_entry_modes;
       if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
         high_bank_entry_modes = gfx1250_high_bank_entry_modes_for_scope(scope);
@@ -6902,8 +7038,12 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
           const auto mode_it = high_bank_entry_modes->find(block);
           if (mode_it == high_bank_entry_modes->end()) {
-            fail_expanded_copy(
-                "expanded text copy cannot determine gfx1250 VGPR MSB mode for copied block");
+            std::ostringstream message;
+            message << "expanded text copy cannot determine gfx1250 VGPR MSB mode for copied "
+                       "block at offset 0x"
+                    << std::hex << block->start_offset() << " in kernel scope 0x"
+                    << scope.translation->entry_text_offset;
+            fail_expanded_copy(message.str());
             break;
           }
           high_bank_shadow_state.mode = mode_it->second;
@@ -6935,8 +7075,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             }
             if (shadow_lowering.kind == HighBankShadowLoweringKind::RemappedGuest) {
               words = translate_remapped_guest_instruction_words(
-                  inst, liveness, shadow_lowering.words, scope.translation->rdna4_grid_x_sgpr,
-                  scope.translation->rdna4_grid_yz_sgpr);
+                  inst, liveness, expanded_context, shadow_lowering.words,
+                  scope.translation->rdna4_grid_x_sgpr, scope.translation->rdna4_grid_yz_sgpr);
               if (words.empty()) {
                 fail_expanded_copy(
                     "expanded text copy cannot translate remapped gfx1250 high-bank instruction");
@@ -7003,7 +7143,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               words = lower_raw_gfx1250_v_mul_u64_e32(text, offset, inst, liveness, source_size);
           }
           if (words.empty())
-            words = translate_instruction_words(inst, offset, liveness, text,
+            words = translate_instruction_words(inst, offset, liveness, expanded_context, text,
                                                 scope.translation->rdna4_grid_x_sgpr,
                                                 scope.translation->rdna4_grid_yz_sgpr);
           if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
@@ -7130,6 +7270,50 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       if (!relocate_direct_branches() || !expanded_copy_ok)
         break;
 
+      const uint32_t required_vgprs =
+          std::max(scope.translation->target_vgpr_count, expanded_context.required_vgpr_count);
+      const uint32_t required_sgprs =
+          std::max(scope.translation->target_sgpr_count, expanded_context.required_sgpr_count);
+      if (required_vgprs != scope.translation->target_vgpr_count ||
+          required_sgprs != scope.translation->target_sgpr_count) {
+        KernelDescriptorTranslationOptions updated_options;
+        updated_options.minimum_vgprs =
+            std::max(conservative_lowering_minimum_vgprs(guest_arch_, host_arch_), required_vgprs);
+        updated_options.minimum_sgprs = required_sgprs;
+        if (const auto override_it = std::ranges::find_if(
+                descriptor_overrides,
+                [&](const KernelDescriptorResourceOverride &override) {
+                  return override.entry_text_offset == scope.translation->entry_text_offset;
+                });
+            override_it != descriptor_overrides.end()) {
+          updated_options.minimum_vgprs =
+              std::max(updated_options.minimum_vgprs, override_it->minimum_vgprs);
+          updated_options.target_vgpr_count_override = override_it->target_vgpr_count_override;
+          updated_options.minimum_sgprs =
+              std::max(updated_options.minimum_sgprs, override_it->minimum_sgprs);
+          updated_options.group_segment_fixed_size_addend =
+              override_it->group_segment_fixed_size_addend;
+          updated_options.private_segment_fixed_size_addend =
+              override_it->private_segment_fixed_size_addend;
+        }
+
+        auto updated = descriptor_translator.translate_descriptor(
+            patcher.image_bytes(), scope.translation->descriptor_file_offset,
+            scope.translation->entry_text_offset, updated_options);
+        if (!updated) {
+          fail_expanded_copy(
+              "expanded text copy could not recompute descriptor scratch requirements");
+          break;
+        }
+        append_diagnostics(result.diagnostics, updated->diagnostics);
+        if (!updated->supported) {
+          fail_expanded_copy(
+              "expanded text copy requires unsupported descriptor scratch resources");
+          break;
+        }
+        *scope.translation = std::move(*updated);
+      }
+
       const auto entry_it = scope_offsets.find(scope.translation->entry_text_offset);
       if (entry_it == scope_offsets.end()) {
         fail_expanded_copy("expanded text copy is missing a translated kernel entry");
@@ -7158,12 +7342,31 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         return true;
       };
 
+      std::optional<uint16_t> prologue_long_branch_pair;
+      std::optional<uint16_t> prologue_long_branch_scc;
+      if (!scope.translation->prologue_words.empty()) {
+        uint32_t scratch_floor = scope.translation->target_source_sgpr_count;
+        if (scope.translation->rdna4_grid_x_sgpr >= 0)
+          scratch_floor = std::max(scratch_floor,
+                                   static_cast<uint32_t>(scope.translation->rdna4_grid_x_sgpr + 1));
+        if (scope.translation->rdna4_grid_yz_sgpr >= 0)
+          scratch_floor = std::max(
+              scratch_floor, static_cast<uint32_t>(scope.translation->rdna4_grid_yz_sgpr + 1));
+        const uint32_t scratch_pair = align_up_vgpr_count(scratch_floor, 2);
+        if (scratch_pair + 2u < scope.translation->target_sgpr_count && scratch_pair + 2u <= 105u) {
+          prologue_long_branch_pair = static_cast<uint16_t>(scratch_pair);
+          prologue_long_branch_scc = static_cast<uint16_t>(scratch_pair + 2u);
+        }
+      }
+
       const ExpandedTextScopePlacementRequest placement_request{
           .original_text_size_bytes = text.size(),
           .current_tail_size_bytes = expanded_words.size() * sizeof(uint32_t),
           .original_entry_offset = scope.translation->entry_text_offset,
           .translated_entry_offset = entry_it->second,
           .prologue_size_bytes = scope.translation->prologue_words.size() * sizeof(uint32_t),
+          .long_branch_sgpr_pair = prologue_long_branch_pair,
+          .long_branch_scc_sgpr = prologue_long_branch_scc,
       };
       const auto scope_placement = plan_expanded_text_scope_placement(placement_request);
       if (!scope_placement) {
@@ -7193,7 +7396,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                "expanded launch stub placement mismatch");
         std::vector<uint32_t> launch_stub(scope.translation->prologue_words.begin(),
                                           scope.translation->prologue_words.end());
-        launch_stub.push_back(build_s_branch(*scope_placement->prologue_branch_dwords, host_arch_));
+        launch_stub.insert(launch_stub.end(), scope_placement->prologue_branch_words.begin(),
+                           scope_placement->prologue_branch_words.end());
 
         expanded_words.insert(expanded_words.end(), launch_stub.begin(), launch_stub.end());
         const uint64_t scope_base = scope_placement->body_offset;
@@ -7460,8 +7664,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
           if (shadow_lowering.kind == HighBankShadowLoweringKind::RemappedGuest) {
             auto words = translate_remapped_guest_instruction_words(
-                inst, active_liveness, shadow_lowering.words, scope.translation->rdna4_grid_x_sgpr,
-                scope.translation->rdna4_grid_yz_sgpr);
+                inst, active_liveness, active_context, shadow_lowering.words,
+                scope.translation->rdna4_grid_x_sgpr, scope.translation->rdna4_grid_yz_sgpr);
             if (words.empty()) {
               result.warnings.push_back(
                   "in-place translation cannot translate remapped gfx1250 high-bank instruction");
@@ -7835,7 +8039,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
 std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
     const Instruction &inst, uint64_t offset, const LivenessAnalysis &liveness,
-    std::span<const uint8_t> orig_text, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr) {
+    TranslationContext &context, std::span<const uint8_t> orig_text, int16_t rdna4_grid_x_sgpr,
+    int16_t rdna4_grid_yz_sgpr) {
   const uint32_t inst_size = inst.size();
   const uint32_t *raw = inst.raw_encoding();
   auto finish_words = [&](std::vector<uint32_t> words) {
@@ -7884,7 +8089,6 @@ std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
 
   const uint16_t dst_opcode = leg ? leg->target_opcode : source_opcode;
 
-  TranslationContext context;
   auto expansion = semantic_translator_->try_lower_expand_with_opcode(inst, offset, liveness,
                                                                       context, source_opcode);
   if (expansion.status == ExpandStatus::Failed) {
@@ -7930,8 +8134,8 @@ std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
 }
 
 std::vector<uint32_t> BinaryTranslator::translate_remapped_guest_instruction_words(
-    const Instruction &inst, LivenessAnalysis &liveness, std::span<const uint32_t> guest_words,
-    int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr) {
+    const Instruction &inst, LivenessAnalysis &liveness, TranslationContext &context,
+    std::span<const uint32_t> guest_words, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr) {
   if (guest_words.empty())
     return {};
 
@@ -7948,8 +8152,8 @@ std::vector<uint32_t> BinaryTranslator::translate_remapped_guest_instruction_wor
 
   const auto *bytes = reinterpret_cast<const uint8_t *>(guest_words.data());
   const std::span<const uint8_t> remapped_text(bytes, guest_words.size() * sizeof(uint32_t));
-  return translate_instruction_words(*remapped, 0, liveness, remapped_text, rdna4_grid_x_sgpr,
-                                     rdna4_grid_yz_sgpr);
+  return translate_instruction_words(*remapped, 0, liveness, context, remapped_text,
+                                     rdna4_grid_x_sgpr, rdna4_grid_yz_sgpr);
 }
 
 bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vector<uint8_t> &text,
@@ -7991,6 +8195,16 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
   auto apply_local_cave = [&](const BranchableTextPlacement &local_cave, PlacementTier tier) {
     auto cave_words = repl.target_words;
     cave_words.push_back(build_s_branch(local_cave.exit_branch_dwords, host_arch_));
+
+    // An active appended-cave chain may later absorb the source bytes between
+    // its return target and another remote rewrite.  A local detour mutates
+    // those bytes into a branch stub whose return lands back in the original
+    // text; copying that stub into the appended chain would leave the chain and
+    // resume in source bytes that the extension has replaced with NOPs.
+    // Terminate the chain at the local detour so a later remote rewrite starts
+    // a fresh chain instead of bridging across non-linear control flow.
+    if (placement.cave_chain != nullptr)
+      *placement.cave_chain = {};
 
     patch_source_branch(local_cave.entry_branch_dwords);
     std::memcpy(text.data() + local_cave.offset, cave_words.data(),
@@ -8121,47 +8335,46 @@ bool BinaryTranslator::apply_semantic(const SemanticReplacement &repl, std::vect
       if (placement.cave_branch_islands == nullptr)
         return false;
 
-      for (uint32_t attempt = 0; attempt < 8; ++attempt) {
-        const uint64_t branch_target = patcher.cave_start() + patcher.cave_body_size();
-        const uint64_t return_branch_pc =
-            branch_target + repl.target_words.size() * sizeof(uint32_t);
-        auto return_trailer = make_return_trailer(return_branch_pc, stub_next);
-        int16_t island_entry_dwords = 0;
-        if (!return_trailer.empty() && placement.long_return_sgpr_pair &&
-            allocate_cave_long_branch_island(
-                patcher, *placement.cave_branch_islands, repl, branch_target, host_arch_,
-                *placement.long_return_sgpr_pair, island_entry_dwords)) {
-          patch_source_branch(island_entry_dwords);
+      const uint64_t branch_target = patcher.cave_start() + patcher.cave_body_size();
+      const uint64_t return_branch_pc = branch_target + repl.target_words.size() * sizeof(uint32_t);
+      auto return_trailer = make_return_trailer(return_branch_pc, stub_next);
+      int16_t island_entry_dwords = 0;
+      if (!return_trailer.empty() && placement.long_return_sgpr_pair &&
+          allocate_cave_long_branch_island(patcher, *placement.cave_branch_islands, repl,
+                                           branch_target, host_arch_,
+                                           *placement.long_return_sgpr_pair, island_entry_dwords)) {
+        patch_source_branch(island_entry_dwords);
 
-          auto cave_words = repl.target_words;
-          cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
-          patcher.append_cave_body(cave_words);
-          record_cave_chain(stub_next,
-                            patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
-          append_placement_diagnostic(warnings_, "selected",
-                                      PlacementTier::AppendedCaveLongBranchIsland, repl);
-          return true;
-        }
-
-        if (!return_trailer.empty() &&
-            allocate_cave_branch_chain(patcher, *placement.cave_branch_islands, repl, branch_target,
-                                       host_arch_, island_entry_dwords)) {
-          patch_source_branch(island_entry_dwords);
-
-          auto cave_words = repl.target_words;
-          cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
-          patcher.append_cave_body(cave_words);
-          record_cave_chain(stub_next,
-                            patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
-          append_placement_diagnostic(warnings_, "selected", PlacementTier::AppendedCaveBranchChain,
-                                      repl);
-          return true;
-        }
-
-        append_cave_branch_island_block(patcher, *placement.cave_branch_islands, host_arch_);
+        auto cave_words = repl.target_words;
+        cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
+        patcher.append_cave_body(cave_words);
+        record_cave_chain(stub_next,
+                          patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+        append_placement_diagnostic(warnings_, "selected",
+                                    PlacementTier::AppendedCaveLongBranchIsland, repl);
+        return true;
       }
 
-      return false;
+      if (return_trailer.empty() ||
+          !allocate_cave_branch_chain(patcher, *placement.cave_branch_islands, repl, branch_target,
+                                      host_arch_, island_entry_dwords)) {
+        // A newly appended island block would begin at branch_target. If the
+        // existing island graph cannot reach that address, adding slots at or
+        // after it cannot make the source branch reachable and only grows the
+        // code object. Fail immediately so the caller can select another
+        // placement strategy.
+        return false;
+      }
+
+      patch_source_branch(island_entry_dwords);
+      auto cave_words = repl.target_words;
+      cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
+      patcher.append_cave_body(cave_words);
+      record_cave_chain(stub_next,
+                        patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+      append_placement_diagnostic(warnings_, "selected", PlacementTier::AppendedCaveBranchChain,
+                                  repl);
+      return true;
     };
 
     if (apply_cave_branch_chain())

@@ -19,6 +19,11 @@ public:
   ~KernelLoggingPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
+  void onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) override;
+  void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
+  void onAmdgpuWavefrontDispatched(Wavefront &wf) override;
+  void onAmdgpuWavefrontHalted(Wavefront &wf) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        Wavefront &wf) override;
 

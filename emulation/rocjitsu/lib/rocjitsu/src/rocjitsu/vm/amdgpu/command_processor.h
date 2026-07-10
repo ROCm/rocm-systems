@@ -222,7 +222,8 @@ private:
   uint32_t dispatch_workgroups(DispatchEntry &entry);
 
   void register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
-                                  uint32_t global_wg_id, ComputeUnitCore *cu, uint32_t lds_base);
+                                  uint32_t global_wg_id, ComputeUnitCore *cu, Lds *lds,
+                                  uint32_t lds_base);
   void mark_cluster_workgroup_complete(uint32_t dispatch_id, uint32_t wg_id);
   void erase_cluster_workgroups(uint32_t dispatch_id);
 
@@ -290,6 +291,7 @@ private:
 
   struct ClusterWorkgroupPlacement {
     ComputeUnitCore *cu = nullptr;
+    Lds *lds = nullptr;
     uint32_t lds_base = 0;
     uint64_t cluster_key = 0;
     uint32_t cluster_rank = 0;

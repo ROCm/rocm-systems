@@ -946,6 +946,19 @@ def _opcode_ranges_for_encoding(spec, enc_name: str):
     )
 
 
+def _opcode_ranges_for_names(spec, enc_name: str, names: frozenset[str]):
+    """Opcodes in an encoding whose instruction names need special handling."""
+
+    enc = spec.encoding_map.get(enc_name)
+    if enc is None:
+        return []
+    return _compress_ranges(
+        inst.opcode
+        for inst in enc.insts
+        if inst.enc_name == enc_name and inst.name in names
+    )
+
+
 def _range_condition(ranges):
     terms = []
     for start, end in ranges:
@@ -958,6 +971,14 @@ def _range_condition(ranges):
 
 def _emit_gfx1250_rdna4_vop3_src2_helpers(dst_spec):
     vop3_ranges = _opcode_ranges_without_src2(dst_spec, 'ENC_VOP3')
+    # These instructions have no architectural SRC2, but OPSEL[2] is the low
+    # bit of their two-bit destination byte selector. It must survive the
+    # otherwise-correct cleanup of modifier bits associated with absent SRC2.
+    vop3_opsel2_ranges = _opcode_ranges_for_names(
+        dst_spec,
+        'ENC_VOP3',
+        frozenset({'V_CVT_SR_FP8_F32', 'V_CVT_SR_BF8_F32'}),
+    )
     vop3_sdst_ranges = _opcode_ranges_without_src2(dst_spec, 'VOP3_SDST_ENC')
     vop3_sdst_opcode_ranges = _opcode_ranges_for_encoding(dst_spec, 'VOP3_SDST_ENC')
 
@@ -967,6 +988,10 @@ def _emit_gfx1250_rdna4_vop3_src2_helpers(dst_spec):
         '// target reserved bits after regular field copying.',
         'inline bool rdna4_vop3_has_unused_src2(uint16_t op) {',
         f'    return {_range_condition(vop3_ranges)};',
+        '}',
+        '',
+        'inline bool rdna4_vop3_uses_opsel2_without_src2(uint16_t op) {',
+        f'    return {_range_condition(vop3_opsel2_ranges)};',
         '}',
         '',
         'inline bool rdna4_vop3_sdst_has_unused_src2(uint16_t op) {',
@@ -983,7 +1008,7 @@ def _emit_gfx1250_rdna4_vop3_src2_helpers(dst_spec):
         '        return;',
         '    dst.src2 = 0;',
         '    dst.abs &= 0x3;',
-        '    dst.opsel &= 0xB;',
+        '    dst.opsel &= rdna4_vop3_uses_opsel2_without_src2(dst_op) ? 0xF : 0xB;',
         '    dst.neg &= 0x3;',
         '}',
         '',

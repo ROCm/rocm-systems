@@ -96,7 +96,10 @@ if(RJ_GFX1250_HSA_RUNTIME64)
                 ${RJ_GFX1250_SEMANTICS_DBT_CORPUS_OUTPUT_DIR}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         )
-        set_tests_properties(Gfx1250SemanticsDbtCorpus PROPERTIES TIMEOUT 300)
+        set_tests_properties(
+            Gfx1250SemanticsDbtCorpus
+            PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE
+        )
         add_custom_target(
             gfx1250_semantics_dbt_corpus
             COMMAND

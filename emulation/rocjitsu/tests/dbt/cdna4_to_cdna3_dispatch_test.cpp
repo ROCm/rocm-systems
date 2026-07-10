@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_HOST_AMDGPU
@@ -170,6 +171,38 @@ Cdna3Target find_cdna3_target() {
       },
       &target);
   return target;
+}
+
+Cdna3Target find_gpu_target_named(std::string_view expected_isa, uint32_t execution_mach) {
+  struct Context {
+    std::string_view expected_isa;
+    uint32_t execution_mach;
+    Cdna3Target target;
+  } context{expected_isa, execution_mach, {}};
+
+  hsa_iterate_agents(
+      [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *ctx = static_cast<Context *>(data);
+        hsa_device_type_t type;
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+        if (type != HSA_DEVICE_TYPE_GPU)
+          return HSA_STATUS_SUCCESS;
+
+        hsa_isa_t isa{};
+        char isa_name[128]{};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
+        hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+        ctx->target.seen_gpu_isas.emplace_back(isa_name);
+        if (std::string_view(isa_name).find(ctx->expected_isa) == std::string_view::npos)
+          return HSA_STATUS_SUCCESS;
+
+        ctx->target.agent = agent;
+        ctx->target.mach = ctx->execution_mach;
+        ctx->target.isa_name = isa_name;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &context);
+  return context.target;
 }
 
 std::string join_seen_isas(const std::vector<std::string> &isas) {
@@ -880,6 +913,29 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
                                << translated.diagnostics.front().message;
 
   ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(translated.elf_bytes, target));
+}
+
+TEST(Cdna4ToCdna3DbtGuestTest, DynamicCopyLoopDispatchAndRun) {
+  const hsa_status_t init_status = hsa_init();
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
+  const HsaShutdownGuard shutdown;
+
+  Cdna3Target guest = find_gpu_target_named("gfx950", EF_AMDGPU_MACH_AMDGCN_GFX942);
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
+
+  Executable exec(kernel_path("dynamic_copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
+
+  // Deliberately load the original gfx950 ELF through the public guest agent.
+  // The DBT HSA hook owns translation and maps execution to simulated gfx942.
+  ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(guest_elf, guest));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {

@@ -3067,7 +3067,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  const auto &lds = cu.lds();
+  const auto &lds = wf.lds();
   uint64_t exec = wf.exec();
   // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
@@ -3109,7 +3109,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  const auto &lds = cu.lds();
+  const auto &lds = wf.lds();
   uint64_t exec = wf.exec();
   // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
@@ -3151,7 +3151,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  const auto &lds = cu.lds();
+  const auto &lds = wf.lds();
   uint64_t exec = wf.exec();
   // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
@@ -3193,7 +3193,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
-  const auto &lds = cu.lds();
+  const auto &lds = wf.lds();
   uint64_t exec = wf.exec();
   // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
   uint32_t lds_addr_base =
