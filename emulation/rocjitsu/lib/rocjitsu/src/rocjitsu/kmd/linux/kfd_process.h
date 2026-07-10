@@ -24,7 +24,45 @@
 #include <unordered_set>
 #include <vector>
 
+#include <unistd.h>
+
 namespace rocjitsu {
+
+/// @brief Move-only RAII owner of a file descriptor.
+///
+/// @details Closes the descriptor on destruction, reset, or move-assignment.
+/// Used where a KfdProcess must deterministically release a descriptor it owns
+/// — e.g. the daemon-mode debugger notifier the transport dup'd into our fd
+/// table via SCM_RIGHTS. A -1 descriptor owns nothing.
+class UniqueFd {
+public:
+  UniqueFd() = default;
+  explicit UniqueFd(int fd) : fd_(fd) {}
+  UniqueFd(UniqueFd &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+  UniqueFd &operator=(UniqueFd &&other) noexcept {
+    if (this != &other) {
+      reset(other.fd_);
+      other.fd_ = -1;
+    }
+    return *this;
+  }
+  UniqueFd(const UniqueFd &) = delete;
+  UniqueFd &operator=(const UniqueFd &) = delete;
+  ~UniqueFd() { reset(); }
+
+  /// @brief The owned descriptor, or -1 if none.
+  [[nodiscard]] int get() const { return fd_; }
+
+  /// @brief Close the current descriptor and take ownership of @p fd (none by default).
+  void reset(int fd = -1) {
+    if (fd_ >= 0 && fd_ != fd)
+      ::close(fd_);
+    fd_ = fd;
+  }
+
+private:
+  int fd_ = -1;
+};
 
 /// @brief Per-process KFD state.
 ///
@@ -151,6 +189,14 @@ public:
     /// File descriptor used as the debugger notification / poll target.
     /// -1 when no debugger is attached.
     int dbg_fd = -1;
+
+    /// @brief Owns @ref dbg_fd when the daemon received it out-of-band.
+    /// @details In daemon mode the notifier is a descriptor dup'd into the
+    /// daemon's own fd table (SCM_RIGHTS), which the session must close when the
+    /// debug session ends (DISABLE) or the process tears down. Engaged only in
+    /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
+    /// descriptor and is not owned here. RAII replaces an explicit close.
+    UniqueFd owned_dbg_fd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.

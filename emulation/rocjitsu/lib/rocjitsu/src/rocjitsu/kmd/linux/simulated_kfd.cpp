@@ -1789,12 +1789,20 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       return -EALREADY; // target process is already debug enabled
 
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
-    if (!daemon_mode_ && fcntl(dbg_fd, F_GETFD) == -1)
+    // In daemon mode the notifier fd has already been substituted for its real
+    // value in our fd space (the transport received it via SCM_RIGHTS), so it is
+    // validated here just like the debugger's own fd in local mode.
+    if (fcntl(dbg_fd, F_GETFD) == -1)
       return -EBADF;
 
     sess.enabled = true;
     sess.debugger_pid = caller.client_pid();
     sess.dbg_fd = dbg_fd;
+    // In daemon mode the session owns the transferred fd and releases it via
+    // RAII (on DISABLE or process teardown). In local mode dbg_fd is the
+    // debugger's own descriptor, left for the debugger to close.
+    if (daemon_mode_)
+      sess.owned_dbg_fd = UniqueFd(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
     sess.runtime_state =
         runtime_enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
@@ -1817,11 +1825,9 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     return 0;
   }
   case KFD_IOC_DBG_TRAP_DISABLE:
-    // Release the debugger notifier the daemon transport handed us via
-    // SCM_RIGHTS (daemon mode owns the dup'd fd). In local mode dbg_fd is the
-    // debugger's own fd, so it is left for the debugger to close.
-    if (daemon_mode_ && sess.dbg_fd >= 0)
-      ::close(sess.dbg_fd);
+    // Resetting the session releases the debugger notifier: in daemon mode the
+    // session's UniqueFd closes the SCM_RIGHTS-transferred fd it owns; in local
+    // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;
   default:

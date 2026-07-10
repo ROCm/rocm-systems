@@ -6,6 +6,7 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
@@ -24,6 +25,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -559,10 +561,15 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   std::array<uint8_t, kCapacity> rinfo_buf;
   rinfo_buf.fill(kSentinel);
 
+  // A live fd for the now-active daemon-mode validation; the daemon adopts it on
+  // ENABLE and releases it on DISABLE (RAII), so it is not tracked/closed here.
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(kClientPid);
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
-  args.enable.dbg_fd = 0; // daemon mode skips the fd reference check
+  args.enable.dbg_fd = notifier;
   args.enable.rinfo_ptr = reinterpret_cast<uint64_t>(rinfo_buf.data());
   args.enable.rinfo_size = static_cast<uint32_t>(kCapacity);
 
@@ -591,6 +598,240 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
   rd.close(); // sends RPC_CLOSE so the server loop exits
   server.join();
   EXPECT_EQ(daemon_driver.close(process_id), 0);
+}
+
+// --- Daemon-mode DBG_TRAP notifier-fd transfer via SCM_RIGHTS ---
+//
+// In daemon mode the debugger's dbg_fd is a number in the *client's* fd table
+// and is meaningless to the daemon. The client hands the real fd over
+// out-of-band as SCM_RIGHTS ancillary data; the daemon receives it in its own
+// fd space and the rj_vm_execute_as() glue substitutes it into DBG_TRAP
+// ENABLE's dbg_fd so the debug session can later signal it, releasing it on
+// DISABLE. These tests exercise the real rj_vm_execute_as() dispatch path
+// (where the substitution and adoption live), not the raw driver ioctl.
+class DbgTrapDaemonTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DAEMON, &vm_), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(vm_, nullptr);
+    ASSERT_EQ(rj_vm_device_open(vm_, kClientPid, &process_id_), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(process_id_, 0u);
+  }
+
+  void TearDown() override {
+    if (vm_ != nullptr) {
+      if (process_id_ != 0)
+        rj_vm_device_close(vm_, process_id_);
+      rj_vm_destroy(vm_);
+    }
+  }
+
+  // Runs one ioctl through rj_vm_execute_as() (the daemon dispatch path), with
+  // an optional out-of-band in_handle. On return, *in_handle_out (when given)
+  // carries cmd.in_handle, which the glue clears to -1 once the debug session
+  // has adopted the transferred fd.
+  int execute(uint32_t cmd_id, void *buf, size_t buf_size, int in_handle, int *in_handle_out) {
+    rj_vm_cmd_t cmd{};
+    cmd.cmd = cmd_id;
+    cmd.buf = buf;
+    cmd.buf_size = buf_size;
+    cmd.shared_handle = -1;
+    cmd.in_handle = in_handle;
+    rj_vm_execute_as(vm_, process_id_, &cmd);
+    if (in_handle_out != nullptr)
+      *in_handle_out = cmd.in_handle;
+    return cmd.result;
+  }
+
+  int enable_with_notifier(int in_handle, int *in_handle_out) {
+    kfd_ioctl_dbg_trap_args en{};
+    en.pid = static_cast<uint32_t>(kClientPid);
+    en.op = KFD_IOC_DBG_TRAP_ENABLE;
+    en.enable.dbg_fd = 0x0BADF00D; // meaningless client-side number; must be replaced
+    return execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), in_handle, in_handle_out);
+  }
+
+  int disable() {
+    kfd_ioctl_dbg_trap_args dis{};
+    dis.pid = static_cast<uint32_t>(kClientPid);
+    dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+    return execute(AMDKFD_IOC_DBG_TRAP, &dis, sizeof(dis), -1, nullptr);
+  }
+
+  static constexpr rj_client_pid_t kClientPid = 4242;
+  rj_vm_t *vm_ = nullptr;
+  uint32_t process_id_ = 0;
+};
+
+// The transferred fd (in_handle) replaces the client-side dbg_fd in the payload
+// and the session takes ownership (in_handle cleared so the transport does not
+// reclaim it).
+TEST_F(DbgTrapDaemonTest, EnableAdoptsTransferredNotifierFd) {
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(kClientPid);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = 0x0BADF00D; // client-side number the daemon must replace
+
+  int in_handle_out = -2;
+  ASSERT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), notifier, &in_handle_out), 0);
+
+  EXPECT_EQ(en.enable.dbg_fd, static_cast<uint32_t>(notifier)); // substituted
+  EXPECT_EQ(in_handle_out, -1);                                 // adopted
+  EXPECT_NE(fcntl(notifier, F_GETFD), -1);                      // still open (session owns it)
+
+  EXPECT_EQ(disable(), 0); // releases the adopted fd (asserted in its own test)
+}
+
+// DISABLE releases the fd the daemon owns; the descriptor is closed afterward.
+TEST_F(DbgTrapDaemonTest, DisableClosesAdoptedNotifierFd) {
+  int notifier = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(notifier, 0);
+
+  ASSERT_EQ(enable_with_notifier(notifier, nullptr), 0);
+  ASSERT_NE(fcntl(notifier, F_GETFD), -1); // open after ENABLE
+
+  ASSERT_EQ(disable(), 0);
+
+  // The daemon owned the transferred fd and closed it on DISABLE.
+  EXPECT_EQ(fcntl(notifier, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
+// Without a transferred fd (in_handle == -1, e.g. the client passed
+// KFD_INVALID_FD), nothing is substituted, so the notifier stays invalid and
+// daemon-mode ENABLE is rejected with -EBADF (matching the kernel's fget()
+// check) rather than adopting a bogus descriptor.
+TEST_F(DbgTrapDaemonTest, EnableWithoutTransferredFdReturnsEbadf) {
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(kClientPid);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = KFD_INVALID_FD;
+
+  int in_handle_out = -2;
+  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), -1, &in_handle_out), -EBADF);
+  EXPECT_EQ(in_handle_out, -1); // nothing adopted
+}
+
+// End-to-end: the RemoteDriver client hands the debugger's notifier fd to an
+// in-process daemon over SCM_RIGHTS (mirroring tools/rocjitsu's handle_client),
+// and the daemon-side rj_vm_execute_as() adopts it. Proven by having the daemon
+// write a sentinel through the *transferred* descriptor and reading it back on
+// the client's own eventfd — only possible if SCM_RIGHTS delivered a working
+// alias of the same kernel object.
+TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+
+  constexpr uint64_t kSentinel = 0x0102030405060708ULL;
+  std::atomic<int> fds_received{0};
+  std::atomic<int> in_handle_after{-2};
+
+  // Minimal stand-in for the daemon's RPC_IOCTL loop: capture an optional
+  // SCM_RIGHTS fd on the header (rpc_recv_msg, exactly as tools/rocjitsu does),
+  // thread it through cmd.in_handle into the real rj_vm_execute_as() path, and
+  // reclaim it only if the session did not adopt it. jthread so an ASSERT_*
+  // failure unwinds without std::terminate() on a joinable thread.
+  std::jthread server([&, server_fd = sv[1]] {
+    for (;;) {
+      rocjitsu::RpcHeader hdr{};
+      int in_fds[1] = {-1};
+      size_t num_in = 1;
+      if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
+        break;
+      int in_fd = (num_in > 0) ? in_fds[0] : -1;
+
+      if (hdr.opcode == rocjitsu::RPC_CLOSE) {
+        rocjitsu::RpcHeader resp{};
+        resp.request_id = hdr.request_id;
+        rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
+      if (hdr.opcode != rocjitsu::RPC_IOCTL) {
+        rocjitsu::RpcHeader resp{};
+        resp.request_id = hdr.request_id;
+        rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+        if (in_fd >= 0)
+          ::close(in_fd);
+        continue;
+      }
+
+      std::vector<uint8_t> payload(hdr.payload_bytes);
+      if (!rocjitsu::rpc_recv_exact(server_fd, payload.data(), hdr.payload_bytes)) {
+        if (in_fd >= 0)
+          ::close(in_fd);
+        break;
+      }
+      auto *ireq = reinterpret_cast<rocjitsu::RpcIoctlRequest *>(payload.data());
+
+      // Prove the received descriptor is live and aliases the client's eventfd
+      // by writing a sentinel through it before the handler adopts it.
+      if (in_fd >= 0) {
+        fds_received.fetch_add(1);
+        uint64_t s = kSentinel;
+        [[maybe_unused]] ssize_t w = ::write(in_fd, &s, sizeof(s));
+      }
+
+      rj_vm_cmd_t cmd{};
+      cmd.cmd = ireq->ioctl_cmd;
+      cmd.buf = payload.data() + sizeof(rocjitsu::RpcIoctlRequest);
+      cmd.buf_size = ireq->args_bytes;
+      cmd.shared_handle = -1;
+      cmd.in_handle = in_fd;
+      rj_vm_execute_as(vm_, process_id_, &cmd);
+      in_handle_after.store(cmd.in_handle);
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
+
+      rocjitsu::RpcHeader resp{};
+      resp.opcode = rocjitsu::RPC_IOCTL;
+      resp.request_id = hdr.request_id;
+      resp.result = cmd.result;
+      resp.payload_bytes = static_cast<uint32_t>(cmd.buf_size);
+      if (!rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp)))
+        break;
+      if (cmd.buf_size > 0 && !rocjitsu::rpc_send_exact(server_fd, cmd.buf, cmd.buf_size))
+        break;
+    }
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // Non-blocking so a failed transfer fails the read below instead of hanging.
+  int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(kClientPid);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(notifier);
+  ASSERT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), 0);
+
+  // The client sent exactly one fd via SCM_RIGHTS and the session adopted it.
+  EXPECT_EQ(fds_received.load(), 1);
+  EXPECT_EQ(in_handle_after.load(), -1);
+
+  // The daemon's write through the transferred fd is visible on our eventfd,
+  // proving the descriptor was really carried across the process boundary.
+  uint64_t got = 0;
+  ASSERT_EQ(::read(notifier, &got, sizeof(got)), static_cast<ssize_t>(sizeof(got)))
+      << "notifier fd was not transferred: " << strerror(errno);
+  EXPECT_EQ(got, kSentinel);
+
+  // Release the adopted fd through the transport for symmetry.
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(kClientPid);
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
+
+  rd.close(); // sends RPC_CLOSE so the server loop exits
+  server.join();
+  ::close(notifier);
 }
 
 } // namespace
