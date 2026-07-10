@@ -252,7 +252,7 @@ sequenceDiagram
     participant Profile as Profile mode
     participant SDK as SDK tool (rocprofiler-sdk)
     participant Native as Native tool (rocprofiler-compute)
-    participant Boundary as profiling_data boundary<br/>(get_writer / get_reader)
+    participant Boundary as profiling_data boundary (get_writer / get_reader)
     participant Hub as Profiler Hub
     participant Store as Workload storage (on disk)
     participant Analyze as Analyze mode
@@ -263,7 +263,7 @@ sequenceDiagram
     loop each collection pass
         SDK->>Store: per-process rocpd
         Native->>Boundary: hand off per-process counters
-    note over Boundary: get_writer(format) selects the native implementation;<br/>compute performs the merge, the implementation only reads/writes
+    note over Boundary: get_writer(format) selects the native implementation, compute performs the merge, the implementation only reads/writes
     alt rocpd_data.py implementation
         Boundary->>Store: read per-process, write per-pass native rocpd (.db)
     else profiler_hub_data.py implementation
