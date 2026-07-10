@@ -21,36 +21,50 @@
 // SOFTWARE.
 
 // Models a rocprofiler-sdk client tool library: it exports rocprofiler_configure, so it is
-// discovered by rocprofiler-sdk's link-map symbol walk during OMPT tool bring-up. It depends
-// on the blas-stub library (see CMakeLists.txt), so blas-stub's DT_INIT runs first and this
-// library's DT_INIT is still pending when discovery occurs -- the exact condition under which
-// a dlopen of this library would re-run the constructor below and deadlock libomp. The
-// constructor calls omp_get_num_places() (which re-enters libomp's init path) to model that.
+// discovered by rocprofiler-sdk's link-map symbol walk during OMPT tool bring-up. The library
+// that actually calls into OpenMP from its DT_INIT constructor is a separate consumer library
+// (see openmp_consumer.cpp); this file only plays the role of the profiler tool.
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
-#include <omp.h>
-
 #include <cstdio>
+#include <cstdlib>
+
+namespace
+{
+// Detects whether this library's static initialization (DT_INIT_ARRAY) ran *after*
+// rocprofiler_configure/tool_init were invoked. If discovery bypassed DT_INIT_ARRAY to call
+// rocprofiler_configure directly, the later real initialization would clobber this global back
+// to 0 -- so tool_fini seeing anything other than 1 means the tool's static state was corrupted.
+int var_check = 0;
+
+int
+tool_init(rocprofiler_client_finalize_t, void*)
+{
+    var_check = 1;
+    return 0;
+}
+
+void
+tool_fini(void*)
+{
+    if(var_check != 1)
+    {
+        fprintf(stderr,
+                "[client] ERROR: var_check == %d (expected 1); static initialization ran after "
+                "tool_init -- DT_INIT_ARRAY bypass corrupted tool state\n",
+                var_check);
+        fflush(stderr);
+        std::abort();
+    }
+}
+}  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 {
-    // a no-op client: returning nullptr means "do not activate", which is sufficient for
-    // exercising the discovery path that previously deadlocked
-    return nullptr;
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
+    return &cfg;
 }
-
-namespace
-{
-__attribute__((constructor)) void
-configure_client_init()
-{
-    fprintf(stderr, "[client] DT_INIT (still pending during discovery): omp_get_num_places()\n");
-    fflush(stderr);
-    int n = omp_get_num_places();
-    fprintf(stderr, "[client] omp_get_num_places() returned %d\n", n);
-    fflush(stderr);
-}
-}  // namespace

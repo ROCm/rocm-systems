@@ -637,8 +637,7 @@ find_clients()
         // (where dlopen would otherwise deadlock) or when explicitly forced via
         // ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN.
         const bool avoid_dlopen =
-            ompt_init_active() ||
-            common::get_env("ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN", false);
+            ompt_init_active() || common::get_env("ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN", false);
         ROCP_WARNING_IF(avoid_dlopen)
             << "rocprofiler-sdk is discovering client tools via ELF symbol resolution (bypassing "
                "dlopen) because it was invoked during OpenMP (OMPT) initialization (where dlopen "
