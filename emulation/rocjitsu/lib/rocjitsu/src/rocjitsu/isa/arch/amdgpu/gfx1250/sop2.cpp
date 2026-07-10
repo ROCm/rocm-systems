@@ -2386,6 +2386,12 @@ SAddF16Sop2::SAddF16Sop2(const MachineInst *inst)
   }
 }
 
+void SAddF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
 
 SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
@@ -2420,6 +2426,12 @@ SSubF16Sop2::SSubF16Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SSubF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
@@ -2457,6 +2469,12 @@ SMinNumF16Sop2::SMinNumF16Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SMinNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -2498,6 +2516,12 @@ SMaxNumF16Sop2::SMaxNumF16Sop2(const MachineInst *inst)
   }
 }
 
+void SMaxNumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_max_num_f16_sop2(*this, wf);
 }
@@ -2536,6 +2560,12 @@ SMulF16Sop2::SMulF16Sop2(const MachineInst *inst)
   }
 }
 
+void SMulF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
 
 SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
@@ -2571,6 +2601,12 @@ SFmacF16Sop2::SFmacF16Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SFmacF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -2693,6 +2729,12 @@ SMinimumF16Sop2::SMinimumF16Sop2(const MachineInst *inst)
   }
 }
 
+void SMinimumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_minimum_f16_sop2(*this, wf);
 }
@@ -2730,6 +2772,12 @@ SMaximumF16Sop2::SMaximumF16Sop2(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc1 = Operand(16, OperandType::OPR_SIMM64, literal64, true);
   }
+}
+
+void SMaximumF16Sop2::implicit_uses(RegisterSet &uses) const {
+  Sop2::implicit_uses(uses);
+  if (auto r = sdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {

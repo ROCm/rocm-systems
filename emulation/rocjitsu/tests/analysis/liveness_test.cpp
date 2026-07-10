@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -74,6 +75,15 @@ public:
   void implicit_uses(RegisterSet &uses) const override {
     for (RegisterRef ref : implicit_uses_)
       uses.expand(ref);
+    // Mirror the codegen: a sub-dword (< 32-bit) destination writes only part
+    // of its register lane, so the old value survives and the register is also
+    // read. Generated instructions surface these partial defs via implicit_uses.
+    for (int i = 0; i < num_dst_; ++i) {
+      const Operand *op = dst_operands_[i];
+      if (op != nullptr && op->size_bits() > 0 && op->size_bits() < REGISTER_GRANULARITY)
+        if (auto ref = op->to_register_ref())
+          uses.expand(*ref);
+    }
   }
 
 private:

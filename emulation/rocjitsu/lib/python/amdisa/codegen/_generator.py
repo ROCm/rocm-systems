@@ -5659,6 +5659,30 @@ class CodeGenerator:
                     public_members.append(
                         cgen.Statement('void execute_impl(amdgpu::Wavefront &wf)')
                     )
+                    # A sub-dword (< 32-bit) destination writes only part of its
+                    # 32-bit register lane, so the old value survives and the
+                    # register is also a read. Surface these partial defs as
+                    # implicit uses. Runtime-sized outputs are never sub-dword,
+                    # so a static size check suffices. Immediate/label outputs
+                    # (e.g. the S_SETREG hwreg selector) never name a register,
+                    # so skip them to avoid dead overrides.
+                    _partial_def_outputs = [
+                        o.name
+                        for o in inst.operands
+                        if o.is_output
+                        and operand_size_exprs.get(o.name, str(o.size)) == str(o.size)
+                        and 0 < o.size < 32
+                        and not any(
+                            tag in o.operand_type.upper()
+                            for tag in ('IMM', 'LABEL', 'CONST')
+                        )
+                    ]
+                    if _partial_def_outputs:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -6505,6 +6529,21 @@ class CodeGenerator:
                                 f'instruction-count deltas.\n'
                                 f'  return static_cast<int64_t>('
                                 f'static_cast<int16_t>({branch_offset_operand}.encoding_value_)) * 4;\n'
+                                f'}}'
+                            )
+                        )
+                    if _partial_def_outputs:
+                        _pd_body = ''.join(
+                            f'  if (auto r = {name}.to_register_ref())\n'
+                            f'    uses.expand(*r);\n'
+                            for name in _partial_def_outputs
+                        )
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'{_pd_body}'
                                 f'}}'
                             )
                         )
