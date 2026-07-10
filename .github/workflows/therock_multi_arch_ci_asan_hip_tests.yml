@@ -43,7 +43,7 @@ jobs:
     outputs:
       baseline_run_id: ${{ steps.fetch.outputs.baseline_run_id }}
     steps:
-      - name: Fetch latest successful nightly ASAN run
+      - name: Fetch latest successful nightly run
         id: fetch
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -52,10 +52,10 @@ jobs:
             echo "baseline_run_id=${{ inputs.baseline_run_id }}" >> "$GITHUB_OUTPUT"
           else
             RUN_ID=$(gh api \
-              "repos/${{ github.repository }}/actions/workflows/therock_multi_arch_ci_asan.yml/runs?status=success&event=schedule&per_page=1" \
+              "repos/${{ github.repository }}/actions/workflows/therock-multi-arch-ci.yml/runs?status=success&branch=develop&per_page=1" \
               --jq '.workflow_runs[0].id')
             if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-              echo "::error::No successful scheduled ASAN run found to use as baseline."
+              echo "::error::No successful nightly run found on develop to use as baseline."
               exit 1
             fi
             echo "baseline_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
