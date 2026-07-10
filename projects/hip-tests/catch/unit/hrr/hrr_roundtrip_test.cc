@@ -770,6 +770,20 @@ HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_Logging_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturequeryspt"};
+  // Exercises hipStreamIsCapturing_spt + hipStreamGetCaptureInfo_spt inside a
+  // manual capture frame (graph executes -> D2H validates the whole path).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureQuerySpt_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
+  // Validates hipStreamBeginCapture_spt on GPU (generated handler omits the
+  // ctx.in_graph_capture bookkeeping; safe for a memset-only capture region).
+  hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);

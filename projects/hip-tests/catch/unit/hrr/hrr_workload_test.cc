@@ -1768,6 +1768,108 @@ TEST_CASE("Unit_HRR_Logging_Direct", "[.][hrr-direct]") {
   HIP_CHECK(hipStreamDestroy(s));
   delete[] h;
 }
+
+// ===========================================================================
+// Workload G9: hipStreamIsCapturing_spt / hipStreamGetCaptureInfo_spt
+//
+// The per-thread-stream capture *query* APIs have real generated handlers that
+// only translate the stream and write to local outputs (safe).  They are
+// exercised INSIDE a MANUAL hipStreamBeginCapture/EndCapture frame: the manual
+// handlers set ctx.in_graph_capture and record the graph in graph_map, which the
+// generated _spt begin/end handlers omit.  The captured memset builds a graph
+// that is instantiated + launched, so a correct D2H proves the whole
+// capture->graph->replay path — with the two _spt queries mid-capture — works.
+// Final blob: h[i] == 0x5A5A5A5A.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamCaptureQuerySpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+  constexpr int    VAL = 0x5A5A5A5A;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
+
+  // APIs under test: query capture state via the _spt variants.
+  hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
+  HIP_CHECK(hipStreamIsCapturing_spt(s, &st));
+  REQUIRE(st == hipStreamCaptureStatusActive);
+
+  hipStreamCaptureStatus st2 = hipStreamCaptureStatusNone;
+  unsigned long long capId = 0;
+  HIP_CHECK(hipStreamGetCaptureInfo_spt(s, &st2, &capId));
+  REQUIRE(st2 == hipStreamCaptureStatusActive);
+
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
+
+  hipGraph_t g = nullptr;
+  HIP_CHECK(hipStreamEndCapture(s, &g));
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G10: hipStreamBeginCapture_spt (GPU-VALIDATED)
+//
+// hipStreamBeginCapture_spt's generated handler translates the stream and starts
+// capture but (unlike the manual hipStreamBeginCapture) does NOT set
+// ctx.in_graph_capture.  That flag only gates timing / sync-after-launch /
+// zero-init memsets, none of which apply to a memset-only capture region with no
+// alloc or kernel launch inside it — so replay should still be correct.  Capture
+// is ended with the MANUAL hipStreamEndCapture (records the graph in graph_map;
+// the generated end_spt discards it, so end_spt stays R2).  This slice validates
+// begin_spt on GPU: green keeps it, red reclassifies it R2.
+// Final blob: h[i] == 0x33333333.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+  constexpr int    VAL = 0x33333333;
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+
+  // API under test: start capture via the _spt variant.
+  HIP_CHECK(hipStreamBeginCapture_spt(s, hipStreamCaptureModeThreadLocal));
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), VAL, N, s));
+  hipGraph_t g = nullptr;
+  HIP_CHECK(hipStreamEndCapture(s, &g));
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(exec, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
 // ===========================================================================
 // Workload N: Additional memset variants
 //

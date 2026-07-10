@@ -114,6 +114,12 @@ hrr:
   Unit_HRR_LoggingRoundtrip:
     <<: *level_2
     tags: [capture, logging, playback, roundtrip]
+  Unit_HRR_StreamCaptureQuerySptRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, graph, playback, roundtrip]
+  Unit_HRR_StreamCaptureBeginSptRoundtrip:
+    <<: *level_2
+    tags: [capture, stream, graph, playback, roundtrip]
   Unit_HRR_MemsetExtraRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -249,6 +255,12 @@ hrr:
   Unit_HRR_Logging_Direct:
     <<: *level_2
     tags: [direct, logging]
+  Unit_HRR_StreamCaptureQuerySpt_Direct:
+    <<: *level_2
+    tags: [direct, stream, graph]
+  Unit_HRR_StreamCaptureBeginSpt_Direct:
+    <<: *level_2
+    tags: [direct, stream, graph]
   Unit_HRR_MemcpyExtra_Direct:
     <<: *level_2
     tags: [direct, memcpy]
