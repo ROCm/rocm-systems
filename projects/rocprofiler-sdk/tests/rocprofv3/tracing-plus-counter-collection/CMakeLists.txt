@@ -13,16 +13,6 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# WSL/DXG does not expose /dev/kfd and currently uses libhsakmt's vendor-packet path for
-# counter collection. Single-counter collection works, but larger multi-counter AQL/PM4
-# packets can exceed libhsakmt's per-queue PM4 frame-size limit until that is raised. Keep
-# single-counter coverage enabled and disable only multi-counter integration paths on
-# WSL/no-KFD.
-set(IS_WSL_DXG_MULTI_COUNTER_DISABLED OFF)
-if(NOT EXISTS "/dev/kfd")
-    set(IS_WSL_DXG_MULTI_COUNTER_DISABLED ON)
-endif()
-
 # pmc
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-tracing-plus-counter-collection
@@ -35,7 +25,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;application-replay"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_WSL_DXG_MULTI_COUNTER_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection)
 
 foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
@@ -56,7 +45,6 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
              ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests;application-replay"
-        DISABLED "${IS_WSL_DXG_MULTI_COUNTER_DISABLED}"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection)
 endforeach()
 
@@ -65,11 +53,6 @@ set(cmdl_multiple "SQ_WAVES" "GRBM_GUI_ACTIVE" "SQ_CYCLES:device=16384"
                   "SQ_BUSY_CYCLES:device=65536")
 
 foreach(_GROUP "single" "multiple")
-    set(_CMDL_MULTI_COUNTER_DISABLED OFF)
-    if(_GROUP STREQUAL "multiple")
-        set(_CMDL_MULTI_COUNTER_DISABLED "${IS_WSL_DXG_MULTI_COUNTER_DISABLED}")
-    endif()
-
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP}
         COMMAND
@@ -80,7 +63,6 @@ foreach(_GROUP "single" "multiple")
         DEPENDS transpose
         TIMEOUT 45
         PRELOAD "${PRELOAD_ENV}"
-        DISABLED "${_CMDL_MULTI_COUNTER_DISABLED}"
         FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 
     set(_TEST_OUTPUT_PREFIX
@@ -103,6 +85,5 @@ foreach(_GROUP "single" "multiple")
              ${_TEST_OUTPUT_PREFIX}_counter_collection.csv
         TIMEOUT 45
         LABELS "integration-tests"
-        DISABLED "${_CMDL_MULTI_COUNTER_DISABLED}"
         FIXTURES_REQUIRED rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 endforeach()

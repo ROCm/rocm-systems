@@ -174,12 +174,12 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         // /dev/kfd), so hardware counters are not armed through the KFD profiler
         // ioctl; instead aqlprofile's vendor-specific PM4 IB is submitted through
         // the dxg path in libhsakmt, gated by WSLKMT_VENDOR_PACKET (enabled by
-        // default by the WSL platform layer). A single counter is collected
-        // correctly this way; a large multi-counter set can exceed libhsakmt's
-        // per-queue PM4 command-buffer frame and fail to arm until that limit is
-        // raised. The /dev/kfd capability probe is shared at the topology level
-        // (rocprofiler::agent) so this stays consistent with KFD event tracing
-        // rather than being an ad-hoc check here.
+        // default by the WSL platform layer). Both single- and multi-counter
+        // collection are supported this way (the per-queue PM4 command-buffer
+        // frame size is computed from the device geometry). The /dev/kfd
+        // capability probe is shared at the topology level (rocprofiler::agent)
+        // so this stays consistent with KFD event tracing rather than being an
+        // ad-hoc check here.
         if(!::rocprofiler::agent::kfd_device_available())
         {
             static std::once_flag warned_once{};
@@ -187,9 +187,8 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
                 ROCP_WARNING << "/dev/kfd is not available (expected under WSL/DXG). Hardware "
                                 "performance counters are collected via the dxg vendor-packet "
                                 "path in libhsakmt (requires WSLKMT_VENDOR_PACKET=1, enabled "
-                                "automatically by the WSL platform layer). Single-counter "
-                                "collection works; large multi-counter sets may currently fail "
-                                "to arm due to the libhsakmt PM4 command-buffer frame-size limit.";
+                                "automatically by the WSL platform layer). Single- and "
+                                "multi-counter collection are supported.";
             });
         }
     }

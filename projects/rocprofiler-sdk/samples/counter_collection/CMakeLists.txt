@@ -33,15 +33,6 @@ endif()
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# WSL/DXG does not expose /dev/kfd and currently routes hardware counter collection
-# through libhsakmt's vendor-packet path. Single-counter samples work, but samples that
-# request many functional counters can exceed libhsakmt's per-queue PM4 frame-size limit
-# until that is raised.
-set(IS_WSL_DXG_MULTI_COUNTER_DISABLED OFF)
-if(NOT EXISTS "/dev/kfd")
-    set(IS_WSL_DXG_MULTI_COUNTER_DISABLED ON)
-endif()
-
 add_library(counter-collection-buffer-client SHARED)
 target_sources(counter-collection-buffer-client PRIVATE buffered_client.cpp client.hpp)
 target_link_libraries(
@@ -180,16 +171,9 @@ add_test(NAME counter-collection-print-functional-counters
 
 set_tests_properties(
     counter-collection-print-functional-counters
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "samples"
-               ENVIRONMENT
-               "${counter-collection-functional-counter-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_WSL_DXG_MULTI_COUNTER_DISABLED}")
+    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+               "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-device-profiling-client SHARED)
 target_sources(counter-collection-device-profiling-client
