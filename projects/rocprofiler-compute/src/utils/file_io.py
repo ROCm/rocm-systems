@@ -72,25 +72,20 @@ def create_df_kernel_top_stats(
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
     kernel_verbose: int,
-    filter_kernel_names: Optional[list[str]] = None,
     kernel_filter: Optional[KernelFilter] = None,
     sortby: str = "sum",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create top stats info by grouping kernels with user's filters.
 
-    Args:
-        filter_kernel_names: When set, only kernels whose (stripped) name is in
-            this list are kept, scoping the Top Stats tables to a selected
-            operator's kernels. Names are compared after stripping whitespace.
+    When ``kernel_filter`` is active, the Top Stats tables are scoped to the
+    selected kernels; otherwise every kernel is included.
 
     Returns:
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    active_kernel_filter = kernel_filter or KernelFilter(
-        names=frozenset(str(name).strip() for name in filter_kernel_names or [])
-    )
+    active_kernel_filter = kernel_filter or KernelFilter()
     df = apply_workload_filters(
         df_in,
         active_kernel_filter,

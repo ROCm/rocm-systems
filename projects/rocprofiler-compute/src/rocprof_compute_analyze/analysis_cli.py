@@ -273,17 +273,6 @@ class cli_analysis(OmniAnalyze_Base):
                 roof_plot=roof_plot,
             )
 
-    @staticmethod
-    def _filter_by_backend(consolidated_df: pd.DataFrame, backend: str) -> pd.DataFrame:
-        """Return the rows attributed to ``backend``.
-
-        When the Backend column is absent, rows are treated as the torch
-        backend.
-        """
-        if "Backend" in consolidated_df.columns:
-            return filter_by_backend(consolidated_df, backend)
-        return filter_by_backend(consolidated_df, backend)
-
     def list_operators(
         self,
         workload_path: str,
@@ -297,7 +286,7 @@ class cli_analysis(OmniAnalyze_Base):
             tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
 
-        backend_df = self._filter_by_backend(consolidated_df, backend)
+        backend_df = filter_by_backend(consolidated_df, backend)
         if backend_df.empty:
             tty.list_ml_operators(workload_path, {}, framework_label=label)
             return
@@ -313,7 +302,6 @@ class cli_analysis(OmniAnalyze_Base):
         workload: schema.Workload,
         workload_path: str,
         args: argparse.Namespace,
-        filter_kernel_names: Optional[list[str]] = None,
         kernel_filter: Optional[KernelFilter] = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Create and store Top Stats tables for a workload."""
@@ -324,7 +312,6 @@ class cli_analysis(OmniAnalyze_Base):
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
-            filter_kernel_names=filter_kernel_names,
             kernel_filter=kernel_filter,
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df

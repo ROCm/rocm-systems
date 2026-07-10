@@ -6208,29 +6208,29 @@ def test_parse_operator_patterns_generic_attr():
 
 @pytest.mark.torch_ops
 def test_filter_by_backend_selects_only_requested_backend():
-    from rocprof_compute_analyze.analysis_cli import cli_analysis
+    from utils.kernel_filter import filter_by_backend
 
     df = pd.DataFrame({
         "Operator_Name": ["aten::mm", "triton_matmul", "aten::relu"],
         "Backend": ["torch", "triton", "torch"],
     })
 
-    triton_df = cli_analysis._filter_by_backend(df, "triton")
+    triton_df = filter_by_backend(df, "triton")
     assert triton_df["Operator_Name"].tolist() == ["triton_matmul"]
 
-    torch_df = cli_analysis._filter_by_backend(df, "torch")
+    torch_df = filter_by_backend(df, "torch")
     assert torch_df["Operator_Name"].tolist() == ["aten::mm", "aten::relu"]
 
 
 @pytest.mark.torch_ops
 def test_filter_by_backend_without_column_defaults_to_torch():
-    from rocprof_compute_analyze.analysis_cli import cli_analysis
+    from utils.kernel_filter import filter_by_backend
 
     df = pd.DataFrame({"Operator_Name": ["aten::mm", "aten::relu"]})
 
     # Without a Backend column, rows are treated as torch.
-    assert len(cli_analysis._filter_by_backend(df, "torch")) == 2
-    assert cli_analysis._filter_by_backend(df, "triton").empty
+    assert len(filter_by_backend(df, "torch")) == 2
+    assert filter_by_backend(df, "triton").empty
 
 
 # -- fnmatch_glob_matches ---------------------------------------------------

@@ -1661,7 +1661,7 @@ def test_create_df_kernel_top_stats_filters():
             filter_dispatch_ids=None,
             time_unit="ns",
             kernel_verbose=0,
-            filter_kernel_names=["kernel_a"],
+            kernel_filter=KernelFilter(frozenset(["kernel_a"])),
         )
         assert set(kernel_top_df["Kernel_Name"]) == {"kernel_a"}
         assert set(dispatch_df["Kernel_Name"]) == {"kernel_a"}

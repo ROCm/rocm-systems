@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -318,31 +317,6 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
         mark_selected_kernels(kernel_top_df, kernel_filter)
 
     return apply_kernel_filter_to_df(df, kernel_filter)
-
-
-def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply dispatch ID filters."""
-    # NB: support ignoring the 1st n dispatched execution by '> n'
-    #     The better way may be parsing python slice string
-    for dispatch_id in workload.filter_dispatch_ids:
-        if isinstance(dispatch_id, str) and ">" in dispatch_id:
-            dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
-        if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
-            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
-
-    if (
-        isinstance(workload.filter_dispatch_ids[0], str)
-        and ">" in workload.filter_dispatch_ids[0]
-    ):
-        dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
-        df = df[df["Dispatch_ID"] > int(dispatch_match.group(1))]
-    else:
-        selected_dispatches = [
-            int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
-        ]
-        df = df.loc[selected_dispatches]
-
-    return df
 
 
 @demarcate

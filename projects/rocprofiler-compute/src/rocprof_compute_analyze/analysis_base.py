@@ -700,7 +700,7 @@ class OmniAnalyze_Base:
                 kernel_lists *= len(args.path)
             for path_info, kernel_ids in zip(args.path, kernel_lists):
                 self._runs[path_info[0]].kernel_selection = KernelSelectionRequest(
-                    mode="indices", values=kernel_ids
+                    indices=kernel_ids
                 )
 
         if not self.pc_sampling_only():

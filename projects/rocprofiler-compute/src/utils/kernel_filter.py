@@ -10,7 +10,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Literal, Optional
+from typing import Iterable, Optional
 
 import pandas as pd
 
@@ -38,47 +38,33 @@ ML_API_ANALYSIS_CLI_OPTIONS = {
 
 @dataclass(frozen=True)
 class KernelSelectionRequest:
-    """A raw, unresolved kernel selection.
+    """A raw, unresolved ``-k`` selection.
 
-    ``mode`` disambiguates the values so no downstream code has to guess:
-    ``"indices"`` are integer row positions in the Top Stats table (CLI ``-k``);
-    ``"names"`` are kernel-name strings (GUI or operator selection).
+    ``indices`` are integer row positions in the Top Stats table, which only
+    exists after the workload's kernels are known, so the request is carried
+    unresolved until :func:`resolve_kernel_filter` can map indices to names.
     """
 
-    mode: Literal["indices", "names"]
-    values: list[int] | list[str]
+    indices: list[int]
 
 
 @dataclass(frozen=True)
 class KernelFilter:
-    """A resolved kernel selection.
+    """A resolved kernel selection, expressed as a set of kernel names.
 
-    Kernel names remain the compatibility layer for ``-k`` and GUI selection.
-    Operator filters may additionally carry identity columns so dispatches from
-    unrelated operators with the same generated kernel name are not included.
+    Names are the single selection currency for ``-k``, GUI selection, and
+    operator filters alike.
     """
 
     names: frozenset[str] = field(default_factory=frozenset)
-    correlation_ids: frozenset[int] = field(default_factory=frozenset)
-    dispatch_ids: frozenset[int] = field(default_factory=frozenset)
 
     @property
     def is_active(self) -> bool:
-        return bool(self.names or self.correlation_ids or self.dispatch_ids)
-
-    @property
-    def is_identity_scoped(self) -> bool:
-        return bool(self.correlation_ids or self.dispatch_ids)
+        return bool(self.names)
 
     def describe(self) -> str:
         """Return a stable short label for filenames/logging."""
-        if self.names:
-            return "_".join(sorted(self.names))
-        if self.dispatch_ids:
-            return "dispatch_" + "_".join(str(i) for i in sorted(self.dispatch_ids))
-        if self.correlation_ids:
-            return "corr_" + "_".join(str(i) for i in sorted(self.correlation_ids))
-        return ""
+        return "_".join(sorted(self.names))
 
 
 def resolve_kernel_filter(
@@ -90,11 +76,8 @@ def resolve_kernel_filter(
     Integer indices are validated against and mapped through ``kernel_top_df``.
     Returns an inactive filter when ``request`` is empty.
     """
-    if request is None or not request.values:
+    if request is None or not request.indices:
         return KernelFilter()
-
-    if request.mode == "names":
-        return KernelFilter(names=_normalize_names(request.values))
 
     if kernel_top_df is None:
         console_error(
@@ -103,7 +86,7 @@ def resolve_kernel_filter(
         )
 
     num_kernels = len(kernel_top_df["Kernel_Name"])
-    for index in request.values:
+    for index in request.indices:
         if not 0 <= index < num_kernels:
             console_error(
                 f"{index} is an invalid kernel id. "
@@ -113,21 +96,8 @@ def resolve_kernel_filter(
     return KernelFilter(
         names=frozenset(
             str(kernel_top_df.iloc[index]["Kernel_Name"]).strip()
-            for index in request.values
+            for index in request.indices
         )
-    )
-
-
-def merge_kernel_filters(left: KernelFilter, right: KernelFilter) -> KernelFilter:
-    """Intersect active filter dimensions where both sides constrain them."""
-    if not left.is_active:
-        return right
-    if not right.is_active:
-        return left
-    return KernelFilter(
-        names=_intersect_or_take(left.names, right.names),
-        correlation_ids=_intersect_or_take(left.correlation_ids, right.correlation_ids),
-        dispatch_ids=_intersect_or_take(left.dispatch_ids, right.dispatch_ids),
     )
 
 
@@ -161,28 +131,12 @@ def apply_kernel_filter_to_df(
     df: pd.DataFrame,
     kernel_filter: KernelFilter,
 ) -> pd.DataFrame:
-    """Filter rows by resolved kernel identity and/or name constraints."""
-    if not kernel_filter.is_active:
+    """Filter rows to the resolved kernel names."""
+    if not kernel_filter.is_active or "Kernel_Name" not in df.columns:
         return df
 
-    filtered_df = df
-    if kernel_filter.correlation_ids and "Correlation_ID" in filtered_df.columns:
-        filtered_df = filtered_df.loc[
-            _numeric_series(filtered_df["Correlation_ID"]).isin(
-                kernel_filter.correlation_ids
-            )
-        ]
-
-    if kernel_filter.dispatch_ids and "Dispatch_ID" in filtered_df.columns:
-        filtered_df = filtered_df.loc[
-            _numeric_series(filtered_df["Dispatch_ID"]).isin(kernel_filter.dispatch_ids)
-        ]
-
-    if kernel_filter.names and "Kernel_Name" in filtered_df.columns:
-        stripped_names = filtered_df["Kernel_Name"].apply(_strip_name)
-        filtered_df = filtered_df.loc[stripped_names.isin(kernel_filter.names)]
-
-    return filtered_df
+    stripped_names = df["Kernel_Name"].apply(_strip_name)
+    return df.loc[stripped_names.isin(kernel_filter.names)]
 
 
 def parse_operator_patterns(args: argparse.Namespace, attr: str) -> list[str]:
@@ -212,26 +166,17 @@ def filter_by_backend(consolidated_df: pd.DataFrame, backend: str) -> pd.DataFra
 
 
 def load_consolidated_ml_api_trace(workload_path: str) -> pd.DataFrame:
-    """Load cached consolidated trace, regenerating when identity columns are stale."""
+    """Load the cached consolidated trace, generating it on first use."""
     ml_api_trace_dir = Path(workload_path) / "ml_api_trace"
     consolidated_path = ml_api_trace_dir / "consolidated.csv"
 
     if consolidated_path.exists():
-        consolidated_df = pd.read_csv(consolidated_path)
-        if _has_identity_columns(consolidated_df) or not _raw_trace_files_exist(
-            workload_path
-        ):
-            console_log(
-                "ml api trace",
-                f"Loaded cached {consolidated_path}. "
-                "Delete ml_api_trace/ directory to force regeneration from raw traces.",
-            )
-            return consolidated_df
-
         console_log(
             "ml api trace",
-            f"Cached {consolidated_path} has an old schema; regenerating it.",
+            f"Loaded cached {consolidated_path}. "
+            "Delete ml_api_trace/ directory to force regeneration from raw traces.",
         )
+        return pd.read_csv(consolidated_path)
 
     consolidated_df, ml_api_trace_path = process_ml_api_trace_output(workload_path)
     if not consolidated_df.empty:
@@ -304,12 +249,8 @@ def build_operator_filter(
         if matched_df.empty:
             return KernelFilter(), matched_df
 
-    raw_pmc = getattr(workload, "raw_pmc", pd.DataFrame())
-    return _kernel_filter_from_matched_df(matched_df, raw_pmc), matched_df
-
-
-def _normalize_names(values: Iterable[object]) -> frozenset[str]:
-    return frozenset(str(name).strip() for name in values if str(name).strip())
+    names = frozenset(matched_df["Kernel_Name"].dropna().str.strip().unique())
+    return KernelFilter(names=names), matched_df
 
 
 def _normalize_ints(values: Iterable[object]) -> frozenset[int]:
@@ -338,12 +279,6 @@ def _strip_name(name: object) -> object:
     return name.strip() if isinstance(name, str) else name
 
 
-def _intersect_or_take(left: frozenset, right: frozenset) -> frozenset:
-    if left and right:
-        return left & right
-    return left or right
-
-
 def _apply_dispatch_id_filters(
     df: pd.DataFrame,
     dispatch_filters: list[str],
@@ -366,83 +301,6 @@ def _apply_dispatch_id_filters(
                 console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
     return df.loc[_numeric_series(df["Dispatch_ID"]).isin(selected_dispatches)]
-
-
-def _kernel_filter_from_matched_df(
-    matched_df: pd.DataFrame,
-    raw_pmc: pd.DataFrame,
-) -> KernelFilter:
-    names = frozenset(matched_df["Kernel_Name"].dropna().str.strip().unique())
-    correlation_ids = _column_int_set(matched_df, "Correlation_ID")
-    dispatch_ids = _derive_dispatch_ids(matched_df, raw_pmc, correlation_ids)
-    return KernelFilter(
-        names=names,
-        correlation_ids=correlation_ids,
-        dispatch_ids=dispatch_ids,
-    )
-
-
-def _derive_dispatch_ids(
-    matched_df: pd.DataFrame,
-    raw_pmc: pd.DataFrame,
-    correlation_ids: frozenset[int],
-) -> frozenset[int]:
-    if raw_pmc.empty or "Dispatch_ID" not in raw_pmc.columns:
-        return frozenset()
-
-    if correlation_ids and "Correlation_ID" in raw_pmc.columns:
-        selected = raw_pmc[
-            pd.to_numeric(raw_pmc["Correlation_ID"], errors="coerce")
-            .astype("Int64")
-            .isin(correlation_ids)
-        ]
-        return _column_int_set(selected, "Dispatch_ID")
-
-    timestamp_columns = {
-        "Kernel_Name",
-        "Start_Timestamp_kernel",
-        "End_Timestamp_kernel",
-    }
-    if not timestamp_columns.issubset(matched_df.columns):
-        return frozenset()
-    if not {"Kernel_Name", "Start_Timestamp", "End_Timestamp"}.issubset(
-        raw_pmc.columns
-    ):
-        return frozenset()
-
-    trace_keys = matched_df[
-        ["Kernel_Name", "Start_Timestamp_kernel", "End_Timestamp_kernel"]
-    ].drop_duplicates()
-    trace_keys = trace_keys.rename(
-        columns={
-            "Start_Timestamp_kernel": "Start_Timestamp",
-            "End_Timestamp_kernel": "End_Timestamp",
-        }
-    )
-    trace_keys["Kernel_Name"] = trace_keys["Kernel_Name"].astype(str).str.strip()
-    raw_keys = raw_pmc.copy()
-    raw_keys["Kernel_Name"] = raw_keys["Kernel_Name"].astype(str).str.strip()
-    merged = raw_keys.merge(
-        trace_keys,
-        on=["Kernel_Name", "Start_Timestamp", "End_Timestamp"],
-        how="inner",
-    )
-    return _column_int_set(merged, "Dispatch_ID")
-
-
-def _column_int_set(df: pd.DataFrame, column: str) -> frozenset[int]:
-    if column not in df.columns:
-        return frozenset()
-    values = pd.to_numeric(df[column], errors="coerce").dropna()
-    return frozenset(int(value) for value in values)
-
-
-def _has_identity_columns(df: pd.DataFrame) -> bool:
-    return bool({"Correlation_ID", "Dispatch_ID"}.intersection(df.columns))
-
-
-def _raw_trace_files_exist(workload_path: str) -> bool:
-    return any(Path(workload_path).glob("**/ml_api_trace*_marker_api_trace.csv"))
 
 
 def mark_selected_kernels(

@@ -539,23 +539,13 @@ def process_ml_api_trace_output(
             f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
     # Backend is added by utils_profile._augment_marker_csv. When absent,
-    # default to "torch". Identity columns are optional across profiler formats
-    # but preserved when available so operator filters can scope dispatches
-    # without collapsing unrelated operators that share a generated kernel name.
+    # default to "torch".
     has_backend = "Backend" in consolidated_df.columns
-    identity_columns = [
-        column
-        for column in ("Correlation_ID", "GUID", "Dispatch_ID")
-        if column in consolidated_df.columns
-    ]
-    projection = [*identity_columns, *required_columns]
-    if has_backend:
-        projection.append("Backend")
+    projection = [*required_columns, "Backend"] if has_backend else required_columns
     consolidated_df = consolidated_df[projection]
     if not has_backend:
         consolidated_df = consolidated_df.assign(Backend="torch")
-    required_for_null_check = ["Backend", *identity_columns]
-    if consolidated_df.drop(columns=required_for_null_check).isnull().values.any():
+    if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
         console_warning("Consolidated ML API trace contains missing values")
         raise ValueError("Consolidated ML API trace contains missing values")
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
@@ -572,7 +562,6 @@ def process_ml_api_trace_output(
             "Operator_Name",
             "Context_Id",
             "Backend",
-            *identity_columns,
             "Kernel_Name",
             "Counter_Name",
             "Counter_Value",
