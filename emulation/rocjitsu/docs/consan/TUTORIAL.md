@@ -198,7 +198,6 @@ the clearest MOI mode for seeing DBI-written data from real IREE kernels.
 export RJ_CONSAN_FLAVOR=moi
 export RJ_CONSAN_MOI_ENGINE=record_replay
 export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
-export RJ_CONSAN_TMP_VGPR=104
 export RJ_CONSAN_MAX_PATCHES=4
 export RJ_CONSAN_REQUIRE_PATCH=1
 export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
@@ -304,8 +303,8 @@ Interpretation:
 
 - the inline-shadow engine can patch and execute in real IREE kernels;
 - IREE correctness means non-corruption, not race detection;
-- explicit registers are still prototype knobs, not the intended final user
-  interface.
+- scratch, owner, epoch, and scalar registers were selected or preserved
+  automatically.
 
 For intentional race diagnostics, prefer the focused rocJITsu HIP controls
 rather than known-correct IREE tests:
@@ -366,7 +365,7 @@ MOI inline-shadow reports a resource-plan skip:
 - Direct-kernel scratch, owner, epoch, and scalar choices are automatic.
 - A full SGPR file, dynamic private stack, or unresolved shared helper is
   rejected explicitly rather than instrumented with an unsafe register.
-- `PLAN.md` tracks the remaining shared-function and rollout work.
+- `SPILLING.md` describes the supported resource and failure boundary.
 
 Sampled mode reports no conflicts:
 

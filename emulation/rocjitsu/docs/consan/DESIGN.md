@@ -28,8 +28,8 @@ register allocation, private-layout, ownership, and spill transaction.
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
-| MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Owner-scoped liveness plans select one per-site scratch assignment for static record/replay, sampled, and inline-shadow access probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Dynamic, barrier, diagnostic, and atomic probes automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Converge the remaining barrier and atomic VGPR paths on the common policy and qualify the standard profiles. |
+| MOI broad operation | All three engines complete the 209-test gfx1201 IREE compatibility sweep without register-number configuration; guarded semantic coverage remains narrower, especially for inline shadow. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel buffer tuning, and expand feature/non-vacuity qualification. |
+| Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -126,24 +126,18 @@ configuration and has narrower coverage in its exact inline path.
 
 The gap is not one feature. It is a set of concrete blockers:
 
-- **Scratch register allocation.** Static record/replay and sampled access
-  probes now choose per-site dead or fresh descriptor-backed VGPR windows and
-  can spill live windows for direct kernels that already establish private
-  scratch.
-  Dynamic access, inline diagnostics, and inline atomic tests now receive
-  automatic scalar and persistent state too. Barrier and atomic patchers still
-  have duplicated VGPR/descriptor logic even though the standard targeted
-  recipes no longer select registers. Broad operation needs those remaining
-  families and shared functions to consume one planner. The first
-  implementation reference is Kunwar Grover's
+- **Scratch register allocation.** Record/replay, sampled, and inline-shadow
+  access, barrier, and atomic probes choose per-site dead or fresh
+  descriptor-backed VGPR windows and spill allowed live windows when needed.
+  Shared helpers use one plan valid for every owning kernel. Scalar and
+  persistent state are automatic too. The first implementation reference is
+  Kunwar Grover's
   `origin/users/Groverkss/text-relocation-land` branch, whose reusable
   contribution is the initial VGPR spill-slot allocator.
-- **Owner and epoch state.** `inline_shadow` needs an owner and epoch live at
-  instrumented accesses. Today those values can be initialized by prologue code,
-  but the registers are manually chosen and the owner derivation is still
-  architecture- and layout-sensitive. Broad operation needs automatic
-  owner/epoch placement, a robust owner policy for arbitrary workgroup shapes,
-  and clear fallback behavior when that policy is not available.
+- **Owner and epoch state.** `inline_shadow` automatically uses a persistent
+  descriptor-backed pair or derived-owner/private-epoch state. Owner derivation
+  remains architecture- and layout-sensitive; broad operation still needs a
+  robust identity policy for arbitrary workgroup shapes.
 - **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
   which is the right direction for applications such as IREE. Current broad
   tests still pass explicit sizes. Broad operation needs per-engine default
@@ -186,9 +180,9 @@ The gap is not one feature. It is a set of concrete blockers:
 - **Test parity.** MOI must pass the same style of corpus as SuperCollider:
   focused rocJITsu tests, hip-moi semantic controls, IREE TileAndFuse, broader
   IREE e2e tests, and rocjitsu-test-corpus cases. Current local evidence is
-  useful but not parity: broad IREE compatibility has passed for
-  `record_replay` and `sampled`, while a broad `inline_shadow` sweep exposed a
-  timeout/hang and remains a targeted mode.
+  useful but not full feature parity: broad IREE compatibility passes for all
+  three engines, while inline-shadow instrumentation coverage and the
+  rocjitsu-test-corpus matrix remain incomplete.
 
 The intended operational target is:
 
@@ -302,9 +296,9 @@ This code should be treated as prototype integration work. Other rocJITsu work
 is expected to make spilling more comprehensive, so ConSan should avoid
 over-engineering interfaces that may be replaced by shared DBI infrastructure.
 
-Migrating the remaining standalone barrier/atomic VGPR patchers through the
-same plan and exposing bounded outcome counters are the largest resource gaps
-between current implementation and the intended architecture.
+Barrier/atomic VGPR patchers now consume the same plan, and bounded HSA logs
+report explicit, dead, descriptor-growth, spill, and unsupported outcomes plus
+planned and emitted spill bytes.
 
 ## SuperCollider Flavor
 
@@ -699,16 +693,17 @@ confidence on LDS ordering controls, not broad atomic opcode coverage.
 
 The code intentionally contains several prototype mechanisms:
 
-- manual register knobs for MOI probes;
-- descriptor growth without general liveness/spilling proof;
+- optional manual register debug overrides;
+- a gfx1201-only ordinary-VGPR spill backend rather than general register-class
+  spilling;
 - explicit report-buffer sizes in broad MOI test recipes;
 - engine-specific resource recipes that users currently need to know;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
 - one-slot inline atomic release state;
 - sparse inline diagnostic records;
-- `inline_shadow` coverage and stability limited to targeted tests rather than
-  the full broad corpus;
+- `inline_shadow` feature/non-vacuity coverage limited to targeted tests even
+  though its broad compatibility sweep is now clean;
 - deterministic or scalar-source delay instead of randomized sampling policy;
 - IREE correctness tests used as patchability/non-corruption evidence, not race
   reports.
@@ -740,11 +735,11 @@ Current evidence categories:
 - IREE RDNA4 / `gfx1201` TileAndFuse matmul tests under SuperCollider and MOI
   modes.
 - Broader IREE e2e inventory under SuperCollider patch-required mode.
-- Broader IREE e2e compatibility sweeps under MOI `record_replay` and
-  `sampled` with prototype resource knobs.
-- A broader IREE `inline_shadow` sweep is not yet clean: targeted TileAndFuse
-  tests pass, but a broad sweep exposed a timeout/hang, so `inline_shadow` is
-  not yet a blanket corpus mode.
+- Broader 209-test IREE e2e compatibility sweeps under all three MOI engines
+  without register-number configuration.
+- Guarded TileAndFuse, scan, and softmax subsets under all three engines;
+  inline shadow remains narrower in supported access forms despite the clean
+  compatibility sweep.
 
 What a passing IREE test means:
 
@@ -760,15 +755,14 @@ What it does not mean:
 - It does not prove that IREE had a race.
 - It does not prove sampled mode saw every race.
 - It does not prove flat `MaybeGroup` is formally correct for arbitrary code.
-- It does not prove manually selected registers are generally safe.
+- It does not prove unsupported instruction families are instrumented.
 
 ## Immediate Engineering Gaps
 
-The non-spill scratch policy, gfx1201 spill-backed access path, zero-to-nonzero
-dispatch scratch, persistent-state fallbacks, scalar/special-state policy, and
-compatible shared-function assignments are now in place. The immediate
-resource gap is planner convergence for the remaining probe families and
-qualification of the no-register-number profiles.
+The R1 resource path is in place: non-spill allocation, gfx1201 spill-backed
+access/barrier/atomic probes, zero-to-nonzero dispatch scratch,
+persistent-state fallbacks, scalar/special-state policy, compatible
+shared-function assignments, and bounded outcome summaries.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:
@@ -780,15 +774,15 @@ instructions or spill/fill placement. ConSan now reuses that allocator beneath
 its gfx1201 B32 backend and the record/replay and sampled access integrations.
 `origin/users/Groverkss/dbt-tooling` and
 `origin/users/Groverkss/dbt_interposer` remain useful background references;
-the remaining work is planner convergence and rollout rather than another
-allocator.
+later work is broader shared infrastructure and target coverage rather than
+another ConSan allocator.
 
 If ConSan needs SGPR spilling, assume it is not already covered there. Implement
 only the minimal SGPR support needed for the current probe family, keep it
 isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
-After scratch/spill policy, the next operational gap is MOI defaulting: engine
+The next operational gap is MOI defaulting: engine
 profiles, auto report-buffer sizing, clear failure modes, and a test matrix
 that proves each engine can run without ad hoc per-test register choices. That
 work is tracked in `PLAN.md` as the path from targeted MOI instrumentation to

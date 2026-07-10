@@ -61,9 +61,9 @@ Known local result:
 
 - Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
   passed after the R1D implementation.
-- Current resource/MOI/spill-manager focus: 155/155 passed after adding
-  automatic scalar resources, lane-independent VCC preservation, SCC
-  preservation, wave32/wave64 shapes, and the bounded full-SGPR failure case.
+- Current resource/MOI/spill-manager focus: 168/168 passed after the complete
+  access/barrier/atomic planner rollout, including automatic scalar resources,
+  shared owners, bounded outcome summaries, and spill accounting.
 
 Focused gfx1201 spill hardware smoke:
 
@@ -197,7 +197,6 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay \
 RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
-RJ_CONSAN_TMP_VGPR=104 \
 RJ_CONSAN_MAX_PATCHES=4 \
 ctest --test-dir /home/benoit/workspace/iree-build \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
@@ -216,7 +215,6 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay \
 RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
-RJ_CONSAN_TMP_VGPR=104 \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
@@ -239,7 +237,6 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=sampled \
 RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
-RJ_CONSAN_TMP_VGPR=104 \
 RJ_CONSAN_MAX_PATCHES=4 \
 ctest --test-dir /home/benoit/workspace/iree-build \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
@@ -258,7 +255,6 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=sampled \
 RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536 \
-RJ_CONSAN_TMP_VGPR=104 \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
@@ -281,12 +277,7 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=inline_shadow \
 RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144 \
-RJ_CONSAN_TMP_VGPR=240 \
-RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1 \
 RJ_CONSAN_MOI_OWNER_SOURCE=hw_id \
-RJ_CONSAN_MOI_OWNER_SGPR=100 \
-RJ_CONSAN_MOI_OWNER_VGPR=250 \
-RJ_CONSAN_MOI_EPOCH_VGPR=251 \
 RJ_CONSAN_MAX_PATCHES=1 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
@@ -298,9 +289,24 @@ ctest --test-dir /home/benoit/workspace/iree-build \
 Known local result:
 
 - TileAndFuse guarded subset: 5/5 passed on `gfx1201`.
-- Broad IREE e2e inline-shadow is not yet clean. A broad sweep reached late
-  tests but timed out in `check_rocm_hip_scan_configured.mlir` and then hung in
-  a softmax test. Treat this as an open MOI broad-readiness bug.
+- Scan/softmax regression subset: 3/3 passed on `gfx1201`.
+- IREE e2e broad sweep: 209/209 passed on `gfx1201` with a 60-second per-test
+  timeout and no register-number configuration. The earlier scan/softmax hang
+  has not reproduced since the common resource rollout.
+
+## hip-moi Semantic Controls
+
+Run the independent reference suite without a ConSan hook:
+
+```sh
+ctest --test-dir /home/benoit/workspace/hip-moi-build \
+  --parallel 8 --timeout 120 --output-on-failure
+```
+
+Known local result:
+
+- 189/189 passed on `gfx1201`, covering reference kernels, attention/WMMA,
+  barriers, atomics/fences, positive race diagnostics, and tutorial cases.
 
 ## rocjitsu-test-corpus
 

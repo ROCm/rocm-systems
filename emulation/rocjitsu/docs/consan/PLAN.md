@@ -94,8 +94,8 @@ flowchart LR
   R1E["R1E: Persistent Owner And Epoch State"]:::done
   R1F["R1F: Scalar And Special-State Policy"]:::done
   R1G["R1G: Shared-Function Resource Plans"]:::done
-  R1H["R1H: MOI Resource Parity Rollout"]:::active
-  R1{"R1: Register/Spill Policy Ready"}:::todo
+  R1H["R1H: MOI Resource Parity Rollout"]:::done
+  R1{"R1: Register/Spill Policy Ready"}:::done
 
   B0 --> R1A
   B0 --> R1C
@@ -120,7 +120,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   B0["B0: Baseline"]:::done
-  R1{"R1: Register/Spill<br/>Policy Ready"}:::todo
+  R1{"R1: Register/Spill<br/>Policy Ready"}:::done
 
   subgraph INLINE["Inline-shadow coverage"]
     direction LR
@@ -240,11 +240,10 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Converge the completed direct- and shared-function resource paths in
-   `R1H`; reaching the `R1` diamond
-   means the whole register/spill policy, rather than only its first backend,
-   is ready.
-2. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
+1. `R1` is complete: access, barrier, and atomic probes use the common
+   resource policy, and the gfx1201 profiles have been qualified without
+   register-number configuration.
+2. Advance `I1A`, `I2`, `I3`, and `S1` as independent feature
    branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
 3. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
    taken in bounded slices when they unblock the main path. Freeze profiles in
@@ -260,11 +259,10 @@ current local execution window while only `gfx1201` hardware is available. Its
 only incoming edge is the existing baseline; it neither gates nor is gated by
 the gfx1201 `M0` path.
 
-The most important design dependency is `R1`. Direct-kernel and shared-helper
-access probes now have automatic ephemeral, persistent, scalar, and
-spill-backed resources. The remaining resource-policy work is migrating the
-non-access probe implementations through the same planner and qualifying the
-standard profiles.
+The most important design dependency, `R1`, is now complete. Direct-kernel and
+shared-helper access, barrier, and atomic probes have automatic ephemeral,
+persistent, scalar, and spill-backed resources. Subsequent nodes build feature
+coverage and operational behavior on that boundary.
 
 ## M0: MOI Broad Turn-On Readiness - TARGET
 
@@ -292,25 +290,21 @@ targeted experiments.
 
 Current state:
 
-- `record_replay` and `sampled` have passed broad local IREE e2e compatibility
-  sweeps with explicit prototype resource knobs.
-- `inline_shadow` has passed targeted IREE TileAndFuse tests, but a broader
-  local IREE sweep exposed a timeout/hang, so it is not yet a blanket mode.
-- hip-moi and rocjitsu-test-corpus coverage have historically been run more
-  thoroughly under SuperCollider than under all MOI engines.
-- MOI still needs explicit report-buffer sizing and, for several paths,
-  manually selected scratch/owner/epoch registers.
+- `record_replay`, `sampled`, and `inline_shadow` have each passed the 209-test
+  local IREE e2e compatibility sweep without register-number configuration.
+- Guarded TileAndFuse plus scan/softmax regressions pass under every engine,
+  but `inline_shadow` still has narrower instruction and diagnostic coverage.
+- The independent hip-moi semantic control suite passes 189/189; broader
+  ConSan feature/non-vacuity qualification remains in `T1`.
+- MOI still needs explicit report-buffer sizing and stable engine profiles.
 
-The primary technical dependency for broad MOI operation is `R1`. The other
-gaps below still matter, but broad runs with hand-picked register numbers do not
-establish that instrumentation is safe for arbitrary kernels. ConSan first
-needs to acquire, preserve, and account for its temporary and persistent
-register state automatically.
+The primary technical dependency for broad MOI operation, `R1`, is complete.
+The other gaps below still matter: a clean compatibility run proves
+non-corruption for patched supported sites, not full instruction coverage or
+diagnostic quality.
 
 Blocking reasons to close:
 
-- Scratch register allocation and spilling are not automatic enough.
-- Owner and epoch state are not automatically placed for arbitrary kernels.
 - HSA-tool-owned report buffers do not yet have robust per-engine default
   capacities and overflow reporting.
 - MOI has engine-specific recipes instead of stable profiles.
@@ -350,54 +344,38 @@ Done criteria:
 - `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and local testing notes agree on the
   readiness level of each MOI engine.
 
-## R1: Register And Spill Policy - ACTIVE
+## R1: Register And Spill Policy - DONE
 
 Goal: give every ConSan probe a documented, testable way to acquire temporary
 registers and persistent sanitizer state without relying on caller-chosen
 register numbers or clobbering application state.
 
-Current state:
+Landed state:
 
-- SuperCollider probes have conservative liveness/free-register selection and
-  fallback descriptor VGPR growth.
-- MOI probes often require explicit knobs such as `RJ_CONSAN_TMP_VGPR`,
-  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`, `RJ_CONSAN_MOI_OWNER_VGPR`,
-  `RJ_CONSAN_MOI_EPOCH_VGPR`, and `RJ_CONSAN_MOI_OWNER_SGPR`.
-- ConSan can grow descriptor SGPR/VGPR allocation for selected explicit regs,
-  but it does not prove those regs are dead and does not spill live values.
-- The patch layer already has `SpillManager`. It allocates stable per-lane
-  private-memory offsets and computes the enlarged private segment, but it does
-  not choose victim registers, emit save/restore instructions, or patch a
-  ConSan kernel descriptor by itself.
-- Kunwar's `origin/users/Groverkss/text-relocation-land` branch has a more
-  complete VGPR-only pattern:
-  - `code/dbt/semantic_scratch.*` prefers a liveness-dead aligned VGPR window,
-    then borrows an allowed live window and assigns transient private-memory
-    spill slots;
-  - `code/dbt/semantic/cdna3_scratch.*` emits target-specific
-    `flat_scratch` dword save/restore sequences and waits;
-  - `TranslationContext` separates persistent spill storage from a reusable
-    per-instruction spill frame and feeds VGPR, SGPR, and private-segment
-    high-water marks back into descriptor translation;
-  - `BinaryTranslator` computes kernel-scoped CFG liveness, relocates expanded
-    kernel text, and commits descriptor growth only after lowering succeeds.
-- Kunwar's concrete spill emitter is CDNA3-only. ConSan's first live target is
-  RDNA4 / `gfx1201`, so R1 needs an RDNA4 spill/fill encoder and wait policy,
-  not a direct copy of that emitter.
-- Kunwar's branch has no general SGPR spill stack. It uses liveness-proven or
-  descriptor-backed SGPRs where possible and has special-purpose scalar
-  preservation only for specific lowerings.
-- ConSan currently instruments both kernel ranges and separately discovered
-  functions. Private spill storage is descriptor-owned, so the first spill
-  implementation must remain kernel-scoped; a shared function may only use it
-  after every owning kernel and call path is known and updated.
-- The retained dump from the broad inline-shadow scan failure contains
-  `_scan_dim1_inclusive_sum_large_configured_vector_distribute_dispatch_0_scan_64x256xf32`,
-  a wave64 gfx1201 kernel with 256 VGPRs, 5,304 bytes of existing private
-  scratch, and 1,335 compiler VGPR spills. Descriptor-only VGPR growth is
-  impossible for that kernel, and a manual high VGPR window is unsafe without
-  liveness proof. This is the first real-workload forced-pressure regression
-  target for R1; it is not yet proven to be the sole cause of the earlier hang.
+- MOI access, barrier, and atomic probes request scratch through one owner-aware
+  planner: explicit debug override, liveness-dead window, fresh
+  descriptor-backed growth, spill-preserved live window, or typed unsupported
+  result.
+- Inline owner/epoch state is automatically placed in dedicated VGPRs or a
+  derived-owner/private-epoch representation. Scalar windows are automatic and
+  preserve EXEC, VCC, and SCC; general SGPR spilling remains deliberately out
+  of scope and full pressure fails closed.
+- Reachable shared functions use the union of owner liveness and one compatible
+  register/private layout. All owning descriptors change; unrelated
+  descriptors do not.
+- The gfx1201 backend emits address-free B32 scratch save/fill sequences,
+  updates descriptors and metadata, and raises AQL dispatch private size even
+  for kernels compiled with zero private bytes.
+- Bounded summaries report explicit, dead, descriptor-growth, spill, and
+  unsupported plans, site kind and typed reason, owner names, and
+  planned/emitted spill bytes.
+- Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch supplied
+  the allocator/spill-frame direction and the `SpillManager` starting point.
+  ConSan added the gfx1201 emitter, owner analysis, descriptor/dispatch
+  transaction, and tests; [SPILLING.md](SPILLING.md) records the boundary.
+- Qualification is 168/168 focused synthetic/unit tests, 24/24 live rocJITsu
+  tests, 189/189 hip-moi controls, guarded TileAndFuse and scan/softmax tests,
+  and 209/209 broad IREE compatibility under each MOI engine.
 
 Current MOI resource demand, before any future probe simplification:
 
@@ -900,7 +878,7 @@ Done criteria:
 - Broad logs distinguish unsupported shared ownership from ordinary
   no-candidate and allocation failures.
 
-## R1H: MOI Resource Parity Rollout - ACTIVE
+## R1H: MOI Resource Parity Rollout - DONE
 
 Goal: integrate the completed R1 resource paths into standard MOI profiles and
 demonstrate that register configuration is no longer the reason MOI trails
@@ -945,6 +923,19 @@ Done criteria:
 - Remaining MOI parity gaps belong to other named DAG nodes rather than hidden
   manual-register assumptions.
 
+Landed evidence:
+
+- Commit `f604bc118b` moves access, barrier, atomic-record, and inline-atomic
+  probes through the common planner and adds bounded resource summaries.
+- Standard record/replay, sampled, and targeted inline-shadow recipes contain
+  no scratch, owner, epoch, or SGPR numbers; live forced-spill tests prove
+  preservation and dispatch-private growth.
+- Focused tests pass 168/168, the live resource tier 24/24, hip-moi controls
+  189/189, and the 209-test IREE compatibility tier under every engine. Guarded
+  TileAndFuse and scan/softmax regressions pass without resource-induced hangs.
+- [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
+  Kunwar Grover's branch while separating reused ideas from new gfx1201 work.
+
 ## O1: MOI Operational Defaults - TODO
 
 Goal: make MOI command lines stable and short enough for routine use.
@@ -958,8 +949,8 @@ Current state:
   `RJ_CONSAN_REQUIRE_PATCH=1`, `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`,
   `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1`, and
   `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1`.
-- The current broad inline-shadow IREE sweep can timeout/hang, so standard
-  recipes also need failure containment.
+- The current broad inline-shadow IREE sweep is clean after R1, but standard
+  recipes still need consistent failure containment and overflow reporting.
 
 Dependency split:
 
@@ -984,8 +975,8 @@ Work:
 - Make buffer overflow visible in logs, guards, and diagnostics.
 - Separate "prove instrumentation happened" guards from ordinary compatibility
   runs so teammates know when to use each.
-- Add timeout/hang triage notes to local testing until the underlying
-  inline-shadow broad issue is fixed.
+- Keep explicit per-test timeouts and failure-triage guidance in the local
+  runbook.
 
 Done criteria:
 
@@ -1316,13 +1307,11 @@ Current state:
   SuperCollider, MOI record/replay, sampled, and inline-shadow configurations.
 - The broader IREE e2e inventory has been used as compatibility coverage for
   SuperCollider.
-- The broader local IREE e2e inventory has also passed MOI `record_replay` and
-  `sampled` compatibility sweeps with explicit prototype resource knobs.
-- A broader local IREE e2e `inline_shadow` sweep is not yet clean: targeted
-  TileAndFuse tests pass, but a broad run exposed a timeout/hang. Treat that as
-  an open MOI broad-readiness bug.
-- hip-moi has been valuable as semantic control coverage, but MOI runs are not
-  yet documented as thoroughly as SuperCollider runs.
+- The broader local IREE e2e inventory passes all three MOI engines without
+  register-number configuration; this remains compatibility rather than proof
+  that every loaded code object was instrumented.
+- hip-moi's 189-test semantic control suite is documented and clean, but the
+  final profile-by-tier ConSan matrix still belongs to `T1B`.
 - No equivalent `gfx942`, `gfx950`, or `gfx1250` ConSan test tier exists yet.
 
 Dependency split:

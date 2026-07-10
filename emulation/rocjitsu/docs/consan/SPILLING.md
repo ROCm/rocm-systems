@@ -4,12 +4,13 @@ This document describes the register-resource path delivered by ConSan R1:
 how a probe obtains temporary registers, when it spills, how private scratch is
 laid out, which kernel descriptors must change, and where the implementation
 deliberately fails closed. It is the focused companion to [DESIGN.md](DESIGN.md);
-[PLAN.md](PLAN.md) tracks the remaining rollout and qualification work.
+[PLAN.md](PLAN.md) tracks later feature, operational, and qualification work.
 
-The first complete version covers the committed R1A-R1G implementation. R1H is
-active: it is moving the remaining barrier and atomic VGPR paths through the
-same policy, adding bounded outcome summaries, and qualifying the standard MOI
-profiles. This document should be updated when those boundaries move.
+The first complete version now covers the committed R1A-R1H implementation.
+Access, barrier, and atomic VGPR paths use the same policy, and the HSA log
+reports bounded per-source outcomes plus planned and emitted spill bytes.
+Later DAG nodes may extend the implementation, but they do not reopen the R1
+resource contract described here.
 
 ## Credit and provenance
 
@@ -184,7 +185,7 @@ does not intentionally leave a partially instrumented object for loading.
 
 ## Current support boundary
 
-The committed R1A-R1G boundary is:
+The committed R1 boundary is:
 
 | Resource or probe family | Current state |
 | --- | --- |
@@ -194,7 +195,7 @@ The committed R1A-R1G boundary is:
 | Reachable shared access helpers | One all-owner-compatible dead, fresh, or common spill plan. |
 | Private-epoch entry/barrier temporaries | Saved and restored through the gfx1201 private path. |
 | Dynamic record, barrier, diagnostic, and atomic scalar state | Automatic descriptor-backed SGPR windows with EXEC/VCC/SCC preservation. |
-| Barrier and atomic VGPR temporaries | R1H rollout is active; these paths are being converged on the common planner. |
+| Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans; explicit register variables are debug overrides. |
 | SGPR spilling | Not implemented; full-file pressure fails closed. |
 | Dynamic-stack kernels | Spill growth rejected until the stack convention is proven compatible. |
 | AccVGPR spilling | Not implemented. |
@@ -222,9 +223,12 @@ proven. Important examples include:
 - malformed or non-growable in-place AMDGPU metadata;
 - unsupported architecture or register class.
 
-These outcomes must remain distinguishable from "no candidate", "successfully
-instrumented and no race found", and an actual race diagnostic. R1H owns the
-final bounded counters and guard/log presentation for that distinction.
+These outcomes are distinguishable from "no candidate", "successfully
+instrumented and no race found", and an actual race diagnostic. The HSA log
+summarizes explicit, dead, descriptor-growth, spill, and unsupported plans,
+planned/emitted spill bytes, site kind, typed reason, and a bounded owner-name
+list. Patch, visible-record, and diagnostic guards cover the corresponding
+runtime distinctions.
 
 ## Tests and evidence
 
@@ -235,10 +239,11 @@ The focused CPU/synthetic suite is:
   --gtest_filter='ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
-It covers allocation precedence, forbidden ranges, rollback, gfx1201
-encodings and waits, descriptor/metadata growth, zero-private kernels,
-dynamic-stack rejection, shared-owner dead/fresh/spill layouts, mixed-wave
-rejection, persistent state, and staged text-growth descriptor updates.
+The current result is 168/168. It covers allocation precedence, forbidden
+ranges, rollback, gfx1201 encodings and waits, descriptor/metadata growth,
+zero-private kernels, dynamic-stack rejection, shared-owner dead/fresh/spill
+layouts, mixed-wave rejection, persistent state, barrier/atomic rollout,
+bounded summaries, and staged text-growth descriptor updates.
 
 The live gfx1201 tier includes forced-spill tests whose victim VGPRs remain
 live across instrumentation:
@@ -248,9 +253,12 @@ ctest -j8 --output-on-failure \
   -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.'
 ```
 
-Notable controls include record/replay and sampled forced-spill preservation,
-zero-to-nonzero private dispatch backing, private-epoch barriers, inline
-diagnostics, and atomic handoff behavior. See
+The current result is 24/24. Notable controls include record/replay and sampled
+forced-spill preservation, zero-to-nonzero private dispatch backing,
+private-epoch barriers, inline diagnostics, and atomic handoff behavior, all
+without register-number configuration. The independent hip-moi control suite
+is 189/189, and all three engines complete the 209-test IREE gfx1201
+compatibility sweep. See
 [LOCAL_TESTING.md](LOCAL_TESTING.md) for workspace paths and the broader test
 ladder.
 

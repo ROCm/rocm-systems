@@ -16,10 +16,12 @@ Use `supercollider` first when sharing the current snapshot with a teammate. It
 is the shortest useful path: redundant-access LDS/likely-group-flat checks,
 configurable delay, and trap or marker-buffer reporting.
 
-Use `moi` for structured memory-order instrumentation experiments. MOI already
-has useful `record_replay`, `inline_shadow`, and `sampled` engines, but some
-paths still require explicit prototype knobs for scratch registers, owner/epoch
-state, and report buffers.
+Use `moi` for structured memory-order instrumentation experiments. MOI has
+`record_replay`, `inline_shadow`, and `sampled` engines. On gfx1201 their
+standard paths now allocate or preserve scratch registers, owner/epoch state,
+and scalar special state automatically; explicit register variables remain
+debug overrides. Report-buffer sizing and engine profiles are still
+prototype-facing operational work.
 
 ## Documents
 
@@ -89,7 +91,9 @@ MOI currently supports:
 - `sampled`: direct sampled watchpoint publication plus host-side sampled
   conflict scanning.
 
-The main prototype gap is resource management. Several MOI probes still depend
-on explicit user-selected registers. The next major engineering phase is to
-centralize scratch allocation and reuse or extend existing DBT spill/cave
-utilities.
+The R1 resource path is complete for the current gfx1201 MOI probes: access,
+barrier, and atomic sites share an owner-aware dead/fresh/spill planner, and
+ordinary runs do not select register numbers. Remaining broad-readiness work is
+tracked separately in [PLAN.md](PLAN.md): stable buffer/profile defaults,
+placement and instruction coverage, richer diagnostics and ordering, sampled
+checking, and qualification.
