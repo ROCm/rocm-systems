@@ -144,8 +144,8 @@ thread_trace_parameter_pack::are_params_valid() const
 
     if(simd_select > 0xF)
     {
-        ROCP_ERROR << "Invalid thread trace SIMD select mask: " << static_cast<uint32_t>(simd_select)
-                   << " (valid range is 0x0-0xF)";
+        ROCP_ERROR << "Invalid thread trace SIMD select mask: "
+                   << static_cast<uint32_t>(simd_select) << " (valid range is 0x0-0xF)";
         return false;
     }
 

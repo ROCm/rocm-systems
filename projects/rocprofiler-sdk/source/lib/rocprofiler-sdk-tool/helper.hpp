@@ -81,27 +81,20 @@
         }                                                                                          \
     }
 
-// Like ROCPROFILER_CALL, but intended for service-configuration calls that are
-// driven directly by user-supplied command-line options (e.g. ATT and
-// PC-sampling parameters). A failure here is almost always caused by an invalid
-// user parameter, so it must be reported as a clean, user-readable error with a
-// non-zero exit instead of aborting via a fatal log. Aborting would raise
-// SIGABRT and route through the process error/signal handler, which is both
-// hostile to users (no actionable message) and has historically deadlocked the
-// tool. ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT is treated as a user error;
-// any other unexpected status is still escalated as fatal for diagnosis.
+// Like ROCPROFILER_CALL, but reports bad arguments with ERROR instead of FATAL and informs the user
+// that there is a bad parameter.
 #define ROCPROFILER_CHECK_USER_CONFIG(result, msg)                                                 \
     {                                                                                              \
         rocprofiler_status_t ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__) = result;               \
-        if(ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__) ==                                         \
-           ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)                                               \
+        if(ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__) ==                                        \
+           ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)                                              \
         {                                                                                          \
-            ROCP_ERROR << msg                                                                       \
+            ROCP_ERROR << msg                                                                      \
                        << " failed: one or more parameters are invalid. Please check the "         \
                           "corresponding command-line options and try again.";                     \
-            ::std::exit(EXIT_FAILURE);                                                              \
+            ::std::exit(EXIT_FAILURE);                                                             \
         }                                                                                          \
-        else if(ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)        \
+        else if(ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)       \
         {                                                                                          \
             std::string status_msg =                                                               \
                 rocprofiler_get_status_string(ROCPROFILER_VARIABLE(USERCFGSTATUS, __LINE__));      \
