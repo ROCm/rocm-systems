@@ -24,6 +24,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <sys/types.h> // pid_t
 #include <unistd.h>
 
 namespace rocjitsu {
