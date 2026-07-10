@@ -65,6 +65,11 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 
+#ifdef __FreeBSD__
+#include <sys/thr.h>
+#define SYS_gettid thr_self(0)
+#endif
+
 constexpr char SNAPSHOT_INFO_ALIGNMENT = 0x8;
 constexpr uint32_t LOAD_ALIGNMENT_SHIFT = 4;
 constexpr uint32_t NOTE_ALIGNMENT_SHIFT = 2;

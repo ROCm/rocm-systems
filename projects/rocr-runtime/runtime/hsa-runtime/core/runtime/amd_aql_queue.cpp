@@ -677,7 +677,11 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 #ifdef __linux__
   int fd;
 #ifdef HAVE_MEMFD_CREATE
+#ifdef __FreeBSD__
+  fd = memfd_create(ring_buf_shm_path, 0);
+#else
   fd = syscall(__NR_memfd_create, ring_buf_shm_path, 0);
+#endif
 
   if (fd == -1) return -1;
 

@@ -47,6 +47,9 @@
 #include <link.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#elif defined(__FreeBSD__)
+#include <link.h>
+#include <sys/ioctl.h>
 #endif
 
 #include "hsakmt/hsakmt.h"
