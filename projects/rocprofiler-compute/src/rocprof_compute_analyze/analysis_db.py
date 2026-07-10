@@ -440,9 +440,10 @@ class db_analysis(OmniAnalyze_Base):
             kernel_filter = getattr(workload, "kernel_filter", None)
             if kernel_filter is not None and kernel_filter.names:
                 grouped_df = grouped_df[
-                    grouped_df["kernel_name"].astype(str).str.strip().isin(
-                        kernel_filter.names
-                    )
+                    grouped_df["kernel_name"]
+                    .astype(str)
+                    .str.strip()
+                    .isin(kernel_filter.names)
                 ]
 
             pc_sampling_data_per_workload[workload_path] = grouped_df
