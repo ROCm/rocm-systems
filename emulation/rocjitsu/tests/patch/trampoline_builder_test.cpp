@@ -311,6 +311,78 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
             build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
 }
 
+TEST(DbiPatchPlacementPlanner, ReservesSequentialAppendedCavesWithExplicitMappings) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/256);
+  DbiPatchPlacementRequest first;
+  first.anchor_offset = 16;
+  first.original_size = 8;
+  first.body_size = 40;
+  first.inline_capacity = 8;
+  DbiPatchPlacementRequest second = first;
+  second.anchor_offset = 32;
+  second.body_size = 24;
+
+  const auto first_placement = planner.plan(first);
+  const auto second_placement = planner.plan(second);
+
+  ASSERT_TRUE(first_placement);
+  ASSERT_TRUE(second_placement);
+  EXPECT_EQ(first_placement->kind, DbiPatchPlacementKind::AppendedCave);
+  EXPECT_EQ(first_placement->body_offset, 256u);
+  EXPECT_EQ(first_placement->return_branch_offset, 296u);
+  EXPECT_EQ(first_placement->return_target, 24u);
+  EXPECT_EQ(second_placement->body_offset, 300u);
+  EXPECT_EQ(second_placement->return_branch_offset, 324u);
+  EXPECT_EQ(second_placement->return_target, 40u);
+  EXPECT_EQ(planner.appended_end(), 328u);
+}
+
+TEST(DbiPatchPlacementPlanner, PrefersInlineThenLocalAndRejectsOverlapTransactionally) {
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, /*original_text_size=*/512);
+  DbiPatchPlacementRequest inline_request;
+  inline_request.anchor_offset = 32;
+  inline_request.original_size = 8;
+  inline_request.body_size = 32;
+  inline_request.inline_capacity = 40;
+  inline_request.local_cave = DbiPatchLocalCave{256, 64};
+  ASSERT_EQ(planner.plan(inline_request)->kind, DbiPatchPlacementKind::Inline);
+
+  DbiPatchPlacementRequest local_request;
+  local_request.anchor_offset = 96;
+  local_request.original_size = 8;
+  local_request.body_size = 40;
+  local_request.inline_capacity = 8;
+  local_request.local_cave = DbiPatchLocalCave{256, 64};
+  const auto local = planner.plan(local_request);
+  ASSERT_TRUE(local);
+  EXPECT_EQ(local->kind, DbiPatchPlacementKind::LocalCave);
+  EXPECT_EQ(local->body_offset, 256u);
+
+  const uint64_t appended_before_failure = planner.appended_end();
+  std::string error;
+  DbiPatchPlacementRequest overlap = local_request;
+  overlap.allow_appended_cave = false;
+  EXPECT_FALSE(planner.plan(overlap, &error));
+  EXPECT_NE(error.find("no nonoverlapping"), std::string::npos);
+  EXPECT_EQ(planner.appended_end(), appended_before_failure);
+}
+
+TEST(DbiPatchPlacementPlanner, FailsBeforeReservingUnreachableAppendedMapping) {
+  constexpr uint64_t kTextSize = 1u << 20u;
+  DbiPatchPlacementPlanner planner(ROCJITSU_CODE_ARCH_RDNA4, kTextSize);
+  DbiPatchPlacementRequest request;
+  request.anchor_offset = 0;
+  request.original_size = 4;
+  request.body_size = 16;
+  request.inline_capacity = 4;
+  std::string error;
+
+  EXPECT_FALSE(planner.plan(request, &error));
+  EXPECT_NE(error.find("no nonoverlapping"), std::string::npos);
+  EXPECT_TRUE(planner.occupied_ranges().empty());
+  EXPECT_EQ(planner.appended_end(), kTextSize);
+}
+
 // NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was
 // tested here. It has been moved to the orchestrator boundary as
 // validate_inline_nop_plan() in instrumentor.h, and the test moved with it

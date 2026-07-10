@@ -1074,6 +1074,10 @@ Current state:
 - MOI record/replay and inline-shadow also use trampoline placement, including
   appended caves for compact IREE TileAndFuse kernels.
 - Placement is conservative and still duplicated across probe families.
+- A shared `DbiPatchPlacementPlanner` now models inline, local-cave, and
+  appended-cave reservations with explicit anchor/body/return coordinates.
+  Inline-shadow access probes consume it; sampled, record/replay, and
+  synchronization families still need migration.
 
 Work:
 

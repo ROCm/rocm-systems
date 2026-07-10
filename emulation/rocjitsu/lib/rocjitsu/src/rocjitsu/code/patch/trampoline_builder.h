@@ -19,7 +19,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -72,6 +74,65 @@ public:
   /// validate_inline_nop_plan (in instrumentor.h) when appropriate.
   [[nodiscard]] static std::optional<TrampolineBytes> build(const TrampolinePlan &plan,
                                                             std::string *error_out = nullptr);
+};
+
+/// @brief Physical placement selected for one DBI patch body.
+enum class DbiPatchPlacementKind : uint8_t {
+  Inline,
+  LocalCave,
+  AppendedCave,
+};
+
+struct DbiPatchLocalCave {
+  uint64_t offset = 0;
+  uint64_t capacity = 0;
+};
+
+struct DbiPatchPlacementRequest {
+  uint64_t anchor_offset = 0;
+  uint32_t original_size = 0;
+  uint64_t body_size = 0;
+  uint64_t inline_capacity = 0;
+  std::optional<DbiPatchLocalCave> local_cave;
+  bool allow_appended_cave = true;
+};
+
+struct DbiPatchPlacement {
+  DbiPatchPlacementKind kind = DbiPatchPlacementKind::Inline;
+  uint64_t anchor_offset = 0;
+  uint32_t original_size = 0;
+  uint64_t body_offset = 0;
+  uint64_t body_size = 0;
+  uint64_t return_branch_offset = 0;
+  uint64_t return_target = 0;
+};
+
+/// @brief Transactional placement allocator shared by DBI probe families.
+///
+/// The planner owns overlap accounting and appended-cave cursor movement. A
+/// successful trampoline reservation includes its four-byte return branch, so
+/// later placements and final emitters use the same coordinates. Failed
+/// requests do not mutate the planner.
+class DbiPatchPlacementPlanner {
+public:
+  DbiPatchPlacementPlanner(rj_code_arch_t arch, uint64_t original_text_size);
+
+  [[nodiscard]] std::optional<DbiPatchPlacement> plan(const DbiPatchPlacementRequest &request,
+                                                      std::string *error_out = nullptr);
+
+  [[nodiscard]] uint64_t appended_end() const { return appended_cursor_; }
+  [[nodiscard]] std::span<const std::pair<uint64_t, uint64_t>> occupied_ranges() const {
+    return occupied_ranges_;
+  }
+
+private:
+  [[nodiscard]] bool range_is_free(uint64_t begin, uint64_t end) const;
+  void reserve_range(uint64_t begin, uint64_t end);
+
+  rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
+  uint64_t original_text_size_ = 0;
+  uint64_t appended_cursor_ = 0;
+  std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges_;
 };
 
 } // namespace rocjitsu
