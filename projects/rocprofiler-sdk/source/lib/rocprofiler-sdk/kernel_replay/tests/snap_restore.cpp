@@ -20,164 +20,369 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Unit test for kernel_replay single-agent memory snap/restore, exercised through real HSA table
-// interception (the counters/tests test_init() pattern): build the real HSA tables, copy them into
-// the SDK's internal tables, then install the tracker's wrappers on top. Device allocations made
-// through the wrapped amd_ext table are recorded into the inventory automatically -- no manual
-// record_alloc.
-//
-// A kernel that writes a buffer is, for snap/restore purposes, just "something that changes device
-// memory", so the test simulates the mutation with a device copy: fill -> snapshot -> mutate ->
-// restore must revert to the snapped contents (and the mutated-readback proves the test is
-// sensitive to restore).
+// Note on assertions: real interception records EVERY device allocation, including runtime-internal
+// ones from kernel launches / hipMemcpy (the known over-capture behavior). Tests therefore assert
+// deltas around their own hipMalloc/hipFree and check pointer membership, never absolute inventory
+// sizes.
 
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
-#include <gtest/gtest.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
-#include <cstdlib>
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+
+#include <array>
+#include <cstdint>
 #include <vector>
 
-namespace mt = rocprofiler::kernel_replay::memory_tracker;
-using namespace rocprofiler::counters::test_constants;
+using namespace rocprofiler;
+namespace mt   = kernel_replay::memory_tracker;
+namespace msnp = kernel_replay::memory_snapshot;
 
 namespace
 {
-// Build real HSA tables, copy them into the SDK internal tables (so get_core_table()->...copy_fn is
-// live), bring up the agent cache, then install the kernel_replay tracker wrappers and enable it.
+namespace kernel
+{
+__global__ void
+fill(float* d, float val, int n)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+        d[i] = val;
+}
+
+// d[i] = base + i : a non-uniform pattern so a stale/partial restore is easy to catch.
+__global__ void
+iota(float* d, float base, int n)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+        d[i] = base + static_cast<float>(i);
+}
+
+// In-place read-write kernel: the canonical case restore must protect (y is both read and written).
+__global__ void
+saxpy(float* y, const float* x, float a, int n)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+        y[i] = a * x[i] + y[i];
+}
+
+// In-place add (another read-write mutation).
+__global__ void
+add(float* d, float delta, int n)
+{
+    const int stride = blockDim.x * gridDim.x;
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride)
+        d[i] = d[i] + delta;
+}
+}  // namespace kernel
+
+constexpr int NUM_THREADS = 1024;
+
+int
+blocks_for(int n)
+{
+    return (n + NUM_THREADS - 1) / NUM_THREADS;
+}
+
+rocprofiler_context_id_t g_ctx{};
+
 void
-init_tracking()
+tracing_noop(rocprofiler_callback_tracing_record_t /*record*/,
+             rocprofiler_user_data_t* /*user_data*/,
+             void* /*callback_data*/)
+{}
+
+int
+tool_init(rocprofiler_client_finalize_t /*fini*/, void* /*tool_data*/)
 {
-    // Surface the kernel_replay logs: enable the debug gate and lower the absl log level so
-    // ROCP_INFO is emitted to stderr.
-    setenv("ROCPROFILER_KERNEL_REPLAY_DEBUG", "1", 1);
-    absl::SetMinLogLevel(absl::LogSeverityAtLeast::kInfo);
-    absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
-
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-
-    HsaApiTable table{};
-    table.core_    = &get_api_table();
-    table.amd_ext_ = &get_ext_table();
-    rocprofiler::hsa::copy_table(table.core_, 0);
-    rocprofiler::hsa::copy_table(table.amd_ext_, 0);
-
-    rocprofiler::agent::construct_agent_cache(&table);
-    ASSERT_NE(rocprofiler::hsa::get_queue_controller(), nullptr);
-    rocprofiler::hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
-
-    // install our inventory wrappers on top of the SDK internal tables
-    mt::update_table(rocprofiler::hsa::get_core_table());
-    mt::update_table(rocprofiler::hsa::get_amd_ext_table());
-    ASSERT_EQ(mt::set_tracking_enabled(true), true);
+    if(rocprofiler_create_context(&g_ctx) != ROCPROFILER_STATUS_SUCCESS) return -1;
+    rocprofiler_configure_callback_tracing_service(
+        g_ctx, ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API, nullptr, 0, tracing_noop, nullptr);
+    rocprofiler_start_context(g_ctx);
+    return 0;
 }
 
-// First GPU agent that has both a device pool and a host-accessible pool.
+void
+tool_fini(void* /*tool_data*/)
+{}
+
+rocprofiler_tool_configure_result_t*
+configure(uint32_t /*version*/,
+          const char* /*runtime_version*/,
+          uint32_t /*priority*/,
+          rocprofiler_client_id_t* id)
+{
+    id->name        = "kernel-replay-snapshot-test";
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
+    return &cfg;
+}
+
 bool
-find_gpu_agent(hsa_amd_memory_pool_t& gpu_pool, hsa_amd_memory_pool_t& cpu_pool)
+ensure_live_tracking()
 {
-    for(const auto& [_, agent] : rocprofiler::hsa::get_queue_controller()->get_supported_agents())
-    {
-        if(agent.gpu_pool().handle != 0 && agent.cpu_pool().handle != 0)
-        {
-            gpu_pool = agent.gpu_pool();
-            cpu_pool = agent.cpu_pool();
-            return true;
-        }
-    }
-    return false;
+    static bool ok = [] {
+        if(rocprofiler_force_configure(&configure) != ROCPROFILER_STATUS_SUCCESS) return false;
+        if(hipInit(0) != hipSuccess) return false;
+        int devs = 0;
+        if(hipGetDeviceCount(&devs) != hipSuccess || devs == 0) return false;
+        return true;
+    }();
+    // Tracking is normally enabled by rocprofiler_configure_kernel_replay_counting_service; enable
+    // it directly here (same statically-linked instance).
+    if(ok) mt::set_tracking_enabled(true);
+    return ok;
 }
 
-// Allocate device memory through the WRAPPED amd_ext table so the tracker records it.
-void*
-alloc_tracked_device(hsa_amd_memory_pool_t pool, size_t bytes)
+// ------------------------- device helpers -------------------------
+bool
+inventory_contains(void* p)
 {
-    void* ptr = nullptr;
-    EXPECT_EQ(rocprofiler::hsa::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
-                  pool, bytes, 0, &ptr),
-              HSA_STATUS_SUCCESS);
-    return ptr;
+    auto inv = mt::snap_inventory();
+    return inv.find(p) != inv.end();
 }
 
-// Host staging from the (real) cpu pool; deliberately NOT through the wrapped table so it does not
-// pollute the inventory.
-void*
-alloc_host(hsa_amd_memory_pool_t cpu_pool, size_t bytes)
+std::vector<float>
+read_device(const float* d, int n)
 {
-    void* ptr = nullptr;
-    EXPECT_EQ(hsa_amd_memory_pool_allocate(cpu_pool, bytes, 0, &ptr), HSA_STATUS_SUCCESS);
-    return ptr;
+    std::vector<float> out(n);
+    EXPECT_EQ(
+        hipMemcpy(out.data(), d, static_cast<size_t>(n) * sizeof(float), hipMemcpyDeviceToHost),
+        hipSuccess);
+    return out;
 }
+
+void
+sync_ok()
+{
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
+void
+launch_fill(float* d, float val, int n)
+{
+    kernel::fill<<<blocks_for(n), NUM_THREADS>>>(d, val, n);
+    sync_ok();
+}
+
+void
+launch_iota(float* d, float base, int n)
+{
+    kernel::iota<<<blocks_for(n), NUM_THREADS>>>(d, base, n);
+    sync_ok();
+}
+
+void
+launch_saxpy(float* y, const float* x, float a, int n)
+{
+    kernel::saxpy<<<blocks_for(n), NUM_THREADS>>>(y, x, a, n);
+    sync_ok();
+}
+
+void
+launch_add(float* d, float delta, int n)
+{
+    kernel::add<<<blocks_for(n), NUM_THREADS>>>(d, delta, n);
+    sync_ok();
+}
+
+constexpr size_t N_ELEMS = 64U * 1024U * 1024U;
 }  // namespace
 
-// fill A -> snapshot -> (sanity A) -> overwrite B (sanity B) -> restore -> must read back A.
+// A plain hipMalloc must be captured automatically by the tracker the SDK installed on the live HSA
+// table (no manual record_alloc), and hipFree must auto-remove it.
+TEST(kernel_replay_snapshot, hipmalloc_autocaptured_and_freed)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const size_t before_alloc = mt::snap_inventory().size();
+    const size_t bytes        = N_ELEMS * sizeof(float);
+
+    float* buffer = nullptr;
+
+    ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
+    ASSERT_NE(buffer, nullptr);
+
+    EXPECT_EQ(mt::snap_inventory().size(), before_alloc + 1)
+        << "hipMalloc was not auto-captured by the live-table tracker";
+    EXPECT_TRUE(inventory_contains(buffer))
+        << "our device pointer is not in the auto-populated inventory";
+
+    const size_t before_free = mt::snap_inventory().size();
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+    EXPECT_EQ(mt::snap_inventory().size(), before_free - 1) << "hipFree was not auto-removed";
+    EXPECT_FALSE(inventory_contains(buffer)) << "freed pointer still present in inventory";
+}
+
+// iota A -> snapshot -> (sanity A) -> in-place kernel mutation (sanity mutated) -> restore -> A.
 TEST(kernel_replay_snapshot, restore_reverts_device_memory)
 {
-    init_tracking();
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
-    hsa_amd_memory_pool_t gpu_pool{}, cpu_pool{};
-    if(!find_gpu_agent(gpu_pool, cpu_pool)) GTEST_SKIP() << "no GPU agent with usable pools";
+    const size_t bytes = N_ELEMS * sizeof(float);
 
-    constexpr int n     = 4096;
-    constexpr int check = 256;
-    const size_t  bytes = n * sizeof(float);
+    float* buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);  // auto-captured
+    ASSERT_NE(buffer, nullptr);
+    ASSERT_TRUE(inventory_contains(buffer));
 
-    auto* d = static_cast<float*>(alloc_tracked_device(gpu_pool, bytes));
-    auto* h = static_cast<float*>(alloc_host(cpu_pool, bytes));
-    ASSERT_NE(d, nullptr);
-    ASSERT_NE(h, nullptr);
-
-    auto read_back = [&]() {
-        std::vector<float> out(n);
-        EXPECT_EQ(hsa_memory_copy(out.data(), d, bytes), HSA_STATUS_SUCCESS);
-        return out;
-    };
-    auto write_device = [&](float base) {
-        for(int i = 0; i < n; ++i)
-            h[i] = base + static_cast<float>(i);
-        EXPECT_EQ(hsa_memory_copy(d, h, bytes), HSA_STATUS_SUCCESS);
-    };
-
-    // pattern A
-    write_device(1.0f);
-
-    rocprofiler::kernel_replay::memory_snapshot::Snapshot snapshot{};
-
-    {  // sanity: device currently holds A
-        auto a = read_back();
-        for(int i = 0; i < check; ++i)
+    launch_iota(buffer, 1.0f, N_ELEMS);
+    {
+        // sanity: device holds A
+        auto a = read_device(buffer, N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
             ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "pre-mutation elem " << i;
     }
 
+    msnp::Snapshot snapshot{};
     snapshot.snap();
 
-    // mutate to pattern B (stand-in for a kernel writing the buffer)
-    write_device(9000.0f);
-    {  // control: mutation actually landed (so the restore check can't pass trivially)
-        auto b = read_back();
-        for(int i = 0; i < check; ++i)
-            ASSERT_FLOAT_EQ(b[i], 9000.0f + i) << "mutated elem " << i;
+    launch_add(buffer, 9000.0f, N_ELEMS);
+    {
+        // control: mutation landed
+        auto b = read_device(buffer, N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
+            ASSERT_FLOAT_EQ(b[i], 9001.0f + i) << "mutated elem " << i;
+    }
+
+    snapshot.restore();
+    {
+        // restore reverted to A
+        auto a = read_device(buffer, N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
+            ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "post-restore elem " << i;
+    }
+
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+// Restoring between passes must stop an in-place kernel from accumulating: N saxpy passes with a
+// restore each should net one application (y0 + a), not N. A no-op restore would leave y0 + N*a.
+TEST(kernel_replay_snapshot, restore_prevents_inplace_accumulation_across_passes)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int   passes = 5;
+    constexpr float y0     = 100.0f;
+    constexpr float a      = 2.0f;  // x == 1 -> each saxpy pass adds exactly `a`
+    const size_t    bytes  = N_ELEMS * sizeof(float);
+
+    float* x = nullptr;
+    float* y = nullptr;
+    ASSERT_EQ(hipMalloc(&x, bytes), hipSuccess);
+    ASSERT_EQ(hipMalloc(&y, bytes), hipSuccess);
+    ASSERT_NE(x, nullptr);
+    ASSERT_NE(y, nullptr);
+
+    launch_fill(x, 1.0f, N_ELEMS);
+    launch_fill(y, y0, N_ELEMS);
+
+    msnp::Snapshot snapshot{};
+    snapshot.snap();
+
+    for(int pass = 0; pass < passes; ++pass)
+    {
+        launch_saxpy(y, x, a, N_ELEMS);
+        {
+            // sensitivity: mutation landed this pass
+            auto mutated = read_device(y, N_ELEMS);
+            for(size_t i = 0; i < N_ELEMS; ++i)
+                ASSERT_FLOAT_EQ(mutated[i], y0 + a) << "pass " << pass << " elem " << i;
+        }
+
+        snapshot.restore();
+        {
+            // restore reverts to snapped inputs -- no accumulation into the next pass
+            auto reverted = read_device(y, N_ELEMS);
+            for(size_t i = 0; i < N_ELEMS; ++i)
+                ASSERT_FLOAT_EQ(reverted[i], y0) << "post-restore pass " << pass << " elem " << i;
+        }
+    }
+
+    {  // after N passes the buffer is exactly the snapped inputs, not y0 + N*a
+        auto final_state = read_device(y, N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
+            ASSERT_FLOAT_EQ(final_state[i], y0) << "final elem " << i;
+    }
+
+    ASSERT_EQ(hipFree(y), hipSuccess);
+    ASSERT_EQ(hipFree(x), hipSuccess);
+}
+
+// A single snapshot must revert every tracked device allocation the test created, not just one.
+TEST(kernel_replay_snapshot, restore_reverts_multiple_buffers)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const size_t bytes = N_ELEMS * sizeof(float);
+
+    constexpr int                  kBufs = 3;
+    std::array<float*, kBufs>      buffers{};
+    const std::array<float, kBufs> base = {1.0f, 100.0f, 10000.0f};
+
+    for(int b = 0; b < kBufs; ++b)
+    {
+        ASSERT_EQ(hipMalloc(&buffers[b], bytes), hipSuccess);  // auto-captured
+        ASSERT_NE(buffers[b], nullptr);
+        launch_iota(buffers[b], base[b], N_ELEMS);
+    }
+
+    msnp::Snapshot snapshot{};
+    snapshot.snap();
+
+    for(int b = 0; b < kBufs; ++b)
+    {
+        launch_add(buffers[b], 77000.0f, N_ELEMS);
+    }
+
+    for(int b = 0; b < kBufs; ++b)
+    {
+        // sensitivity: mutations landed on every buffer
+        auto mutated = read_device(buffers[b], N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
+            ASSERT_FLOAT_EQ(mutated[i], base[b] + 77000.0f + i) << "buf " << b << " elem " << i;
     }
 
     snapshot.restore();
 
-    {  // restore must have reverted device memory to pattern A
-        auto a = read_back();
-        for(int i = 0; i < check; ++i)
-            ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "post-restore elem " << i;
+    for(int b = 0; b < kBufs; ++b)
+    {
+        // every buffer reverted to its own pattern
+        auto reverted = read_device(buffers[b], N_ELEMS);
+        for(size_t i = 0; i < N_ELEMS; ++i)
+            ASSERT_FLOAT_EQ(reverted[i], base[b] + i) << "restored buf " << b << " elem " << i;
     }
 
-    EXPECT_EQ(rocprofiler::hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(d),
-              HSA_STATUS_SUCCESS);
-    EXPECT_EQ(hsa_amd_memory_pool_free(h), HSA_STATUS_SUCCESS);
+    for(int b = 0; b < kBufs; ++b)
+        ASSERT_EQ(hipFree(buffers[b]), hipSuccess);
+}
+
+// The tracking gate must fully suppress inventory population: a hipMalloc made while tracking is
+// disabled must not be recorded (the fast-path check in the wrappers).
+TEST(kernel_replay_snapshot, disabled_tracking_records_nothing)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const size_t bytes = 4096 * sizeof(float);
+
+    ASSERT_EQ(mt::set_tracking_enabled(false), false);
+    const size_t before = mt::snap_inventory().size();
+
+    float* d = nullptr;
+    ASSERT_EQ(hipMalloc(&d, bytes), hipSuccess);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(mt::snap_inventory().size(), before) << "allocation recorded while tracking disabled";
+    EXPECT_FALSE(inventory_contains(d)) << "disabled tracking still recorded the pointer";
+
+    // restore the gate before freeing (and for subsequent tests)
+    ASSERT_EQ(mt::set_tracking_enabled(true), true);
+    ASSERT_EQ(hipFree(d), hipSuccess);
 }
