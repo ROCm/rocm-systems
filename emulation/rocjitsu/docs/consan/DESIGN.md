@@ -627,12 +627,21 @@ Current implementation:
 - Auto-buffer probes publish the buffer generation in every sampled entry.
   Host replay ignores entries from older generations, scans the active entries
   at HSA-tool teardown, and reports sampled conflict counts.
+- With `RJ_CONSAN_MOI_SAMPLED_CHECK=1`, site `i` checks the immediately
+  preceding sampled slot before publishing. Matching valid generation, epoch,
+  owner inequality, conflicting access kinds, and exact cell range increment
+  the report header's sampled immediate-conflict counter on the GPU. The HSA
+  summary and diagnostic guards consume that counter without waiting for host
+  pairwise replay.
 - Keeps host-side sampled publish/replay helpers as semantic references.
 
 Important current simplifications:
 
 - Runtime selection is deterministic owner-stride sampling, not probabilistic
   or temporally varying sampling within one wave.
+- The in-kernel checker compares one adjacent slot and exact ranges rather than
+  scanning the table or testing all overlapping ranges. Its counter is an
+  immediate signal, not a structured full diagnostic record.
 - There is no in-kernel sampled conflict checker.
 - Clean sampled output is inconclusive.
 - Owner/epoch values are masked to the prototype 10-bit fields before packing.

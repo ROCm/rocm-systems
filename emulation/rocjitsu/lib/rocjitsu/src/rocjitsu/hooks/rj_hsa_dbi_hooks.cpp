@@ -76,6 +76,7 @@ struct HookConfig {
   bool moi_track_barriers = false;
   bool moi_track_atomics = false;
   bool moi_dynamic_access_records = false;
+  bool moi_sampled_check = false;
   bool test_force_vgpr_spill = false;
   bool test_force_private_epoch = false;
   std::string test_kernel_name_filter;
@@ -602,10 +603,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (config.flavor == rocjitsu::ConSanFlavor::Moi) {
     if (config.moi_engine != rocjitsu::ConSanMoiEngine::Sampled) {
       constexpr const char *kSampledOnlyKnobs[] = {
-          "RJ_CONSAN_MOI_SAMPLE_STRIDE",
-          "RJ_CONSAN_MOI_SAMPLE_OFFSET",
-          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
-          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+          "RJ_CONSAN_MOI_SAMPLE_STRIDE",         "RJ_CONSAN_MOI_SAMPLE_OFFSET",
+          "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE", "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+          "RJ_CONSAN_MOI_SAMPLED_CHECK",
       };
       for (const char *name : kSampledOnlyKnobs) {
         if (env_has_value(name))
@@ -658,6 +658,7 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       "RJ_CONSAN_MOI_SAMPLE_OFFSET",
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE",
       "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET",
+      "RJ_CONSAN_MOI_SAMPLED_CHECK",
   };
   for (const char *name : kMoiOnlyKnobs) {
     if (env_has_value(name))
@@ -710,6 +711,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false,
                       &config.moi_dynamic_access_records))
+    return std::nullopt;
+  if (!parse_bool_env("RJ_CONSAN_MOI_SAMPLED_CHECK", false, &config.moi_sampled_check))
     return std::nullopt;
   // Deliberately test-only: this is not part of the public ConSan knob set.
   if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill))
@@ -1309,6 +1312,7 @@ public:
     uint64_t replay_conflict_count = 0;
     uint64_t replay_diagnostic_count = 0;
     uint64_t sampled_conflict_count = 0;
+    uint64_t sampled_immediate_conflict_count = 0;
   };
 
   Summary summarize_and_clear(CoreApiTable *core) {
@@ -1330,6 +1334,7 @@ public:
       total.replay_conflict_count += entry_summary.replay_conflict_count;
       total.replay_diagnostic_count += entry_summary.replay_diagnostic_count;
       total.sampled_conflict_count += entry_summary.sampled_conflict_count;
+      total.sampled_immediate_conflict_count += entry_summary.sampled_immediate_conflict_count;
       if (core != nullptr && core->hsa_memory_free_fn != nullptr && entries_[i].ptr != nullptr)
         (void)core->hsa_memory_free_fn(entries_[i].ptr);
       entries_[i] = Entry{};
@@ -1521,6 +1526,8 @@ private:
     summary.dropped_atomic_record_count = dropped_atomics;
     summary.dropped_diagnostic_record_count = dropped_diagnostics;
     summary.sampled_conflict_count = sampled_conflicts;
+    summary.sampled_immediate_conflict_count =
+        header->sampled_watchpoint_capacity != 0 ? header->event_counter : 0;
     log_message(kLogInfo,
                 "ConSan MOI auto report reader=%llu addr=0x%llx bytes=%zu generation=%llu "
                 "event_counter=%u access_records=%u visible_records=%u dropped_records=%u "
@@ -1531,6 +1538,7 @@ private:
                 "diagnostic_capacity=%u "
                 "exact_shadow_capacity=%u visible_exact_shadow=%zu "
                 "sampled_watchpoints=%u visible_sampled=%zu sampled_conflicts=%u "
+                "sampled_immediate_conflicts=%u "
                 "fine_grained=%s",
                 static_cast<unsigned long long>(entry.reader),
                 static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
@@ -1542,7 +1550,9 @@ private:
                 header->diagnostic_count, visible_diagnostics, dropped_diagnostics,
                 header->diagnostic_capacity, header->exact_shadow_entry_capacity,
                 visible_exact_shadow.size(), header->sampled_watchpoint_capacity,
-                visible_sampled.size(), sampled_conflicts, entry.fine_grained ? "true" : "false");
+                visible_sampled.size(), sampled_conflicts,
+                static_cast<uint32_t>(summary.sampled_immediate_conflict_count),
+                entry.fine_grained ? "true" : "false");
 
     const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
         static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader));
@@ -2084,7 +2094,8 @@ public:
     }
     const bool moi_has_diagnostics = moi_report_summary.visible_diagnostic_record_count +
                                          moi_report_summary.replay_diagnostic_count +
-                                         moi_report_summary.sampled_conflict_count >
+                                         moi_report_summary.sampled_conflict_count +
+                                         moi_report_summary.sampled_immediate_conflict_count >
                                      0;
     if (moi_require_diagnostics && !moi_has_diagnostics) {
       std::fprintf(
@@ -2093,7 +2104,8 @@ public:
           "%llu auto MOI report buffer(s) produced zero visible/replay diagnostics or sampled "
           "conflicts "
           "(visible access=%llu barrier=%llu atomic=%llu diagnostics=%llu "
-          "exact-shadow=%llu sampled=%llu, replay diagnostics=%llu sampled_conflicts=%llu)\n",
+          "exact-shadow=%llu sampled=%llu, replay diagnostics=%llu sampled_conflicts=%llu "
+          "sampled_immediate_conflicts=%llu)\n",
           static_cast<unsigned long long>(moi_report_summary.buffer_count),
           static_cast<unsigned long long>(moi_report_summary.visible_access_record_count),
           static_cast<unsigned long long>(moi_report_summary.visible_barrier_record_count),
@@ -2102,7 +2114,8 @@ public:
           static_cast<unsigned long long>(moi_report_summary.visible_exact_shadow_entry_count),
           static_cast<unsigned long long>(moi_report_summary.visible_sampled_watchpoint_count),
           static_cast<unsigned long long>(moi_report_summary.replay_diagnostic_count),
-          static_cast<unsigned long long>(moi_report_summary.sampled_conflict_count));
+          static_cast<unsigned long long>(moi_report_summary.sampled_conflict_count),
+          static_cast<unsigned long long>(moi_report_summary.sampled_immediate_conflict_count));
       std::fflush(stderr);
       std::_Exit(88);
     }
@@ -2113,7 +2126,8 @@ public:
           "%llu auto MOI report buffer(s) produced visible/replay diagnostics or sampled "
           "conflicts "
           "(visible access=%llu barrier=%llu atomic=%llu diagnostics=%llu "
-          "exact-shadow=%llu sampled=%llu, replay diagnostics=%llu sampled_conflicts=%llu)\n",
+          "exact-shadow=%llu sampled=%llu, replay diagnostics=%llu sampled_conflicts=%llu "
+          "sampled_immediate_conflicts=%llu)\n",
           static_cast<unsigned long long>(moi_report_summary.buffer_count),
           static_cast<unsigned long long>(moi_report_summary.visible_access_record_count),
           static_cast<unsigned long long>(moi_report_summary.visible_barrier_record_count),
@@ -2122,7 +2136,8 @@ public:
           static_cast<unsigned long long>(moi_report_summary.visible_exact_shadow_entry_count),
           static_cast<unsigned long long>(moi_report_summary.visible_sampled_watchpoint_count),
           static_cast<unsigned long long>(moi_report_summary.replay_diagnostic_count),
-          static_cast<unsigned long long>(moi_report_summary.sampled_conflict_count));
+          static_cast<unsigned long long>(moi_report_summary.sampled_conflict_count),
+          static_cast<unsigned long long>(moi_report_summary.sampled_immediate_conflict_count));
       std::fflush(stderr);
       std::_Exit(89);
     }
@@ -2435,6 +2450,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_track_barriers = config->moi_track_barriers;
     patch_options.moi_track_atomics = config->moi_track_atomics;
     patch_options.moi_dynamic_access_records = config->moi_dynamic_access_records;
+    patch_options.moi_sampled_check = config->moi_sampled_check;
     patch_options.force_vgpr_spill = config->test_force_vgpr_spill;
     patch_options.force_private_epoch = config->test_force_private_epoch;
     patch_options.test_kernel_name_filter = config->test_kernel_name_filter;

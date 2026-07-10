@@ -273,6 +273,17 @@ The runtime stride must be a power of two in `1..1024`. Unselected waves skip
 sample delay, packing, and publication; auto-buffer generations prevent stale
 entries from participating in teardown replay.
 
+For the experimental immediate checker:
+
+```sh
+export RJ_CONSAN_MOI_SAMPLED_CHECK=1
+export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1
+```
+
+The checker compares each sampled site with the preceding site slot and logs
+`sampled_immediate_conflicts` as soon as the GPU increments the shared counter.
+It is deliberately lower fidelity than host replay.
+
 Interpretation:
 
 - visible sampled entries prove DBI probes executed;

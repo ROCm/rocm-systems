@@ -1832,7 +1832,7 @@ struct MoiKernelResourceContext {
   case ConSanMoiEngine::InlineShadow:
     return inline_shadow_scratch_count(options);
   case ConSanMoiEngine::Sampled:
-    return 5u;
+    return options.moi_sampled_check ? 7u : 5u;
   }
   return 0;
 }
@@ -2104,7 +2104,7 @@ void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidate
 
 [[nodiscard]] uint16_t moi_exec_save_sgpr_count(const ConSanOptions &options) {
   if (options.moi_engine == ConSanMoiEngine::Sampled)
-    return options.moi_runtime_sample_stride > 1 ? 2u : 0u;
+    return options.moi_runtime_sample_stride > 1 || options.moi_sampled_check ? 2u : 0u;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
     if (!options.moi_report_buffer_address)
       return 0;
@@ -3932,6 +3932,143 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   result.modified = true;
 }
 
+[[nodiscard]] bool append_direct_sampled_immediate_check(
+    std::vector<uint32_t> &words, const ConSanOptions &options, rj_code_arch_t arch,
+    uint32_t record_index, size_t sampled_watchpoints_offset, uint16_t current_low_vgpr,
+    uint16_t current_high_vgpr, std::vector<std::string> &errors) {
+  if (!options.moi_sampled_check || record_index == 0)
+    return true;
+  if (!options.moi_report_buffer_address || !options.scratch_vgpr || !options.moi_exec_save_sgpr) {
+    errors.emplace_back("ConSan MOI sampled checker is missing report or scalar resources");
+    return false;
+  }
+
+  const uint16_t address_lo_vgpr = *options.scratch_vgpr;
+  const uint16_t address_hi_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+  const uint16_t prior_low_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  const uint16_t prior_high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
+  const uint64_t prior_address = *options.moi_report_buffer_address + sampled_watchpoints_offset +
+                                 static_cast<uint64_t>(record_index - 1u) * sizeof(uint64_t);
+
+  const auto save_vcc = build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+  if (!save_vcc ||
+      !append_load_u32_vgpr(words, prior_address, prior_low_vgpr, *options.scratch_vgpr, arch) ||
+      !append_load_u32_vgpr(words, prior_address + sizeof(uint32_t), prior_high_vgpr,
+                            *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI sampled checker could not load the prior slot");
+    return false;
+  }
+  words.push_back(*save_vcc);
+
+  std::vector<size_t> skip_branch_indices;
+  auto append_required_predicate = [&](std::optional<uint32_t> compare) {
+    const auto skip = build_s_cbranch_vccz(0, arch);
+    if (!compare || !skip)
+      return false;
+    words.push_back(*compare);
+    skip_branch_indices.push_back(words.size());
+    words.push_back(*skip);
+    return true;
+  };
+
+  const auto prior_valid = build_v_and_b32_e32_literal(tmp_vgpr, 1u, prior_low_vgpr, arch);
+  if (!prior_valid) {
+    errors.emplace_back("ConSan MOI sampled checker could not decode validity");
+    return false;
+  }
+  words.insert(words.end(), prior_valid->begin(), prior_valid->end());
+  if (!append_required_predicate(
+          build_v_cmp_ne_u32_e32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch)) ||
+      !append_extract_exact_shadow_field(words, address_lo_vgpr, current_low_vgpr,
+                                         consan_moi_sampled_watchpoint::owner_shift,
+                                         consan_moi_sampled_watchpoint::max_owner, arch) ||
+      !append_extract_exact_shadow_field(words, address_hi_vgpr, prior_low_vgpr,
+                                         consan_moi_sampled_watchpoint::owner_shift,
+                                         consan_moi_sampled_watchpoint::max_owner, arch) ||
+      !append_required_predicate(
+          build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch))) {
+    errors.emplace_back("ConSan MOI sampled checker could not compare owners");
+    return false;
+  }
+
+  const uint32_t low_epoch_generation_mask =
+      static_cast<uint32_t>(consan_moi_sampled_watchpoint::epoch_generation_mask);
+  const uint32_t high_generation_mask =
+      static_cast<uint32_t>(consan_moi_sampled_watchpoint::generation_mask >> 32u);
+  const uint32_t high_range_mask = static_cast<uint32_t>(
+      (consan_moi_sampled_watchpoint::start_mask | consan_moi_sampled_watchpoint::count_mask) >>
+      32u);
+  auto append_equal_masked = [&](uint16_t current_vgpr, uint16_t prior_vgpr, uint32_t mask) {
+    const auto current = build_v_and_b32_e32_literal(address_lo_vgpr, mask, current_vgpr, arch);
+    const auto prior = build_v_and_b32_e32_literal(address_hi_vgpr, mask, prior_vgpr, arch);
+    if (!current || !prior)
+      return false;
+    words.insert(words.end(), current->begin(), current->end());
+    words.insert(words.end(), prior->begin(), prior->end());
+    return append_required_predicate(
+        build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch));
+  };
+  if (!append_equal_masked(current_low_vgpr, prior_low_vgpr, low_epoch_generation_mask) ||
+      !append_equal_masked(current_high_vgpr, prior_high_vgpr, high_generation_mask) ||
+      !append_equal_masked(current_high_vgpr, prior_high_vgpr, high_range_mask)) {
+    errors.emplace_back("ConSan MOI sampled checker could not compare ordering or ranges");
+    return false;
+  }
+
+  if (!append_extract_exact_shadow_field(
+          words, address_lo_vgpr, current_low_vgpr,
+          consan_moi_sampled_watchpoint::access_kind_shift,
+          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch) ||
+      !append_extract_exact_shadow_field(
+          words, address_hi_vgpr, prior_low_vgpr, consan_moi_sampled_watchpoint::access_kind_shift,
+          (1u << consan_moi_sampled_watchpoint::access_kind_bits) - 1u, arch)) {
+    errors.emplace_back("ConSan MOI sampled checker could not decode access kinds");
+    return false;
+  }
+  const auto both_read =
+      build_v_and_b32_e32(tmp_vgpr, vector_source_vgpr(address_lo_vgpr), address_hi_vgpr, arch);
+  if (!both_read) {
+    errors.emplace_back("ConSan MOI sampled checker could not compare access kinds");
+    return false;
+  }
+  words.push_back(*both_read);
+  if (!append_required_predicate(build_v_cmp_ne_u32_e32_vcc(
+          scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read)),
+          tmp_vgpr, arch))) {
+    errors.emplace_back("ConSan MOI sampled checker could not predicate conflicting kinds");
+    return false;
+  }
+
+  const uint64_t immediate_conflict_count_address =
+      *options.moi_report_buffer_address + offsetof(ConSanMoiReportHeader, event_counter);
+  if (!append_atomic_fetch_add_one_u32(words, immediate_conflict_count_address, tmp_vgpr,
+                                       *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI sampled checker could not increment the conflict counter");
+    return false;
+  }
+
+  const size_t restore_index = words.size();
+  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, *options.moi_exec_save_sgpr, arch);
+  if (!restore_vcc) {
+    errors.emplace_back("ConSan MOI sampled checker could not restore VCC");
+    return false;
+  }
+  for (size_t branch_index : skip_branch_indices) {
+    const size_t skipped_words = restore_index - branch_index - 1u;
+    if (skipped_words > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+      errors.emplace_back("ConSan MOI sampled checker skip branch is out of range");
+      return false;
+    }
+    const auto skip = build_s_cbranch_vccz(static_cast<int16_t>(skipped_words), arch);
+    if (!skip)
+      return false;
+    words[branch_index] = *skip;
+  }
+  words.push_back(*restore_vcc);
+  return true;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, uint32_t record_index,
@@ -3940,19 +4077,21 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     errors.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  if (static_cast<uint32_t>(*options.scratch_vgpr) + 5u > kMaxVgprs) {
-    errors.emplace_back("ConSan MOI sampled probe needs five scratch VGPRs");
+  const uint16_t scratch_count = options.moi_sampled_check ? 7u : 5u;
+  if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
+    errors.emplace_back("ConSan MOI sampled probe exceeds the VGPR file");
     return std::nullopt;
   }
   auto lds_byte_offset_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!lds_byte_offset_vgpr)
     return std::nullopt;
-  if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, 5, errors))
+  if (reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
+                                             errors))
     return std::nullopt;
-  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr, 5,
-                                            "MOI owner", errors) ||
-      reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr, 5,
-                                            "MOI epoch", errors))
+  if (reject_optional_scratch_range_overlap(options.moi_owner_vgpr, *options.scratch_vgpr,
+                                            scratch_count, "MOI owner", errors) ||
+      reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
+                                            scratch_count, "MOI epoch", errors))
     return std::nullopt;
   auto byte_count = byte_count_for_candidate(candidate);
   if (!byte_count) {
@@ -4076,6 +4215,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     errors.emplace_back("ConSan MOI sampled probe could not encode cell-count field");
     return std::nullopt;
   }
+  if (!append_direct_sampled_immediate_check(words, options, arch, record_index,
+                                             sampled_watchpoints_offset, low_vgpr, high_vgpr,
+                                             errors))
+    return std::nullopt;
   if (!append_store_u32_vgpr(words, sampled_entry_address, low_vgpr, *options.scratch_vgpr, arch) ||
       !append_store_u32_vgpr(words, sampled_entry_address + sizeof(uint32_t), high_vgpr,
                              *options.scratch_vgpr, arch)) {
@@ -4173,7 +4316,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
 
     const ConSanMoiCandidate &candidate = *candidate_ptr;
-    const auto resources = resolve_moi_scratch(result, candidate, options, 5);
+    const auto resources =
+        resolve_moi_scratch(result, candidate, options, options.moi_sampled_check ? 7u : 5u);
     if (!resources) {
       continue;
     }
@@ -4186,9 +4330,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     std::vector<std::string> candidate_errors;
-    auto words =
-        build_direct_sampled_watchpoint_words(bytes, candidate, candidate_options, arch, 0,
-                                              layout.sampled_watchpoints_offset, candidate_errors);
+    auto words = build_direct_sampled_watchpoint_words(
+        bytes, candidate, candidate_options, arch, options.moi_sampled_check ? 1u : 0u,
+        layout.sampled_watchpoints_offset, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -4335,6 +4479,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                 layout.sampled_watchpoints_offset, result.errors);
       if (!words)
         return;
+      const uint64_t spill_bytes =
+          planned_patch.spill ? static_cast<uint64_t>((planned_patch.spill->save_words.size() +
+                                                       planned_patch.spill->restore_words.size()) *
+                                                      sizeof(uint32_t))
+                              : 0;
+      const uint64_t planned_probe_bytes = planned_patch.patch_bytes - spill_bytes;
+      if (words->size() * sizeof(uint32_t) > planned_probe_bytes) {
+        result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
+        return;
+      }
+      words->resize(static_cast<size_t>(planned_probe_bytes / sizeof(uint32_t)),
+                    build_s_nop(0, arch));
 
       ConSanPatchInfo info;
       info.kind = planned_patch.use_appended_cave
@@ -4437,6 +4593,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       result.elf_bytes.clear();
       return;
     }
+    const uint64_t planned_probe_bytes = planned_patch.patch_bytes;
+    if (words->size() * sizeof(uint32_t) > planned_probe_bytes) {
+      result.errors.emplace_back("ConSan MOI sampled probe final patch grew after planning");
+      result.elf_bytes.clear();
+      return;
+    }
+    words->resize(static_cast<size_t>(planned_probe_bytes / sizeof(uint32_t)),
+                  build_s_nop(0, arch));
     const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
     if (patch_bytes != planned_patch.patch_bytes) {
       result.errors.emplace_back("ConSan MOI sampled probe final patch size changed");

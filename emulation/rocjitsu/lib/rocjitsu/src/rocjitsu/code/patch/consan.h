@@ -78,6 +78,9 @@ struct ConSanOptions {
   bool moi_track_barriers = false;
   bool moi_track_atomics = false;
   bool moi_dynamic_access_records = false;
+  /// Check the immediately preceding direct-sampled slot in-kernel and
+  /// increment the shared diagnostic counter on a sampled conflict.
+  bool moi_sampled_check = false;
   /// Test-only control that exercises the spill tier even when a dead or
   /// descriptor-growth VGPR window is available.
   bool force_vgpr_spill = false;

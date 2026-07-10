@@ -126,7 +126,7 @@ flowchart LR
     direction LR
     R2["R2: Patch Placement"]:::todo
     F1["F1: Flat Provenance"]:::todo
-    I1A["I1A: Native DS<br/>Multi-Cell"]:::todo
+    I1A["I1A: Native DS<br/>Multi-Cell"]:::active
     I1B["I1B: Likely-Group<br/>Flat Coverage"]:::todo
     I1{"I1: LDS Coverage Ready"}:::todo
 
@@ -141,7 +141,7 @@ flowchart LR
     I2["I2: Inline Diagnostics"]:::done
     I3["I3: Barrier And<br/>Atomic Semantics"]:::done
     S1["S1: Sampling Policy"]:::done
-    S2["S2: In-Kernel<br/>Sampled Checking"]:::active
+    S2["S2: In-Kernel<br/>Sampled Checking"]:::done
 
     S1 --> S2
   end
@@ -376,7 +376,7 @@ Landed state:
   the allocator/spill-frame direction and the `SpillManager` starting point.
   ConSan added the gfx1201 emitter, owner analysis, descriptor/dispatch
   transaction, and tests; [SPILLING.md](SPILLING.md) records the boundary.
-- Qualification is 170/170 focused synthetic/unit tests, 26/26 live rocJITsu
+- Qualification is 171/171 focused synthetic/unit tests, 28/28 live rocJITsu
   tests, 189/189 hip-moi controls, guarded TileAndFuse and scan/softmax tests,
   and 209/209 broad IREE compatibility under each MOI engine.
 
@@ -933,7 +933,7 @@ Landed evidence:
 - Standard record/replay, sampled, and targeted inline-shadow recipes contain
   no scratch, owner, epoch, or SGPR numbers; live forced-spill tests prove
   preservation and dispatch-private growth.
-- Focused tests pass 170/170, the live resource/behavior tier 26/26, hip-moi controls
+- Focused tests pass 171/171, the live resource/behavior tier 28/28, hip-moi controls
   189/189, and the 209-test IREE compatibility tier under every engine. Guarded
   TileAndFuse and scan/softmax regressions pass without resource-induced hangs.
 - [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
@@ -996,7 +996,7 @@ Landed evidence:
   objects. Overflow counts are printed unconditionally, and
   `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` is the strict guard.
 - The deliberate 144-byte dynamic-record test proves visible overflow. The
-  170 focused tests and 26 live gfx1201 resource/behavior tests pass, and all
+  171 focused tests and 28 live gfx1201 resource/behavior tests pass, and all
   three 209-test IREE sweeps pass without a buffer-size variable.
 
 ### O1B: Freeze Standard Engine Profiles - TODO
@@ -1200,7 +1200,7 @@ Landed evidence:
 - The live cross-wave race prints owner/epoch/instruction/access fields,
   `second_lanes=0x10001`, and `[0,4)` first/second LDS ranges; it also exercises
   visible diagnostic overflow at the default four-record capacity.
-- The 101-test `ConSanMoi` suite, 26-test live resource/behavior tier, and
+- The 102-test `ConSanMoi` suite, 28-test live resource/behavior tier, and
   209-test inline-shadow IREE compatibility sweep pass.
 
 ## I3: Inline Barrier And Atomic Semantics - DONE
@@ -1279,31 +1279,37 @@ Landed evidence:
 - The auto-buffer conflict control proves generated entries carry the active
   generation, while host tests prove stale generations are ignored.
 
-## S2: In-Kernel Sampled Checking - TODO
+## S2: In-Kernel Sampled Checking - DONE
 
 Goal: let sampled mode report conflicts without waiting for host teardown.
 
 Position in the DAG: `S1` first defines the table, runtime selection, and
 generation policy that the in-kernel checker consumes.
 
-Current state:
+Landed state:
 
-- Direct sampled probes publish entries.
-- Host teardown scans the sampled table and reports sampled conflicts.
-- There is no in-kernel sampled conflict checker.
-
-Work:
-
-- Choose a minimal sampled table policy: one slot per site, hashed LDS cell, or
-  small set-associative table.
-- Add an in-kernel check against at least one prior sampled entry.
-- Emit diagnostics through the shared MOI diagnostic ABI where practical.
-- Preserve host-side sampled replay as a test oracle.
+- Direct sampled probes retain one slot per site. With
+  `RJ_CONSAN_MOI_SAMPLED_CHECK=1`, site `i` checks slot `i-1` before publishing.
+- The GPU predicate checks valid generation, epoch, different owner,
+  conflicting kinds, and exact cell range, then atomically increments the
+  shared header event counter. Sampled summaries name it
+  `sampled_immediate_conflicts`, and diagnostic guards consume it.
+- Host teardown still scans the full sampled table and remains the broader
+  semantic oracle.
 
 Done criteria:
 
 - A known sampled race can produce a GPU-side or immediate diagnostic without
   relying solely on teardown scanning.
+
+Landed evidence:
+
+- Synthetic machine-code coverage verifies automatic seven-VGPR/two-SGPR
+  resources, prior-slot loads, predicates, and the GPU atomic increment.
+- A live explicit-buffer gfx1201 control observes a nonzero immediate counter
+  directly after synchronization, before teardown replay.
+- An auto-buffer control logs a nonzero `sampled_immediate_conflicts` value and
+  satisfies the diagnostic guard.
 
 ## F1: Flat Provenance Hardening - TODO
 

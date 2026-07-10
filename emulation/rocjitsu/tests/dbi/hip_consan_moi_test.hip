@@ -1182,6 +1182,32 @@ TEST(ConSanMoiHipTest, RuntimeSampledBackendSelectsOneWave) {
   EXPECT_EQ(live_entries.front().cell_count, 1u);
 }
 
+TEST(ConSanMoiHipTest, InKernelSampledCheckerReportsConflictImmediately) {
+  constexpr uint32_t kSampledSlots = 2;
+  constexpr size_t kReportBytes = moi_direct_sampled_report_buffer_bytes(kSampledSlots);
+  uint32_t *d_out = nullptr;
+  void *d_report = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&d_report, kReportBytes));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_report, 0, kReportBytes));
+
+  ReportEnvGuard report_env;
+  ASSERT_TRUE(set_moi_report_buffer_env(d_report, kReportBytes));
+
+  moi_two_wave_lds_accesses<<<1, 64>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  const hipError_t sync = hipDeviceSynchronize();
+  ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);
+
+  MoiReportHeader header;
+  HIP_ASSERT(hipMemcpy(&header, d_report, sizeof(header), hipMemcpyDeviceToHost));
+  free_device_ptr(static_cast<uint32_t *>(d_report));
+  free_device_ptr(d_out);
+
+  EXPECT_GT(header.event_counter, 0u);
+}
+
 TEST(ConSanMoiHipTest, EquivalentAccessesInDifferentWorkgroupsDoNotConflict) {
   constexpr uint32_t kAccessSlots = 8;
   constexpr size_t kReportBytes = moi_report_buffer_bytes(kAccessSlots);

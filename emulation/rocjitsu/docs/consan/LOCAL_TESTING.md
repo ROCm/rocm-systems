@@ -61,7 +61,7 @@ Known local result:
 
 - Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
   passed after the R1D implementation.
-- Current resource/MOI/spill-manager focus: 170/170 passed after the complete
+- Current resource/MOI/spill-manager focus: 171/171 passed after the complete
   access/barrier/atomic planner rollout, including automatic scalar resources,
   shared owners, bounded outcome summaries, and spill accounting.
 
@@ -122,7 +122,7 @@ ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/
 
 Known local result:
 
-- 26/26 passed on gfx1201. The inline-shadow race, barrier, atomic, private
+- 28/28 passed on gfx1201. The inline-shadow race, barrier, atomic, private
   epoch, and `hw_id` variants carry no register-number environment variables.
   Dynamic access and barrier-record variants also choose their EXEC/VCC/SCC
   scalar state automatically. Forced record/replay and sampled spill controls

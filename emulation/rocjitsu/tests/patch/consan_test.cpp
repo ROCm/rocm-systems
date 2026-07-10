@@ -3208,6 +3208,48 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeWaveSelectionKeepsAllSitesPatchable) {
   }
 }
 
+TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
+  constexpr uint32_t kSecondSiteWord = 240;
+  std::vector<uint32_t> text_words(560, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  text_words[kSecondSiteWord] = 0xD8D80000u;
+  text_words[kSecondSiteWord + 1] = 0x01000000u; // ds_load_b32 v1, v0
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.moi_sampled_check = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+  options.max_patches = 2;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
+  ASSERT_TRUE(result.patches[1].scratch_vgpr);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text_section = patched.text_sections().front();
+  ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
+  std::vector<uint32_t> patched_words(text_section->size() / sizeof(uint32_t));
+  std::memcpy(patched_words.data(), text_section->data(), text_section->size());
+
+  const uint16_t scratch = *result.patches[1].scratch_vgpr;
+  const auto diagnostic_increment = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      scratch, static_cast<uint16_t>(scratch + 4u), static_cast<uint16_t>(scratch + 4u),
+      /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(diagnostic_increment);
+  EXPECT_EQ(count_subsequence(patched_words, *diagnostic_increment), 1u);
+}
+
 TEST(ConSanMoi, DirectSampledProbeWarnsWhenReportCapacityLimitsPatches) {
   std::vector<uint32_t> text_words(360, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   text_words[0] = 0xD8340000u;

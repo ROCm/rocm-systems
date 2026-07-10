@@ -156,9 +156,10 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain any visible inline diagnostic, host-replay diagnostic, or sampled conflict. The checked inline-shadow barrier-order control uses this guard. |
 | `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT` | `record_replay` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto-buffer host replay emits no conflict. |
 | `RJ_CONSAN_MOI_FORBID_OVERFLOW` | all MOI engines with auto report buffers | Optional guard: process exits nonzero at hook unload if access, barrier, atomic, or diagnostic records were dropped. Drops are always reported to stderr even without the guard. |
-| `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Access, barrier, and atomic probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
+| `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Access, barrier, and atomic probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five or seven with in-kernel checking, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` | `sampled` | Deterministic runtime wave selection without removing eligible static sites. The stride defaults to 1 and must be a power of two in 1..1024; the offset defaults to 0 and must be smaller than the stride. A wave publishes when `owner & (stride - 1) == offset`. |
+| `RJ_CONSAN_MOI_SAMPLED_CHECK` | `sampled` | Opt into immediate GPU-side checking against the preceding sampled site slot. A match increments the report header event counter, which sampled summaries expose as `sampled_immediate_conflicts` and diagnostic guards recognize. |
 | `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported RDNA4 barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
 | `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `record_replay` | Opt-in access-record append mode. Each active lane reserves its own access-record slot at runtime. Dynamic probes automatically preserve EXEC, VCC, and SCC and currently skip candidates immediately after `s_*_saveexec` while control-flow/liveness handling is still conservative. |
 | `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, sampled runtime selection, `inline_shadow` diagnostics/atomics | Optional explicit even-base debug override. Runtime sampled probes reserve one VCC-save pair; record/barrier probes reserve five SGPRs from an even base in `0..100`: EXEC, VCC, and SCC. Inline diagnostics/atomic acquire reserve eleven SGPRs from an even base in `0..94`: four nested EXEC pairs, VCC, and SCC. Without the override, ConSan places a fresh window above all guest scalar references and grows only owning descriptors. |
@@ -295,6 +296,12 @@ them.
 - Auto report buffers assign a generation to each code-object buffer and bake
   it into direct sampled entries. Teardown ignores stale-generation entries.
   Explicit caller-owned sampled buffers retain generation zero.
+- `RJ_CONSAN_MOI_SAMPLED_CHECK=1`: before publishing site `i`, compare its
+  packed metadata with slot `i-1`. A valid same-generation/same-epoch entry
+  from another owner with conflicting access kinds and the same cell range
+  increments an immediate GPU counter. This intentionally small adjacent-slot,
+  exact-range policy can miss conflicts; host replay remains the broader test
+  oracle.
 - `RJ_CONSAN_MOI_OWNER_VGPR=N`: experimental MOI first-light hook. When set,
   the injected LDS probe copies this VGPR into the access record's owner field.
   When unset for a kernel-owned first-light site, the probe derives a prototype
