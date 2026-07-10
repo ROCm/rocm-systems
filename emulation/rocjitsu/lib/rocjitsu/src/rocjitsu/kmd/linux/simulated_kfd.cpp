@@ -1831,7 +1831,7 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     sess = KfdProcess::DebugSession{};
     return 0;
   default:
-    return -ENOSYS;
+    return -EINVAL;
   }
 }
 
