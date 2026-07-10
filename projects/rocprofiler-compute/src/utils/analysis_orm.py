@@ -647,6 +647,7 @@ class Database:
                 InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
             )
             .outerjoin(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,
                 PCSampleState.pc_sample_state_uuid
