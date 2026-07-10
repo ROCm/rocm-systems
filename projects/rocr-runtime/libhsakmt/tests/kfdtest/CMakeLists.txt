@@ -24,7 +24,7 @@
 # If environment variable DRM_DIR or LIBHSAKMT_PATH is set, the script
 # will pick up the corresponding libraries from those pathes.
 
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 
 project(KFDTest)
 
@@ -103,9 +103,7 @@ include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
 # This allows NUMA_ROOT, hsakmt_ROOT, etc. to guide package discovery in both
 # TheRock (via CMake cache variables) and standalone builds (via environment).
 # Without this policy, find_package() ignores _ROOT hints, breaking custom paths.
-if ( POLICY CMP0074 )
-    cmake_policy( SET CMP0074 NEW )
-endif()
+cmake_policy( SET CMP0074 NEW )
 
 # Find NUMA library
 # Try CONFIG mode first (TheRock), fall back to manual discovery (standalone)
