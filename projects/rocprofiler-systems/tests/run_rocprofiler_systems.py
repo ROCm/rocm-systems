@@ -86,7 +86,7 @@ def prepend_path(env, name: str, path: Path) -> None:
 
 def build_env(
     install_dir: Path, tests_dir: Path, rocm_path: Path, rocm_bin_dir: Path
-) -> dict:
+) -> dict[str, str]:
     env = os.environ.copy()
     prepend_path(env, "PATH", rocm_bin_dir)
     prepend_path(env, "PATH", install_dir / "bin")
@@ -103,12 +103,12 @@ def resolve_tier() -> str:
     tier = os.getenv("TEST_TYPE", DEFAULT_TEST_TIER).lower()
     if tier not in TEST_TIERS:
         raise ValueError(
-            f"Unknown TEST_TYPE {tier!r}. Expected one of: " f"{', '.join(TEST_TIERS)}."
+            f"Unknown TEST_TYPE {tier!r}. Expected one of: {', '.join(TEST_TIERS)}."
         )
     return tier
 
 
-def run_tests(tests_dir: Path, env: dict) -> None:
+def run_tests(tests_dir: Path, env: dict[str, str]) -> None:
     tier = resolve_tier()
 
     ctest_base = ["ctest", "--test-dir", str(tests_dir)]
@@ -118,7 +118,7 @@ def run_tests(tests_dir: Path, env: dict) -> None:
     config_cmd = ctest_base + [
         "--verbose",
         "--tests-regex",
-        "^rocprofiler-systems-pytest-config$",
+        f"^{PROJECT_NAME}-pytest-config$",
     ]
     logging.info(f"++ Exec [{tests_dir}]$ {format_command(config_cmd)}")
     subprocess.run(config_cmd, cwd=tests_dir, check=True, env=env)
