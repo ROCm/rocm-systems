@@ -1871,6 +1871,48 @@ TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 // ===========================================================================
+// Workload: hipConfigureCall (legacy execution-stack launch config)
+//
+// hipConfigureCall has a real (non-noop) generated playback handler that
+// rebuilds the grid/block dim3s and the shared-mem size and translates the
+// stream handle before re-issuing the call - it drops no buffer and
+// dereferences no stale pointer.  It has no prior HRR coverage.  The legacy
+// hipConfigureCall / hipSetupArgument / hipLaunchByPtr execution-stack launch
+// path is separate from the <<<>>> (__hipPushCallConfiguration) path HRR records
+// for kernel launches, so the API is exercised on its own: it only pushes a
+// call configuration onto the thread-local execution stack and returns
+// hipSuccess (no matching hipLaunchByPtr consumes it).  A memset-based D2H canary
+// then confirms the replay stream - including the replayed hipConfigureCall -
+// stays intact end to end.
+// Final blob: h[i] == 88.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  // API under test: push a launch configuration onto the execution stack.
+  dim3 grid((N + 255) / 256), block(256);
+  HIP_CHECK(hipConfigureCall(grid, block, /*sharedMem*/ 0, s));
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d), 88, N, s));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 88);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
 // Workload N: Additional memset variants
 //
 // Exercises hipMemset3D, hipMemset3DAsync, hipMemsetD2D8/16/32 and Async,

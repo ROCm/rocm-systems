@@ -784,6 +784,12 @@ HIP_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_configurecall"};
+  // Exercises hipConfigureCall (legacy execution-stack launch configuration).
+  hrr_run_roundtrip("Unit_HRR_ConfigureCall_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);
