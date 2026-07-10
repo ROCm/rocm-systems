@@ -61,6 +61,8 @@ struct HookConfig {
   std::optional<rocjitsu::ConSanFlavor> flavor;
   rocjitsu::ConSanMoiEngine moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   rocjitsu::ConSanMoiOwnerSource moi_owner_source = rocjitsu::ConSanMoiOwnerSource::WorkitemId;
+  rocjitsu::ConSanFlatProvenanceMode flat_provenance_mode =
+      rocjitsu::ConSanFlatProvenanceMode::Likely;
   bool fail_closed = false;
   bool require_patch = false;
   bool probe_nop = false;
@@ -240,6 +242,16 @@ moi_resource_source_name(rocjitsu::ConSanRegisterAllocationSource source) {
     return "workitem_id";
   case rocjitsu::ConSanMoiOwnerSource::HwId:
     return "hw_id";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] const char *flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
+  switch (mode) {
+  case rocjitsu::ConSanFlatProvenanceMode::Likely:
+    return "likely";
+  case rocjitsu::ConSanFlatProvenanceMode::Strict:
+    return "strict";
   }
   return "unknown";
 }
@@ -523,6 +535,24 @@ moi_resource_source_name(rocjitsu::ConSanRegisterAllocationSource source) {
   return false;
 }
 
+[[nodiscard]] bool parse_flat_provenance_mode_env(rocjitsu::ConSanFlatProvenanceMode *out) {
+  const char *value = std::getenv("RJ_CONSAN_FLAT_PROVENANCE");
+  if (value == nullptr || *value == '\0' || ascii_iequals(value, "likely") ||
+      ascii_iequals(value, "default")) {
+    *out = rocjitsu::ConSanFlatProvenanceMode::Likely;
+    return true;
+  }
+  if (ascii_iequals(value, "strict") || ascii_iequals(value, "group")) {
+    *out = rocjitsu::ConSanFlatProvenanceMode::Strict;
+    return true;
+  }
+  std::fprintf(stderr,
+               "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_FLAT_PROVENANCE='%s'; "
+               "expected likely|strict\n",
+               value);
+  return false;
+}
+
 [[nodiscard]] bool parse_check_trap_mode_env(CheckTrapMode *out) {
   const char *value = std::getenv("RJ_CONSAN_CHECK_TRAP_MODE");
   if (value == nullptr || *value == '\0') {
@@ -675,6 +705,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_flavor_env(&config.flavor))
     return std::nullopt;
   if (!parse_moi_engine_env(&config.moi_engine))
+    return std::nullopt;
+  if (!parse_flat_provenance_mode_env(&config.flat_provenance_mode))
     return std::nullopt;
   if (!parse_moi_owner_source_env(&config.moi_owner_source))
     return std::nullopt;
@@ -1953,7 +1985,8 @@ public:
         "fault_barrier_index=%u "
         "delay_mode=%s delay_var_ssrc=%u "
         "max_patches=%u tmp_vgpr=%s moi_exec_save_sgpr=%s "
-        "moi_owner_source=%s moi_owner_sgpr=%s moi_owner_vgpr=%s moi_epoch_vgpr=%s "
+        "moi_owner_source=%s flat_provenance=%s moi_owner_sgpr=%s moi_owner_vgpr=%s "
+        "moi_epoch_vgpr=%s "
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
         flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
@@ -1977,6 +2010,7 @@ public:
         config.scratch_vgpr ? std::to_string(*config.scratch_vgpr).c_str() : "auto",
         config.moi_exec_save_sgpr ? std::to_string(*config.moi_exec_save_sgpr).c_str() : "unset",
         owner_source_name(config.moi_owner_source),
+        flat_provenance_mode_name(config.flat_provenance_mode),
         config.moi_owner_sgpr ? std::to_string(*config.moi_owner_sgpr).c_str() : "unset",
         config.moi_owner_vgpr ? std::to_string(*config.moi_owner_vgpr).c_str() : "unset",
         config.moi_epoch_vgpr ? std::to_string(*config.moi_epoch_vgpr).c_str() : "unset",
@@ -2437,6 +2471,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.flavor = config->flavor.value_or(rocjitsu::ConSanFlavor::None);
     patch_options.moi_engine = config->moi_engine;
     patch_options.moi_owner_source = config->moi_owner_source;
+    patch_options.flat_provenance_mode = config->flat_provenance_mode;
     patch_options.fail_closed = config->fail_closed;
     patch_options.probe_nop = config->probe_nop;
     patch_options.probe_trampoline_nop = config->probe_trampoline_nop;

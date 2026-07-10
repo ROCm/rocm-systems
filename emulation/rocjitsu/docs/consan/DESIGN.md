@@ -422,11 +422,21 @@ The public hints are:
 - `Global`
 - `Unknown`
 
-Only `Group` and `MaybeGroup` are currently instrumentable. `MaybeGroup` is an
-MVP heuristic: it means the observed dataflow is consistent with a pointer
-derived from `src_shared_base`. It is not a formal proof for arbitrary
-binaries. The intended direction is to harden this provenance before relying on
-flat coverage for broad team-facing diagnostics.
+`Group` means that both 32-bit halves were coherently traced from
+`src_shared_base`. `MaybeGroup` means only a component, select, or arithmetic
+chain remains consistent with that origin; it is a heuristic, not a proof for
+arbitrary binaries. `RJ_CONSAN_FLAT_PROVENANCE=likely` (the default) admits
+both classifications. `strict` admits only `Group`, for demonstrations and
+qualification runs that prefer precision over flat-site recall. Inventory and
+verbose site logs retain the classifications independently of this selection
+policy, and skipped-candidate warnings count strict-policy exclusions.
+
+For an admitted RDNA4 flat group pointer in `v[addr:addr+1]`, ConSan's LDS
+normalization contract is: `v[addr]` is the unsigned byte offset within the LDS
+aperture and `v[addr+1]` is provenance evidence only. Static VFLAT `ioffset`
+bytes are added to the low word before rounding the byte interval to 4-byte
+shadow cells. The high word must never be mixed into the shadow index. Sites
+whose encoding or provenance cannot satisfy this contract remain unpatched.
 
 ### Where Current Code Is Prototype-Shaped
 

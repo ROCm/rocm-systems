@@ -653,11 +653,13 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
       " unsupported_mnemonic=" + std::to_string(counts.unsupported_mnemonic));
 }
 
-[[nodiscard]] bool is_moi_flat_candidate(const ConSanFlatSite &site) {
+[[nodiscard]] bool is_moi_flat_candidate(const ConSanFlatSite &site,
+                                         ConSanFlatProvenanceMode mode) {
   if (site.kind == ConSanLdsAccessKind::Other)
     return false;
   return site.address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-         site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
+         (mode == ConSanFlatProvenanceMode::Likely &&
+          site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
 struct SkippedMoiFlatCounts {
@@ -666,10 +668,11 @@ struct SkippedMoiFlatCounts {
   uint32_t private_hint = 0;
   uint32_t maybe_private = 0;
   uint32_t global = 0;
+  uint32_t excluded_maybe_group = 0;
 
   [[nodiscard]] bool any() const {
     return other_kind != 0 || unknown != 0 || private_hint != 0 || maybe_private != 0 ||
-           global != 0;
+           global != 0 || excluded_maybe_group != 0;
   }
 };
 
@@ -704,10 +707,11 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
     return;
   result.warnings.emplace_back(
       "ConSan MOI skipped flat sites in " + std::string(in_kernel ? "kernel " : "function ") +
-      std::string(container_name) + " because they were not likely group/LDS candidates: " +
+      std::string(container_name) + " because the flat provenance policy did not admit them: " +
       "unknown=" + std::to_string(counts.unknown) +
       " private=" + std::to_string(counts.private_hint) + " maybe_private=" +
       std::to_string(counts.maybe_private) + " global=" + std::to_string(counts.global) +
+      " excluded_maybe_group=" + std::to_string(counts.excluded_maybe_group) +
       " unsupported_kind=" + std::to_string(counts.other_kind));
 }
 
@@ -761,7 +765,8 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   return candidate;
 }
 
-void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanResult &result) {
+void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanFlatProvenanceMode mode,
+                           ConSanResult &result) {
   SkippedMoiLdsCounts skipped_lds_counts;
   for (const ConSanLdsSite &site : kernel.lds_sites) {
     if (is_moi_native_lds_candidate(site)) {
@@ -774,9 +779,12 @@ void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanResult &result)
   warn_skipped_moi_lds_candidates(kernel.name, true, skipped_lds_counts, result);
   SkippedMoiFlatCounts skipped_flat_counts;
   for (const ConSanFlatSite &site : kernel.flat_sites) {
-    if (is_moi_flat_candidate(site)) {
+    if (is_moi_flat_candidate(site, mode)) {
       result.moi_candidates.push_back(
           make_moi_candidate(kernel.name, true, kernel.descriptor_file_offset, site));
+    } else if (site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup &&
+               mode == ConSanFlatProvenanceMode::Strict) {
+      ++skipped_flat_counts.excluded_maybe_group;
     } else {
       count_skipped_moi_flat_candidate(site, skipped_flat_counts);
     }
@@ -784,7 +792,8 @@ void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanResult &result)
   warn_skipped_moi_flat_candidates(kernel.name, true, skipped_flat_counts, result);
 }
 
-void append_moi_candidates(const ConSanFunctionInfo &function, ConSanResult &result) {
+void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvenanceMode mode,
+                           ConSanResult &result) {
   SkippedMoiLdsCounts skipped_lds_counts;
   for (const ConSanLdsSite &site : function.lds_sites) {
     if (is_moi_native_lds_candidate(site)) {
@@ -796,8 +805,11 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanResult &res
   warn_skipped_moi_lds_candidates(function.name, false, skipped_lds_counts, result);
   SkippedMoiFlatCounts skipped_flat_counts;
   for (const ConSanFlatSite &site : function.flat_sites) {
-    if (is_moi_flat_candidate(site)) {
+    if (is_moi_flat_candidate(site, mode)) {
       result.moi_candidates.push_back(make_moi_candidate(function.name, false, std::nullopt, site));
+    } else if (site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup &&
+               mode == ConSanFlatProvenanceMode::Strict) {
+      ++skipped_flat_counts.excluded_maybe_group;
     } else {
       count_skipped_moi_flat_candidate(site, skipped_flat_counts);
     }
@@ -6983,9 +6995,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.elf_bytes.clear();
   result.moi_candidates.clear();
   for (const ConSanKernelInfo &kernel : result.kernels)
-    append_moi_candidates(kernel, result);
+    append_moi_candidates(kernel, effective_options.flat_provenance_mode, result);
   for (const ConSanFunctionInfo &function : result.functions)
-    append_moi_candidates(function, result);
+    append_moi_candidates(function, effective_options.flat_provenance_mode, result);
   rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_owner_sgpr(effective_options, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);

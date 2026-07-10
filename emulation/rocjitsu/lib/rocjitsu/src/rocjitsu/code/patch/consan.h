@@ -39,6 +39,13 @@ enum class ConSanMoiOwnerSource : uint8_t {
   HwId,
 };
 
+/// Controls whether flat/VFLAT sites whose group provenance is heuristic are
+/// eligible for instrumentation.
+enum class ConSanFlatProvenanceMode : uint8_t {
+  Likely,
+  Strict,
+};
+
 enum class ConSanRegisterAllocationSource : uint8_t {
   Unsupported,
   Explicit,
@@ -65,6 +72,7 @@ struct ConSanOptions {
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
   ConSanMoiOwnerSource moi_owner_source = ConSanMoiOwnerSource::WorkitemId;
+  ConSanFlatProvenanceMode flat_provenance_mode = ConSanFlatProvenanceMode::Likely;
   bool fail_closed = false;
   bool probe_nop = false;
   bool probe_trampoline_nop = false;

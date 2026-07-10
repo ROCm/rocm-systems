@@ -125,9 +125,9 @@ flowchart LR
   subgraph INLINE["Inline-shadow coverage"]
     direction LR
     R2["R2: Patch Placement"]:::done
-    F1["F1: Flat Provenance"]:::active
+    F1["F1: Flat Provenance"]:::done
     I1A["I1A: Native DS<br/>Multi-Cell"]:::done
-    I1B["I1B: Likely-Group<br/>Flat Coverage"]:::todo
+    I1B["I1B: Likely-Group<br/>Flat Coverage"]:::active
     I1{"I1: LDS Coverage Ready"}:::todo
 
     R2 --> I1B
@@ -1339,16 +1339,23 @@ Landed evidence:
 - An auto-buffer control logs a nonzero `sampled_immediate_conflicts` value and
   satisfies the diagnostic guard.
 
-## F1: Flat Provenance Hardening - TODO
+## F1: Flat Provenance Hardening - DONE
 
 Goal: make likely-group flat/VFLAT instrumentation defensible as coverage grows.
 
-Current state:
+Landed state:
 
 - Flat/VFLAT support is necessary for hip-moi-style compiled helper code.
-- `Group` and `MaybeGroup` provenance are instrumentable.
+- `Group` and `MaybeGroup` provenance are instrumentable under the default
+  `RJ_CONSAN_FLAT_PROVENANCE=likely` policy. `strict` admits only `Group`.
 - The tracker follows `src_shared_base` and related pointer construction
-  patterns, but `MaybeGroup` is still heuristic.
+  patterns. `Group` requires coherent low and high halves; one-sided,
+  selected, or arithmetic evidence is explicitly downgraded to `MaybeGroup`.
+- Inventory and site logs preserve the classification independently of the
+  selection policy. Strict-policy warnings count excluded `MaybeGroup` sites.
+- The RDNA4 normalization contract treats the low address VGPR as the unsigned
+  LDS byte offset, adds any supported static `ioffset`, and uses the high VGPR
+  only as provenance evidence before rounding to 4-byte shadow cells.
 
 Work:
 
@@ -1365,6 +1372,17 @@ Done criteria:
 - Docs and logs make clear when a flat access is strongly known group memory
   versus a heuristic `MaybeGroup`.
 - Inline-shadow flat work has a concrete address-normalization contract.
+
+Qualification evidence:
+
+- All 162 `ConSan.*` and `ConSanMoi.*` unit tests pass, including a strict-mode
+  control that excludes a `MaybeGroup` site while the default admits it.
+- A strict f16 IREE TileAndFuse audit found 185 native LDS sites and no compute
+  flat sites; its ROCclr support object exposed only 18 `Unknown` flat sites.
+- A separate strict hip-moi `NoPipelineProd16x8` audit found no `Group` sites
+  and 31 helper `MaybeGroup` sites, proving that its heuristic helper coverage
+  must remain an explicit likely-policy choice rather than being conflated
+  with the IREE native-DS path.
 
 ## T1: Team Test Matrix - PARTIAL
 

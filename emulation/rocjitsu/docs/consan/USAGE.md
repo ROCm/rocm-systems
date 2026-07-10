@@ -132,6 +132,11 @@ The MVP uses this HSA tools loader path. A separate waitcheck-style
   sampled conflicts. Host-side sampled packing/replay
   helpers still exist as semantic reference code, but the checked sampled GPU
   path no longer writes full access records first.
+- `RJ_CONSAN_FLAT_PROVENANCE=likely|strict`: admit both proven `Group` and
+  heuristic `MaybeGroup` flat/VFLAT sites (`likely`, the default), or only
+  coherently traced two-half `Group` sites (`strict`). The policy applies to
+  both SuperCollider and MOI; inventory counts and verbose classifications are
+  retained either way.
   `inline_shadow` patches decoded native scalar, B64, B128, d16, and
   two-address LDS load/store sites to publish one packed exact-shadow entry per
   rounded 4-byte cell directly from GPU code with RDNA4
@@ -676,7 +681,9 @@ Keep GPU test fanout near 8.
 
 ## Limitations
 
-- Flat/generic LDS provenance is conservative. The hook can identify likely
+- Flat/generic LDS provenance is conservative. Use
+  `RJ_CONSAN_FLAT_PROVENANCE=strict` when false-positive avoidance matters more
+  than flat-site recall. The hook can identify likely
   group/LDS helper-function flat sites and destructively trap them. The
   non-destructive check/trap path can patch eligible sites through padding or
   local NOP caves, bounded by `RJ_CONSAN_MAX_PATCHES`, but it still does not

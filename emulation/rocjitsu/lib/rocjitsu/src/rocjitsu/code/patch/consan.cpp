@@ -2223,17 +2223,20 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return false;
 }
 
-[[nodiscard]] bool is_likely_group_flat_hint(ConSanFlatAddressSpaceHint hint) {
+[[nodiscard]] bool is_instrumentable_group_flat_hint(ConSanFlatAddressSpaceHint hint,
+                                                     ConSanFlatProvenanceMode mode) {
   return hint == ConSanFlatAddressSpaceHint::Group ||
-         hint == ConSanFlatAddressSpaceHint::MaybeGroup;
+         (mode == ConSanFlatProvenanceMode::Likely &&
+          hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
-[[nodiscard]] bool is_supported_flat_trap_site(const ConSanFlatSite &site) {
+[[nodiscard]] bool is_supported_flat_trap_site(const ConSanFlatSite &site,
+                                               ConSanFlatProvenanceMode mode) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
     return false;
   if (site.size != 3u * sizeof(uint32_t))
     return false;
-  return is_likely_group_flat_hint(site.address_space_hint);
+  return is_instrumentable_group_flat_hint(site.address_space_hint, mode);
 }
 
 [[nodiscard]] std::optional<uint16_t> flat_dword_count(const ConSanFlatSite &site) {
@@ -2242,7 +2245,8 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
   return std::nullopt;
 }
 
-[[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site) {
+[[nodiscard]] bool is_supported_flat_check_trap_site(const ConSanFlatSite &site,
+                                                     ConSanFlatProvenanceMode mode) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
     return false;
   if (site.size != 3u * sizeof(uint32_t) || !site.addr_vgpr)
@@ -2263,7 +2267,7 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     if (!site.data_vgpr || static_cast<uint32_t>(*site.data_vgpr) + *dword_count > 256)
       return false;
   }
-  return is_likely_group_flat_hint(site.address_space_hint);
+  return is_instrumentable_group_flat_hint(site.address_space_hint, mode);
 }
 
 [[nodiscard]] bool is_forbidden_flat_scratch_vgpr_run(const ConSanFlatSite &site,
@@ -3174,7 +3178,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     return caves;
   };
   auto visit_site = [&](const ConSanFlatSite &site) {
-    if (!is_supported_flat_check_trap_site(site))
+    if (!is_supported_flat_check_trap_site(site, options.flat_provenance_mode))
       return;
     ++supported_candidate_count;
     auto required_vgprs = flat_dword_count(site);
@@ -3510,7 +3514,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               ConSanResult &result) {
+                               const ConSanOptions &options, ConSanResult &result) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
     result.warnings.emplace_back("ConSan flat trap proof currently supports only RDNA4");
     return;
@@ -3527,13 +3531,13 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     if (kernel.preflight_action == ConSanPreflightAction::Reject)
       continue;
     for (const ConSanFlatSite &site : kernel.flat_sites) {
-      if (is_supported_flat_trap_site(site))
+      if (is_supported_flat_trap_site(site, options.flat_provenance_mode))
         candidates.push_back(&site);
     }
   }
   for (const ConSanFunctionInfo &function : result.functions) {
     for (const ConSanFlatSite &site : function.flat_sites) {
-      if (is_supported_flat_trap_site(site))
+      if (is_supported_flat_trap_site(site, options.flat_provenance_mode))
         candidates.push_back(&site);
     }
   }
@@ -3702,7 +3706,7 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
       }
     }
   } else if (options.probe_flat_trap)
-    try_apply_flat_trap_patch(code_object, arch, result);
+    try_apply_flat_trap_patch(code_object, arch, options, result);
   else if (options.probe_lds_endpgm)
     try_apply_lds_endpgm_patch(code_object, arch, result);
   else if (options.probe_endpgm)

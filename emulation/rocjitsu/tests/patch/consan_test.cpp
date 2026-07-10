@@ -6158,6 +6158,33 @@ TEST(ConSan, ClassifiesHighHalfSharedBaseFlatLoadAsMaybeGroup) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
+TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
+  const std::array<uint32_t, 9> text_words = {
+      0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
+      0xD5810000u, 0x00000080u,              // v_mov_b32_e64 v0, 0
+      0xD5810001u, 0x00000001u,              // v_mov_b32_e64 v1, s1
+      0xEC05007Cu, 0x00000002u, 0x00000000u, // flat_load_b32 v2, v[0:1]
+      0xBFB00000u,                           // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+
+  ConSanOptions likely_options;
+  likely_options.flavor = ConSanFlavor::Moi;
+  const auto likely_result = try_patch_consan(bytes, likely_options);
+  ASSERT_TRUE(likely_result.errors.empty());
+  ASSERT_EQ(likely_result.moi_candidates.size(), 1u);
+  EXPECT_EQ(likely_result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatMaybeGroup);
+
+  ConSanOptions strict_options = likely_options;
+  strict_options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  const auto strict_result = try_patch_consan(bytes, strict_options);
+  ASSERT_TRUE(strict_result.errors.empty());
+  EXPECT_TRUE(strict_result.moi_candidates.empty());
+  EXPECT_TRUE(std::ranges::any_of(strict_result.warnings, [](const std::string &warning) {
+    return warning.find("excluded_maybe_group=1") != std::string::npos;
+  }));
+}
+
 TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   const std::array<uint32_t, 11> text_words = {
       0xBE8E01EBu,                           // s_mov_b64 s[14:15], src_shared_base

@@ -162,6 +162,13 @@ Known local result:
 
 - hip-moi full suite: 189/189 passed on `gfx1201` with
   `RJ_CONSAN_CHECK_TRAP_MODE=lds`.
+- A separate strict-provenance inventory of `NoPipelineProd16x8` found no
+  strongly proven `Group` flat sites. Its local helpers contained 31
+  `MaybeGroup` sites; the seven kernels contained 903 flat sites classified as
+  679 `Unknown` and 224 `MaybePrivate`, while helper functions contained 1508
+  flat sites classified as 31 `MaybeGroup`, 226 `MaybePrivate`, and 1251
+  `Unknown`. The likely policy is therefore required to cover those helper
+  candidates; strict mode intentionally excludes them.
 - The default `RJ_CONSAN_CHECK_TRAP_MODE=all` is not currently the broad
   hip-moi compatibility recipe; it has hit ambiguous flat/local-cave cases.
 
@@ -226,6 +233,11 @@ ctest --test-dir /home/benoit/workspace/iree-build \
 Known local result:
 
 - TileAndFuse guarded subset: 5/5 passed on `gfx1201`.
+- A strict-provenance inventory of the representative f16 TileAndFuse object
+  found 185 native LDS sites and no flat sites in its two compute kernels. The
+  separately loaded ROCclr support object had 18 `Unknown` flat sites and no
+  `Group`/`MaybeGroup` sites. This workload therefore does not depend on the
+  heuristic flat path.
 
 ### MOI Sampled
 
