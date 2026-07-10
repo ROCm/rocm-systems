@@ -1238,6 +1238,41 @@ private:
         m_memory_alloc_time_range    = make_time_range_stmt("rocpd_memory_allocate");
     }
 
+    // Ranked per-track pmc candidates for v3 counter tracks. One AMD-SMI poll
+    // co-samples all of an agent's metrics under a single rocpd_sample.event_id, so a
+    // plain sample->pmc_event join on event_id fans a track out to every co-sampled
+    // pmc. rn=1 is the track's own pmc: rank the candidate whose ip.name matches the
+    // track's name_id string (agent ordinal " [N]" stripped, exact match) first, with
+    // pmc_id as the deterministic tiebreaker for non-per-metric tracks. rocpd_string is
+    // LEFT-joined so a NULL name_id degrades to the tiebreaker rather than dropping the
+    // track. Shared verbatim by the counter metadata query (counter_track_names) and the
+    // four scalar value/detail queries so all five resolve each track to the same pmc.
+    static std::string ranked_pmc_resolver(const std::string& u)
+    {
+        return fmt::format(
+            "SELECT s.track_id AS track_id, pe.pmc_id AS pmc_id, ip.name AS name, "
+            "ROW_NUMBER() OVER (PARTITION BY s.track_id ORDER BY "
+            "CASE WHEN ip.name = CASE WHEN instr(str.string, ' [') > 0 "
+            "THEN substr(str.string, 1, instr(str.string, ' [') - 1) "
+            "ELSE str.string END THEN 0 ELSE 1 END, pe.pmc_id) AS rn "
+            "FROM rocpd_sample_{u} s "
+            "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
+            "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
+            "JOIN rocpd_track_{u} t ON t.id = s.track_id "
+            "LEFT JOIN rocpd_string_{u} str ON str.id = t.name_id",
+            fmt::arg("u", u));
+    }
+
+    // JOIN clause that restricts a value query's sample->pmc_event event_id join to each
+    // track's own resolved pmc (rn=1 from ranked_pmc_resolver), eliminating the AMD-SMI
+    // event_id fan-out. Assumes the value query aliases rocpd_sample AS s and
+    // rocpd_pmc_event AS p.
+    static std::string resolved_pmc_join(const std::string& u)
+    {
+        return "JOIN (SELECT track_id, pmc_id FROM (" + ranked_pmc_resolver(u) +
+               ") WHERE rn = 1) r ON r.track_id = s.track_id AND r.pmc_id = p.pmc_id ";
+    }
+
     void initialize_track_synthesis_statements()
     {
         const auto& u = m_uuid;
@@ -1325,38 +1360,19 @@ private:
             fmt::format("SELECT MAX(id) FROM rocpd_track_{}", u),
             &max_track_id_result::max_id);
 
-        // Resolve each counter track's own pmc deterministically. One AMD-SMI poll
-        // co-samples all of an agent's metrics under a single rocpd_sample.event_id, so a
-        // plain sample->pmc_event join on event_id fans a track out to every co-sampled
-        // pmc_id; a bare GROUP BY track_id would then keep an arbitrary one. v3
-        // rocpd_track has no agent_id/pmc_id, but when the sampled tracks are per-metric
-        // their name_id string carries the metric identity + agent ordinal (e.g.
-        // "device_busy_gfx [0]"). The event_id join already scopes candidates to the
-        // track's own agent; rank the candidate whose ip.name matches that string
-        // (ordinal stripped) first, so it wins. Tracks that are NOT per-metric (name is a
-        // thread name, and the event join is a clean 1:1 with no fan-out) have a single
-        // candidate and fall through to it via the pmc_id tiebreaker -- still
-        // deterministic. rocpd_string is LEFT-joined so a NULL name_id degrades to the
-        // same fallback instead of dropping the track.
-        m_counter_track_names = m_backend->create_read_statement_executor<
-            counter_track_name_result>(
-            fmt::format(
-                "SELECT track_id, pmc_id, name FROM ("
-                "SELECT s.track_id AS track_id, pe.pmc_id AS pmc_id, ip.name AS name, "
-                "ROW_NUMBER() OVER (PARTITION BY s.track_id ORDER BY "
-                "CASE WHEN ip.name = CASE WHEN instr(str.string, ' [') > 0 "
-                "THEN substr(str.string, 1, instr(str.string, ' [') - 1) "
-                "ELSE str.string END THEN 0 ELSE 1 END, pe.pmc_id) AS rn "
-                "FROM rocpd_sample_{u} s "
-                "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id "
-                "JOIN rocpd_info_pmc_{u} ip ON ip.id = pe.pmc_id "
-                "JOIN rocpd_track_{u} t ON t.id = s.track_id "
-                "LEFT JOIN rocpd_string_{u} str ON str.id = t.name_id"
-                ") WHERE rn = 1",
-                fmt::arg("u", u)),
-            &counter_track_name_result::track_id,
-            &counter_track_name_result::pmc_id,
-            &counter_track_name_result::name);
+        // Resolve each counter track's own pmc + display name deterministically via the
+        // shared ranked_pmc_resolver (rn=1). See that helper for the fan-out rationale.
+        // v3 rocpd_track has no agent_id/pmc_id, but per-metric sampled tracks carry the
+        // metric identity + agent ordinal in their name_id string (e.g.
+        // "device_busy_gfx [0]"); the resolver's name match picks the right pmc, and the
+        // Q9 display name is that same pmc's ip.name.
+        m_counter_track_names =
+            m_backend->create_read_statement_executor<counter_track_name_result>(
+                "SELECT track_id, pmc_id, name FROM (" + ranked_pmc_resolver(u) +
+                    ") WHERE rn = 1",
+                &counter_track_name_result::track_id,
+                &counter_track_name_result::pmc_id,
+                &counter_track_name_result::name);
     }
 
     void initialize_interval_track_statements()
@@ -1659,15 +1675,17 @@ private:
                 &track_stats_result::max_ts,
                 &track_stats_result::count);
 
-        // counter: samples on track_id joined to their pmc value (matches scalar_track).
+        // counter: samples on track_id joined to their own pmc value (matches
+        // scalar_track). resolved_pmc_join strips the AMD-SMI event_id fan-out so the
+        // count/bounds reflect the track's own metric, not all co-sampled pmcs.
         m_scalar_stats =
             m_backend
                 ->create_read_statement_executor<track_stats_result, bind_types<size_t>>(
                     fmt::format("SELECT MIN(s.timestamp), MAX(s.timestamp), COUNT(*) "
                                 "FROM rocpd_sample_{u} s "
-                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
-                                "WHERE s.track_id = ?",
-                                fmt::arg("u", u)),
+                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id ",
+                                fmt::arg("u", u)) +
+                        resolved_pmc_join(u) + "WHERE s.track_id = ?",
                     &track_stats_result::min_ts,
                     &track_stats_result::max_ts,
                     &track_stats_result::count);
@@ -1677,14 +1695,18 @@ private:
     {
         const auto& u = m_uuid;
 
+        // resolved_pmc_join strips the AMD-SMI event_id fan-out: without it each sample
+        // joins to every co-sampled pmc under its event_id, returning ~6x rows mixing
+        // six metrics. See ranked_pmc_resolver.
         m_scalar_track =
             m_backend
                 ->create_read_statement_executor<scalar_row_result, bind_types<size_t>>(
                     fmt::format("SELECT s.id, s.timestamp, p.value "
                                 "FROM rocpd_sample_{u} s "
-                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
-                                "WHERE s.track_id = ? ORDER BY s.timestamp",
-                                fmt::arg("u", u)),
+                                "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id ",
+                                fmt::arg("u", u)) +
+                        resolved_pmc_join(u) +
+                        "WHERE s.track_id = ? ORDER BY s.timestamp",
                     &scalar_row_result::id,
                     &scalar_row_result::timestamp,
                     &scalar_row_result::value);
@@ -1694,29 +1716,34 @@ private:
     {
         const auto& u = m_uuid;
 
-        // Keyed on rocpd_sample.id (scalar_event_t::opaque_id).
+        // Keyed on rocpd_sample.id (scalar_event_t::opaque_id). resolved_pmc_join keeps
+        // only the sample's own pmc value; without it one sample joins to all co-sampled
+        // pmcs sharing its event_id and could report another metric's value.
         m_scalar_detail = m_backend->create_read_statement_executor<scalar_detail_result,
                                                                     bind_types<size_t>>(
             fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
                         "FROM rocpd_sample_{u} s "
-                        "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id "
-                        "WHERE s.id = ?",
-                        fmt::arg("u", u)),
+                        "JOIN rocpd_pmc_event_{u} p ON p.event_id = s.event_id ",
+                        fmt::arg("u", u)) +
+                resolved_pmc_join(u) + "WHERE s.id = ?",
             &scalar_detail_result::id,
             &scalar_detail_result::track_id,
             &scalar_detail_result::timestamp,
             &scalar_detail_result::value,
             &scalar_detail_result::event_id);
 
-        // Keyed on rocpd_pmc_event.id.
+        // Keyed on rocpd_pmc_event.id. resolved_pmc_join pairs the pmc row with the one
+        // sample whose track resolves to that pmc; without it it joins to every sample
+        // sharing the event_id (six co-sampled metric tracks) and could return a
+        // different track's sample.
         m_pmc_event_detail =
             m_backend->create_read_statement_executor<scalar_detail_result,
                                                       bind_types<size_t>>(
                 fmt::format("SELECT s.id, s.track_id, s.timestamp, p.value, s.event_id "
                             "FROM rocpd_pmc_event_{u} p "
-                            "JOIN rocpd_sample_{u} s ON s.event_id = p.event_id "
-                            "WHERE p.id = ?",
-                            fmt::arg("u", u)),
+                            "JOIN rocpd_sample_{u} s ON s.event_id = p.event_id ",
+                            fmt::arg("u", u)) +
+                    resolved_pmc_join(u) + "WHERE p.id = ?",
                 &scalar_detail_result::id,
                 &scalar_detail_result::track_id,
                 &scalar_detail_result::timestamp,
