@@ -108,6 +108,17 @@ __device__ __forceinline__ uint32_t padded_ds_load_b32(uint32_t lds_addr) {
   return value;
 }
 
+__device__ __forceinline__ void padded_ds_store_b128(uint32_t lds_addr, uint4 value) {
+  register uint32_t value0 asm("v20") = value.x;
+  register uint32_t value1 asm("v21") = value.y;
+  register uint32_t value2 asm("v22") = value.z;
+  register uint32_t value3 asm("v23") = value.w;
+  asm volatile("ds_store_b128 %0, v[20:23]\n\t" RJ_CONSAN_INLINE_SHADOW_NOP_CAVE
+               :
+               : "v"(lds_addr), "v"(value0), "v"(value1), "v"(value2), "v"(value3)
+               : "memory");
+}
+
 __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
   uint32_t one = 1;
   asm volatile("flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
@@ -178,6 +189,19 @@ __global__ __launch_bounds__(128) void padded_cross_wave_lds_store(uint32_t *out
   __syncthreads();
   if (tid == 0)
     out[0] = lds[0];
+}
+
+__global__ __launch_bounds__(64) void padded_cross_wave_lds_store_b128(uint32_t *out) {
+  __shared__ uint32_t lds[4];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+  const uint4 value =
+      make_uint4(0xA0000000u | tid, 0xB0000000u | tid, 0xC0000000u | tid, 0xD0000000u | tid);
+  padded_ds_store_b128(lds_addr, value);
+
+  __syncthreads();
+  if (tid == 0)
+    out[0] = lds[0] ^ lds[1] ^ lds[2] ^ lds[3];
 }
 
 __global__ __launch_bounds__(128) void padded_barrier_ordered_lds_store(uint32_t *out) {
@@ -294,6 +318,19 @@ TEST(ConSanInlineShadowTest, BarrierOrderedCrossWaveStoreCompletes) {
   free_device_ptr(d_out);
 
   EXPECT_NE(out, 0u);
+}
+
+TEST(ConSanInlineShadowTest, CrossWaveRacyB128StoreCompletes) {
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, sizeof(uint32_t)));
+
+  padded_cross_wave_lds_store_b128<<<1, 64>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  const hipError_t sync = hipDeviceSynchronize();
+  ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);
+
+  free_device_ptr(d_out);
 }
 
 TEST(ConSanInlineShadowTest, SameAddressAtomicHandoffCompletes) {

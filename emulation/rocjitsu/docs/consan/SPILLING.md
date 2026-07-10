@@ -239,7 +239,7 @@ The focused CPU/synthetic suite is:
   --gtest_filter='ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
-The current result is 171/171. It covers allocation precedence, forbidden
+The current result is 172/172. It covers allocation precedence, forbidden
 ranges, rollback, gfx1201 encodings and waits, descriptor/metadata growth,
 zero-private kernels, dynamic-stack rejection, shared-owner dead/fresh/spill
 layouts, mixed-wave rejection, persistent state, barrier/atomic rollout,
@@ -253,7 +253,7 @@ ctest -j8 --output-on-failure \
   -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.'
 ```
 
-The current resource/behavior result is 28/28. Notable controls include
+The current resource/behavior result is 29/29. Notable controls include
 record/replay and sampled
 forced-spill preservation, zero-to-nonzero private dispatch backing,
 private-epoch barriers, inline diagnostics, and atomic handoff behavior, all

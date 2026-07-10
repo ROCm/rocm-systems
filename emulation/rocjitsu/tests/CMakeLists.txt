@@ -1450,6 +1450,10 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ConSanInlineShadowTest.CrossWaveRacyStoreCompletes"
             )
             set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_B128_RACY_TEST
+                "ConSanInlineShadowTest.CrossWaveRacyB128StoreCompletes"
+            )
+            set(
                 RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST
                 "ConSanInlineShadowTest.BarrierOrderedCrossWaveStoreCompletes"
             )
@@ -1658,6 +1662,24 @@ if(RJ_ENABLE_HIP_TESTS)
                 PROPERTIES
                     PASS_REGULAR_EXPRESSION
                         "second_lanes=0x[1-9a-fA-F].*first_lds=\\[0,4\\) second_lds=\\[0,4\\)"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiReportsCrossWaveB128Race"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_B128_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=padded_cross_wave_lds_store_b128"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(
                 NAME "ConSanInlineShadowTest.DbiReportsCrossWaveRaceHwIdOwnerSource"

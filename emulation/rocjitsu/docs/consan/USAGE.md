@@ -15,7 +15,7 @@ experimental DBI atomic-record patch for selected RDNA4 no-SADDR
 current implementation can publish compact sampled watchpoint entries directly
 from DBI probes, without first writing full access records. Its
 `inline_shadow` engine can also publish exact-shadow entries directly from
-native dword LDS load/store probes and emit a first compact inline diagnostic
+decoded native LDS load/store cell ranges and emit a compact inline diagnostic
 for a prior non-empty,
 different-owner conflict. ConSan is instrumentation-only on the local RDNA4 `gfx1201`
 device; it is not meant to translate the code object to another architecture.
@@ -132,13 +132,15 @@ The MVP uses this HSA tools loader path. A separate waitcheck-style
   sampled conflicts. Host-side sampled packing/replay
   helpers still exist as semantic reference code, but the checked sampled GPU
   path no longer writes full access records first.
-  `inline_shadow` patches native LDS `ds_store_b32`/`ds_write_b32` and
-  `ds_load_b32`/`ds_read_b32` sites to publish packed exact-shadow entries
-  directly from GPU code with RDNA4 `flat_atomic_swap_b64`. It checks the returned prior
+  `inline_shadow` patches decoded native scalar, B64, B128, d16, and
+  two-address LDS load/store sites to publish one packed exact-shadow entry per
+  rounded 4-byte cell directly from GPU code with RDNA4
+  `flat_atomic_swap_b64`. It checks the returned prior
   shadow entry and emits one compact diagnostic for the first implemented
   conflict predicate: prior entry nonzero, prior owner different from the
-  current owner, and not a read/read pair. It does not yet implement inline
-  barrier epochs or wider LDS forms.
+  current owner, same epoch, and not a read/read pair. Barrier epochs and a
+  narrow same-address atomic handoff are supported; likely-group flat LDS is
+  the remaining access-form gap.
 - `RJ_CONSAN_MOI_BACKEND=context|sampled_watchpoint`: legacy alias. It is used
   only when `RJ_CONSAN_MOI_ENGINE` is unset. `context` maps to `record_replay`;
   `sampled_watchpoint` maps to `sampled`.

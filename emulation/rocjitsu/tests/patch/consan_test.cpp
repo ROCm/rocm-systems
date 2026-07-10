@@ -1465,6 +1465,53 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
   EXPECT_TRUE(contains_subsequence(text_words, expected_final_cell_offset));
 }
 
+TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
+  const auto expect_cell_publications = [](uint32_t word0, uint32_t word1,
+                                           std::string_view expected_mnemonic,
+                                           uint32_t expected_cells) {
+    const std::array<uint32_t, 3> input_words = {
+        word0,
+        word1,
+        build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+    };
+    const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(input_words);
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::Moi;
+    options.moi_engine = ConSanMoiEngine::InlineShadow;
+    options.scratch_vgpr = 16;
+    options.moi_owner_vgpr = 24;
+    options.moi_epoch_vgpr = 25;
+    options.moi_report_buffer_address = 0x100000000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const auto result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+    ASSERT_TRUE(result.modified);
+    ASSERT_EQ(result.moi_candidates.size(), 1u);
+    EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
+
+    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    ASSERT_EQ(patched.text_sections().size(), 1u);
+    const auto *text_section = patched.text_sections().front();
+    ASSERT_EQ(text_section->size() % sizeof(uint32_t), 0u);
+    std::vector<uint32_t> text_words(text_section->size() / sizeof(uint32_t));
+    std::memcpy(text_words.data(), text_section->data(), text_section->size());
+
+    const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
+        /*vaddr=*/16, /*vsrc=*/18, /*vdst=*/21, /*return_old_value=*/true, /*scope=*/2,
+        ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(atomic_swap);
+    EXPECT_EQ(count_subsequence(text_words, *atomic_swap), expected_cells);
+  };
+
+  expect_cell_publications(0xD9D80000u, 0x01000009u, "ds_load_b64", 2u);
+  expect_cell_publications(0xDA980000u, 0x01000002u, "ds_load_u16_d16", 1u);
+  expect_cell_publications(0xD8380201u, 0x00000000u, "ds_store_2addr_b32", 2u);
+  expect_cell_publications(0xD9DC0201u, 0x01000009u, "ds_load_2addr_b64", 4u);
+}
+
 TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options;

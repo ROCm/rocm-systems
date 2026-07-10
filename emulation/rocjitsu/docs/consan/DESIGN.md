@@ -26,7 +26,7 @@ register allocation, private-layout, ownership, and spill transaction.
 | Public flavor switch | `RJ_CONSAN_FLAVOR=supercollider|moi`. | Keep the two top-level flavors. |
 | SuperCollider | Usable redundant LDS/likely-group-flat check/trap mode. | Keep as a simple perturbation/value-check sanitizer mode. |
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
-| MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
+| MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | All three engines complete the 209-test gfx1201 IREE compatibility sweep without register-number configuration; guarded semantic coverage remains narrower, especially for inline shadow. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel buffer tuning, and expand feature/non-vacuity qualification. |
 | Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
@@ -563,8 +563,8 @@ Current implementation:
 - Uses the shared MOI report buffer.
 - Requires enough exact-shadow entries to cover the full 64 KiB LDS space at
   one 4-byte cell per entry.
-- Instruments native dword LDS `ds_store_b32`/`ds_write_b32` and
-  `ds_load_b32`/`ds_read_b32`.
+- Instruments decoded native scalar, B64, B128, d16, and two-address LDS
+  loads/stores, publishing every rounded 4-byte cell in each access range.
 - Uses `flat_atomic_swap_b64` to publish a packed exact-shadow word and obtain
   the prior word atomically.
 - Reports a conflict when the prior entry is non-empty, from a different owner,
@@ -590,7 +590,8 @@ Current diagnostic shape:
 
 Important current simplifications:
 
-- Only native dword LDS accesses are covered.
+- Native byte/d16 accesses conservatively cover their rounded 4-byte cell;
+  byte-precise masks are not represented.
 - Direct-kernel owner, epoch, scratch VGPRs, and SGPR temporaries are automatic;
   explicit register variables remain debug overrides.
 - `hw_id` owner source makes owner wave-uniform and automatically receives a

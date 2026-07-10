@@ -124,9 +124,9 @@ flowchart LR
 
   subgraph INLINE["Inline-shadow coverage"]
     direction LR
-    R2["R2: Patch Placement"]:::todo
+    R2["R2: Patch Placement"]:::active
     F1["F1: Flat Provenance"]:::todo
-    I1A["I1A: Native DS<br/>Multi-Cell"]:::active
+    I1A["I1A: Native DS<br/>Multi-Cell"]:::done
     I1B["I1B: Likely-Group<br/>Flat Coverage"]:::todo
     I1{"I1: LDS Coverage Ready"}:::todo
 
@@ -376,7 +376,7 @@ Landed state:
   the allocator/spill-frame direction and the `SpillManager` starting point.
   ConSan added the gfx1201 emitter, owner analysis, descriptor/dispatch
   transaction, and tests; [SPILLING.md](SPILLING.md) records the boundary.
-- Qualification is 171/171 focused synthetic/unit tests, 28/28 live rocJITsu
+- Qualification is 172/172 focused synthetic/unit tests, 29/29 live rocJITsu
   tests, 189/189 hip-moi controls, guarded TileAndFuse and scan/softmax tests,
   and 209/209 broad IREE compatibility under each MOI engine.
 
@@ -933,7 +933,7 @@ Landed evidence:
 - Standard record/replay, sampled, and targeted inline-shadow recipes contain
   no scratch, owner, epoch, or SGPR numbers; live forced-spill tests prove
   preservation and dispatch-private growth.
-- Focused tests pass 171/171, the live resource/behavior tier 28/28, hip-moi controls
+- Focused tests pass 172/172, the live resource/behavior tier 29/29, hip-moi controls
   189/189, and the 209-test IREE compatibility tier under every engine. Guarded
   TileAndFuse and scan/softmax regressions pass without resource-induced hangs.
 - [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
@@ -996,7 +996,7 @@ Landed evidence:
   objects. Overflow counts are printed unconditionally, and
   `RJ_CONSAN_MOI_FORBID_OVERFLOW=1` is the strict guard.
 - The deliberate 144-byte dynamic-record test proves visible overflow. The
-  171 focused tests and 28 live gfx1201 resource/behavior tests pass, and all
+  172 focused tests and 29 live gfx1201 resource/behavior tests pass, and all
   three 209-test IREE sweeps pass without a buffer-size variable.
 
 ### O1B: Freeze Standard Engine Profiles - TODO
@@ -1097,12 +1097,12 @@ for IREE and hip-moi-style workloads.
 
 Current state:
 
-- Exact-shadow publication is live for native dword LDS loads/stores.
-- It records one 4-byte LDS cell per probe.
+- Exact-shadow publication is live for native scalar, B64, B128, d16, and
+  two-address LDS loads/stores.
+- It publishes every rounded 4-byte cell in each decoded access range.
 - It can emit compact diagnostics for prior non-empty, different-owner,
   same-epoch conflicts, suppressing read/read pairs.
-- It does not cover native B64/B128/two-address/d16 forms or likely-group flat
-  accesses.
+- It does not yet cover likely-group flat accesses.
 
 Dependency split:
 
@@ -1116,22 +1116,31 @@ Dependency split:
 - Completing `I1B` reaches the `I1` coverage milestone because `I1A` is an
   incoming prerequisite.
 
-### I1A: Native DS Multi-Cell Coverage - TODO
+### I1A: Native DS Multi-Cell Coverage - DONE
 
-Work:
+Landed state:
 
-- Generalize exact-shadow publication around an LDS byte/cell range rather
-  than a hard-coded single dword.
-- Extend exact-shadow cell-range handling to multi-cell native DS forms:
-  `ds_load/store_b64`, `ds_load/store_b128`, and two-address loads.
-- Decide whether d16 forms should publish one rounded 4-byte cell first, or
-  carry byte masks into the inline predicate.
+- Exact-shadow publication consumes decoded LDS byte ranges and atomically
+  publishes each rounded 4-byte cell.
+- B64, B128, and two-address B32/B64 forms publish two, four, or the sum of
+  both decoded ranges as appropriate.
+- Byte and d16 forms conservatively publish one rounded 4-byte cell; byte masks
+  remain a possible future precision improvement.
 
 Done criteria:
 
 - Inline-shadow can instrument representative IREE TileAndFuse native DS sites
   without limiting to one dword access.
 - Race controls exercise at least one multi-cell access.
+
+Landed evidence:
+
+- Synthetic patch tests cover B64, B128, d16, and two-address B32/B64 and count
+  the expected per-cell atomic publications.
+- A live two-wave B128 store control reports a conflict through inline shadow.
+- A guarded IREE f16 TileAndFuse run passes with eight access probes; its first
+  diagnostic reports `[0,8)` ranges, proving a native B64 site reached the
+  multi-cell path.
 
 ### I1B: Likely-Group Flat Coverage - TODO
 
@@ -1200,7 +1209,7 @@ Landed evidence:
 - The live cross-wave race prints owner/epoch/instruction/access fields,
   `second_lanes=0x10001`, and `[0,4)` first/second LDS ranges; it also exercises
   visible diagnostic overflow at the default four-record capacity.
-- The 102-test `ConSanMoi` suite, 28-test live resource/behavior tier, and
+- The 103-test `ConSanMoi` suite, 29-test live resource/behavior tier, and
   209-test inline-shadow IREE compatibility sweep pass.
 
 ## I3: Inline Barrier And Atomic Semantics - DONE
