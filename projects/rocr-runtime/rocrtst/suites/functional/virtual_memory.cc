@@ -1499,6 +1499,10 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
   size_t alloc_size = granule_size * 10;
   const int kMemoryAllocSize = alloc_size / sizeof(int);
 
+  std::cout << "granule_size = " << granule_size << std::endl;
+  std::cout << "alloc_size = " << alloc_size << std::endl;
+  std::cout << "kMemoryAllocSize = " << kMemoryAllocSize << std::endl;
+
   // Get queue size and create queue
   uint32_t queue_size = 0;
   ASSERT_SUCCESS(hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
