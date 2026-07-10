@@ -1470,11 +1470,21 @@ generate_agent_profiles()
     return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
 }
 
-// this function creates a rocprofiler profile config on the first entry
+// Shared, lazily-built per-agent profile set (one config per counter group). Built once on first
+// use and shared by both the non-replay round-robin and the replay per-dispatch selectors.
+agent_profiles&
+get_agent_profiles()
+{
+    static auto profiles = generate_agent_profiles();
+    return profiles;
+}
+
+// Non-replay: free-running round-robin across counter groups (time-based rotation across
+// dispatches).
 std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto agent_profiles = generate_agent_profiles();
+    auto& agent_profiles = get_agent_profiles();
 
     auto agent_iter = agent_profiles.current_iter.find(agent_id);
     if(agent_iter == agent_profiles.current_iter.end())
@@ -1494,6 +1504,34 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 
     uint64_t profile_pos = my_iter / agent_profiles.rotation;
     return profiles->second[profile_pos % profiles->second.size()];
+}
+
+// Kernel replay: deterministic per-dispatch batch selection. All N passes of one dispatch share the
+// same dispatch_id (the SDK fixes it), and this callback fires once per pass in order, so the k-th
+// call for a given dispatch_id returns counter group k -- keeping pass i <-> batch i aligned
+// regardless of interleaving with other dispatches/agents (unlike the free-running round-robin).
+// The per-dispatch counter is erased once all groups have been handed out.
+std::optional<rocprofiler_counter_config_id_t>
+get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t dispatch_id)
+{
+    auto& agent_profiles = get_agent_profiles();
+
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end() || profiles->second.empty()) return std::nullopt;
+
+    const auto n_groups = profiles->second.size();
+
+    static std::mutex                             pass_pos_mutex;
+    static std::unordered_map<uint64_t, uint64_t> pass_pos;
+    uint64_t                                      idx = 0;
+    {
+        auto  _lk = std::lock_guard<std::mutex>{pass_pos_mutex};
+        auto& pos = pass_pos[dispatch_id];
+        idx       = pos++;
+        if(pos >= n_groups) pass_pos.erase(dispatch_id);
+    }
+
+    return profiles->second[idx % n_groups];
 }
 
 int64_t
@@ -1779,6 +1817,16 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     if(!is_targeted_kernel(kernel_id, kernel_iteration))
     {
         return;
+    }
+    else if(tool::get_config().kernel_replay)
+    {
+        // Deterministic pass i -> counter group i for this dispatch (fixes desync vs the
+        // free-running round-robin when passes/profiles don't line up perfectly).
+        if(auto profile = get_replay_profile(agent_id, dispatch_data.dispatch_info.dispatch_id))
+        {
+            *config          = *profile;
+            user_data->value = common::get_tid();
+        }
     }
     else if(auto profile = get_device_counting_service(agent_id))
     {

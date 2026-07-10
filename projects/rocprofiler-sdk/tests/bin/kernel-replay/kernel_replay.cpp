@@ -231,6 +231,62 @@ run_vecscale(int n, int iters)
     printf("vecScale: n=%d iters=%d OK\n", n, iters);
     return EXIT_SUCCESS;
 }
+
+// Restore-correctness mode: launch ONE in-place saxpy dispatch (y = a*x + y) and self-check that
+// the effect landed exactly once. Under --kernel-replay with N counter groups the SDK re-executes
+// this single dispatch N times, restoring device memory between passes, so the result is
+// data-dependent on restore:
+//   restore WORKS  -> y == y0 + a*x        (applied once)          e.g. 102
+//   restore BROKEN -> y == y0 + N*(a*x)    (accumulated per pass)  e.g. 110 for N=5
+// A no-op/broken restore therefore makes this exit non-zero -- unlike a counter-only check.
+int
+run_inplace_saxpy(int n)
+{
+    const size_t bytes = static_cast<size_t>(n) * sizeof(float);
+    const float  alpha = 2.0f;
+    const float  x_val = 1.0f;
+    const float  y0    = 100.0f;
+
+    std::vector<float> h_x(n, x_val);
+    std::vector<float> h_y(n, y0);
+
+    float *d_x = nullptr, *d_y = nullptr;
+    HIP_CHECK(hipMalloc(&d_x, bytes));
+    HIP_CHECK(hipMalloc(&d_y, bytes));
+    HIP_CHECK(hipMemcpy(d_x, h_x.data(), bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_y, h_y.data(), bytes, hipMemcpyHostToDevice));
+
+    saxpy<<<512, 512>>>(alpha, d_x, d_y, n);  // exactly one host-observed launch
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipMemcpy(h_y.data(), d_y, bytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_x));
+    HIP_CHECK(hipFree(d_y));
+
+    const float applied_once = y0 + alpha * x_val;  // 102
+    const float step         = alpha * x_val;       // 2
+
+    int nonuniform = 0;
+    for(int i = 0; i < n; ++i)
+        if(!approx_equal(h_y[i], h_y[0])) ++nonuniform;
+
+    const float observed = (h_y[0] - y0) / step;
+    printf("[rstest] y[0]=%.3f applied_once=%.3f observed_applications=%.3f nonuniform=%d\n",
+           h_y[0],
+           applied_once,
+           observed,
+           nonuniform);
+
+    if(approx_equal(h_y[0], applied_once) && nonuniform == 0)
+    {
+        printf("[rstest] PASS: kernel effect applied exactly once (restore reverted inputs)\n");
+        return EXIT_SUCCESS;
+    }
+
+    printf("[rstest] FAIL: applied %.3f times -> restore did NOT revert inputs\n", observed);
+    return EXIT_FAILURE;
+}
 }  // namespace
 
 int
@@ -242,6 +298,7 @@ main(int argc, char** argv)
     if(run_vecadd(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
     if(run_saxpy(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
     if(run_vecscale(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
+    if(run_inplace_saxpy(n) != EXIT_SUCCESS) return EXIT_FAILURE;
 
     printf("kernel-replay: all kernels completed\n");
     return EXIT_SUCCESS;
