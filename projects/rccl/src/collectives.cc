@@ -129,15 +129,16 @@ RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
 
 // Returns true when the DDA fast path should be attempted for a collective
 // with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942; gfx950 uses the user-configurable rcclParamDdaThreshold();
-// all other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default) {
+// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
+// gfx950 uses the user-configurable rcclParamDdaThreshold().
+// All other architectures return false (threshold 0).
+static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0 || comm->nRanks < 8 || comm->symmetricSupport) return false;
   size_t threshold;
   if (IsArchMatch(comm->archName, "gfx942")) {
     threshold = gfx942Default;
   } else if (IsArchMatch(comm->archName, "gfx950")) {
-    threshold = (size_t)rcclParamDdaThreshold();
+    threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
   } else {
     return false;
   }
@@ -306,7 +307,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       }
       #endif // ENABLE_ROCSHMEM
 
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304) &&
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304) &&
         ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
       NCCLCHECK(ncclAllToAllDdaIpc(
         sendbuff,
