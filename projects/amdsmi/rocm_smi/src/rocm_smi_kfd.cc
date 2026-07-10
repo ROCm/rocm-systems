@@ -57,11 +57,18 @@ static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDVramPrefix = "vram_";
 
-// Check whether a given PID has /dev/kfd open by scanning its fd links.
-static bool PidHasKfdOpen(const std::string& pid_str) {
+// Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
+// kInaccessible means we could not read /proc/<pid>/fd at all (the process
+// belongs to another user, or exited) — the outcome is unknown, not negative.
+enum class KfdOpenState { kHasKfd, kNoKfd, kInaccessible };
+
+// Inspect a PID's fd links to determine whether it has /dev/kfd open.
+static KfdOpenState PidKfdOpenState(const std::string& pid_str) {
   std::string fd_dir_path = "/proc/" + pid_str + "/fd";
   DIR* fd_dir = opendir(fd_dir_path.c_str());
-  if (!fd_dir) return false;
+  // EACCES/EPERM (another user's process) or ENOENT (process exited) leave the
+  // answer undetermined; callers must not treat this as "no KFD open".
+  if (!fd_dir) return KfdOpenState::kInaccessible;
 
   bool found = false;
   struct dirent* fd_entry;
@@ -79,20 +86,27 @@ static bool PidHasKfdOpen(const std::string& pid_str) {
     }
   }
   closedir(fd_dir);
-  return found;
+  return found ? KfdOpenState::kHasKfd : KfdOpenState::kNoKfd;
+}
+
+// Check whether a given PID definitively has /dev/kfd open.
+static bool PidHasKfdOpen(const std::string& pid_str) {
+  return PidKfdOpenState(pid_str) == KfdOpenState::kHasKfd;
 }
 
 // Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
 // When running inside a container with PID namespace isolation, KFD sysfs
 // reports host PIDs that are not visible in the container's /proc. We detect
 // this by checking numeric entries under kKFDProcPathRoot against /proc.
-// For each KFD PID we check three cases:
+// For each KFD PID we check these cases:
 //   1. PID exists in /proc AND has /dev/kfd open → same namespace (not namespaced).
 //   2. PID exists in /proc but does NOT have /dev/kfd open → different namespace.
 //   3. PID does NOT exist in /proc → inconclusive (process may have exited);
 //      skip to the next entry to avoid a false positive from a short-lived process.
-// If all KFD entries are inconclusive (all exited), we conservatively assume
-// we are not namespaced (the KFD entries will be cleaned up shortly anyway).
+//   4. PID's /proc/<pid>/fd is unreadable (owned by another user) → inconclusive;
+//      permission denial is not evidence of a different namespace, so skip it.
+// If all KFD entries are inconclusive, we conservatively assume we are not
+// namespaced (the KFD entries will be cleaned up shortly anyway).
 // Result is cached for the lifetime of the process; PID namespace is assumed stable.
 static bool IsKfdPidNamespaced() {
   static std::atomic<int> cached{-1};
@@ -120,9 +134,16 @@ static bool IsKfdPidNamespaced() {
       continue;
     }
     // PID exists in /proc; check whether the same process has /dev/kfd open.
-    // If it does, we share the same PID namespace. If not, a different
-    // container-local process coincidentally has the same PID number.
-    if (!PidHasKfdOpen(name)) {
+    KfdOpenState state = PidKfdOpenState(name);
+    if (state == KfdOpenState::kInaccessible) {
+      // /proc/<pid>/fd unreadable (another user's process, e.g. a root-owned
+      // GPU job seen by a non-root caller). Cannot determine namespace from
+      // this entry, so skip it rather than falsely flagging namespaced.
+      continue;
+    }
+    // We could read the fd set: presence of /dev/kfd means same namespace,
+    // absence means a different container-local process reused this PID number.
+    if (state == KfdOpenState::kNoKfd) {
       namespaced = true;
     }
     determined = true;
@@ -130,7 +151,7 @@ static bool IsKfdPidNamespaced() {
   }
   closedir(kfd_dir);
 
-  // If every KFD entry was inconclusive (all processes exited), conservatively
+  // If every KFD entry was inconclusive (exited or unreadable), conservatively
   // assume we are not namespaced — the stale KFD entries will be reaped soon.
   if (!determined) {
     namespaced = false;
