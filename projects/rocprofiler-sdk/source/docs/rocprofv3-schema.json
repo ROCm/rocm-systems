@@ -568,7 +568,7 @@
                                 "type": "array",
                                 "description": "Comments matching assembly instructions from pc_sample_instructions array. If debug symbols are available, comments provide instructions to source-line mapping. Otherwise, a comment is an empty string."
                             },
-                            "att_filenames" : {
+                            "att_filenames": {
                                 "type": "array",
                                 "items": {
                                     "type": "string",
@@ -1257,120 +1257,119 @@
                                     "properties": {
                                         "hw_id": {
                                             "type": "object",
-                                            "description" : "Describes hardware part on which sampled wave was running.",
+                                            "description": "Describes hardware part on which sampled wave was running.",
                                             "properties": {
-                                                "chiplet":{
+                                                "chiplet": {
                                                     "type": "integer",
                                                     "description": "Chiplet index."
                                                 },
-                                                "wave_id ":{
+                                                "wave_id ": {
                                                     "type": "integer",
                                                     "description": "Wave slot index."
                                                 },
-                                                "simd_id":{
+                                                "simd_id": {
                                                     "type": "integer",
                                                     "description": "SIMD index."
                                                 },
-                                                "pipe_id ":{
+                                                "pipe_id ": {
                                                     "type": "integer",
-                                                    "description":  "Pipe index."
+                                                    "description": "Pipe index."
                                                 },
-                                                "cu_or_wgp_id":{
+                                                "cu_or_wgp_id": {
                                                     "type": "integer",
                                                     "description": "Index of compute unit or workgroup processor."
                                                 },
-                                                "shader_array_id":{
+                                                "shader_array_id": {
                                                     "type": "integer",
                                                     "description": "Shader array index."
                                                 },
-                                                "shader_engine_id":{
+                                                "shader_engine_id": {
                                                     "type": "integer",
                                                     "description": "Shader engine index."
                                                 },
-                                                "workgroup_id":{
+                                                "workgroup_id": {
                                                     "type": "integer",
                                                     "description": "Workgroup position in the 3D."
                                                 },
-                                                "vm_id":{
+                                                "vm_id": {
                                                     "type": "integer",
                                                     "description": "Virtual memory ID."
                                                 },
-                                                "queue_id":{
+                                                "queue_id": {
                                                     "type": "integer",
                                                     "description": "Queue id."
                                                 },
-                                                "microengine_id":{
+                                                "microengine_id": {
                                                     "type": "integer",
                                                     "description": "ACE (microengine) index."
                                                 }
                                             }
-                                           },
-                                            "pc": {
+                                        },
+                                        "pc": {
                                             "type": "object",
                                             "description": "Encapsulates information about sampled PC.",
                                             "properties": {
-                                                "code_object_id":{
+                                                "code_object_id": {
                                                     "type": "integer",
                                                     "description": "Code object id"
                                                 },
-                                                "code_object_offset":{
+                                                "code_object_offset": {
                                                     "type": "integer",
                                                     "description": "Offset within the object if the latter is known. Otherwise, virtual address of the PC."
                                                 }
                                             }
                                         },
-                                            "exec_mask":{
-                                                "type": "integer",
-                                                "description": "Execution mask indicating active SIMD lanes of sampled wave."
-                                            },
-                                            "timestamp":{
-                                                "type": "integer",
-                                                "description": "Timestamp."
-                                            },
-                                            "dispatch_id":{
-                                                "type": "integer",
-                                                "description": "Dispatch id."
-                                            },
-                                            "correlation_id": {
-                                                    "type": "object",
-                                                    "description": "Correlation ID information.",
-                                                    "properties": {
-                                                        "internal": {
-                                                            "type": "integer",
-                                                            "description": "Internal correlation ID."
-                                                        },
-                                                        "external": {
-                                                            "type": "integer",
-                                                            "description": "External correlation ID."
-                                                        }
-                                                    }
+                                        "exec_mask": {
+                                            "type": "integer",
+                                            "description": "Execution mask indicating active SIMD lanes of sampled wave."
+                                        },
+                                        "timestamp": {
+                                            "type": "integer",
+                                            "description": "Timestamp."
+                                        },
+                                        "dispatch_id": {
+                                            "type": "integer",
+                                            "description": "Dispatch id."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
                                                 },
-                                            "rocprofiler_dim3_t": {
-                                                "type": "object",
-                                                "description": " Position of the workgroup in 3D grid.",
-                                                "properties": {
-                                                     "x": {
-                                                        "type": "integer",
-                                                        "description": "Dimension x."
-                                                     },
-                                                     "y": {
-                                                        "type": "integer",
-                                                        "description": "Dimension y."
-                                                     },
-                                                     "z": {
-                                                        "type": "integer",
-                                                        "description": "Dimension z."
-                                                     }
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
                                                 }
-                                            },
-                                            "wave_in_group": {
-                                                "type": "integer",
-                                                "description": "Wave position within the workgroup (0-31)."
                                             }
+                                        },
+                                        "rocprofiler_dim3_t": {
+                                            "type": "object",
+                                            "description": " Position of the workgroup in 3D grid.",
+                                            "properties": {
+                                                "x": {
+                                                    "type": "integer",
+                                                    "description": "Dimension x."
+                                                },
+                                                "y": {
+                                                    "type": "integer",
+                                                    "description": "Dimension y."
+                                                },
+                                                "z": {
+                                                    "type": "integer",
+                                                    "description": "Dimension z."
+                                                }
+                                            }
+                                        },
+                                        "wave_in_group": {
+                                            "type": "integer",
+                                            "description": "Wave position within the workgroup (0-31)."
                                         }
                                     }
                                 }
-
+                            }
                         }
                     },
                     "buffer_records": {
@@ -1964,7 +1963,7 @@
                                     ]
                                 }
                             },
-                            "rccl_api_traces": {
+                            "rccl_api": {
                                 "type": "array",
                                 "description": "RCCL API records.",
                                 "items": {
@@ -2020,6 +2019,10 @@
                                         "args": {
                                             "type": "array",
                                             "description": "RCCL API args"
+                                        },
+                                        "retval": {
+                                            "type": "object",
+                                            "description": "RCCL API return value."
                                         }
                                     },
                                     "required": [
@@ -2030,7 +2033,8 @@
                                         "start_timestamp",
                                         "end_timestamp",
                                         "thread_id",
-                                        "args"
+                                        "args",
+                                        "retval"
                                     ]
                                 }
                             }

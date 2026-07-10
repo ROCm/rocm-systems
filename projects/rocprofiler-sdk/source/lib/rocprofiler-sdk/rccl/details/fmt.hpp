@@ -30,7 +30,9 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <string_view>
 #include <type_traits>
@@ -80,7 +82,9 @@ struct formatter<ncclUniqueId>
     {
         static_assert(sizeof(v) == 128 * sizeof(char), "NCCL ID type changed. Expected char[128]");
 
-        return fmt::format_to(ctx.out(), "0x{:0x}", fmt::join(v.internal, ""));
+        auto bytes = std::array<unsigned char, sizeof(v.internal)>{};
+        std::memcpy(bytes.data(), v.internal, sizeof(v.internal));
+        return fmt::format_to(ctx.out(), "0x{:02x}", fmt::join(bytes, ""));
     }
 };
 
@@ -120,7 +124,7 @@ struct formatter<ncclComm_t>
     template <typename Ctx>
     auto format(const ncclComm_t& v, Ctx& ctx) const
     {
-        return fmt::format_to(ctx.out(), "0x{:0x}", v);
+        return fmt::format_to(ctx.out(), "{}", fmt::ptr(v));
     }
 };
 

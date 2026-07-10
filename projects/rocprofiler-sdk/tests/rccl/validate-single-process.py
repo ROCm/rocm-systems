@@ -320,7 +320,7 @@ def test_rccl_sp_api_traces(input_data):
                 checked_args == 3
             ), f"Expected to validate 3 args, found only {checked_args}"
 
-    # check cakkback records args
+    # check callback records args
     for record in rccl_cb_traces:
         op_name = rccl_api_cb_ops[1][record["operation"]]
 

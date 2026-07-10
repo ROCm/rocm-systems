@@ -34,7 +34,7 @@ def _test_rccl_api_json_traces(json_data):
     buffer_records = data["buffer_records"]
 
     rccl_bf_traces = buffer_records["rccl_api"]
-    rccl_api_bf_ops = get_operation(data, "RCCL_API")
+    rccl_api_bf_ops = get_operation(data, "RCCL_API_EXT")
     assert len(rccl_api_bf_ops[1]) == 38
 
     api_calls = []
