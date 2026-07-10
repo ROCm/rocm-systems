@@ -125,7 +125,7 @@ jobs:
           "family_overrides": {
             "gfx125x": {
               "linux": {
-                "test-runs-on": "linux-mi455-gpu-rocm",
+                "test-runs-on": "linux-mi455-gpu-rocm-test",
                 "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
                 "fetch-gfx-targets": ["gfx1250"]
               }
@@ -148,7 +148,8 @@ jobs:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
+      # TEMPORARY: Force comprehensive tests for MI455 testing
+      test_type: "comprehensive"
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
