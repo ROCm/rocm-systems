@@ -31,10 +31,13 @@ import pytest
 def pytest_addoption(parser):
     parser.addoption("--input-csv", action="store", default=None)
     parser.addoption("--input-json", action="store", default=None)
+    # --ref-count gating check
+    parser.addoption("--ref-count", action="store_true", default=False)
 
 
 @pytest.fixture
 def pc_csv(request):
+    # load the PC sampling CSV
     fname = request.config.getoption("--input-csv")
     if not fname or not os.path.isfile(fname):
         pytest.skip("PC sampling unavailable")
@@ -45,6 +48,7 @@ def pc_csv(request):
 
 @pytest.fixture
 def json_data(request):
+    # load the full JSON result
     fname = request.config.getoption("--input-json")
     if not fname or not os.path.isfile(fname):
         pytest.skip("PC sampling unavailable")

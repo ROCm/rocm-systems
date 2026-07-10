@@ -92,6 +92,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/selected-regions-ref-count/out_pc_sampling_stochastic.csv
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/selected-regions-ref-count/out_results.json
+         --ref-count
     TIMEOUT 60
     LABELS "integration-tests;pc-sampling;pause-resume;selected-regions;stochastic"
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-selected-regions-ref-count-stochastic

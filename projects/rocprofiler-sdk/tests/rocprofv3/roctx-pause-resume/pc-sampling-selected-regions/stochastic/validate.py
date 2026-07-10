@@ -21,78 +21,46 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Validate rocprofv3 stochastic PC sampling output collected under --selected-regions.
 
 import sys
 
 import pytest
 
-STOCHASTIC_COLUMNS = [
-    "Sample_Timestamp",
-    "Exec_Mask",
-    "Dispatch_Id",
-    "Instruction",
-    "Instruction_Comment",
-    "Correlation_Id",
-    "Wave_Issued_Instruction",
-    "Instruction_Type",
-    "Stall_Reason",
-    "Wave_Count",
-]
+from rocprofiler_sdk.pc_sampling.selected_regions import csv as pcs_csv
+from rocprofiler_sdk.pc_sampling.selected_regions import json as pcs_json
 
-MIN_SAMPLES = 100
-MIN_V_MOV_B32_SAMPLES = 100
-MIN_V_MOV_B32_RATIO = 0.30
+METHOD = "stochastic"
 
 INSTRUCTION_TYPE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_"
 STALL_REASON_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
 
-def _tool(json_data):
+def _records(json_data):
     tool = json_data["rocprofiler-sdk-tool"]
-    return tool[0] if isinstance(tool, list) else tool
+    tool = tool[0] if isinstance(tool, list) else tool
+    return tool["buffer_records"]["pc_sample_stochastic"]
 
 
 def test_validate_pc_sampling_selected_regions_csv(pc_csv):
-    # CSV schema, non-trivial volume, and sane per-row values.
-    assert (
-        list(pc_csv.columns) == STOCHASTIC_COLUMNS
-    ), f"unexpected columns: {list(pc_csv.columns)}"
-    assert len(pc_csv) >= MIN_SAMPLES, f"too few samples: {len(pc_csv)}"
-    assert (pc_csv["Exec_Mask"] > 0).all(), "Exec_Mask must be > 0"
-    assert (pc_csv["Dispatch_Id"] > 0).all(), "Dispatch_Id must be > 0"
-    assert (pc_csv["Correlation_Id"] >= 0).all(), "Correlation_Id must be >= 0"
+    # CSV schema, sample volume, and per-row values
+    pcs_csv.validate_columns(pc_csv, METHOD)
+    pcs_csv.validate_sample_volume(pc_csv)
+    pcs_csv.validate_values(pc_csv)
 
 
-def test_validate_pc_sampling_selected_regions_json(pc_csv, json_data):
-    tool = _tool(json_data)
-    records = tool["buffer_records"]["pc_sample_stochastic"]
-
-    # JSON buffer is present and agrees with the CSV record count.
-    assert len(records) > 0, "no stochastic PC sampling records in JSON"
-    assert len(records) == len(
-        pc_csv
-    ), f"CSV rows ({len(pc_csv)}) != JSON records ({len(records)})"
-
-    # pc_sampling_kernel is a v_mov_b32 loop -> samples must be dominated by it,
-    # confirming the right kernel was sampled and instructions decoded correctly.
-    instructions = tool["strings"]["pc_sample_instructions"]
-    v_mov_b32_count = 0
-    for sample in records:
-        inst_index = sample["inst_index"]
-        if inst_index >= 0 and instructions[inst_index].startswith("v_mov_b32"):
-            v_mov_b32_count += 1
-
-    assert (
-        v_mov_b32_count >= MIN_V_MOV_B32_SAMPLES
-    ), f"expected >= {MIN_V_MOV_B32_SAMPLES} v_mov_b32 samples, got {v_mov_b32_count}"
-    ratio = v_mov_b32_count / len(records)
-    assert (
-        ratio >= MIN_V_MOV_B32_RATIO
-    ), f"expected v_mov_b32 samples >= {MIN_V_MOV_B32_RATIO:.0%}, got {ratio:.2%}"
+def test_validate_pc_sampling_selected_regions_json(pc_csv, json_data, request):
+    pcs_json.validate_csv_json_parity(pc_csv, json_data, METHOD)
+    pcs_json.validate_data_integrity(json_data, METHOD)
+    # collection restricted to the resume regions
+    if request.config.getoption("--ref-count"):
+        pcs_json.validate_selected_regions_ref_count_gating(json_data, METHOD)
+    else:
+        pcs_json.validate_selected_regions_gating(json_data, METHOD)
 
 
 def test_validate_pc_sampling_stochastic_specific_csv(pc_csv):
-    # The four stochastic-only CSV columns are well-formed.
+    # stochastic-only columns are well-formed
     assert pc_csv["Wave_Issued_Instruction"].isin([0, 1]).all()
     assert (pc_csv["Wave_Count"] > 0).all()
     assert pc_csv["Instruction_Type"].str.startswith(INSTRUCTION_TYPE_PREFIX).all()
@@ -100,9 +68,8 @@ def test_validate_pc_sampling_stochastic_specific_csv(pc_csv):
 
 
 def test_validate_pc_sampling_stochastic_specific_json(json_data):
-    # Same stochastic-only fields validated in the JSON records.
-    records = _tool(json_data)["buffer_records"]["pc_sample_stochastic"]
-    for rec in records:
+    # stochastic-only fields are well-formed in the JSON records
+    for rec in _records(json_data):
         r = rec["record"]
         assert r["wave_issued"] in (0, 1)
         assert r["wave_cnt"] > 0
