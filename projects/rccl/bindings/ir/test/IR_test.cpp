@@ -21,6 +21,15 @@
  *   [B7] ncclLsaBarrierSession{Init,Arrive,Wait,Sync}
  *          — sizeof / alignment structural check: PASS
  *          — runtime invocations: SKIP (require a live ncclDevComm)
+ *   [C0] bucket-C export/link coverage — takes the device address of all four
+ *          ncclGin/composite barrier thunks and checks each resolves from the
+ *          bitcode (covers the functions without needing live resources)
+ *   [C1] ncclGinBarrierSession{Init,Sync}
+ *          — sizeof / alignment structural check: PASS
+ *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
+ *   [C2] ncclBarrierSession{Init,Sync}  (composite inner-LSA + outer-GIN)
+ *          — sizeof / alignment structural check: PASS
+ *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
  *
  * Build is NOT a normal CMake/GTest build: librccl_device.bc must already
  * exist (cmake -DEMIT_LLVM_IR=ON) and the translation unit must be compiled
@@ -48,6 +57,18 @@ static_assert(sizeof(ncclLsaBarrierSession_C) > 0,
               "ncclLsaBarrierSession_C must have non-zero size");
 static_assert(alignof(ncclLsaBarrierSession_C) >= 1,
               "ncclLsaBarrierSession_C must have valid alignment");
+
+/* [C] GIN + composite barrier session structs — enabling bucket [C] makes
+ * these compile; the static_asserts guard against a regression that would
+ * silently strip the wrapper structs back out of the build. */
+static_assert(sizeof(ncclGinBarrierSession_C) > 0,
+              "ncclGinBarrierSession_C must have non-zero size");
+static_assert(alignof(ncclGinBarrierSession_C) >= 1,
+              "ncclGinBarrierSession_C must have valid alignment");
+static_assert(sizeof(ncclBarrierSession_C) > 0,
+              "ncclBarrierSession_C must have non-zero size");
+static_assert(alignof(ncclBarrierSession_C) >= 1,
+              "ncclBarrierSession_C must have valid alignment");
 
 /* -----------------------------------------------------------------------
  * Error checking — fail the current GTest assertion rather than exit(),
@@ -441,4 +462,84 @@ TEST_F(IRDeviceTest, B7b_LsaBarrierSessionRuntime) {
    * ncclGetResourceBufferLocalPointer() → segfault. */
   GTEST_SKIP() << "ncclLsaBarrierSession{Init,Arrive,Wait,Sync} require a "
                   "live ncclDevComm (not set up here)";
+}
+
+/* =====================================================================
+ * [C] Bucket-C symbol link/export coverage
+ *
+ * The structural cases (C1a/C2a) only touch the session *structs*, and the
+ * runtime cases (C1b/C2b) are SKIPPED because they need a live ncclDevComm +
+ * GIN net. To still cover the four exported *functions* themselves, this
+ * kernel takes the device address of each thunk and stores it. Storing the
+ * pointer value (not a folded != nullptr) forces the consumer -> bitcode
+ * relocation for every symbol, so a missing/renamed/internalized export makes
+ * the device link fail or yields a null address here — without invoking the
+ * functions (which would require live resources).
+ * ==================================================================== */
+__global__ void k_bucketC_symbol_addrs(uint64_t* out) {
+  out[0] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionInit;
+  out[1] = (uint64_t)(uintptr_t)(void*)&ncclGinBarrierSessionSync;
+  out[2] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionInit;
+  out[3] = (uint64_t)(uintptr_t)(void*)&ncclBarrierSessionSync;
+}
+
+TEST_F(IRDeviceTest, C0_BucketCSymbolsLinkable) {
+  constexpr int N = 4;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * N));
+  HIP_ASSERT(hipMemset(d, 0, sizeof(uint64_t) * N));
+  k_bucketC_symbol_addrs<<<1, 1>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  uint64_t got[N] = {};
+  HIP_ASSERT(hipMemcpy(got, d, sizeof got, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  const char* names[N] = {
+      "ncclGinBarrierSessionInit", "ncclGinBarrierSessionSync",
+      "ncclBarrierSessionInit",    "ncclBarrierSessionSync"};
+  for (int i = 0; i < N; ++i) {
+    SCOPED_TRACE(names[i]);
+    EXPECT_NE(got[i], 0ull) << names[i] << " did not resolve from the bitcode";
+  }
+}
+
+/* =====================================================================
+ * [C1] ncclGinBarrierSession — structural + skip runtime
+ * ==================================================================== */
+TEST_F(IRDeviceTest, C1a_GinBarrierSessionStructural) {
+  /* Mirrors B7a: the sizeof / alignof static_asserts at the top of the file
+   * fire at compile time; re-assert at runtime so the case appears in the
+   * summary and proves bucket [C]'s ncclGinBarrierSession_C is instantiated. */
+  EXPECT_GT(sizeof(ncclGinBarrierSession_C), 0u);
+  EXPECT_GE(alignof(ncclGinBarrierSession_C), 1u);
+}
+
+TEST_F(IRDeviceTest, C1b_GinBarrierSessionRuntime) {
+  /* ncclGinBarrierSessionInit takes an ncclGin_C, ncclTeam and
+   * ncclGinBarrierHandle bound to live GPU-Initiated-Networking resources;
+   * ncclGinBarrierSessionSync then issues network fences against them. Both
+   * require a live ncclDevComm with an established GIN connection, which is
+   * not available in this standalone device-API test. */
+  GTEST_SKIP() << "ncclGinBarrierSession{Init,Sync} require a live ncclDevComm "
+                  "+ GIN network resources (not set up here)";
+}
+
+/* =====================================================================
+ * [C2] ncclBarrierSession (composite inner-LSA + outer-GIN) — structural
+ *      + skip runtime
+ * ==================================================================== */
+TEST_F(IRDeviceTest, C2a_BarrierSessionStructural) {
+  EXPECT_GT(sizeof(ncclBarrierSession_C), 0u);
+  EXPECT_GE(alignof(ncclBarrierSession_C), 1u);
+}
+
+TEST_F(IRDeviceTest, C2b_BarrierSessionRuntime) {
+  /* The composite barrier wires together an inner LSA barrier and an outer
+   * GIN barrier (inner/outer teams, an ncclLsaBarrierHandle, an
+   * ncclGinBarrierHandle and an ncclGin_C), so it needs everything B7b and
+   * C1b need at once: a live ncclDevComm plus GIN network resources. */
+  GTEST_SKIP() << "ncclBarrierSession{Init,Sync} require a live ncclDevComm "
+                  "+ GIN network resources (not set up here)";
 }

@@ -290,6 +290,7 @@ target_link_libraries(
         rocjitsu_plugin_race_detector
         rocjitsu_vm_risc_v
         rocjitsu_config
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads

@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -26,7 +27,11 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -34,6 +39,13 @@ const std::string CONFIG_DIR_PATH = CONFIG_DIR;
 
 // \NPI new GPU: add a config-load test for its configs/<gpu>.json here.
 using namespace rocjitsu;
+
+std::filesystem::path write_temp_config(std::string_view name, std::string_view json) {
+  std::filesystem::path path = std::filesystem::temp_directory_path() / std::string(name);
+  std::ofstream out(path);
+  out << json;
+  return path;
+}
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_cdna4.json";
@@ -75,7 +87,10 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
                                                         rdna4.device.revision_id),
             0x51u);
   EXPECT_EQ(kmd::gfx_target_name(rdna4.device.gfx_target_version), "gfx1201");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx1201"), rdna4.device.gfx_target_version);
   EXPECT_EQ(kmd::gfx_target_name(90010), "gfx90a");
+  EXPECT_EQ(kmd::gfx_target_version_from_name("gfx90a"), 90010u);
+  EXPECT_FALSE(kmd::gfx_target_version_from_name("cdna4"));
   EXPECT_EQ(kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3_5), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(110500), 0u);
   EXPECT_EQ(kmd::gb_addr_config_for_gfx_target_version(120500), 0u);
@@ -305,6 +320,168 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
   EXPECT_EQ(loaded.device.capability, 268468354u);
   EXPECT_EQ(loaded.device.capability2, 3u);
   EXPECT_EQ(loaded.device.debug_prop, 3119u);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
+  const std::filesystem::path path = write_temp_config("rocjitsu_dbt_only_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "host_gpu_id": 8716,
+        "log_level": 2,
+        "signal_backtrace": true,
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "vendor_id": 4098,
+          "device_id": 30112,
+          "family_id": 160,
+          "unique_id": 5929628898254127105,
+          "marketing_name": "AMD Instinct MI350X",
+          "drm_render_minor": 191,
+          "simd_count": 64,
+          "num_shader_engines": 4,
+          "num_shader_arrays_per_engine": 2,
+          "num_cu_per_sh": 4,
+          "local_mem_size": 309237645312
+        }
+      }
+    })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host_isa, "gfx1201");
+  EXPECT_EQ(dbt.host_gpu_id, 8716u);
+  EXPECT_EQ(dbt.log_level, 2);
+  EXPECT_TRUE(dbt.signal_backtrace);
+  ASSERT_TRUE(dbt.guest_device.present);
+  EXPECT_EQ(dbt.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(dbt.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(dbt.guest_device.marketing_name, "AMD Instinct MI350X");
+  EXPECT_EQ(dbt.guest_device.drm_render_minor, 191u);
+  EXPECT_EQ(dbt.guest_device.simd_count, dbt.guest_device.num_shader_engines *
+                                             dbt.guest_device.num_cu_per_sh *
+                                             dbt.guest_device.simd_per_cu);
+  EXPECT_EQ(dbt.guest_device.num_shader_arrays_per_engine, 2u);
+  EXPECT_EQ(dbt.guest_device.local_mem_size, 309237645312ULL);
+}
+
+TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_bad_dbt_guest_geometry_config_test.json", R"({
+      "dbt_guest": {
+        "enabled": true,
+        "guest_isa": "gfx950",
+        "host_isa": "gfx1201",
+        "guest_device": {
+          "gpu_id": 38144,
+          "gfx_target_version": 90500,
+          "simd_count": 1024,
+          "num_shader_engines": 4,
+          "num_cu_per_sh": 4,
+          "simd_per_cu": 4
+        }
+      }
+    })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
+}
+
+TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
+  std::ifstream base(CONFIG_DIR_PATH + "/gfx1201_r9700.json");
+  ASSERT_TRUE(base.is_open());
+  std::string json((std::istreambuf_iterator<char>(base)), std::istreambuf_iterator<char>());
+  const size_t insert_pos = json.find('{');
+  ASSERT_NE(insert_pos, std::string::npos);
+  json.insert(insert_pos + 1, R"(
+    "dbt_guest": {
+      "enabled": true,
+      "guest_isa": "gfx950",
+      "host_isa": "gfx1201",
+      "host_gpu_id": 8716,
+      "log_level": 2,
+      "signal_backtrace": true,
+      "guest_device": {
+        "gpu_id": 38144,
+        "gfx_target_version": 90500,
+        "vendor_id": 4098,
+        "device_id": 30112,
+        "family_id": 160,
+        "unique_id": 5929628898254127105,
+        "marketing_name": "AMD Instinct MI350X",
+        "drm_render_minor": 191,
+        "simd_count": 64,
+        "num_shader_engines": 4,
+        "num_shader_arrays_per_engine": 2,
+        "num_cu_per_sh": 4,
+        "local_mem_size": 309237645312
+      }
+    },
+  )");
+
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_full_dbt_guest_config_test.json", json);
+  auto loaded = config::load_config(path.string(), rocjitsu::kEmbeddedSchema);
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(loaded.dbt_guest.enabled);
+  EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
+  EXPECT_EQ(loaded.dbt_guest.host_isa, "gfx1201");
+  EXPECT_EQ(loaded.dbt_guest.host_gpu_id, 8716u);
+  EXPECT_EQ(loaded.dbt_guest.log_level, 2);
+  EXPECT_TRUE(loaded.dbt_guest.signal_backtrace);
+  ASSERT_TRUE(loaded.dbt_guest.guest_device.present);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gpu_id, 38144u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.gfx_target_version, 90500u);
+  EXPECT_EQ(loaded.dbt_guest.guest_device.marketing_name, "AMD Instinct MI350X");
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_missing_dbt_guest_config_test.json", "{}");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_FALSE(dbt.enabled);
+  EXPECT_TRUE(dbt.guest_isa.empty());
+  EXPECT_TRUE(dbt.host_isa.empty());
+  EXPECT_EQ(dbt.host_gpu_id, 0u);
+  EXPECT_EQ(dbt.log_level, 0);
+  EXPECT_FALSE(dbt.signal_backtrace);
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_missing_dbt_guest_device_config_test.json", R"({
+        "dbt_guest": {
+          "enabled": true,
+          "guest_isa": "gfx950",
+          "host_isa": "gfx1201"
+        }
+      })");
+
+  auto dbt = config::load_dbt_guest_config_from_file(path.string());
+  std::filesystem::remove(path);
+
+  EXPECT_TRUE(dbt.enabled);
+  EXPECT_EQ(dbt.guest_isa, "gfx950");
+  EXPECT_EQ(dbt.host_isa, "gfx1201");
+  EXPECT_FALSE(dbt.guest_device.present);
+}
+
+TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
+  const std::filesystem::path path =
+      write_temp_config("rocjitsu_malformed_dbt_guest_config_test.json", R"({ "dbt_guest": )");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(path.string()), std::runtime_error);
+  std::filesystem::remove(path);
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
