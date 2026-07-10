@@ -391,10 +391,11 @@ public:
                                 uint32_t* heights, uint32_t& num_channels,
                                 RocJpegImage& output_image, size_t* channel_sizes)
     {
-        // channel_sizes are size_t and each product casts pitch to size_t before align_size().
-        // pitch and height derive from the JPEG dimensions (up to 65535), so pitch * height can
-        // exceed 32 bits; computing in uint32_t (or the int align()) would wrap and undersize the
-        // device allocation callers make from these values while SaveImage copies the full surface.
+        // channel_sizes are size_t and each product casts pitch to size_t before
+        // align_size(). pitch and height derive from the JPEG dimensions (up to 65535),
+        // so pitch * height can exceed 32 bits; computing in uint32_t (or the int
+        // align()) would wrap and undersize the device allocation callers make from these
+        // values while SaveImage copies the full surface.
         bool     is_roi_valid = false;
         uint32_t roi_width;
         uint32_t roi_height;
@@ -418,8 +419,8 @@ public:
                             output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
                         channel_sizes[2] = channel_sizes[1] = channel_sizes[0] =
                             align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      (is_roi_valid ? roi_height : heights[0]),
-                                  mem_alignment);
+                                           (is_roi_valid ? roi_height : heights[0]),
+                                       mem_alignment);
                         break;
                     case ROCJPEG_CSS_440:
                         num_channels              = 3;
@@ -427,12 +428,12 @@ public:
                             output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
                         channel_sizes[0] =
                             align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      (is_roi_valid ? roi_height : heights[0]),
-                                  mem_alignment);
-                        channel_sizes[2] = channel_sizes[1] =
-                            align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      ((is_roi_valid ? roi_height : heights[0]) >> 1),
-                                  mem_alignment);
+                                           (is_roi_valid ? roi_height : heights[0]),
+                                       mem_alignment);
+                        channel_sizes[2] = channel_sizes[1] = align_size(
+                            static_cast<size_t>(output_image.pitch[0]) *
+                                ((is_roi_valid ? roi_height : heights[0]) >> 1),
+                            mem_alignment);
                         break;
                     case ROCJPEG_CSS_422:
                         num_channels = 1;
@@ -440,8 +441,8 @@ public:
                             (is_roi_valid ? roi_width : widths[0]) * 2;
                         channel_sizes[0] =
                             align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      (is_roi_valid ? roi_height : heights[0]),
-                                  mem_alignment);
+                                           (is_roi_valid ? roi_height : heights[0]),
+                                       mem_alignment);
                         break;
                     case ROCJPEG_CSS_420:
                         num_channels          = 2;
@@ -449,20 +450,20 @@ public:
                             is_roi_valid ? roi_width : widths[0];
                         channel_sizes[0] =
                             align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      (is_roi_valid ? roi_height : heights[0]),
-                                  mem_alignment);
-                        channel_sizes[1] =
-                            align_size(static_cast<size_t>(output_image.pitch[1]) *
-                                      ((is_roi_valid ? roi_height : heights[0]) >> 1),
-                                  mem_alignment);
+                                           (is_roi_valid ? roi_height : heights[0]),
+                                       mem_alignment);
+                        channel_sizes[1] = align_size(
+                            static_cast<size_t>(output_image.pitch[1]) *
+                                ((is_roi_valid ? roi_height : heights[0]) >> 1),
+                            mem_alignment);
                         break;
                     case ROCJPEG_CSS_400:
                         num_channels          = 1;
                         output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
                         channel_sizes[0] =
                             align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                      (is_roi_valid ? roi_height : heights[0]),
-                                  mem_alignment);
+                                           (is_roi_valid ? roi_height : heights[0]),
+                                       mem_alignment);
                         break;
                     default:
                         std::cout << "Unknown chroma subsampling!" << std::endl;
@@ -474,9 +475,10 @@ public:
                 {
                     num_channels          = 1;
                     output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
-                    channel_sizes[0]      = align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                                      (is_roi_valid ? roi_height : heights[0]),
-                                                  mem_alignment);
+                    channel_sizes[0] =
+                        align_size(static_cast<size_t>(output_image.pitch[0]) *
+                                       (is_roi_valid ? roi_height : heights[0]),
+                                   mem_alignment);
                 }
                 else
                 {
@@ -484,38 +486,44 @@ public:
                     output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
                     output_image.pitch[1] = is_roi_valid ? roi_width : widths[1];
                     output_image.pitch[2] = is_roi_valid ? roi_width : widths[2];
-                    channel_sizes[0]      = align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                                      (is_roi_valid ? roi_height : heights[0]),
-                                                  mem_alignment);
-                    channel_sizes[1]      = align_size(static_cast<size_t>(output_image.pitch[1]) *
-                                                      (is_roi_valid ? roi_height : heights[1]),
-                                                  mem_alignment);
-                    channel_sizes[2]      = align_size(static_cast<size_t>(output_image.pitch[2]) *
-                                                      (is_roi_valid ? roi_height : heights[2]),
-                                                  mem_alignment);
+                    channel_sizes[0] =
+                        align_size(static_cast<size_t>(output_image.pitch[0]) *
+                                       (is_roi_valid ? roi_height : heights[0]),
+                                   mem_alignment);
+                    channel_sizes[1] =
+                        align_size(static_cast<size_t>(output_image.pitch[1]) *
+                                       (is_roi_valid ? roi_height : heights[1]),
+                                   mem_alignment);
+                    channel_sizes[2] =
+                        align_size(static_cast<size_t>(output_image.pitch[2]) *
+                                       (is_roi_valid ? roi_height : heights[2]),
+                                   mem_alignment);
                 }
                 break;
             case ROCJPEG_OUTPUT_Y:
                 num_channels          = 1;
                 output_image.pitch[0] = is_roi_valid ? roi_width : widths[0];
-                channel_sizes[0]      = align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                                  (is_roi_valid ? roi_height : heights[0]),
-                                              mem_alignment);
+                channel_sizes[0] =
+                    align_size(static_cast<size_t>(output_image.pitch[0]) *
+                                   (is_roi_valid ? roi_height : heights[0]),
+                               mem_alignment);
                 break;
             case ROCJPEG_OUTPUT_RGB:
                 num_channels          = 1;
                 output_image.pitch[0] = (is_roi_valid ? roi_width : widths[0]) * 3;
-                channel_sizes[0]      = align_size(static_cast<size_t>(output_image.pitch[0]) *
-                                                  (is_roi_valid ? roi_height : heights[0]),
-                                              mem_alignment);
+                channel_sizes[0] =
+                    align_size(static_cast<size_t>(output_image.pitch[0]) *
+                                   (is_roi_valid ? roi_height : heights[0]),
+                               mem_alignment);
                 break;
             case ROCJPEG_OUTPUT_RGB_PLANAR:
                 num_channels          = 3;
                 output_image.pitch[2] = output_image.pitch[1] = output_image.pitch[0] =
                     is_roi_valid ? roi_width : widths[0];
-                channel_sizes[2] = channel_sizes[1] = channel_sizes[0] = align_size(
-                    static_cast<size_t>(output_image.pitch[0]) * (is_roi_valid ? roi_height : heights[0]),
-                    mem_alignment);
+                channel_sizes[2] = channel_sizes[1] = channel_sizes[0] =
+                    align_size(static_cast<size_t>(output_image.pitch[0]) *
+                                   (is_roi_valid ? roi_height : heights[0]),
+                               mem_alignment);
                 break;
             default:
                 std::cout << "Unknown output format!" << std::endl;
