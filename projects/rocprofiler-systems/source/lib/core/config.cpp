@@ -3173,7 +3173,6 @@ get_mpi_world_size_from_env()
 namespace output_filtering
 {
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
-<<<<<<< users/dgaliffi/refactor/is-rank-in-filter
 /**
  * Decide whether the current MPI rank should produce output, given a filter.
  *
@@ -3202,12 +3201,6 @@ namespace output_filtering
 bool
 rank_passes_filter(std::optional<std::uint64_t> current_rank,
                    std::optional<std::uint64_t> world_size, std::string enabled_ranks_str)
-=======
-namespace
-{
-[[nodiscard]] bool
-is_rank_in_filter(std::string enabled_ranks_str)
->>>>>>> develop
 {
     rocprofsys::utility::trim_str(enabled_ranks_str);
     for(auto& ch : enabled_ranks_str)
@@ -3265,15 +3258,15 @@ is_rank_in_filter(std::string enabled_ranks_str)
     }
 
     const auto is_enabled =
-        enabled_ranks.count(static_cast<std::int64_t>(current_rank.value())) != 0;
-    LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
+        enabled_ranks.count(static_cast<std::int64_t>(*current_rank)) != 0;
+    LOG_DEBUG("Output for MPI rank {} is {}", *current_rank,
               is_enabled ? "enabled" : "disabled");
     return is_enabled;
 }
 
 namespace
 {
-bool
+[[nodiscard]] bool
 is_rank_in_filter(std::string enabled_ranks_str)
 {
     return rank_passes_filter(get_mpi_rank_from_env(), get_mpi_world_size_from_env(),
