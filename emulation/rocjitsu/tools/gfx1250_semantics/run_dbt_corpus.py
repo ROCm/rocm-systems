@@ -22,11 +22,13 @@ EXPECTED_XFAILS = {
     "add_minmax_ops": "EXPAND not yet implemented for v_add_max_i32",
     "ashr_pk_i8_ops": "EXPAND not yet implemented for v_ashr_pk_i8_i32",
     "bf16_tanh_transcendental_ops": "EXPAND not yet implemented for v_rcp_bf16_e32",
-    # The add now lowers, exposing the next hardware-backed limitation: the
-    # translated block-memory kernel is launched without a usable flat-scratch
-    # base. Keep the case visible as an XFAIL until backend scratch setup is
-    # normalized with the simulator path.
-    "block_memory_ops": "Memory access fault",
+    # bd-2lx.9 supplies a valid RDNA4 private-aperture pointer and the scratch
+    # block result now matches. The same case exposes independent cross-ISA
+    # global block-operation corruption tracked by bd-2lx.11.
+    "block_memory_ops": (
+        "mismatched outputs against external/kmd: "
+        "global_load_out_u32, global_store_out_u32"
+    ),
     "cluster_global_async_memory_ops": "EXPAND not yet implemented for cluster_load_b64",
     "cos_bf16_ops": "EXPAND not yet implemented for v_cos_bf16_e32",
     "cvt_f16_fp8_bf8_ops": "mismatched outputs against external/kmd: out_u32",

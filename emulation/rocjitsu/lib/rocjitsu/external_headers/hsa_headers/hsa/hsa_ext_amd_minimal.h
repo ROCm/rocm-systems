@@ -204,3 +204,14 @@ using hsa_amd_agent_set_async_scratch_limit_fn_t = hsa_status_t(HSA_API *)(hsa_a
 using hsa_amd_memory_async_batch_copy_fn_t = hsa_status_t(HSA_API *)(
     const hsa_amd_memory_copy_op_t *, uint32_t, uint32_t, const hsa_signal_t *);
 using hsa_amd_agent_preload_fn_t = hsa_status_t(HSA_API *)(hsa_agent_t, uint64_t);
+
+/// @brief ROCR queue-interception callback ABI used by the DBT AQL boundary.
+using hsa_amd_queue_intercept_packet_writer = void (*)(const void *packets, uint64_t packet_count);
+using hsa_amd_queue_intercept_handler = void (*)(const void *packets, uint64_t packet_count,
+                                                 uint64_t user_packet_index, void *user_data,
+                                                 hsa_amd_queue_intercept_packet_writer writer);
+using hsa_amd_queue_intercept_create_fn_t = hsa_status_t(HSA_API *)(
+    hsa_agent_t, uint32_t, hsa_queue_type32_t, void (*)(hsa_status_t, hsa_queue_t *, void *),
+    void *, uint32_t, uint32_t, hsa_queue_t **);
+using hsa_amd_queue_intercept_register_fn_t =
+    hsa_status_t(HSA_API *)(hsa_queue_t *, hsa_amd_queue_intercept_handler, void *);

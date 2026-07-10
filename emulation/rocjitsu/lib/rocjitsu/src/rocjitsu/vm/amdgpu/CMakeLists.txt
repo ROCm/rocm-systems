@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_vm_amdgpu
+    aql_packet_normalizer.cpp
     wavefront.cpp
     cluster_lds_multicast.cpp
     compute_unit.cpp

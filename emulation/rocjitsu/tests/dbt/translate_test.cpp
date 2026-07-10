@@ -6044,7 +6044,7 @@ TEST(BinaryTranslator, Gfx1250VAddNcU64E32LowersToCarryChain) {
 TEST(BinaryTranslator, Gfx1250VAddNcU64E32LowersFlatScratchBasePair) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
   constexpr uint16_t kFlatScratchBaseLo = 230;
-  constexpr uint16_t kFlatScratchBaseHi = 231;
+  constexpr uint16_t kRdna4SrcPrivateBase = 237;
   gfx1250::Vop2MachineInst inst{};
   inst.src0 = kFlatScratchBaseLo;
   inst.vsrc1 = 0;
@@ -6066,8 +6066,38 @@ TEST(BinaryTranslator, Gfx1250VAddNcU64E32LowersFlatScratchBasePair) {
 
   AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
-  expect_add_u64_carry_chain(translated, 2, kFlatScratchBaseLo, 256, std::nullopt,
-                             kFlatScratchBaseHi);
+  const Section *translations = find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  const auto cave_words = section_words_for_test(*translations);
+
+  std::optional<size_t> aperture_move;
+  uint8_t aperture_sgpr = 0;
+  for (size_t i = 0; i < cave_words.size(); ++i) {
+    const auto mov = std::bit_cast<rdna4::Sop1MachineInst>(cave_words[i]);
+    if (mov.encoding == 0x17Du && mov.op == 1u && mov.ssrc0 == kRdna4SrcPrivateBase) {
+      aperture_move = i;
+      aperture_sgpr = static_cast<uint8_t>(mov.sdst);
+      break;
+    }
+  }
+  ASSERT_TRUE(aperture_move.has_value());
+  ASSERT_LE(*aperture_move + 4u, cave_words.size());
+  EXPECT_EQ(aperture_sgpr & 1u, 0u);
+  EXPECT_LE(aperture_sgpr, 105u);
+  EXPECT_EQ(cave_words[*aperture_move + 1u],
+            build_s_wait_alu(kWaitAluDepctrSaSdst0, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto mov_offset = std::bit_cast<rdna4::Vop1MachineInst>(cave_words[*aperture_move + 2u]);
+  EXPECT_EQ(mov_offset.op, 1u);
+  EXPECT_EQ(mov_offset.vdst, 2u);
+  EXPECT_EQ(mov_offset.src0, 256u);
+
+  const auto mov_aperture = std::bit_cast<rdna4::Vop1MachineInst>(cave_words[*aperture_move + 3u]);
+  EXPECT_EQ(mov_aperture.op, 1u);
+  EXPECT_EQ(mov_aperture.vdst, 3u);
+  EXPECT_EQ(mov_aperture.src0, static_cast<uint16_t>(aperture_sgpr + 1u));
+  EXPECT_EQ((cave_words[*aperture_move + 4u] >> 16) & 0x7Fu,
+            sopp_op_branch(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST(BinaryTranslator, Gfx1250VAddF16E32PreservesHalfSelectorsInRdna4Vop3) {

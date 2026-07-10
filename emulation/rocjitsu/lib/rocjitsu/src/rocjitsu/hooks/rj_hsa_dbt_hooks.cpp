@@ -23,6 +23,7 @@
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/vm/amdgpu/aql_packet_normalizer.h"
 #include "util/arena_alloc.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
@@ -133,6 +134,8 @@ struct HookConfig {
   std::optional<TargetInfo> source_override;
   std::optional<TargetInfo> guest_target;
   uint32_t host_gpu_id = 0;
+  rocjitsu::config::DbtExecutionBackend execution_backend =
+      rocjitsu::config::DbtExecutionBackend::Hardware;
   int log_level = kLogDisabled;
   bool signal_backtrace = false;
 };
@@ -280,6 +283,7 @@ void restore_signal_backtrace_handlers() {
   config.source_override = *guest;
   config.guest_target = *guest;
   config.host_gpu_id = dbt_guest->host_gpu_id;
+  config.execution_backend = dbt_guest->execution_backend;
   config.log_level = clamp_log_level(dbt_guest->log_level);
   config.signal_backtrace = dbt_guest->signal_backtrace;
   return config;
@@ -580,6 +584,45 @@ private:
   std::unordered_map<Key, uint64_t, KeyHash> map_;
 };
 
+/// @brief Tracks loader-reported resources by runtime kernel-object handle.
+///
+/// @details The hardware packet normalizer cannot safely dereference an
+/// application-provided kernel-object address. Recording the HSA loader's
+/// symbol attributes keeps packet normalization independent of ELF placement
+/// and gives it the same fixed-resource sizes used to configure the kernel.
+class KernelResourceRegistry {
+public:
+  static KernelResourceRegistry &instance() {
+    static KernelResourceRegistry registry;
+    return registry;
+  }
+
+  void record(uint64_t kernel_object, rocjitsu::amdgpu::AqlKernelResourceRequirements resources) {
+    if (kernel_object == 0)
+      return;
+    std::unique_lock lock(mutex_);
+    resources_[kernel_object] = resources;
+  }
+
+  [[nodiscard]] rocjitsu::amdgpu::AqlKernelResourceRequirements
+  lookup(uint64_t kernel_object) const {
+    std::shared_lock lock(mutex_);
+    auto it = resources_.find(kernel_object);
+    if (it == resources_.end())
+      return {};
+    return it->second;
+  }
+
+  void clear() {
+    std::unique_lock lock(mutex_);
+    resources_.clear();
+  }
+
+private:
+  mutable std::shared_mutex mutex_;
+  std::unordered_map<uint64_t, rocjitsu::amdgpu::AqlKernelResourceRequirements> resources_;
+};
+
 /// @brief Record memory-backed HSA code-object bytes for later DBT translation.
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
@@ -614,6 +657,11 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
                                      void *data, uint32_t private_segment_size,
                                      uint32_t group_segment_size, hsa_queue_t **queue);
 
+/// @brief Apply backend AQL policy before guest packets reach an execution queue.
+void rj_aql_packet_interceptor(const void *packets, uint64_t packet_count,
+                               uint64_t user_packet_index, void *data,
+                               hsa_amd_queue_intercept_packet_writer writer);
+
 /// @brief Forward destruction for queues returned by guest queue creation.
 hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue);
 
@@ -627,6 +675,11 @@ hsa_status_t HSA_API rj_memory_assign_agent(void *ptr, hsa_agent_t agent,
 
 /// @brief Drop executable-agent mappings before forwarding executable destruction.
 hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable);
+
+/// @brief Record fixed kernel resources when the loader exposes a kernel object.
+hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t executable_symbol,
+                                                   hsa_executable_symbol_info_t attribute,
+                                                   void *value);
 
 /// @brief Remap guest symbol queries to the host load agent.
 hsa_status_t HSA_API rj_executable_get_symbol(hsa_executable_t executable, const char *module_name,
@@ -778,7 +831,15 @@ void clear_agent_mapper();
 /// - `type` is the exact function-pointer type stored in `original_<name>_`.
 #define RJ_HSA_SAVED_ONLY_ENTRIES(X)                                                               \
   X(agent_get_info, core_, true, hsa_agent_get_info_fn, decltype(hsa_agent_get_info) *)            \
-  X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)
+  X(isa_get_info_alt, core_, true, hsa_isa_get_info_alt_fn, decltype(hsa_isa_get_info_alt) *)      \
+  X(amd_queue_intercept_create, amd_ext_,                                                          \
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_create_fn),        \
+                        &AmdExtTable::hsa_amd_queue_intercept_create_fn),                          \
+    hsa_amd_queue_intercept_create_fn, hsa_amd_queue_intercept_create_fn_t)                        \
+  X(amd_queue_intercept_register, amd_ext_,                                                        \
+    api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn),      \
+                        &AmdExtTable::hsa_amd_queue_intercept_register_fn),                        \
+    hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
 
 /// @brief HSA table entries patched by the DBT hook.
 ///
@@ -810,6 +871,8 @@ void clear_agent_mapper();
     decltype(hsa_memory_assign_agent) *)                                                           \
   X(executable_destroy, core_, true, false, hsa_executable_destroy_fn, rj_executable_destroy,      \
     decltype(hsa_executable_destroy) *)                                                            \
+  X(executable_symbol_get_info, core_, true, false, hsa_executable_symbol_get_info_fn,             \
+    rj_executable_symbol_get_info, decltype(hsa_executable_symbol_get_info) *)                     \
   X(executable_get_symbol, core_, true, false, hsa_executable_get_symbol_fn,                       \
     rj_executable_get_symbol, decltype(hsa_executable_get_symbol) *)                               \
   X(executable_get_symbol_by_name, core_, true, false, hsa_executable_get_symbol_by_name_fn,       \
@@ -941,6 +1004,15 @@ public:
       return false;
     }
 
+    if (original_amd_queue_intercept_create_ == nullptr ||
+        original_amd_queue_intercept_register_ == nullptr) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] HSA runtime does not provide queue interception required "
+                   "for DBT guest AQL normalization\n");
+      clear_unlocked();
+      return false;
+    }
+
 #define RJ_INSTALL_PATCH(name, table_ptr, present, patch_if_original, field, wrapper, type)        \
   if ((present) && (!(patch_if_original) || original_##name##_ != nullptr))                        \
     (table_ptr)->field = wrapper;
@@ -949,8 +1021,9 @@ public:
 
     active_ = true;
 
-    log_message(kLogInfo, "installed DBT hook target=%s arch=%s mach=0x%x",
-                config_->target.name.data(), arch_name(config_->target.arch), config_->target.mach);
+    log_message(kLogInfo, "installed DBT hook target=%s arch=%s mach=0x%x backend=%s",
+                config_->target.name.data(), arch_name(config_->target.arch), config_->target.mach,
+                rocjitsu::config::dbt_execution_backend_name(config_->execution_backend));
     return true;
   }
 
@@ -973,6 +1046,7 @@ public:
 
     CodeObjectReaderRegistry::instance().clear();
     ExecutableAgentRegistry::instance().clear();
+    KernelResourceRegistry::instance().clear();
     clear_agent_mapper();
     clear_memory_pool_mapper();
     if (!had_state)
@@ -1906,6 +1980,65 @@ hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
   return original(agent, callback, data);
 }
 
+void rj_aql_packet_interceptor(const void *packets, uint64_t packet_count,
+                               uint64_t user_packet_index, void *data,
+                               hsa_amd_queue_intercept_packet_writer writer) {
+  (void)data;
+  if (packets == nullptr || writer == nullptr || packet_count == 0)
+    return;
+
+  const auto config = layer().config();
+  const auto backend =
+      config && config->execution_backend == rocjitsu::config::DbtExecutionBackend::Simulator
+          ? rocjitsu::amdgpu::AqlExecutionBackend::Simulator
+          : rocjitsu::amdgpu::AqlExecutionBackend::Hardware;
+  const auto *packet_bytes = static_cast<const std::byte *>(packets);
+  for (uint64_t index = 0; index < packet_count; ++index) {
+    const void *packet = packet_bytes + index * sizeof(hsa_kernel_dispatch_packet_t);
+    const uint64_t kernel_object = rocjitsu::amdgpu::aql_packet_kernel_object(packet);
+    const auto resources = KernelResourceRegistry::instance().lookup(kernel_object);
+    const auto normalized = rocjitsu::amdgpu::normalize_aql_packet(packet, backend, resources);
+    if (config && config->log_level >= kLogDebug && kernel_object != 0 &&
+        normalized.packet_count != 0) {
+      hsa_kernel_dispatch_packet_t dispatch{};
+      std::memcpy(&dispatch, &normalized.packets[normalized.packet_count - 1], sizeof(dispatch));
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] AQL packet index=%llu kernel_object=%llu "
+                   "loader_private=%u loader_fixed_group=%u dispatch_private=%u "
+                   "dispatch_group=%u\n",
+                   static_cast<unsigned long long>(user_packet_index + index),
+                   static_cast<unsigned long long>(kernel_object), resources.private_segment_size,
+                   resources.group_segment_fixed_size, dispatch.private_segment_size,
+                   dispatch.group_segment_size);
+    }
+    if (normalized.disposition ==
+        rocjitsu::amdgpu::AqlPacketDisposition::NormalizedExtendedDispatch) {
+      log_message(
+          kLogVerbose, "normalized extended AQL packet index=%llu into %u hardware packet(s)",
+          static_cast<unsigned long long>(user_packet_index + index), normalized.packet_count);
+    } else if (normalized.disposition ==
+               rocjitsu::amdgpu::AqlPacketDisposition::NormalizedKernelResources) {
+      log_message(kLogVerbose, "normalized AQL kernel resources at packet index=%llu",
+                  static_cast<unsigned long long>(user_packet_index + index));
+    } else if (normalized.disposition ==
+               rocjitsu::amdgpu::AqlPacketDisposition::UnsupportedClusterDispatch) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] clustered AQL dispatch at queue index %llu is unsupported "
+                   "by the hardware backend; forwarding it to the HSA runtime error path\n",
+                   static_cast<unsigned long long>(user_packet_index + index));
+    } else if (normalized.disposition ==
+               rocjitsu::amdgpu::AqlPacketDisposition::MalformedExtendedDispatch) {
+      std::fprintf(stderr,
+                   "[rocjitsu-hooks] malformed extended AQL dispatch at queue index %llu; "
+                   "forwarding it to the HSA runtime error path\n",
+                   static_cast<unsigned long long>(user_packet_index + index));
+    }
+
+    if (normalized.packet_count != 0)
+      writer(normalized.packets.data(), normalized.packet_count);
+  }
+}
+
 hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                      void (*callback)(hsa_status_t, hsa_queue_t *, void *),
                                      void *data, uint32_t private_segment_size,
@@ -1913,12 +2046,40 @@ hsa_status_t HSA_API rj_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue
   auto *original = layer().queue_create();
   if (!original)
     return HSA_STATUS_ERROR;
+  const bool guest_queue = AgentMapper::instance().is_guest(agent);
   hsa_agent_t mapped = AgentMapper::instance().map(agent);
-  log_message(kLogVerbose, "queue_create agent=%llu mapped=%llu size=%u",
+  log_message(kLogVerbose, "queue_create agent=%llu mapped=%llu size=%u guest=%d",
               static_cast<unsigned long long>(agent.handle),
-              static_cast<unsigned long long>(mapped.handle), size);
-  return original(mapped, size, type, callback, data, private_segment_size, group_segment_size,
-                  queue);
+              static_cast<unsigned long long>(mapped.handle), size, guest_queue ? 1 : 0);
+  if (!guest_queue)
+    return original(mapped, size, type, callback, data, private_segment_size, group_segment_size,
+                    queue);
+
+  auto *intercept_create = layer().amd_queue_intercept_create();
+  auto *intercept_register = layer().amd_queue_intercept_register();
+  if (!intercept_create || !intercept_register)
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t status = intercept_create(mapped, size, type, callback, data, private_segment_size,
+                                         group_segment_size, queue);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+
+  status = intercept_register(*queue, rj_aql_packet_interceptor, nullptr);
+  if (status != HSA_STATUS_SUCCESS) {
+    auto *destroy = layer().queue_destroy();
+    if (destroy)
+      (void)destroy(*queue);
+    *queue = nullptr;
+    return status;
+  }
+
+  const auto config = layer().config();
+  log_message(kLogInfo, "installed guest AQL normalization queue=%p backend=%s",
+              static_cast<void *>(*queue),
+              config ? rocjitsu::config::dbt_execution_backend_name(config->execution_backend)
+                     : "hardware");
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API rj_queue_destroy(hsa_queue_t *queue) {
@@ -1981,6 +2142,48 @@ hsa_status_t HSA_API rj_executable_destroy(hsa_executable_t executable) {
     return HSA_STATUS_ERROR;
   hsa_status_t status = original(executable);
   log_message(kLogVerbose, "executable_destroy status=%d", static_cast<int>(status));
+  return status;
+}
+
+hsa_status_t HSA_API rj_executable_symbol_get_info(hsa_executable_symbol_t executable_symbol,
+                                                   hsa_executable_symbol_info_t attribute,
+                                                   void *value) {
+  auto *original = layer().executable_symbol_get_info();
+  if (!original)
+    return HSA_STATUS_ERROR;
+
+  hsa_status_t status = original(executable_symbol, attribute, value);
+  if (status != HSA_STATUS_SUCCESS || value == nullptr)
+    return status;
+
+  uint64_t kernel_object = 0;
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT) {
+    kernel_object = *static_cast<const uint64_t *>(value);
+  } else if (original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                      &kernel_object) != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+  if (kernel_object == 0)
+    return status;
+
+  rocjitsu::amdgpu::AqlKernelResourceRequirements resources;
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
+    resources.private_segment_size = *static_cast<const uint32_t *>(value);
+  } else {
+    (void)original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
+                   &resources.private_segment_size);
+  }
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE) {
+    resources.group_segment_fixed_size = *static_cast<const uint32_t *>(value);
+  } else {
+    (void)original(executable_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
+                   &resources.group_segment_fixed_size);
+  }
+  KernelResourceRegistry::instance().record(kernel_object, resources);
+  log_message(kLogDebug,
+              "recorded kernel object=%llu private_segment_size=%u group_segment_fixed_size=%u",
+              static_cast<unsigned long long>(kernel_object), resources.private_segment_size,
+              resources.group_segment_fixed_size);
   return status;
 }
 

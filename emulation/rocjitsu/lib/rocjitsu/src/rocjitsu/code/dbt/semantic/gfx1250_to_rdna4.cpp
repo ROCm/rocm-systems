@@ -30,6 +30,7 @@ constexpr uint32_t kVop3Encoding = 0x35u;
 constexpr uint8_t kNullSgpr = 124;
 constexpr uint16_t kGfx1250SrcFlatScratchBaseLo = 230;
 constexpr uint16_t kGfx1250SrcFlatScratchBaseHi = 231;
+constexpr uint16_t kRdna4SrcPrivateBase = 237;
 constexpr uint32_t kK128Fp8BorrowedVgprCount = 5;
 constexpr uint32_t kPrivateBorrowedVgprCount = 21;
 constexpr uint32_t kPrivateBorrowScratchBytes = kPrivateBorrowedVgprCount * sizeof(uint32_t);
@@ -3610,6 +3611,42 @@ std::vector<uint32_t> expand_v_add_nc_u64(uint8_t vdst, const Vector64SourcePart
                                           const LivenessAnalysis &liveness) {
   if (vdst == 255)
     return {};
+
+  // gfx1250's globally-addressable scratch pointer is
+  //
+  //   SRC_FLAT_SCRATCH_BASE + (lane_id << 52) + private_offset.
+  //
+  // RDNA4 does not implement that addressing mode. Its equivalent flat
+  // private pointer is {private_offset, SRC_PRIVATE_BASE.hi}; reading
+  // SRC_PRIVATE_BASE as a 64-bit pair is required because 32-bit reads of the
+  // special source do not provide the aperture value. Normalize this common
+  // address-construction idiom here instead of carrying gfx1250-only special
+  // sources into the target instruction stream.
+  const auto is_gfx1250_flat_scratch_base = [](const Vector64SourceParts &src) {
+    return src.lo == kGfx1250SrcFlatScratchBaseLo && src.hi == kGfx1250SrcFlatScratchBaseHi &&
+           !src.lo_literal && !src.hi_literal;
+  };
+  const Vector64SourceParts *private_offset = nullptr;
+  if (is_gfx1250_flat_scratch_base(src0))
+    private_offset = &src1;
+  else if (is_gfx1250_flat_scratch_base(src1))
+    private_offset = &src0;
+
+  if (private_offset) {
+    auto aperture_sgpr = liveness.find_free_sgpr_pair(&inst);
+    if (!aperture_sgpr || *aperture_sgpr > 105)
+      return {};
+
+    constexpr uint8_t kOpMovB32 = 1;
+    std::vector<uint32_t> words;
+    words.reserve(5);
+    words.push_back(build_s_mov_b64(static_cast<uint8_t>(*aperture_sgpr), kRdna4SrcPrivateBase));
+    append_wait_salu_sgpr(words);
+    append_vop1(words, kOpMovB32, vdst, private_offset->lo, private_offset->lo_literal);
+    append_vop1(words, kOpMovB32, static_cast<uint8_t>(vdst + 1u),
+                static_cast<uint16_t>(*aperture_sgpr + 1u));
+    return words;
+  }
 
   if (low_write_clobbers_high_source(vdst, src0.hi) ||
       low_write_clobbers_high_source(vdst, src1.hi))

@@ -18,6 +18,7 @@
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
 
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
@@ -58,6 +59,11 @@ std::vector<uint64_t> g_last_memory_lock_agents;
 std::vector<uint64_t> g_last_memory_lock_to_pool_agents;
 std::vector<uint64_t> g_last_vmem_access_agents;
 hsa_amd_memory_pool_t g_last_memory_lock_to_pool_pool{};
+hsa_queue_t g_fake_queue{};
+hsa_agent_t g_last_intercept_queue_agent{};
+hsa_amd_queue_intercept_handler g_intercept_handler = nullptr;
+void *g_intercept_handler_data = nullptr;
+std::vector<uint8_t> g_intercept_output;
 
 const char *isa_name(hsa_isa_t isa) {
   if (isa.handle == kGuestIsa.handle)
@@ -101,6 +107,64 @@ hsa_status_t HSA_API fake_iterate_agents_host_first(hsa_status_t (*callback)(hsa
 hsa_status_t HSA_API fake_shut_down() {
   ++g_fake_shutdown_calls;
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_queue_create(hsa_agent_t, uint32_t, hsa_queue_type32_t,
+                                       void (*)(hsa_status_t, hsa_queue_t *, void *), void *,
+                                       uint32_t, uint32_t, hsa_queue_t **queue) {
+  if (queue == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *queue = &g_fake_queue;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_queue_destroy(hsa_queue_t *) { return HSA_STATUS_SUCCESS; }
+
+hsa_status_t HSA_API fake_executable_symbol_get_info(hsa_executable_symbol_t,
+                                                     hsa_executable_symbol_info_t attribute,
+                                                     void *value) {
+  if (value == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT) {
+    *static_cast<uint64_t *>(value) = 0x1234;
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
+    *static_cast<uint32_t *>(value) = 140;
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE) {
+    *static_cast<uint32_t *>(value) = 8192;
+    return HSA_STATUS_SUCCESS;
+  }
+  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+}
+
+hsa_status_t HSA_API fake_amd_queue_intercept_create(hsa_agent_t agent, uint32_t,
+                                                     hsa_queue_type32_t,
+                                                     void (*)(hsa_status_t, hsa_queue_t *, void *),
+                                                     void *, uint32_t, uint32_t,
+                                                     hsa_queue_t **queue) {
+  if (queue == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  g_last_intercept_queue_agent = agent;
+  *queue = &g_fake_queue;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
+                                                       hsa_amd_queue_intercept_handler callback,
+                                                       void *data) {
+  if (queue == nullptr || callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  g_intercept_handler = callback;
+  g_intercept_handler_data = data;
+  return HSA_STATUS_SUCCESS;
+}
+
+void capture_intercept_packets(const void *packets, uint64_t packet_count) {
+  const auto *bytes = static_cast<const uint8_t *>(packets);
+  g_intercept_output.insert(g_intercept_output.end(), bytes, bytes + packet_count * 64u);
 }
 
 hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
@@ -380,6 +444,9 @@ struct FakeApiTable {
     core.hsa_shut_down_fn = fake_shut_down;
     core.hsa_iterate_agents_fn = fake_iterate_agents;
     core.hsa_agent_get_info_fn = fake_agent_get_info;
+    core.hsa_queue_create_fn = fake_queue_create;
+    core.hsa_queue_destroy_fn = fake_queue_destroy;
+    core.hsa_executable_symbol_get_info_fn = fake_executable_symbol_get_info;
     core.hsa_agent_iterate_isas_fn = fake_agent_iterate_isas;
     core.hsa_isa_get_info_alt_fn = fake_isa_get_info_alt;
     core.hsa_code_object_reader_create_from_file_fn = fake_code_object_reader_create_from_file;
@@ -395,6 +462,8 @@ struct FakeApiTable {
     amd.hsa_amd_memory_lock_to_pool_fn = fake_amd_memory_lock_to_pool;
     amd.hsa_amd_pointer_info_fn = fake_amd_pointer_info;
     amd.hsa_amd_vmem_set_access_fn = fake_amd_vmem_set_access;
+    amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
+    amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
   }
 };
 
@@ -490,6 +559,64 @@ TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
 
   EXPECT_EQ(status, HSA_STATUS_SUCCESS);
   EXPECT_EQ(seen, std::vector<uint64_t>{kGuestAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, GuestQueueInterceptNormalizesClusterSizeOneExtendedDispatch) {
+  reset_pool_blocker(false);
+  reset_agent_blocker(false);
+  g_last_intercept_queue_agent = {};
+  g_intercept_handler = nullptr;
+  g_intercept_handler_data = nullptr;
+  g_intercept_output.clear();
+  FakeApiTable api;
+  InstalledHook hook(api);
+  ASSERT_TRUE(hook.installed());
+  ASSERT_NE(api.core.hsa_queue_create_fn, fake_queue_create);
+
+  uint64_t kernel_object = 0;
+  EXPECT_EQ(api.core.hsa_executable_symbol_get_info_fn(hsa_executable_symbol_t{7},
+                                                       HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                                       &kernel_object),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(kernel_object, 0x1234u);
+
+  hsa_queue_t *queue = nullptr;
+  EXPECT_EQ(api.core.hsa_queue_create_fn(kGuestAgent, 64, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr,
+                                         0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue, &g_fake_queue);
+  EXPECT_EQ(g_last_intercept_queue_agent.handle, kHostAgent.handle);
+  ASSERT_NE(g_intercept_handler, nullptr);
+
+  rocjitsu::amdgpu::AmdExtKernelDispatchPacket extended{};
+  extended.header =
+      static_cast<uint16_t>((HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+                            (1u << HSA_PACKET_HEADER_BARRIER) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE));
+  extended.amd_format = rocjitsu::amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+  extended.setup = 1;
+  extended.workgroup_size_x = 32;
+  extended.workgroup_size_y = 1;
+  extended.workgroup_size_z = 1;
+  extended.cluster_count_x = 4;
+  extended.cluster_count_y = 1;
+  extended.cluster_count_z = 1;
+  extended.cluster_size_x = 1;
+  extended.cluster_size_y = 1;
+  extended.cluster_size_z = 1;
+  extended.group_segment_size = 8192;
+  extended.kernel_object = kernel_object;
+
+  g_intercept_handler(&extended, 1, 7, g_intercept_handler_data, capture_intercept_packets);
+  ASSERT_EQ(g_intercept_output.size(), sizeof(hsa_kernel_dispatch_packet_t));
+  hsa_kernel_dispatch_packet_t dispatch{};
+  std::memcpy(&dispatch, g_intercept_output.data(), sizeof(dispatch));
+  EXPECT_EQ((dispatch.header >> HSA_PACKET_HEADER_TYPE) & 0xffu, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+  EXPECT_EQ(dispatch.grid_size_x, 128u);
+  EXPECT_EQ(dispatch.kernel_object, extended.kernel_object);
+  EXPECT_EQ(dispatch.private_segment_size, 140u);
+  EXPECT_EQ(dispatch.group_segment_size, 8192u);
 }
 
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenHostAppearsFirst) {
