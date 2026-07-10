@@ -82,7 +82,7 @@ if(HIP_FOUND AND rocjpeg_FOUND AND rocprofiler-register_FOUND)
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
     # saveimage overflow regression test (SWSPLAT-24294)
-    add_executable(test_saveimage_overflow ${PROJECT_SOURCE_DIR}/test_saveimage_overflow.cpp)
+    add_executable(test_saveimage_overflow test_saveimage_overflow.cpp)
     target_link_libraries(test_saveimage_overflow ${LINK_LIBRARY_LIST})
 else()
     message("-- ERROR!: ${PROJECT_NAME} excluded! unmet dependencies")
