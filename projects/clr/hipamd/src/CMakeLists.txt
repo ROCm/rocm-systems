@@ -331,6 +331,154 @@ if(HIP_ENABLE_ROCPROFILER_REGISTER)
     set_target_properties(amdhip64 PROPERTIES INSTALL_RPATH "\$ORIGIN")
 endif()
 
+# LTTng-UST tracepoint emission. OFF by default while this feature is being
+# staged in; the packaging declarations in hipamd/packaging/CMakeLists.txt
+# are gated on this same option so the binary's NEEDED entry is always
+# package-resolvable.
+if(WIN32 OR NOT BUILD_SHARED_LIBS)
+    set(HIP_ENABLE_LTTNG_UST OFF)
+else()
+    option(HIP_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" OFF)
+endif()
+
+if(HIP_ENABLE_LTTNG_UST)
+    # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
+    # submodules under shared/lttng/ (canonical, shared with rocr-runtime),
+    # installed into the build tree at <build>/_deps/lttng-prefix/, and
+    # shipped at runtime under /opt/rocm/lib/ alongside libamdhip64.so
+    # (libamdhip64 picks them up via RPATH $ORIGIN — see
+    # set_target_properties below). See shared/lttng/README.md.
+    set(LTTNG_VENDORED_ROOT
+        "${CMAKE_CURRENT_LIST_DIR}/../../../../shared/lttng"
+        CACHE PATH "Path to shared vendored LTTng tree (shared/lttng/)")
+    if(NOT EXISTS "${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake")
+        message(FATAL_ERROR
+            "HIP_ENABLE_LTTNG_UST=ON but shared/lttng/ was not found at\n"
+            "    ${LTTNG_VENDORED_ROOT}\n"
+            "Either checkout the rocm-systems super-repo (which provides "
+            "shared/lttng/), set -DLTTNG_VENDORED_ROOT=<path>, or disable "
+            "with -DHIP_ENABLE_LTTNG_UST=OFF.")
+    endif()
+    set(LTTNG_VENDORED_URCU_SRC "${LTTNG_VENDORED_ROOT}/userspace-rcu")
+    set(LTTNG_VENDORED_UST_SRC  "${LTTNG_VENDORED_ROOT}/lttng-ust")
+    include(${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake)
+
+    find_package(PkgConfig REQUIRED)
+    # Prepend the vendored .pc dir so pkg_check_modules picks it before
+    # any system lttng-ust the distro might also ship.
+    set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
+    pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+
+    # HIP_ENABLE_LTTNG_UST + the provider header/include path are needed by
+    # amdhip64 both at the call sites (via rocm_trace_emit.h) and in the
+    # definition-only TU (lttng/rocm_hip_tp.cpp), which both include
+    # rocm_hip_tp.h.
+    target_compile_definitions(amdhip64 PRIVATE HIP_ENABLE_LTTNG_UST=1)
+    target_include_directories(amdhip64 PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/lttng
+        ${LTTNG_VENDORED_INCLUDE_DIR})
+
+    # lttng/rocm_hip_tp.cpp is the definition-only TU that actually
+    # generates the tracepoint provider probes (LTTNG_UST_TRACEPOINT_
+    # CREATE_PROBES / _DEFINE); lttng/rocm_trace_init.cpp defines the
+    # runtime-wide kill switch (rocm_hip_trace_g_disabled) that every
+    # call site in rocm_trace_emit.h references, plus the dlmopen
+    # SEGFAULT mitigation constructor. Without both compiled into
+    # amdhip64, the library has undefined references to the tracepoint
+    # symbols and rocm_hip_trace_g_disabled at link/load time.
+    target_sources(amdhip64 PRIVATE
+        lttng/rocm_hip_tp.cpp
+        lttng/rocm_trace_init.cpp)
+
+    # Build amdhip64 only after the vendored libs exist (the .pc query
+    # above happens at configure time, but the actual .so files are only
+    # produced when the lttng_ust_vendored ExternalProject runs at build
+    # time; without this dependency, the link step races the build).
+    add_dependencies(amdhip64 lttng_ust_vendored)
+
+    # amdhip64 both defines and creates the tracepoint probes (via
+    # lttng/rocm_hip_tp.cpp) and links liblttng-ust directly.
+    target_link_directories(amdhip64 PRIVATE ${LTTNG_VENDORED_LIB_DIR})
+    target_link_libraries(amdhip64 PRIVATE PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+
+    # RPATH:
+    #   BUILD_RPATH   — let in-tree tests find the vendored .so files at
+    #                   <build>/_deps/lttng-prefix/lib/.
+    #   INSTALL_RPATH — at /opt/rocm/lib/libamdhip64.so, the vendored
+    #                   libs sit directly in /opt/rocm/lib/ (no lttng/
+    #                   subdir). The literal $ORIGIN expands to
+    #                   /opt/rocm/lib at runtime.
+    set_target_properties(amdhip64 PROPERTIES
+        BUILD_RPATH   "${LTTNG_VENDORED_LIB_DIR}"
+        INSTALL_RPATH "\$ORIGIN")
+
+    # Stage the vendored .so files into the same build-tree directory as
+    # libamdhip64.so. This is what fixes downstream link failures (e.g.
+    # TheRock CI: rocFFT, rocRoller, rocprofiler-systems link against
+    # -lamdhip64 / -lhsa-runtime64; the linker reads NEEDED entries like
+    # liblttng-ust.so.1 and resolves them via the same -L path used to
+    # find libamdhip64.so). With the vendored .so files co-located in
+    # the build dir, no extra -rpath-link or downstream coordination is
+    # required. Mirrors the installed flat layout under /opt/rocm/lib/.
+    #
+    # PRE_LINK runs after object compilation but before the link step,
+    # so the vendored .so files are present when the linker resolves
+    # -llttng-ust via the target's link directory. Attaching to the
+    # amdhip64 target directly (rather than using add_custom_target +
+    # add_dependencies) avoids the cyclic dependency that arises when
+    # $<TARGET_FILE_DIR:amdhip64> is used in a separate custom target.
+    if(NOT WIN32)
+        # Use a sane shell-based existence check rather than
+        # `cp ... 2>/dev/null || true`. The previous form silently
+        # masked the case where the vendored .so files were missing
+        # (e.g. the FetchContent build failed in a hard-to-spot way),
+        # which then broke downstream link consumers later. Now we
+        # explicitly probe for liblttng-ust.so* (the canonical
+        # vendored library) and fail the build with an actionable
+        # error message if absent. The cp itself uses the original
+        # glob style and lets `set -e` surface any real failures.
+        #
+        # Single-line shell script: make's recipe parser does not
+        # allow bare newlines inside a command argument.
+        add_custom_command(TARGET amdhip64 PRE_LINK
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:amdhip64>"
+            COMMAND sh -c "set -e; if ! ls '${LTTNG_VENDORED_LIB_DIR}'/liblttng-ust.so* >/dev/null 2>&1; then echo 'error: no vendored LTTng-UST shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2; exit 1; fi; cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:amdhip64>/'"
+            COMMENT "Staging vendored LTTng-UST .so files into amdhip64 build dir"
+            VERBATIM)
+    endif()
+
+    # NB: install rules for the vendored .so files live in
+    # hipamd/packaging/CMakeLists.txt under COMPONENT binary, gated on
+    # HIP_ENABLE_LTTNG_UST.
+
+    # Per-packet AQL kernel-dispatch tracepoint lives at the HIP CLR packet-
+    # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
+    # static archive and linked into amdhip64; the tracepoint emit symbols
+    # live in amdhip64 (via lttng/rocm_hip_tp.cpp), but rocvirtual.cpp needs
+    # the include path and the HIP_ENABLE_LTTNG_UST macro to compile the
+    # call sites. Apply both to the rocclr target here.
+    if(TARGET rocclr)
+        target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
+        target_include_directories(rocclr PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/lttng
+            ${LTTNG_VENDORED_INCLUDE_DIR}
+            ${LTTNG_UST_INCLUDE_DIRS})
+        add_dependencies(rocclr lttng_ust_vendored)
+    endif()
+
+    # Symbol-coverage gate: every exported HIP/__hip text symbol from the
+    # built libamdhip64.so must appear in one of the checked-in migration
+    # inventories. Fails the build on any miss.
+    add_custom_command(TARGET amdhip64 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Running LTTng symbol-coverage gate..."
+        COMMAND bash ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_coverage_gate.sh
+                $<TARGET_FILE:amdhip64>
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory.txt
+                ${CMAKE_CURRENT_LIST_DIR}/../scripts/lttng_migration_inventory_c.txt
+        VERBATIM)
+endif()
+
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND
   ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/share/hip/.hipInfo ${PROJECT_BINARY_DIR}/lib/.hipInfo)
 add_custom_command(TARGET amdhip64 POST_BUILD COMMAND

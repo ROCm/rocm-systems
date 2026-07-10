@@ -3,6 +3,8 @@
 *.o
 *.exe
 *.swp
+*.pyc
+__pycache__/
 lib
 packages
 build

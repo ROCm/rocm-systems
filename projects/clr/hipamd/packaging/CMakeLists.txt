@@ -53,6 +53,27 @@ if(HIP_PLATFORM STREQUAL "amd" )
               DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT ${COMPONENT_NAME})
 
+   # Vendored LTTng-UST + userspace-rcu .so files. LTTNG_VENDORED_LIB_DIR
+   # is set by the include() of shared/lttng/cmake/VendorLttng.cmake from
+   # hipamd/src/CMakeLists.txt — only populated when
+   # HIP_ENABLE_LTTNG_UST=ON, hence the guard.
+   if(HIP_ENABLE_LTTNG_UST AND DEFINED LTTNG_VENDORED_LIB_DIR)
+      # Install the vendored .so files directly under
+      # ${CMAKE_INSTALL_LIBDIR} alongside libamdhip64.so (flat, no lttng/
+      # subdir). libamdhip64 finds these at runtime via RPATH $ORIGIN;
+      # without them in the package, the loader would fall back to a
+      # system lttng-ust (or fail). Flat placement also lets downstream
+      # consumers that link -lamdhip64 resolve the NEEDED
+      # liblttng-ust.so.1 etc. via the same -L path.
+      install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}
+              COMPONENT ${COMPONENT_NAME}
+              USE_SOURCE_PERMISSIONS
+              FILES_MATCHING
+              PATTERN "liblttng*.so*"
+              PATTERN "liburcu*.so*")
+   endif()
+
 #TODO:This do not belong in BINARY package.
 #Keeping it as is for now
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/share/hip/.hipInfo DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
@@ -175,6 +196,11 @@ set(HIP_RUNTIME_ROCM_PKG_DEPENDENCIES "hsa-rocr, rocminfo, comgr, rocm-core")
 if(HIP_ENABLE_ROCPROFILER_REGISTER)
    set(HIP_RUNTIME_ROCM_PKG_DEPENDENCIES "${HIP_RUNTIME_ROCM_PKG_DEPENDENCIES}, rocprofiler-register")
 endif()
+
+# LTTng-UST runtime libraries are now bundled inside the package (see the
+# install rule above: flat under ${CMAKE_INSTALL_LIBDIR} alongside
+# libamdhip64.so). The .deb/.rpm no longer requires the host distro's
+# lttng-ust package to be installed.
 
 set(HIP_RUNTIME_DEB_STDPKG_DEPENDENCIES "libnuma1, libstdc++6, libc6")
 

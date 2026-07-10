@@ -31,6 +31,7 @@
 #include "platform/activity.hpp"
 #include "../hip_internal.hpp"
 #include "../hip_global.hpp"
+#include "../lttng/rocm_trace_emit.h"
 
 #include "rocclr/os/os.hpp"
 #include "platform/runtime.hpp"
@@ -2762,21 +2763,34 @@ uint64_t HipProfilerDisableExt() {
 // ============================================================
 // Public C extension API
 // ============================================================
+
+/* Typed exit macro for the hipError_t-returning wrappers below. Mirrors
+ * ROCM_TRACE_RET_STATUS in hip_table_interface.cpp; kept local here since
+ * these wrappers don't go through the dispatch-table TRY/CATCH machinery. */
+#define ROCM_TRACE_RET_STATUS(EXPR)                                                                \
+  do {                                                                                             \
+    const auto __rocm_rv = (EXPR);                                                                 \
+    rocm_trace_emit_hip_api_exit_status(__func__, static_cast<int32_t>(__rocm_rv));                \
+    return __rocm_rv;                                                                              \
+  } while (0)
+
 extern "C" {
 
 // ================================================================================================
 hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state) {
+  rocm_trace_emit_hip_api_enter(__func__);
   (void)state;  // reserved for future feature flags; ignored in this version
   uint64_t id = HipProfilerEnableExt();
   if (start_record_id) *start_record_id = id;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS(hipSuccess);
 }
 
 // ================================================================================================
 hipError_t hipProfilerDisableExt(uint64_t* end_record_id) {
+  rocm_trace_emit_hip_api_enter(__func__);
   uint64_t id = HipProfilerDisableExt();
   if (end_record_id) *end_record_id = id;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS(hipSuccess);
 }
 
 // ================================================================================================
@@ -2784,8 +2798,9 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
                                      size_t* chunk_count,
                                      size_t* chunk_size,
                                      size_t* total_count) {
+  rocm_trace_emit_hip_api_enter(__func__);
   if (!chunks || !chunk_count || !chunk_size || !total_count)
-    return hipErrorInvalidValue;
+    ROCM_TRACE_RET_STATUS(hipErrorInvalidValue);
 
   // Snapshot under alloc lock so chunk_count and total_count are consistent.
   size_t nchunks, total;
@@ -2799,12 +2814,13 @@ hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
   *chunk_count = nchunks;
   *chunk_size  = kChunkSize;
   *total_count = total;
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS(hipSuccess);
 }
 
 // ================================================================================================
 hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data) {
-  if (!cb) return hipErrorInvalidValue;
+  rocm_trace_emit_hip_api_enter(__func__);
+  if (!cb) ROCM_TRACE_RET_STATUS(hipErrorInvalidValue);
   bool first;
   {
     std::lock_guard<std::mutex> lk(g_chunk_clients_mtx);
@@ -2817,7 +2833,7 @@ hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void
     g_chunk_thread_stop = false;
     g_chunk_thread      = std::thread(ChunkDeliveryThread);
   }
-  return hipSuccess;
+  ROCM_TRACE_RET_STATUS(hipSuccess);
 }
 
 }  // extern "C"

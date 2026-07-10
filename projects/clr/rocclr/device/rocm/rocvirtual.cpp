@@ -21,6 +21,23 @@
 #include "utils/debug.hpp"
 #include "os/os.hpp"
 
+/* LTTng-UST per-packet dispatch tracepoint emit helper. The include path
+ * (hipamd/src/lttng) and the HIP_ENABLE_LTTNG_UST define are added to the
+ * rocclr target by hipamd's CMakeLists.txt when -DHIP_ENABLE_LTTNG_UST=ON.
+ * The header degrades to no-op stubs when the macro is undefined, so guarding
+ * the include is unnecessary as long as the include path is always available. */
+#if defined(HIP_ENABLE_LTTNG_UST) && HIP_ENABLE_LTTNG_UST
+#include "rocm_trace_emit.h"
+#else
+/* No-op stubs duplicated here so the call sites in this file compile without
+ * the LTTng include path. Keep these in sync with the !HIP_ENABLE_LTTNG_UST
+ * branch of hipamd/src/lttng/rocm_trace_emit.h. */
+static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+    uint32_t a, uint64_t b, uint64_t c, uint64_t d) {
+    (void)a; (void)b; (void)c; (void)d;
+}
+#endif
+
 #include <fstream>
 #include <limits>
 
@@ -1419,6 +1436,25 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
   *aql_loc = *packet;
 
+  /* LTTng: emit per-packet dispatch tracepoint, but only for KERNEL_DISPATCH
+   * packets (barriers and PM4 vendor-specific packets share this dispatch
+   * helper and are filtered out below). The tracepoint represents HIP's
+   * intent before any HSA intercept rewrite; the helper internally mints
+   * its own corr_id and reads the TLS slot for parent_corr_id (= the
+   * launching HIP API's corr_id). */
+  {
+    const uint8_t pkt_type = extractAqlBits(header, HSA_PACKET_HEADER_TYPE,
+                                            HSA_PACKET_HEADER_WIDTH_TYPE);
+    if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      auto* kdp = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet);
+      rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+          gpu_queue_->id,
+          index,
+          kdp->kernel_object,
+          kdp->completion_signal.handle);
+    }
+  }
+
   metadata_preloader_.Set(packet, header, index & queueMask);
   if (header != 0) {
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
@@ -1781,6 +1817,30 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
           // Tag is shown in the "Graph ShaderName" line above; don't repeat it as
           // the packet prefix.
           logAqlBarrierPacket(roc_device_, gpu_queue_, hdr, bpkt, slotIdx, priority_);
+        }
+      }
+    }
+
+    // LTTng: emit per-packet dispatch tracepoint for each KERNEL_DISPATCH
+    // packet in this chunk. Done after all completion-signal patches above
+    // (fixup loop and lastSlot patch) so the emitted handle is final. The
+    // emit helper is a one-atomic-load no-op when no LTTng session is active.
+    // The helper internally mints its own corr_id per packet and reads the
+    // TLS slot for parent_corr_id (= the launching HIP API's corr_id).
+    {
+      for (size_t i = chunkStart; i < chunkEnd; ++i) {
+        const uint16_t hdr_i = static_cast<uint16_t>(validFullHeaders[i]);
+        if (extractAqlBits(hdr_i, HSA_PACKET_HEADER_TYPE,
+                           HSA_PACKET_HEADER_WIDTH_TYPE) ==
+            HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+          const uint64_t slotIdx_i = (startIndex + i) & queueMask;
+          auto* slot_i = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+              queueBase + slotIdx_i * kPacketSize);
+          rocm_trace_emit_hip_aql_kernel_dispatch_submit(
+              gpu_queue_->id,
+              startIndex + i,
+              slot_i->kernel_object,
+              slot_i->completion_signal.handle);
         }
       }
     }
