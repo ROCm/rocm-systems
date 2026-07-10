@@ -21,7 +21,9 @@ Use `moi` for structured memory-order instrumentation experiments. MOI has
 standard paths now allocate or preserve scratch registers, owner/epoch state,
 and scalar special state automatically; explicit register variables remain
 debug overrides. Per-engine report buffers are allocated automatically when
-needed. Stable engine behavior profiles remain prototype-facing work.
+needed. Startup identifies the frozen conservative profile as `standard-v1`;
+advanced dynamic-record, ordering, and immediate-sampled paths remain explicit
+extensions because they change patch composition and buffer layout.
 
 ## Documents
 

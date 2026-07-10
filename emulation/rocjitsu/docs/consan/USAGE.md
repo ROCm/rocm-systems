@@ -116,6 +116,24 @@ The MVP uses this HSA tools loader path. A separate waitcheck-style
 
 ## Environment Variables
 
+### Standard MOI profiles
+
+Selecting an engine activates the versioned `standard-v1` profile; startup
+logs print that identity. Ordinary runs need only `RJ_CONSAN_FLAVOR=moi` and
+one explicit engine choice:
+
+| Engine | Standard behavior | Explicit extensions |
+| --- | --- | --- |
+| `record_replay` | Lazy 64 KiB buffer, one supported access site, automatic resources, teardown exact-shadow replay. | Raise `RJ_CONSAN_MAX_PATCHES`; enable per-lane append, barrier events, or atomic events when that extra coverage is wanted. |
+| `sampled` | Lazy 64 KiB buffer, one supported site, all waves eligible, teardown sampled-table scan. | Select static/runtime strides for lower overhead or reproducibility; enable `RJ_CONSAN_MOI_SAMPLED_CHECK` for immediate prior-slot checking. |
+| `inline_shadow` | Lazy 256 KiB buffer, one supported site, automatic owner/epoch/scratch state, exact GPU publication and bounded diagnostics. | Raise the patch budget; enable barrier epochs or the narrow atomic handoff model for ordering-sensitive runs. |
+
+The conservative composition is intentional. Dynamic records and ordering
+probes repartition buffers and add independent patches; silently enabling all
+of them caused narrow-layout feature tests to fail and was rejected during the
+profile qualification. They remain supported, tested controls rather than
+hidden defaults.
+
 - `RJ_CONSAN_FLAVOR=supercollider|moi`: select the ConSan instrumentation
   flavor. There is intentionally no default; each run must opt in explicitly.
 - `RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled`: select the MOI

@@ -111,6 +111,8 @@ struct HookConfig {
   std::string dump_dir;
 };
 
+constexpr std::string_view kMoiStandardProfile = "standard-v1";
+
 [[nodiscard]] const char *preflight_action_name(rocjitsu::ConSanPreflightAction action) {
   switch (action) {
   case rocjitsu::ConSanPreflightAction::NotRun:
@@ -1974,7 +1976,8 @@ public:
 
     log_message(
         kLogInfo,
-        "installed ConSan hook flavor=%s moi_engine=%s delay_nops=%u fail_closed=%s "
+        "installed ConSan hook flavor=%s moi_engine=%s moi_profile=%s delay_nops=%u "
+        "fail_closed=%s "
         "require_patch=%s "
         "probe_nop=%s probe_trampoline_nop=%s probe_endpgm=%s probe_lds_endpgm=%s "
         "check_trap_mode=%s probe_lds_check_trap=%s probe_flat_check_trap=%s probe_flat_trap=%s "
@@ -1990,11 +1993,12 @@ public:
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu moi_auto_report_buffer_size_source=%s mode=%s",
         flavor_name(config.flavor.value_or(rocjitsu::ConSanFlavor::None)),
-        rocjitsu::consan_moi_engine_name(config.moi_engine), config.delay_nops,
-        config.fail_closed ? "true" : "false", config.require_patch ? "true" : "false",
-        config.probe_nop ? "true" : "false", config.probe_trampoline_nop ? "true" : "false",
-        config.probe_endpgm ? "true" : "false", config.probe_lds_endpgm ? "true" : "false",
-        check_trap_mode_name(config.check_trap_mode),
+        rocjitsu::consan_moi_engine_name(config.moi_engine),
+        config.flavor == rocjitsu::ConSanFlavor::Moi ? kMoiStandardProfile.data() : "none",
+        config.delay_nops, config.fail_closed ? "true" : "false",
+        config.require_patch ? "true" : "false", config.probe_nop ? "true" : "false",
+        config.probe_trampoline_nop ? "true" : "false", config.probe_endpgm ? "true" : "false",
+        config.probe_lds_endpgm ? "true" : "false", check_trap_mode_name(config.check_trap_mode),
         config.probe_lds_check_trap ? "true" : "false",
         config.probe_flat_check_trap ? "true" : "false", config.probe_flat_trap ? "true" : "false",
         config.fault_drop_barrier ? "true" : "false",

@@ -149,8 +149,8 @@ flowchart LR
   subgraph OPS["Operational profile"]
     direction LR
     O1A["O1A: Buffer And<br/>Failure Defaults"]:::done
-    O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::active
-    O1{"O1: Operational<br/>Defaults Ready"}:::todo
+    O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::done
+    O1{"O1: Operational<br/>Defaults Ready"}:::done
 
     O1A --> O1B
     O1B --> O1
@@ -179,10 +179,10 @@ flowchart LR
 ```mermaid
 flowchart LR
   B0["B0: Baseline"]:::done
-  O1{"O1: Operational<br/>Defaults Ready"}:::todo
+  O1{"O1: Operational<br/>Defaults Ready"}:::done
   I2["I2: Inline Diagnostics"]:::done
   I3["I3: Barrier And<br/>Atomic Semantics"]:::done
-  S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
+  S2["S2: In-Kernel<br/>Sampled Checking"]:::done
   T1A["T1A: Test Tiers<br/>And Harness"]:::partial
   T1B["T1B: MOI Parity<br/>Qualification Runs"]:::todo
   T1{"T1: gfx1201 MOI<br/>Parity Qualified"}:::partial
@@ -939,7 +939,7 @@ Landed evidence:
 - [SPILLING.md](SPILLING.md) is the cross-linked durable R1 guide and credits
   Kunwar Grover's branch while separating reused ideas from new gfx1201 work.
 
-## O1: MOI Operational Defaults - TODO
+## O1: MOI Operational Defaults - DONE
 
 Goal: make MOI command lines stable and short enough for routine use.
 
@@ -999,7 +999,7 @@ Landed evidence:
   172 focused tests and 29 live gfx1201 resource/behavior tests pass, and all
   three 209-test IREE sweeps pass without a buffer-size variable.
 
-### O1B: Freeze Standard Engine Profiles - TODO
+### O1B: Freeze Standard Engine Profiles - DONE
 
 Work:
 
@@ -1019,6 +1019,21 @@ Done criteria:
   ordinary tests.
 - Each profile corresponds to the stable engine behavior named by its DAG
   prerequisites; explicit overrides remain debugging controls.
+
+Landed state and evidence:
+
+- Hook startup identifies the frozen `standard-v1` profile. It keeps the
+  already-qualified conservative composition: one access site by default,
+  lazy 64/64/256 KiB buffers, automatic register resources, teardown replay or
+  scan, and explicit opt-in for dynamic records, ordering probes, immediate
+  sampled checking, or broader patch counts.
+- An attempted profile that silently enabled every synchronization and dynamic
+  path failed 13 of 37 live tests, including narrow-layout crashes. It was
+  rejected rather than standardized; those independently qualified features
+  remain explicit because they alter buffer partitioning and patch composition.
+- With only flavor and engine selection, each profile passes all five guarded
+  IREE TileAndFuse output tests. The full 37-test live feature tier passes with
+  the documented explicit controls used to exercise advanced behavior.
 
 ## A1: Multi-Architecture Native Targets - DEFERRED
 

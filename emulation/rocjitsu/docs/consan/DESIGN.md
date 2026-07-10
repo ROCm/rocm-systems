@@ -144,10 +144,11 @@ The gap is not one feature. It is a set of concrete blockers:
   shadow, allocates only after a code object inventories relevant sites, and
   reports dropped records unconditionally. Explicit size and zero-disable
   overrides remain available.
-- **Engine profiles.** `record_replay`, `inline_shadow`, and `sampled` have
-  different resource needs and diagnostic meanings. Broad operation should not
-  require users to memorize prototype recipes. Each engine needs a documented
-  default profile, with explicit override knobs retained for debugging.
+- **Engine profiles.** `record_replay`, `inline_shadow`, and `sampled` use the
+  documented `standard-v1` profiles: lazy per-engine buffers, automatic
+  resources, conservative one-site composition, and explicit extensions for
+  broader patch counts, dynamic records, ordering probes, and immediate
+  sampled checking. Startup logs name the profile.
 - **Instruction coverage.** `record_replay` and `sampled` can cover more of
   the current broad IREE compatibility corpus, while `inline_shadow` is still
   mostly native dword LDS. Exact inline operation needs multi-cell native DS
@@ -831,7 +832,5 @@ only the minimal SGPR support needed for the current probe family, keep it
 isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
-The next operational gap is freezing engine profiles and completing the test
-matrix that proves each engine can run without ad hoc per-test choices. That
-work is tracked in `PLAN.md` as the path from targeted MOI instrumentation to
-broad MOI operation.
+The remaining operational gate is the profile-by-tier qualification matrix in
+`PLAN.md`, followed by the broad-turn-on acceptance review.
