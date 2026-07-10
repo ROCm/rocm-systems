@@ -32,27 +32,45 @@ TEST_F(HipFileStats, StatsCollectionAddIo)
     EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
     EXPECT_CALL(mhip, hipGetDevice).WillRepeatedly(testing::Return(0));
     stats.setLevel(StatsLevel::Basic);
-    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0);
+    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0, true);
     ASSERT_EQ(10, stats.getPerGpuStats(0, StatsBackend::Fastpath)
                       ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
                       .buckets[0]
                       .load());
-    Context<StatsCollection>::get()->addIo(IoType::Write, StatsBackend::Fallback, 10, 0);
+    Context<StatsCollection>::get()->addIo(IoType::Write, StatsBackend::Fallback, 10, 0, true);
     ASSERT_EQ(10, stats.getPerGpuStats(0, StatsBackend::Fallback)
                       ->ioSizeBytes[static_cast<size_t>(IoType::Write)]
                       .buckets[0]
                       .load());
-    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0);
+    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0, true);
     ASSERT_EQ(20, stats.getPerGpuStats(0, StatsBackend::Fastpath)
                       ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
                       .buckets[0]
                       .load());
     stats.setLevel(StatsLevel::Disabled);
-    Context<StatsCollection>::get()->addIo(IoType::Write, StatsBackend::Fallback, 10, 0);
+    Context<StatsCollection>::get()->addIo(IoType::Write, StatsBackend::Fallback, 10, 0, true);
     ASSERT_EQ(10, stats.getPerGpuStats(0, StatsBackend::Fallback)
                       ->ioSizeBytes[static_cast<size_t>(IoType::Write)]
                       .buckets[0]
                       .load());
+}
+
+TEST_F(HipFileStats, StatsCollectionAddIoUnaligned)
+{
+    Stats                    stats{};
+    StrictMock<MStatsServer> mstats{};
+    StrictMock<MHip>         mhip{};
+    EXPECT_CALL(mstats, getStats).WillRepeatedly(testing::Return(&stats));
+    EXPECT_CALL(mhip, hipGetDevice).WillRepeatedly(testing::Return(0));
+    stats.setLevel(StatsLevel::Basic);
+    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0, false);
+    ASSERT_EQ(1, stats.getPerGpuStats(0, StatsBackend::Fastpath)
+                     ->unalignedCount[static_cast<size_t>(IoType::Read)]
+                     .load());
+    Context<StatsCollection>::get()->addIo(IoType::Read, StatsBackend::Fastpath, 10, 0, true);
+    ASSERT_EQ(1, stats.getPerGpuStats(0, StatsBackend::Fastpath)
+                     ->unalignedCount[static_cast<size_t>(IoType::Read)]
+                     .load());
 }
 
 TEST_F(HipFileStats, StatsCollectionError)
@@ -190,10 +208,15 @@ TEST_F(HipFileStats, GenerateReportV1)
         .buckets[0] = 3;
     stats.getPerGpuStats(0, StatsBackend::Fallback)
         ->errorCount[static_cast<size_t>(IoType::Write)]
-        .buckets[0]                = 4;
+        .buckets[0] = 4;
+
     stats.getBufferRegistrations() = 10;
     stats.getFileRegistrations()   = 20;
     stats.getFastpathRejections()  = 30;
+
+    stats.getPerGpuStats(0, StatsBackend::Fallback)->unalignedCount[static_cast<size_t>(IoType::Read)]  = 40;
+    stats.getPerGpuStats(0, StatsBackend::Fallback)->unalignedCount[static_cast<size_t>(IoType::Write)] = 50;
+
     StatsClient::generateReportV1(os, &stats);
     std::string str{os.str()};
     ASSERT_GT(std::string::npos, str.find("Total Fastpath Read Size (B): 2"));
@@ -207,6 +230,8 @@ TEST_F(HipFileStats, GenerateReportV1)
     ASSERT_GT(std::string::npos, str.find("Buffer Registrations: 10"));
     ASSERT_GT(std::string::npos, str.find("File Handle Registrations: 20"));
     ASSERT_GT(std::string::npos, str.find("Fastpath Rejections: 30"));
+    ASSERT_GT(std::string::npos, str.find("Total Fallback Read Unaligned: 40"));
+    ASSERT_GT(std::string::npos, str.find("Total Fallback Write Unaligned: 50"));
 }
 
 TEST_F(HipFileStats, GenerateReportV1TwoGpus)
@@ -278,6 +303,7 @@ TEST_F(HipFileStatsPerGpuStatsV1, GetHistograms)
     auto [readSize, readCount, readTime, readError]     = stats.getHistograms(IoType::Read);
     auto [writeSize, writeCount, writeTime, writeError] = stats.getHistograms(IoType::Write);
     auto [invalidSize, invalidCount, invalidTime, invalidError] =
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): invalid value tests rejection
         stats.getHistograms(static_cast<IoType>(-1));
     ASSERT_EQ(&stats.ioSizeBytes[0], readSize);
     ASSERT_EQ(&stats.ioCount[0], readCount);
@@ -299,6 +325,7 @@ TEST_F(HipFileStatsV1, getPerGpuStats)
 {
     StatsV1 stats{};
     ASSERT_EQ(nullptr, stats.getPerGpuStats(StatsV1::MaxGpus, StatsBackend::Fastpath));
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): invalid value tests rejection
     ASSERT_EQ(nullptr, stats.getPerGpuStats(0, static_cast<StatsBackend>(-1)));
 }
 

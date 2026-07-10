@@ -69,6 +69,8 @@ public:
 
     std::map<pcinfo_t, KernelName> kernel_names{};
     std::vector<occupancy_t>       occupancy{};
+    std::vector<trace_event_t>     events{};
+    std::vector<dispatch_t>        dispatches{};
 };
 
 class WaveFile

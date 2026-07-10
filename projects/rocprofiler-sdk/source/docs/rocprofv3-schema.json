@@ -1035,6 +1035,220 @@
                                     ]
                                 }
                             },
+                            "spm_counter_collection": {
+                                "type": "array",
+                                "description": "SPM Counter collection records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "dispatch_data": {
+                                            "type": "object",
+                                            "description": "Dispatch data details.",
+                                            "properties": {
+                                                "size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the dispatch data."
+                                                },
+                                                "correlation_id": {
+                                                    "type": "object",
+                                                    "description": "Correlation ID information.",
+                                                    "properties": {
+                                                        "internal": {
+                                                            "type": "integer",
+                                                            "description": "Internal correlation ID."
+                                                        },
+                                                        "external": {
+                                                            "type": "integer",
+                                                            "description": "External correlation ID."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "internal",
+                                                        "external"
+                                                    ]
+                                                },
+                                                "dispatch_info": {
+                                                    "type": "object",
+                                                    "description": "Dispatch information details.",
+                                                    "properties": {
+                                                        "size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the dispatch information."
+                                                        },
+                                                        "agent_id": {
+                                                            "type": "object",
+                                                            "description": "Agent ID information.",
+                                                            "properties": {
+                                                                "handle": {
+                                                                    "type": "integer",
+                                                                    "description": "Handle of the agent."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "handle"
+                                                            ]
+                                                        },
+                                                        "queue_id": {
+                                                            "type": "object",
+                                                            "description": "Queue ID information.",
+                                                            "properties": {
+                                                                "handle": {
+                                                                    "type": "integer",
+                                                                    "description": "Handle of the queue."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "handle"
+                                                            ]
+                                                        },
+                                                        "kernel_id": {
+                                                            "type": "integer",
+                                                            "description": "ID of the kernel."
+                                                        },
+                                                        "dispatch_id": {
+                                                            "type": "integer",
+                                                            "description": "ID of the dispatch."
+                                                        },
+                                                        "private_segment_size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the private segment."
+                                                        },
+                                                        "group_segment_size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the group segment."
+                                                        },
+                                                        "workgroup_size": {
+                                                            "type": "object",
+                                                            "description": "Workgroup size information.",
+                                                            "properties": {
+                                                                "x": {
+                                                                    "type": "integer",
+                                                                    "description": "X dimension."
+                                                                },
+                                                                "y": {
+                                                                    "type": "integer",
+                                                                    "description": "Y dimension."
+                                                                },
+                                                                "z": {
+                                                                    "type": "integer",
+                                                                    "description": "Z dimension."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "x",
+                                                                "y",
+                                                                "z"
+                                                            ]
+                                                        },
+                                                        "grid_size": {
+                                                            "type": "object",
+                                                            "description": "Grid size information.",
+                                                            "properties": {
+                                                                "x": {
+                                                                    "type": "integer",
+                                                                    "description": "X dimension."
+                                                                },
+                                                                "y": {
+                                                                    "type": "integer",
+                                                                    "description": "Y dimension."
+                                                                },
+                                                                "z": {
+                                                                    "type": "integer",
+                                                                    "description": "Z dimension."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "x",
+                                                                "y",
+                                                                "z"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "size",
+                                                        "agent_id",
+                                                        "queue_id",
+                                                        "kernel_id",
+                                                        "dispatch_id",
+                                                        "private_segment_size",
+                                                        "group_segment_size",
+                                                        "workgroup_size",
+                                                        "grid_size"
+                                                    ]
+                                                }
+                                            },
+                                            "required": [
+                                                "size",
+                                                "correlation_id",
+                                                "dispatch_info"
+                                            ]
+                                        },
+                                        "records": {
+                                            "type": "array",
+                                            "description": "Array of sampled counter values.",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "counter_id": {
+                                                        "type": "object",
+                                                        "description": "Counter ID information.",
+                                                        "properties": {
+                                                            "handle": {
+                                                                "type": "integer",
+                                                                "description": "Handle of the counter."
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "handle"
+                                                        ]
+                                                    },
+                                                    "value": {
+                                                        "type": "number",
+                                                        "description": "Sampled counter value."
+                                                    },
+                                                    "timestamp": {
+                                                        "type": "integer",
+                                                        "description": "GPU timestamp when the sample was collected."
+                                                    },
+                                                    "instance_id": {
+                                                        "type": "integer",
+                                                        "description": "Counter instance identifier encoding dimension information (XCC, Shader Engine, Instance)."
+                                                    }
+                                                },
+                                                "required": [
+                                                    "counter_id",
+                                                    "value",
+                                                    "timestamp",
+                                                    "instance_id"
+                                                ]
+                                            }
+                                        },
+                                        "stream_id": {
+                                            "type": "object",
+                                            "description": "Stream identifier for the SPM data.",
+                                            "properties": {
+                                                "handle": {
+                                                    "type": "integer",
+                                                    "description": "Handle of the stream."
+                                                }
+                                            },
+                                            "required": [
+                                                "handle"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "thread_id",
+                                        "dispatch_data",
+                                        "records",
+                                        "stream_id"
+                                    ]
+                                }
+                            },
                             "pc_sample_host_trap": {
                                 "type": "array",
                                 "description": "Host Trap PC Sampling records.",

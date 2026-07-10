@@ -147,7 +147,6 @@ class TestJacobi(RocprofsysTest):
     def test_roctx(self, mode, hpc_openmp_environment):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
 
         result = self.run_test(
@@ -237,16 +236,12 @@ class TestMatrixExponential(RocprofsysTest):
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_USE_OMPT"] = "ON"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
 
         result = self.run_test(
             mode, target="matrix-exponential-streams-sync-hip", env=env
         )
-        self.assert_regex(
-            result,
-            pass_regex=self.rocblas_gemm_kernel_prefix,
-            subtest_name="rocBLAS GEMM Kernel Validation",
-        )
+        self.assert_regex(result)
+
         # 171 total GEMM dispatches (sum of 1 to 18 from the Taylor series loop),
         # but schedule(dynamic) distributes them non-deterministically across
         # 4 OpenMP threads, so we verify presence rather than exact per-thread counts
@@ -257,13 +252,10 @@ class TestMatrixExponential(RocprofsysTest):
             pass_regex=self.rocblas_gemm_kernel_prefix,
         )
 
-        # TODO: Disabled pending investigation (AIPROFSYST-418)
-        # We expect 171 GEMM dispatches, but sometimes we see less.
-
-        # self.assert_rocpd(
-        #     result,
-        #     rules_files=matrix_exponential_rules,
-        # )
+        self.assert_rocpd(
+            result,
+            rules_files=matrix_exponential_rules,
+        )
 
 
 @pytest.mark.rocm

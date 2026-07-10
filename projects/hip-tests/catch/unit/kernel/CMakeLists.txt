@@ -19,10 +19,27 @@ set(TEST_SRC
     hipLaunchBoundsBasic.cc
     hipAutoThreadIdx.cc
     hipLaunchKernelEx.cc
+    hipTestUserSgprIncrease.cc
 )
+
+# KernelStackSize only on gfx1250 and gfx1251
+set(KERNEL_STACK_SIZE_SUPPORTING_GPUS "gfx1250;gfx1251")
+set(KERNEL_STACK_SIZE_SUPPORTED OFF)
+foreach(STACK_SIZE_GPU IN LISTS KERNEL_STACK_SIZE_SUPPORTING_GPUS)
+  string(FIND "${OFFLOAD_ARCH_STR}" "${STACK_SIZE_GPU}" _idx)
+  if(_idx GREATER -1)
+    set(KERNEL_STACK_SIZE_SUPPORTED ON)
+    break()
+  endif()
+endforeach()
+
 if(UNIX)
   set(TEST_SRC ${TEST_SRC}
       hipPrintfKernel.cc)
+  if(KERNEL_STACK_SIZE_SUPPORTED)
+    message(STATUS "KernelStackSize test enabled: ${OFFLOAD_ARCH_STR}")
+    set(TEST_SRC ${TEST_SRC} hipKernelStackSize.cc)
+  endif()
 endif()
 
 # only for AMD

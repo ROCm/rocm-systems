@@ -203,6 +203,17 @@ def require_torch(*, gpu: bool = False) -> None:
         pytest.skip("torch.cuda.is_available() is False")
 
 
+def require_triton(*, gpu: bool = False) -> None:
+    """Skip when Triton, or the PyTorch/GPU stack it requires, is unavailable."""
+    require_torch(gpu=gpu)
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("Triton is not installed")
+    try:
+        import triton  # noqa: F401
+    except Exception as e:
+        pytest.skip(f"Triton import failed: {type(e).__name__}: {e}")
+
+
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
     """Skip monkeypatch tests under --call-binary (patches don't cross processes)."""

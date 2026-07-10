@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_REVERSE_OFFLOAD_RO_NET_GPU_TEMPLATES_HPP_
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "constmem.hpp"
 #include "commands_types.hpp"
 #include "context_ro_device.hpp"
 #include "queue_proxy.hpp"
@@ -147,7 +148,7 @@ __device__ void ROContext::put_nbi(T *dest, const T *source, size_t nelems,
 template <typename T>
 __device__ void ROContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
                      reinterpret_cast<void *>(&value), sizeof(T), local_pe);
@@ -161,7 +162,7 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
 template <typename T>
 __device__ T ROContext::g(const T *source, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
     long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
     T dest;
@@ -305,6 +306,26 @@ __device__ T ROContext::amo_fetch_xor(void *dst, T value, int pe) {
 template <typename T>
 __device__ void ROContext::amo_xor(void *dst, T value, int pe) {
   [[maybe_unused]] T ret{amo_fetch_xor(dst, value, pe)};
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
+                                            const T *source, int nreduce) {
+  if (!is_thread_zero_in_block()) {
+    __syncthreads();
+    return ROCSHMEM_SUCCESS;
+  }
+
+  ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+
+  build_queue_element(RO_NET_TEAM_REDUCE_SCATTER, dest, const_cast<T *>(source),
+                      nreduce, 0, 0, 0, 0, nullptr, nullptr,
+                      (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
+                      true, get_status_flag(), is_default_ctx, Op,
+                      GetROType<T>::Type);
+
+  __syncthreads();
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename T>

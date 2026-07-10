@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -676,6 +676,19 @@ write_perfetto(
                                 mid);
                             (*it)->end_timestamp     = mid;
                             (*next)->start_timestamp = mid;
+
+                            // The modified start may have pushed *next behind multiple later
+                            // records. Find the correct insertion point and rotate in one
+                            // shot so subsequent iterations see correct neighbors.
+                            auto insert_it =
+                                std::upper_bound(std::next(next),
+                                                 qitr.second.end(),
+                                                 (*next)->start_timestamp,
+                                                 [](rocprofiler_timestamp_t lhs, const auto* rhs) {
+                                                     return lhs < rhs->start_timestamp;
+                                                 });
+                            if(insert_it != std::next(next))
+                                std::rotate(next, std::next(next), insert_it);
                         }
 
                         if(demangled.find(name) == demangled.end())

@@ -15,6 +15,7 @@ set(_SKIP_REGEX "@RAUT_SKIP_REGULAR_EXPRESSION@")
 set(_DISABLED "@RAUT_DISABLED@")
 set(_ENVIRONMENT "@RAUT_ENVIRONMENT@")
 set(_PREFIX "@RAUT_TEST_PREFIX@")
+set(_RESOURCE_LOCK "@RAUT_RESOURCE_LOCK@")
 
 function(rocprofiler_sdk_update_unit_test_environment _VAR _NAME)
     set(_UPD) # temporary variable to hold updated list
@@ -65,6 +66,12 @@ if(_DISABLED)
     set_tests_properties(
         ${@RAUT_TARGET@_TESTS}
         PROPERTIES DISABLED "${_DISABLED}")
+endif()
+
+if(_RESOURCE_LOCK)
+    set_tests_properties(
+        ${@RAUT_TARGET@_TESTS}
+        PROPERTIES RESOURCE_LOCK "${_RESOURCE_LOCK}")
 endif()
 
 # Disable specific tests
