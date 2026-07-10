@@ -116,6 +116,18 @@ lttng enable-event --userspace --channel=ch1 \
     'rocm_hsa:hsa_signal_create_args,rocm_hsa:hsa_signal_destroy_args,rocm_hsa:hsa_amd_memory_pool_allocate_args' >/dev/null
 lttng start "$SESSION_NAME" >/dev/null
 
+# In ROCR_LTTNG_UST_LINK_MODE=dynamic (the default), hsa-runtime64 does not
+# link liblttng-ust and does not create the tracepoint probes itself --
+# probe creation lives in the separate rocm_hsa_lttng_provider DSO, which
+# must be loaded (e.g. via LD_PRELOAD) for any rocm_hsa:* event to fire.
+# Only preload it when present, so this script remains backward-compatible
+# with a 'direct'-mode build (no provider .so is built at all in that
+# mode) and correctly exercises the dynamic-mode default otherwise.
+HSA_LTTNG_PROVIDER="$BUILD_LIB_DIR/librocm_hsa_lttng_provider.so"
+if [ -f "$HSA_LTTNG_PROVIDER" ]; then
+    export LD_PRELOAD="$HSA_LTTNG_PROVIDER${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
 APP_RC=0
 "$WORK/curated_test" || APP_RC=$?
 echo "  curated_test exit=$APP_RC"

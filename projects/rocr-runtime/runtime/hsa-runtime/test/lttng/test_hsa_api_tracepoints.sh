@@ -101,6 +101,18 @@ lttng enable-channel --userspace --discard --subbuf-size=4096 --num-subbuf=2 def
 lttng enable-event --userspace -c default 'rocm_hsa:hsa_api_enter,rocm_hsa:hsa_api_exit_status,rocm_hsa:hsa_api_exit_ptr,rocm_hsa:hsa_api_exit_void' >/dev/null
 lttng start "$SESSION_API" >/dev/null
 
+# In ROCR_LTTNG_UST_LINK_MODE=dynamic (the default), hsa-runtime64 does not
+# link liblttng-ust and does not create the tracepoint probes itself --
+# probe creation lives in the separate rocm_hsa_lttng_provider DSO, which
+# must be loaded (e.g. via LD_PRELOAD) for any rocm_hsa:* event to fire.
+# Only preload it when present, so this script remains backward-compatible
+# with a 'direct'-mode build (no provider .so is built at all in that
+# mode) and correctly exercises the dynamic-mode default otherwise.
+HSA_LTTNG_PROVIDER="$LIB_DIR/librocm_hsa_lttng_provider.so"
+if [ -f "$HSA_LTTNG_PROVIDER" ]; then
+    export LD_PRELOAD="$HSA_LTTNG_PROVIDER${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
 LD_LIBRARY_PATH="$LIB_DIR:${LD_LIBRARY_PATH:-}" "$TRACE_DIR/tiny" || true
 
 lttng stop "$SESSION_API" >/dev/null
