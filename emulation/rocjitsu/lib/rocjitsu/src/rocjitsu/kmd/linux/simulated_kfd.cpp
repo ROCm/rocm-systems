@@ -1814,17 +1814,20 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     if (daemon_mode_)
       sess.owned_dbg_fd = UniqueFd(dbg_fd);
     sess.exception_enable_mask = args->enable.exception_mask;
-    sess.runtime_state =
-        runtime_enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
 
-    // Copy kfd_runtime_info back to the debugger (kernel: kfd_dbg_trap_enable
-    // copies the saved runtime info and returns its size).
+    // Snapshot the runtime-enable state under a single lock so the marshaled
+    // runtime_state, r_debug and ttmp_setup stay mutually consistent: a
+    // concurrent RUNTIME_ENABLE/DISABLE must not change them between reads.
+    // Lock order debug_mutex_ -> runtime_mutex_ is already held that way.
+    // Kernel: kfd_dbg_trap_enable copies the saved runtime info and returns its
+    // size.
     kfd_runtime_info info{};
     {
       std::lock_guard<std::mutex> rlk(target->runtime_mutex_);
-      info.r_debug = target->runtime_state_.r_debug;
-      info.ttmp_setup =
-          (target->runtime_state_.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
+      const auto &rt = target->runtime_state_;
+      sess.runtime_state = rt.enabled ? DEBUG_RUNTIME_STATE_ENABLED : DEBUG_RUNTIME_STATE_DISABLED;
+      info.r_debug = rt.r_debug;
+      info.ttmp_setup = (rt.mode_mask & KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK) ? 1u : 0u;
     }
     info.runtime_state = sess.runtime_state;
     size_t copy_size = std::min(static_cast<size_t>(args->enable.rinfo_size), sizeof(info));
