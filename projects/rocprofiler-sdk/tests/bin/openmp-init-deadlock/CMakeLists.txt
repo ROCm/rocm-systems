@@ -23,57 +23,77 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
+if(NOT OMP_TARGET_COMPILER)
+    find_program(
+        amdclangpp_EXECUTABLE
+        NAMES amdclang++
+        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+    mark_as_advanced(amdclangpp_EXECUTABLE)
+
+    if(amdclangpp_EXECUTABLE)
+        set(OMP_TARGET_COMPILER
+            "${amdclangpp_EXECUTABLE}"
+            CACHE FILEPATH "")
+    endif()
+endif()
+
 project(rocprofiler-sdk-tests-bin-openmp-init-deadlock LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Threads REQUIRED)
 
-# This regression test needs the LLVM OpenMP runtime (libomp), which performs OMPT tool
-# discovery while holding its non-recursive init ticket lock. The GNU runtime (libgomp)
-# does not reproduce the deadlock the same way, so the test is only registered when libomp
-# is found.
-find_library(
-    openmp-init-deadlock-libomp
-    NAMES omp libomp.so.5 libomp.so
-    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATH_SUFFIXES llvm/lib lib NO_CACHE)
+include(rocprofiler-sdk-custom-compilation)
 
-if(NOT openmp-init-deadlock-libomp)
-    message(
-        STATUS
-            "[openmp-init-deadlock] LLVM libomp not found; skipping OMPT init-deadlock regression app"
-        )
-    return()
-endif()
-
-# -fopenmp is used only to parse the '#pragma omp' directives at compile time; the LLVM
-# libomp runtime is linked explicitly below (rather than relying on the compiler's default
-# OpenMP runtime, which for GCC would be libgomp) so the OMPT/ticket-lock behavior under
-# test is exercised regardless of the compiler.
 function(openmp_init_deadlock_add_omp_library _NAME _SRC)
     add_library(${_NAME} SHARED)
     target_sources(${_NAME} PRIVATE ${_SRC})
     target_compile_options(${_NAME} PRIVATE -fopenmp)
-    target_link_libraries(${_NAME} PRIVATE ${openmp-init-deadlock-libomp}
-                                           rocprofiler-sdk::tests-build-flags)
+    target_link_options(${_NAME} PRIVATE -fopenmp)
+    target_link_libraries(${_NAME} PRIVATE rocprofiler-sdk::tests-build-flags)
+    if(OMP_TARGET_COMPILER)
+        rocprofiler_sdk_custom_compilation(TARGET ${_NAME}
+                                           COMPILER ${OMP_TARGET_COMPILER})
+    endif()
 endfunction()
 
-# models OpenBLAS (USE_OPENMP=1): DT_INIT enters an omp parallel region
+# models OpenBLAS (USE_OPENMP=1): DT_INIT calls omp_get_num_places() (see blas_stub.cpp)
 openmp_init_deadlock_add_omp_library(openmp-init-deadlock-blas-stub blas_stub.cpp)
 
-# models a rocprofiler-sdk client tool: exports rocprofiler_configure and depends on the
-# blas-stub so its own DT_INIT is still pending when discovery runs
+# models an ordinary OpenMP-using application library: its DT_INIT calls into libomp and
+# it exposes lib_get_num_places() so the executable can confirm the constructor ran
+openmp_init_deadlock_add_omp_library(openmp-init-deadlock-consumer openmp_consumer.cpp)
+
+# models a rocprofiler-sdk client tool: only exports rocprofiler_configure. It depends on
+# the consumer (and blas-stub) so their DT_INIT constructors are pending when discovery
+# runs
 openmp_init_deadlock_add_omp_library(openmp-init-deadlock-client client.cpp)
 target_link_libraries(
     openmp-init-deadlock-client
     PRIVATE rocprofiler-sdk::rocprofiler-sdk
-            # ensure blas-stub initializes first and remains a hard dependency
-            "-Wl,--no-as-needed" openmp-init-deadlock-blas-stub "-Wl,--as-needed")
+            # ensure the consumer/blas-stub initialize first and remain hard dependencies
+            "-Wl,--no-as-needed"
+            openmp-init-deadlock-consumer
+            openmp-init-deadlock-blas-stub
+            "-Wl,--as-needed")
 
 add_executable(openmp-init-deadlock)
 target_sources(openmp-init-deadlock PRIVATE openmp-init-deadlock.cpp)
+# main() calls omp_get_num_places() directly, so it needs -fopenmp and an OpenMP runtime
+target_compile_options(openmp-init-deadlock PRIVATE -fopenmp)
+target_link_options(openmp-init-deadlock PRIVATE -fopenmp)
 target_link_libraries(
     openmp-init-deadlock
-    PRIVATE Threads::Threads rocprofiler-sdk::tests-build-flags
-            # pulls in the client (and transitively blas-stub) as load-time dependencies
-            "-Wl,--no-as-needed" openmp-init-deadlock-client "-Wl,--as-needed")
+    PRIVATE Threads::Threads
+            rocprofiler-sdk::tests-build-flags
+            # pulls in the client (and transitively consumer + blas-stub) as load-time
+            # deps
+            "-Wl,--no-as-needed"
+            openmp-init-deadlock-client
+            openmp-init-deadlock-consumer
+            "-Wl,--as-needed")
+if(OMP_TARGET_COMPILER)
+    rocprofiler_sdk_custom_compilation(TARGET openmp-init-deadlock
+                                       COMPILER ${OMP_TARGET_COMPILER})
+endif()
