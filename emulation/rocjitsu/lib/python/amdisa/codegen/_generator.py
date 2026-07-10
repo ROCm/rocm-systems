@@ -223,10 +223,13 @@ class CodeGenerator:
     def _encoding_group_name(
         base_name: str, offset: int, has_multiple_values: bool
     ) -> str:
-        if has_multiple_values:
-            return f'{base_name}OpHi{offset}'
+        # The base constant already names the first decode value.  Reuse it for
+        # offset zero instead of emitting a redundant ``OpHi0`` alias that is
+        # absent from the checked-in generated headers.
         if offset == 0:
             return base_name
+        if has_multiple_values:
+            return f'{base_name}OpHi{offset}'
         return f'{base_name}Hi{offset}'
 
     def _encoding_constants_block(self) -> cgen.Line | None:
@@ -244,8 +247,16 @@ class CodeGenerator:
 
             base_name = f'k{enc.fmt_enc_name}'
             has_multiple_values = len(values) > 1
-            seen[base_name] = values[0]
-            constants.append((base_name, values[0]))
+            existing = seen.get(base_name)
+            if existing is None:
+                seen[base_name] = values[0]
+                constants.append((base_name, values[0]))
+            elif existing != values[0]:
+                raise ValueError(
+                    f'encoding constant collision for '
+                    f'{self.isa_spec.arch_name}::encoding::{base_name}: '
+                    f'{existing} vs {values[0]}'
+                )
             for value in values:
                 value_offset = value - values[0]
                 name = self._encoding_group_name(
@@ -290,6 +301,7 @@ class CodeGenerator:
             '/// @brief Primary decode selector constants generated from the ISA XML.',
             '///',
             '/// These values match Instruction::encoding_id(), which is word0 >> 23.',
+            '/// They are not necessarily the narrower MachineInst::encoding bitfield value.',
         ]
         lines.extend(
             self._emit_encoding_constant(name, value) for name, value in constants
@@ -313,6 +325,9 @@ class CodeGenerator:
         concrete: list[tuple[str, int]] = []
         seen: dict[str, int] = {}
 
+        # Parser collections preserve XML declaration order.  Retaining that
+        # order here makes regenerated headers deterministic while keeping the
+        # constants grouped like the source ISA specification.
         for enc in self.isa_spec.inst_encodings:
             for inst in enc.insts:
                 base_name = self._opcode_const_base_name(inst.name)

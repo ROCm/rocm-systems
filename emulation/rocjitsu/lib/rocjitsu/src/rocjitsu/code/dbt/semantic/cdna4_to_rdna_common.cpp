@@ -53,6 +53,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
                                 "is v255");
 
   constexpr uint16_t kVccLo = 106;
+  // These generated opcodes currently match on RDNA3 and RDNA4. Keep the
+  // architecture-specific selection explicit so an ISA XML change cannot
+  // silently make this shared lowering emit the other target's opcode.
   const uint16_t add_co_u32_op = host_arch == ROCJITSU_CODE_ARCH_RDNA3
                                      ? rdna3::kVAddCoU32Vop3SdstEnc
                                      : rdna4::kVAddCoU32Vop3SdstEnc;

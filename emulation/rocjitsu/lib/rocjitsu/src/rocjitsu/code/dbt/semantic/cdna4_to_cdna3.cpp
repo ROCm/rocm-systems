@@ -97,7 +97,7 @@ build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint
                                                               uint16_t op, uint8_t vdata) {
   cdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
-  dst.op = op & 0xFF;
+  dst.op = op & 0x7F;
   dst.offset = src.offset;
   dst.offen = src.offen;
   dst.idxen = src.idxen;

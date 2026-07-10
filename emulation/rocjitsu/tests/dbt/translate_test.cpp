@@ -2006,7 +2006,7 @@ std::array<uint32_t, 2> make_cdna4_ds_read_b64_tr_b16_words() {
 std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint16_t op) {
   rocjitsu::cdna4::MubufMachineInst inst{};
   inst.encoding = 0x38;
-  inst.op = op & 0xFF;
+  inst.op = op & 0x7F;
   inst.lds = 1;
   inst.offen = 1;
   inst.vaddr = 2;

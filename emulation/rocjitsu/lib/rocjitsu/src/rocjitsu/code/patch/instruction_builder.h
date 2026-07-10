@@ -45,6 +45,9 @@ class Instruction;
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = cdna4::encoding::kSopp;
 inline constexpr uint32_t kSop1EncodingPrefix = cdna4::encoding::kSop1;
+// SOP2 stores only a two-bit fixed prefix in MachineInst::encoding. Generated
+// encoding::kSop2 is instead the wider primary-decode selector (word0 >> 23),
+// so using it directly here would conflate two different representations.
 inline constexpr uint32_t kSop2EncodingPrefix = 0x2;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
