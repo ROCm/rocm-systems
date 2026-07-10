@@ -171,6 +171,7 @@ ARG DEBUG_BUILD=0
 ## building rocSHMEM
 ARG ROCSHMEM_BRANCH=users/abouteiller/gin-stage2
 ARG ROCSHMEM_CACHE_BUST=1
+RUN echo "rocshmem cache bust: ${ROCSHMEM_CACHE_BUST}"
 COPY projects/rocshmem/ /tmp/local/projects/rocshmem/
 ENV ROCSHMEM_INSTALL_DIR=${WORKDIR}/rocshmem
 RUN if [ "${USE_LOCAL_SRC}" = "1" ]; then \
@@ -200,6 +201,7 @@ RUN cd ${SRC}/projects/rocshmem \
 ## building RCCL
 ARG RCCL_BRANCH=users/abouteiller/gin-stage2
 ARG RCCL_CACHE_BUST=1
+RUN echo "rccl cache bust: ${RCCL_CACHE_BUST}"
 COPY projects/rccl/      /tmp/local/projects/rccl/
 COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
