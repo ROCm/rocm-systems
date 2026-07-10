@@ -42,7 +42,9 @@ environment variable such as ``HSA_HOTSWAP_DEBUG``:
 ``dispatch``
   ROCR records host-side hotswap decisions and dispatch metadata. This mode is
   the least invasive mode and should be available without COMGR device
-  instrumentation support.
+  instrumentation support. Dispatch packet coverage is limited to runtime paths
+  where ROCR actually observes the packet; many application packets are written
+  directly into the queue ring.
 
 ``entry``
   ROCR passes a debug record buffer to COMGR. COMGR emits a wrapper at kernel
@@ -67,8 +69,10 @@ answer the question:
   ``cluster_size_z`` fields.
 * If a value is only meaningful at device time, ROCR should ask COMGR to emit
   instrumentation that reads the shader programming guide defined hardware
-  field, such as the cluster ID status field, and writes it into the debug
-  record.
+  field, such as the ``IB_STS2`` cluster ID status field, and writes it into
+  the debug record. The production PLAT-204339 B0 workaround already uses this
+  class of COMGR-emitted device read for correctness; debug mode should reuse
+  the same documented source instead of inventing a host-side cluster ID.
 * If neither source is available, the record should mark the field unknown
   instead of guessing.
 
@@ -99,6 +103,11 @@ ROCR should not try to synthesize device-time cluster IDs from host metadata.
 If the value must be observed at device time, ROCR should request COMGR device
 instrumentation and provide storage for the result.
 
+Dispatch metadata capture should be described as opportunistic unless the
+queue path being debugged routes packets through a ROCR-visible submission or
+intercept path. Code-object-load decisions are always visible to hotswap; every
+individual dispatch packet is not.
+
 COMGR responsibilities
 ----------------------
 
@@ -113,11 +122,33 @@ COMGR should own all instruction-level instrumentation:
   passed through user kernargs.
 * Save and restore any registers used by instrumentation.
 * Emit device-time reads for hardware state, such as the shader programming
-  guide defined cluster ID or dynamic cluster-size fields, in the wrapper or
-  site instrumentation path.
+  guide defined cluster ID field, in the wrapper or site instrumentation path.
+  Cluster size should come from host packet metadata unless a documented
+  device-time field is identified for the target.
 * Emit per-site records only when scratch registers and insertion points are
   proven safe. If a requested site record cannot be emitted, return a clear
   debug-mode failure instead of emitting partial instrumentation silently.
+
+Compatibility and failure policy
+--------------------------------
+
+Debug instrumentation should be negotiated separately from production strict
+mode:
+
+* Keep production hotswap flags minimal. Debug flags should not be required for
+  PLAT-204339 correctness.
+* Extend the COMGR hotswap options structure by using the existing ``size``
+  field as a version boundary. New ROCR builds must continue to pass the base
+  option size when no debug fields are needed.
+* If ``dispatch`` mode is selected and COMGR lacks debug support, ROCR can
+  still emit host-side decision records.
+* If ``entry`` or ``site`` mode is selected and COMGR lacks the requested debug
+  support, ROCR should fail the debug request explicitly or disable only that
+  debug mode according to the environment policy. It should not imply that
+  device-time coverage was collected.
+* If production strict mode is required and COMGR cannot produce or load the
+  strict rewrite, ROCR must fail the load instead of falling back to the
+  original code object.
 
 Record model
 ------------
@@ -143,8 +174,10 @@ Expected coverage
 
 ``dispatch`` mode is guaranteed only for information already visible to ROCR.
 It can identify that a mask workaround was requested and can report cluster
-metadata carried by the dispatch packet. It cannot report per-wave device state
-or prove that a specific dynamic instruction instance executed.
+metadata carried by a dispatch packet when that packet passes through a
+ROCR-observed path. It cannot report per-wave device state, cannot guarantee
+coverage for direct queue-ring writes, and cannot prove that a specific dynamic
+instruction instance executed.
 
 ``entry`` mode is the preferred device-time mode. It has a single controlled
 instrumentation point, avoids changing user ABI, and can record hardware state
@@ -167,3 +200,15 @@ Testing plan
   options and verifies that records are emitted and drained.
 * Validate on gfx1250 A0 hardware with B0 code objects that exercise tensor and
   cluster-load mask workaround paths.
+
+Suggested implementation phases
+-------------------------------
+
+* First add ``HSA_HOTSWAP_DEBUG=dispatch`` parsing and host-side decision
+  records in ROCR. This phase does not require COMGR changes.
+* Then add COMGR debug option validation and explicit unsupported-mode errors
+  for ``entry`` and ``site``.
+* Add entry-wrapper records once the device record writer, register allocation,
+  and buffer-address materialization are proven on gfx1250.
+* Add per-site records last, with negative tests for every case that cannot be
+  instrumented safely.
