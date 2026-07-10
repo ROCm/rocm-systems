@@ -70,6 +70,7 @@ protected:
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
+    soc_ = soc;
     auto num_xcds = soc->num_xcds();
 
     loaded_.engine_config.max_ticks = 0;
@@ -98,6 +99,7 @@ protected:
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
+  rocjitsu::SoC *soc_ = nullptr;
   rocjitsu::SimulatedDriver *driver_ = nullptr;
 };
 
@@ -190,7 +192,8 @@ TEST_F(KfdIoctlTest, GetTileConfigRejectsUnknownGpuId) {
 }
 
 TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
-  rocjitsu::SimulatedDriver daemon_driver(*loaded_.soc(), true);
+  ASSERT_NE(soc_, nullptr);
+  rocjitsu::SimulatedDriver daemon_driver(*soc_, true);
   uint32_t process_id = daemon_driver.open_process();
   ASSERT_NE(process_id, 0u);
 

@@ -1617,6 +1617,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(a - b - c); }}()',
     'mad_u24': '(({0} & 0x00FFFFFFu) * ({1} & 0x00FFFFFFu) + {2})',
     'mad_i24': '::rocjitsu::amdgpu::mad_i24_u32({0}, {1}, {2})',
+    'mad_lo_u16': '::rocjitsu::amdgpu::mad_lo_u16({0}, {1}, {2})',
     'bfe_u': '[&]() {{ uint32_t src={0}; uint32_t off={1} & 31u; uint32_t w={2} & 31u;'
     ' if (w == 0) return 0u;'
     ' uint32_t mask = (w >= 32) ? ~0u : ((1u << w) - 1u);'
