@@ -252,17 +252,41 @@ def test_topology_bit_clear(monkeypatch, ais_check):
     assert ais_check.topology_reports_ais() is False
 
 
-def test_topology_any_node_with_bit_counts(monkeypatch, ais_check):
+def test_topology_any_gpu_node_with_bit_counts(monkeypatch, ais_check):
     _patch_topology(
         monkeypatch,
         ais_check,
         {
-            "1": "capability 0\n",
-            "2": "capability 64\n",
+            "1": "simd_count 144\ncapability 0\n",
+            "2": "simd_count 144\ncapability 64\n",
         },
     )
 
     assert ais_check.topology_reports_ais() is True
+
+
+def test_topology_bit_set_on_non_gpu_node_ignored(monkeypatch, ais_check):
+    # capability bit is set, but simd_count is 0 -> not a GPU, so skipped.
+    _patch_topology(
+        monkeypatch,
+        ais_check,
+        {
+            "0": "cpu_cores_count 48\nsimd_count 0\ncapability 64\n",
+        },
+    )
+
+    assert ais_check.topology_reports_ais() is False
+
+
+def test_topology_bit_set_but_no_simd_count(monkeypatch, ais_check):
+    # capability bit set but simd_count absent -> not treated as a GPU.
+    _patch_topology(
+        monkeypatch,
+        ais_check,
+        {"0": "capability 64\n"},
+    )
+
+    assert ais_check.topology_reports_ais() is False
 
 
 def test_topology_missing_capability_field(monkeypatch, ais_check):

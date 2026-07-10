@@ -138,8 +138,9 @@ def amdgpu_dkms_version():
 def topology_reports_ais():
     """
     True if any KFD topology GPU node reports AIS P2P-DMA initialized via its
-    "capability" bit (capability & KFD_CAPABILITY_AIS). CPU nodes omit the field
-    and are simply skipped.
+    "capability" bit (capability & KFD_CAPABILITY_AIS). Only GPU nodes are
+    considered, identified by a non-zero "simd_count"; CPU nodes (simd_count 0
+    or absent) are skipped.
     """
     try:
         nodes = os.listdir(KFD_TOPOLOGY_NODES)
@@ -150,17 +151,22 @@ def topology_reports_ais():
         path = os.path.join(KFD_TOPOLOGY_NODES, node, "properties")
         try:
             with open(path, "r", encoding="utf-8") as f:
+                simd_count = 0
+                capability = 0
                 for line in f:
                     key, _, value = line.partition(" ")
-                    if key != "capability":
+                    if key not in ("simd_count", "capability"):
                         continue
                     try:
-                        capability = int(value.strip())
+                        parsed = int(value.strip())
                     except ValueError:
-                        break
-                    if capability & KFD_CAPABILITY_AIS:
-                        return True
-                    break
+                        continue
+                    if key == "simd_count":
+                        simd_count = parsed
+                    else:
+                        capability = parsed
+                if simd_count and (capability & KFD_CAPABILITY_AIS):
+                    return True
         except OSError:
             continue
 
