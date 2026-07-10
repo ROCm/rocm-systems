@@ -377,6 +377,17 @@ TEST_F(KfdIoctlTest, DbgTrapOpBeforeEnableReturnsEINVAL) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EINVAL);
 }
 
+TEST_F(KfdIoctlTest, DbgTrapBareDisableReturnsEINVAL) {
+  // DISABLE with no active session has nothing to tear down. The by-pid gate's
+  // DISABLE exemption only skips the cross-process authorization check, not the
+  // session-enabled requirement, so a bare DISABLE is still rejected with
+  // EINVAL like any other non-ENABLE op on a disabled session.
+  kfd_ioctl_dbg_trap_args dis{};
+  dis.pid = static_cast<uint32_t>(getpid());
+  dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), -EINVAL);
+}
+
 TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
   // ROCr's runtime-enable must have run for the session to report ENABLED.
   kfd_ioctl_runtime_enable_args rt{};
@@ -412,6 +423,46 @@ TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
   args.enable.dbg_fd = make_debug_fd();
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EALREADY);
+}
+
+// Hammers ENABLE/DISABLE on one session from many threads to exercise
+// debug_mutex_ under ThreadSanitizer. Races are legitimate: a losing ENABLE
+// sees EALREADY and a losing DISABLE sees EINVAL. The invariant is that the
+// driver serializes them without a data race or torn session state — every call
+// returns one of the well-defined codes, never a crash or a bogus errno. Uses
+// self-debug (target pid == getpid()) so the whole cycle stays on debug_mutex_
+// and runtime_mutex_. In local mode the session never owns dbg_fd, so a single
+// shared eventfd can back every ENABLE.
+TEST_F(KfdIoctlTest, DbgTrapConcurrentEnableDisableIsRaceFree) {
+  const int fd = make_debug_fd();
+  const auto pid = static_cast<uint32_t>(getpid());
+  constexpr int kThreads = 8;
+  constexpr int kIters = 250;
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&, t] {
+      for (int i = 0; i < kIters; ++i) {
+        if ((t + i) & 1) {
+          kfd_ioctl_dbg_trap_args en{};
+          en.pid = pid;
+          en.op = KFD_IOC_DBG_TRAP_ENABLE;
+          en.enable.dbg_fd = fd;
+          const int rc = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &en);
+          EXPECT_TRUE(rc == 0 || rc == -EALREADY) << "enable rc=" << rc;
+        } else {
+          kfd_ioctl_dbg_trap_args dis{};
+          dis.pid = pid;
+          dis.op = KFD_IOC_DBG_TRAP_DISABLE;
+          const int rc = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis);
+          EXPECT_TRUE(rc == 0 || rc == -EINVAL) << "disable rc=" << rc;
+        }
+      }
+    });
+  }
+  for (auto &th : threads)
+    th.join();
 }
 
 TEST_F(KfdIoctlTest, DbgTrapEnableBadFdReturnsEBADF) {
