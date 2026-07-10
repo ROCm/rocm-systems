@@ -103,6 +103,21 @@ def _runtime_env() -> dict[str, str]:
     return env
 
 
+def _refresh_site_packages() -> None:
+    """Pick up editable-install .pth files added by a subprocess pip install.
+
+    Python only processes site-packages .pth files at interpreter startup, so
+    an in-process import after ``pip install -e`` in a child process needs this.
+    """
+    import importlib
+    import site
+
+    for d in site.getsitepackages():
+        if os.path.isdir(d):
+            site.addsitedir(d)
+    importlib.invalidate_caches()
+
+
 def _pip_install_editable() -> str:
     """``pip install -e`` the nccl4py tree; return the build log path."""
     os.makedirs(NCCL4PY_OUT, exist_ok=True)
@@ -145,6 +160,7 @@ def _pip_install_editable() -> str:
             check=False,
         )
     assert proc.returncode == 0, f"Failed to pip install nccl4py (see {build_log})"
+    _refresh_site_packages()
     return build_log
 
 
