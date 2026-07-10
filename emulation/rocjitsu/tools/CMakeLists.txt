@@ -25,6 +25,7 @@ set(RJ_TRANSLATE_OBJECT_LIBS
     rocjitsu_vm_amdgpu
     rocjitsu_vm_risc_v
     rocjitsu_config
+    rocjitsu_dbt_config
 )
 
 add_library(rocjitsu_tooling STATIC dbt_translate.cpp)

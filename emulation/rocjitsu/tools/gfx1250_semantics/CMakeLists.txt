@@ -34,6 +34,7 @@ set(RJ_GFX1250_SEMANTICS_OBJECT_LIBS
     rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
+    rocjitsu_dbt_config
 )
 
 find_library(
