@@ -2732,7 +2732,9 @@ class CodeGenerator:
     # D16 load semantic classes. Stores share the d16_hi/d16_lo flags, so the
     # class gate is what restricts the partial-def treatment to loads.
     # global/scratch loads use the 'flat_load' class.
-    _D16_LOAD_CLASSES = frozenset({'flat_load', 'buffer_load', 'tbuffer_load', 'ds_read'})
+    _D16_LOAD_CLASSES = frozenset(
+        {'flat_load', 'buffer_load', 'tbuffer_load', 'ds_read'}
+    )
 
     def _dst_is_also_source(self, inst: Instruction) -> bool:
         """Return True if the instruction reads from its destination operand.
