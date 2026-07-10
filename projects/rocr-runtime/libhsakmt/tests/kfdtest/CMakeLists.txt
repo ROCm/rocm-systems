@@ -92,7 +92,11 @@ set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 
 find_package(PkgConfig)
 
-list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+# Prepend DRM_DIR to CMAKE_PREFIX_PATH if set
+# Note: list(PREPEND) was added in CMake 3.15, using INSERT for 3.12 compatibility
+if(DRM_DIR)
+    list(INSERT CMAKE_PREFIX_PATH 0 "${DRM_DIR}")
+endif()
 # The module name passed to pkg_check_modules() is determined by the
 # name of file *.pc
 pkg_check_modules(DRM REQUIRED libdrm)
