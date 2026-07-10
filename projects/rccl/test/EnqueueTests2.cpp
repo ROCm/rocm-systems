@@ -130,5 +130,85 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // Gather_RecvHeavy_UsesNChannelsMax
+    //
+    // Exercises the ROCM-26926 fix: single-node asymmetric P2P traffic
+    // (planTotalTasks has a zero direction, as in gather where the root only
+    // receives) must start channel selection from nChannelsMax instead of
+    // nChannelsMin.
+    //
+    // We drive the recv direction (dir 0) with a large positive byte count and
+    // leave the send direction as a no-op (-1). planTotalTasks = {N, 0} makes
+    // asymmetric == true. With nNodes == 1 the fix selects nChStart ==
+    // nChannelsMax; a large enough message keeps the std::min from clamping
+    // below it. The resulting count is read back via p2pTasks[0]->nChannels.
+    //
+    // A self-send (sendRank == recvRank == comm->rank) is used so the function
+    // skips the connector-graph walk and proxy-op logic, keeping the host-only
+    // setup minimal while still executing the changed nChannels computation.
+    TEST(addP2pToPlan, Gather_RecvHeavy_UsesNChannelsMax)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        // Single-node topology with distinct min/max channel counts so the
+        // nChStart choice is observable.
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 1;
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;         // power of two, >= nChannelsMax
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        // Recv message sized so the fix is observable: large enough that
+        // divUp(bytes, p2pChunkSize/8) >= nChannelsMax (std::min does not clamp
+        // below nChStart), but small enough that the subsequent partSize
+        // doubling loop would NOT have promoted the old nChannelsMin start up
+        // to nChannelsMax. With p2pChunkSize=64KiB (minPartSize=8KiB,
+        // maxPartSize=2MiB), 4MiB yields nChannelsMax=8 under the fix versus
+        // nChannelsMin=4 under the old behaviour.
+        const ssize_t kRecvBytes = 4 * 1024 * 1024;  // 4 MiB
+
+        // Non-null recv task so we can read back the selected channel count.
+        struct ncclTaskP2p recvTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {&recvTask, nullptr};
+
+        // Gather at the root: recv total is nonzero, send total is zero.
+        int planTotalTasks[2] = {kNChannelsMax, 0};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ -1,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ kRecvBytes,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // The asymmetric path must start from nChannelsMax (not nChannelsMin).
+        EXPECT_EQ(recvTask.nChannels, kNChannelsMax);
+        EXPECT_GT(recvTask.nChannels, kNChannelsMin);
+
+        free(plan);
+        free(comm);
+    }
 }
 }
