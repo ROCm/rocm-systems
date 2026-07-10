@@ -343,5 +343,72 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // TwoRankExchange_UsesNChannelsMin
+    //
+    // Regression guard for the == 0 vs <= 1 tightening (commit 8ce40df957).
+    // The original fix used `planTotalTasks[dir] <= 1`, which misclassified a
+    // 2-rank symmetric exchange (planTotalTasks = {1, 1}) as asymmetric and
+    // wrongly boosted it to nChannelsMax. The corrected predicate uses == 0, so
+    // {1, 1} is symmetric and must stay at nChannelsMin.
+    //
+    // Both directions carry a positive 4 MiB payload (the size at which an
+    // asymmetric classification would select nChannelsMax), so a result of
+    // nChannelsMin proves {1, 1} is treated as symmetric.
+    TEST(addP2pToPlan, TwoRankExchange_UsesNChannelsMin)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 1;
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        const ssize_t kBytes = 4 * 1024 * 1024;
+
+        struct ncclTaskP2p recvTask = {};
+        struct ncclTaskP2p sendTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {&recvTask, &sendTask};
+
+        // 2-rank symmetric exchange: exactly one task in each direction.
+        int planTotalTasks[2] = {1, 1};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ kBytes,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ kBytes,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // {1, 1} is symmetric under the == 0 predicate: must stay at min.
+        EXPECT_EQ(recvTask.nChannels, kNChannelsMin);
+        EXPECT_EQ(sendTask.nChannels, kNChannelsMin);
+        EXPECT_LT(recvTask.nChannels, kNChannelsMax);
+
+        free(plan);
+        free(comm);
+    }
 }
 }
