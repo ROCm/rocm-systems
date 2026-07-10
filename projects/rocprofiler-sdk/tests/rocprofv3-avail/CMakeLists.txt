@@ -22,8 +22,8 @@ list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 # Disable for all sanitizers - Python tests cannot load sanitizer libs dynamically due to
 # static TLS block allocation limitations On WSL (no /dev/kfd) gfx-info[0] is a synthetic
 # CPU agent, so the arch regex above misses and these tests would run and fail; disable
-# them there so WSL matches the real-gfx1150+KFD behavior (where the arch match already
-# disables them).
+# them there so WSL matches the real gfx11-class + KFD behavior (where the arch match
+# already disables them).
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
    OR ROCPROFILER_MEMCHECK
@@ -43,7 +43,7 @@ endif()
 # is an RDNA (gfx10/11/12) cache block; on CDNA (e.g. gfx9xx / MI300) the equivalent L2
 # counter is TCC_HIT, so this exact list cannot be resolved there and pmc-check fails.
 # Restrict these checks to the architectures where the listed counters actually exist
-# (RDNA, e.g. gfx1150 on WSL2).
+# (RDNA, e.g. a gfx11-class GPU on WSL2).
 #
 # Additionally require /dev/kfd: these tests target device 0 (`-d 0` / `device=0`), but on
 # WSL the only GPU is enumerated at index 1 (a synthetic CPU agent occupies index 0), so
