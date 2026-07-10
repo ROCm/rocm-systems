@@ -22,15 +22,21 @@ rtc:
     disabled: [asan]
   Unit_hiprtcGetLoweredName_templateKrnls:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_cpp17:
     <<: *level_2
     tags: [compile]
   Unit_hiprtc_namehandling:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_getloweredname:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_test_hip_bfloat16:
     <<: *level_2
@@ -57,17 +63,24 @@ rtc:
     tags: [link]
   Unit_hiprtc_half_shuffle:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [integration]
   Unit_hiprtc_half_shuffle_sync:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [integration]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
+    # AIRUNTIME-2410
+    disabled: [asan]
     tags: [compile]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
-    disabled: [amd_wsl]
+    # AIRUNTIME-2410
+    disabled: [amd_wsl, asan]
     tags: [header]
   Unit_Rtc_MathConstants_header:
     <<: *level_2
@@ -218,7 +231,8 @@ rtc:
   Unit_Rtc_CoopReduce:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    # AIRUNTIME-2410
+    disabled: [amd_windows, asan]
   Unit_Rtc_CoopScan:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
