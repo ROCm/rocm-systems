@@ -392,6 +392,18 @@ find_clients()
     }
 
     auto get_env_libs = []() {
+        // Never honor ROCP_TOOL_LIBRARIES in a secure-execution context (setuid/
+        // setgid binaries, file capabilities, etc.). Otherwise an unprivileged
+        // local user could inject an arbitrary shared library (via dlopen) into a
+        // privileged process by setting this environment variable.
+        if(common::is_at_secure())
+        {
+            ROCP_CI_LOG(WARNING) << "[ROCP_TOOL_LIBRARIES] ignoring environment variable because "
+                                    "the process is running in a secure-execution context "
+                                    "(AT_SECURE)";
+            return std::vector<std::string>{};
+        }
+
         auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
         auto       val_arr   = std::vector<std::string>{};
         size_t     pos       = 0;

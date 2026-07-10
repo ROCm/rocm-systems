@@ -53,6 +53,24 @@ def _cast(inner: SemaNode, target: SemaType) -> SemaNode:
     return SemaNode(SemaNodeKind.CAST, ty=target, cast_target=target, children=(inner,))
 
 
+def _cvt_f32_fp8_assignment() -> SemaNode:
+    return SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='tmp'),
+            SemaNode(
+                SemaNodeKind.CALL,
+                call_name='cvt_f32_fp8',
+                ty=SemaType.U32,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='cvt_f32_fp8'),
+                    SemaNode(SemaNodeKind.LIT, lit_value='0x40', ty=SemaType.U32),
+                ),
+            ),
+        ),
+    )
+
+
 class TestLowerEmptyBlock:
     def test_empty_block(self):
         block = SemaBlock(
@@ -651,6 +669,61 @@ class TestLowerControlFlow:
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
         assert 'for (' in result
+
+    @pytest.mark.parametrize('control', ['if', 'for', 'while'])
+    def test_nested_control_flow_preserves_arch_name(self, control):
+        nested_body = _cvt_f32_fp8_assignment()
+        if control == 'if':
+            body = SemaNode(
+                SemaNodeKind.IF,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        elif control == 'for':
+            body = SemaNode(
+                SemaNodeKind.FOR,
+                children=(
+                    SemaNode(
+                        SemaNodeKind.ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.LT,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.ADD_ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    nested_body,
+                ),
+            )
+        else:
+            body = SemaNode(
+                SemaNodeKind.WHILE,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        block = SemaBlock('TEST', ExecModel.SCALAR, body)
+        ctx = LoweringContext(exec_model=ExecModel.SCALAR, arch_name='cdna3')
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'util::fp8_e4m3_fnuz_to_f32' in result
+        assert 'util::fp8_e4m3_to_f32' not in result
 
 
 class TestLowerContextIds:

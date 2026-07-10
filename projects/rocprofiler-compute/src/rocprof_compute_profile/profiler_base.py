@@ -13,6 +13,7 @@ from typing import Any, Optional, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -34,6 +35,22 @@ from utils.utils_exceptions import (
 )
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
+
+# Maps each CLI flag to the backends it enables.
+_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
+    "torch_trace": ("torch",),
+    "triton_trace": ("triton",),
+    "ml_api_trace": KNOWN_ML_API_BACKENDS,
+}
+
+
+def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
+    """Return the set of frameworks requested via CLI flags."""
+    selected: set[str] = set()
+    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
+        if getattr(args, flag, False):
+            selected.update(frameworks)
+    return selected
 
 
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
@@ -59,54 +76,66 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
-def _prepare_torch_trace_injection(
+def _prepare_ml_api_trace_injection(
     remaining: list[str],
     resolved_exec_path: Path,
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
+    frameworks: set[str],
 ) -> None:
-    """Rewrite the workload command to inject ROCTX markers for --torch-trace.
+    """Insert the inject_roctx launcher into the workload command.
 
-    Mutates *remaining* in-place.  Three cases:
-      1. Explicit Python interpreter  — insert inject_roctx.py before the script.
-      2. Direct .py script execution  — prepend sys.executable + inject_roctx.py.
-      3. Non-Python binary            — warn and leave the command untouched.
+    Modifies the ``remaining`` command list in place. The launcher is run by
+    absolute path, with the selected frameworks passed as ``--frameworks
+    <names>`` followed by ``--`` and the workload command. The rewrite depends
+    on the workload type:
+      1. Python interpreter — insert the launcher before the script.
+      2. Direct .py script  — prepend ``sys.executable`` and the launcher.
+      3. Other executables  — leave the command unchanged and emit a warning.
     """
-    inject_script = Path(__file__).parent.parent / "utils" / "inject_roctx.py"
-    if not inject_script.exists():
+    launch_script = (
+        Path(__file__).parent.parent / "utils" / "inject_roctx" / "launch.py"
+    )
+    if not launch_script.is_file():
         console_error(
-            f"Cannot find inject_roctx.py at {inject_script}. "
+            f"Cannot find inject_roctx launcher at {launch_script}. "
             "Please verify your installation."
         )
+
+    launcher = [
+        str(launch_script),
+        "--frameworks",
+        ",".join(sorted(frameworks)),
+        "--",
+    ]
 
     if is_python:
         if skip_flag:
             console_warning(
                 f"Cannot inject ROCTX markers into 'python {skip_flag}' "
                 "invocations. Launching workload as-is; "
-                "--torch-trace may have no effect."
+                "ML API tracing may have no effect."
             )
         elif not Path(remaining[script_index]).is_file():
             raise PythonScriptNotFoundError(remaining[script_index])
         else:
-            remaining.insert(script_index, str(inject_script))
+            remaining[script_index:script_index] = launcher
     elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining.insert(0, str(inject_script))
-        remaining.insert(0, sys.executable)
+        remaining[0:0] = [sys.executable, *launcher]
     else:
         console_warning(
             "Command does not look like a Python entry point, "
             "skipping ROCTX auto-injection and launching workload as-is. "
-            "Ensure the binary already initializes PyTorch/ROCTX markers, "
-            "otherwise --torch-trace will have no effect."
+            "Ensure the binary already initializes ROCTX markers, "
+            "otherwise ML API tracing will have no effect."
         )
 
     if (resolved_exec_path.parent / "_internal").is_dir():
         console_warning(
             "Workload appears to be a self-contained binary. "
             "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents --torch-trace from collecting data. "
+            "prevents ML API tracing from collecting data. "
             "Rebuild without packaging libhsa/libhip or "
             "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
         )
@@ -135,6 +164,8 @@ class RocProfCompute_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
+        selected_frameworks = _compute_selected_frameworks(args)
+        self._selected_frameworks: set[str] = selected_frameworks
 
         if (
             sum((
@@ -161,28 +192,21 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if getattr(args, "torch_trace", False):
+        if selected_frameworks:
             if args.attach_pid:
                 console_error(
-                    "--torch-trace cannot be used with --attach-pid. "
-                    "Torch trace requires injecting ROCTX markers into the "
-                    "workload at launch; already-running processes cannot be "
-                    "instrumented. Please remove one of these options."
+                    "ML API tracing cannot be used with --attach-pid. "
+                    "ROCTX injection requires launching the workload; "
+                    "already-running processes cannot be instrumented. "
+                    "Please remove one of these options."
                 )
 
             if args.attach_duration_msec:
                 console_error(
-                    "--torch-trace cannot be used with --attach-duration-msec. "
+                    "ML API tracing cannot be used with --attach-duration-msec. "
                     "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with --torch-trace. Please remove one of "
+                    "is incompatible with ML API tracing. Please remove one of "
                     "these options."
-                )
-
-            if args.spatial_multiplexing is not None:
-                console_error(
-                    "--torch-trace does not yet support multi-node profiling "
-                    "via --spatial-multiplexing. Please remove one of these "
-                    "options."
                 )
 
         # Each --dispatch token must be a positive integer or a range
@@ -220,7 +244,7 @@ class RocProfCompute_Base:
             resolved_exec_path = Path(exec_candidate).resolve()
 
             # Detect bare Python interpreter (no script, no -c/-m) regardless
-            # of --torch-trace — this always hangs the profiler.
+            # of ML API tracing — this always hangs the profiler.
             is_python = re.match(r"^python[0-9.]*$", resolved_exec_path.name)
             script_index: Optional[int] = None
             skip_flag: Optional[str] = None
@@ -229,13 +253,14 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            if getattr(args, "torch_trace", False):
-                _prepare_torch_trace_injection(
+            if selected_frameworks:
+                _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
+                    selected_frameworks,
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
@@ -329,7 +354,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                torch_trace_enabled=getattr(args, "torch_trace", False),
+                ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 
@@ -369,12 +394,6 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
-        pc_sampling = PCSamplingProfile(
-            args=args,
-            profiler=self.__profiler,
-            workload_dir=args.output_directory,
-        )
-
         # Run profiling on each input file
         input_files = sorted(
             Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml")
@@ -392,6 +411,10 @@ class RocProfCompute_Base:
         print_status(status_msg)
 
         native_tool_path = self.__get_native_tool_path(args)
+        pc_sampling = PCSamplingProfile(
+            args=args,
+            profiler=self.__profiler,
+        )
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)
         else:
@@ -486,10 +509,15 @@ class RocProfCompute_Base:
             )
             return
 
-        # No native tool for pc sampling
-        pc_sampling.run(self.get_profiler_options(), total_runs)
+        if self.__profiler == "rocprofiler-sdk":
+            pc_sampling_options = self.get_pc_sampling_profiler_options(
+                native_tool_path=native_tool_path
+            )
+        else:
+            pc_sampling_options = self.get_pc_sampling_profiler_options()
+        pc_sampling.run(pc_sampling_options, total_runs)
 
-    def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
+    def __get_native_tool_path(self, args: argparse.Namespace) -> Optional[str]:
         try:
             if (
                 self.__is_native_tool_requested(args)  # noqa: E501
@@ -510,18 +538,12 @@ class RocProfCompute_Base:
         return self.__profiler == "rocprofiler-sdk" and not args.no_native_tool
 
     def __is_native_tool_supported(self, args: argparse.Namespace) -> bool:
-        # Native counter collection tool is only compatible with
-        # rocprofiler-sdk public API for ROCm version >= 7.x.x
-
-        # PC sampling only profile does not need native tool
-
-        # Do not use native tool in attach
-        # mode until we figure out how multiple tools can attach
-        # TODO: Figure out how multiple tools can attach
+        # Native tool is compatible with the rocprofiler-sdk public API for
+        # ROCm >= 7.x.x. It is used for both counter collection and PC sampling.
+        # Do not use the native tool in attach mode.
         return (
             int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
             and not args.attach_pid
-            and not is_only_pc_sampling(args.filter_blocks)
         )
 
     @abstractmethod
