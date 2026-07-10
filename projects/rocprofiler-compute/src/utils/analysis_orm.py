@@ -389,6 +389,7 @@ class Database:
     _engine: Optional[Engine] = None
     _db_name: Optional[str] = None
     _view_sql_cache: Optional[dict[str, str]] = None
+    _type_cache: Optional[dict[tuple[type[Base], str], Base]] = None
 
     @classmethod
     def init(cls, db_name: str) -> str:
@@ -405,6 +406,7 @@ class Database:
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
         cls._db_name = db_name
+        cls._type_cache = {}
         # Compile views eagerly so a broken definition fails at init time.
         cls._view_sql_cache = cls._compile_view_sql()
         console_debug("SQLite database initialized in memory")
@@ -413,6 +415,19 @@ class Database:
     @classmethod
     def get_session(cls) -> Optional[Session]:
         return cls._session
+
+    @classmethod
+    def get_or_create_type(cls, orm_class: type[Base], text: str) -> Base:
+        """Return a de-duplicated lookup-table row for the text, creating it once.
+
+        Deduplicates DB-wide across workloads. orm_class must be a lookup table
+        with a unique text column.
+        """
+        key = (orm_class, text)
+        if key not in cls._type_cache:
+            cls._type_cache[key] = orm_class(text=text)
+            cls._session.add(cls._type_cache[key])
+        return cls._type_cache[key]
 
     @classmethod
     def commit(cls) -> None:

@@ -390,8 +390,6 @@ class db_analysis(OmniAnalyze_Base):
             return
 
         pid = tool_data.get("metadata", {}).get("pid")
-        stall_reason_types: dict[str, orm.PCSampleStallReasonType] = {}
-        instruction_sample_types: dict[str, orm.InstructionSampleType] = {}
 
         for code_object in load_aggregated_pc_sampling(tool_data):
             code_object_store = orm.CodeObjectStore(
@@ -402,21 +400,13 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(code_object_store)
             for line in code_object.instruction_lines:
-                self._add_instruction_line(
-                    line,
-                    code_object_store,
-                    kernel_objs,
-                    stall_reason_types,
-                    instruction_sample_types,
-                )
+                self._add_instruction_line(line, code_object_store, kernel_objs)
 
     @staticmethod
     def _add_instruction_line(
         line: InstructionLineRecord,
         code_object_store: orm.CodeObjectStore,
         kernel_objs: dict[str, orm.Kernel],
-        stall_reason_types: dict[str, orm.PCSampleStallReasonType],
-        instruction_sample_types: dict[str, orm.InstructionSampleType],
     ) -> None:
         """Insert one instruction line, its sample state, and child counts."""
         instruction_line = orm.InstructionLine(
@@ -440,8 +430,8 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.PCSampleStallReason(
                     pc_sample_state=sample_state,
-                    stall_reason_type=db_analysis._get_or_create_type(
-                        text, stall_reason_types, orm.PCSampleStallReasonType
+                    stall_reason_type=Database.get_or_create_type(
+                        orm.PCSampleStallReasonType, text
                     ),
                     count=count,
                 )
@@ -450,24 +440,12 @@ class db_analysis(OmniAnalyze_Base):
             Database.get_session().add(
                 orm.InstructionSample(
                     pc_sample_state=sample_state,
-                    instruction_sample_type=db_analysis._get_or_create_type(
-                        text, instruction_sample_types, orm.InstructionSampleType
+                    instruction_sample_type=Database.get_or_create_type(
+                        orm.InstructionSampleType, text
                     ),
                     count=count,
                 )
             )
-
-    @staticmethod
-    def _get_or_create_type(
-        text: str,
-        cache: dict[str, Any],
-        orm_class: type,
-    ) -> Any:  # noqa: ANN401
-        """Return a de-duplicated lookup-table row for *text*, creating it once."""
-        if text not in cache:
-            cache[text] = orm_class(text=text)
-            Database.get_session().add(cache[text])
-        return cache[text]
 
     @staticmethod
     def evaluate(

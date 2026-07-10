@@ -222,6 +222,7 @@ def db_session():
     Database.init(":memory:")
     yield Database.get_session()
     Database._session.close()
+    Database._engine.dispose()
     Database._session = None
     Database._engine = None
 

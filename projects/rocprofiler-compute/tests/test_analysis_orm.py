@@ -161,6 +161,34 @@ def test_get_view_sql_returns_copy(db_session):
 
 
 # =============================================================================
+# get_or_create_type
+# =============================================================================
+
+
+def test_get_or_create_type_dedups(db_session):
+    """The same text returns one cached row; a new text creates another."""
+    first = Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    again = Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    other = Database.get_or_create_type(PCSampleStallReasonType, "BARRIER_WAIT")
+    db_session.commit()
+
+    assert first is again
+    assert other is not first
+    assert db_session.query(PCSampleStallReasonType).count() == 2
+
+
+def test_get_or_create_type_dedups_across_calls(db_session):
+    """Reusing a text after a commit (e.g. a second workload) creates no
+    duplicate row, respecting the unique constraint."""
+    Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    db_session.commit()
+    Database.get_or_create_type(PCSampleStallReasonType, "WAITCNT")
+    db_session.commit()
+
+    assert db_session.query(PCSampleStallReasonType).count() == 1
+
+
+# =============================================================================
 # pc_sampling view
 # =============================================================================
 

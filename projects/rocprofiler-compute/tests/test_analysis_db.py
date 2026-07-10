@@ -863,25 +863,6 @@ def make_pc_sampling_tool_data():
     }
 
 
-def test_get_or_create_type_dedups(db_session):
-    """The same text returns one cached row; a new text creates another."""
-    cache = {}
-    first = db_analysis._get_or_create_type(
-        "WAITCNT", cache, orm.PCSampleStallReasonType
-    )
-    again = db_analysis._get_or_create_type(
-        "WAITCNT", cache, orm.PCSampleStallReasonType
-    )
-    other = db_analysis._get_or_create_type(
-        "BARRIER_WAIT", cache, orm.PCSampleStallReasonType
-    )
-    db_session.commit()
-
-    assert first is again
-    assert other is not first
-    assert db_session.query(orm.PCSampleStallReasonType).count() == 2
-
-
 def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     """A workload without tool data inserts no rows."""
     workload = orm.Workload(name="w", sub_name="s")
