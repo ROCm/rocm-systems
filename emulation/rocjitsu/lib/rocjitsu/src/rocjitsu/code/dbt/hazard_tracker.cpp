@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/dbt/hazard_tracker.h"
 
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
+
 namespace rocjitsu {
 
 void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline consumer) {
@@ -24,8 +26,7 @@ void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline co
   }
 
   if (simm16 != 0) {
-    constexpr uint8_t kSoppDelayAlu = 7;
-    words.push_back(pack_sopp(kSoppDelayAlu, simm16));
+    words.push_back(pack_sopp(rdna4::kSDelayAluSopp, simm16));
   }
 }
 
