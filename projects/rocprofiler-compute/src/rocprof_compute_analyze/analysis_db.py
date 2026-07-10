@@ -13,6 +13,10 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from pc_sampling.pc_sampling_analysis import (
+    InstructionLineRecord,
+    load_aggregated_pc_sampling,
+)
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
@@ -47,10 +51,6 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.pc_sampling_analysis import (
-    InstructionLineRecord,
-    load_aggregated_pc_sampling,
-)
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
     OpsSupport,
