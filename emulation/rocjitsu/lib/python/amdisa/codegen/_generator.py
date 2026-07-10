@@ -1699,10 +1699,13 @@ class CodeGenerator:
             )
         # SDWA dst_unused:PRESERVE and DPP that keeps lanes (partial row/bank
         # mask, or bound_ctrl == 0 with an edge-crossing dpp_ctrl) leave the old
-        # destination in place, so surface every destination operand as a use.
-        # Deriving the ref from the decoded dst operand(s) yields the real class
-        # and width and covers multi-dst encodings: VOP3_SDST_ENC writes both a
-        # VGPR result and an SGPR carry, both preserved under a partial mask.
+        # destination in place, so surface the preserved destination as a use.
+        # This matches what the executor actually restores: the non-VOPC SDWA/DPP
+        # merge only rewrites old vdst bytes/lanes via write_vgpr, so only a
+        # VGPR-class destination is preserved. SGPR destinations are fully
+        # written and never restored -- a VOP3_SDST_ENC carry (v_add_co_ci) and a
+        # VOP3 compare's SGPR mask alike -- so filter to RegClass::VGPR. The ref
+        # still comes from the decoded dst operand to get the real width.
         #
         # SDWA exists only on VOP1/VOP2; DPP additionally exists on VOP3/VOP3P/
         # VOP3_SDST_ENC on gfx11+ (gated -- GCN/CDNA lack the dpp_* fields).
@@ -1736,6 +1739,7 @@ class CodeGenerator:
                 'for (int i = 0; i < num_dst_operands(); ++i) '
                 'if (const auto *dst = dst_operand(i)) '
                 'if (auto ref = dst->to_register_ref()) '
+                'if (ref->cls == RegClass::VGPR) '
                 'uses.expand(*ref);'
             )
         return ''

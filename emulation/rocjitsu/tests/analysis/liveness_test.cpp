@@ -1007,11 +1007,12 @@ TEST(GeneratedInstDefUse, Vop3DppBoundCtrlZeroEdgeCrossingReadsDestination) {
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
-TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskReadsSgprDestinationNotVgpr) {
-  // v_cmp_lt_f32_e64 writes its lane mask to an SGPR pair through the vdst field
-  // (here s[8:9]), so a partial DPP mask preserves the SGPR -- not a VGPR. This
-  // is why Vop3::implicit_uses derives the ref from the dst operand instead of
-  // hardcoding RegClass::VGPR like VOP1/VOP2.
+TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskDoesNotReadDestination) {
+  // v_cmp_lt_f32_e64 writes its lane mask to an SGPR pair via the vdst field
+  // (s[8:9]). The executor's non-VOPC DPP restore only touches the VGPR file at
+  // inst_.vdst -- a no-op that writes back the saved value -- and does NOT
+  // preserve the SGPR mask, which is fully written. So a partial mask reads
+  // neither the SGPR nor a VGPR, matching implicit_uses filtering to VGPR.
   auto inst = decode_rdna4(
       {kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
   ASSERT_NE(inst, nullptr);
@@ -1019,7 +1020,7 @@ TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskReadsSgprDestinationNotVgpr) {
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
-  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
 }
 
@@ -1039,10 +1040,11 @@ TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
 }
 
-TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsBothDestinations) {
+TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   // v_add_co_ci_u32_e64 (VOP3_SDST_ENC) writes TWO destinations: a VGPR result
-  // (v6) and an SGPR carry-out (s[8:9]). A partial DPP mask preserves both, so
-  // both must surface -- this is why implicit_uses loops over every dst operand.
+  // (v6) and an SGPR carry-out (s[8:9]). The executor's DPP restore preserves
+  // only the VGPR result (write_vgpr); the SGPR carry is fully written, so only
+  // the VGPR surfaces as a use -- implicit_uses filters to RegClass::VGPR.
   // RDNA4 VOP3_SDST_ENC word0: encoding[31:26]=53, op[25:16]=288, sdst[14:8]=8,
   // vdst[7:0]=6. word1: src0=250 (SRC_DPP), src1[17:9]=3, src2[26:18]=10 (carry).
   constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
@@ -1055,7 +1057,7 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsBothDestinations) {
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 1}));
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 1}));
-  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
 }
 
 } // namespace

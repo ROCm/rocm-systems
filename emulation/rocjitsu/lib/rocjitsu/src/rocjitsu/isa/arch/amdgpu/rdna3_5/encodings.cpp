@@ -140,7 +140,8 @@ void Vop1::implicit_uses(RegisterSet &uses) const {
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
         if (auto ref = dst->to_register_ref())
-          uses.expand(*ref);
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop1::default_encoding() {
@@ -187,7 +188,8 @@ void Vop2::implicit_uses(RegisterSet &uses) const {
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
         if (auto ref = dst->to_register_ref())
-          uses.expand(*ref);
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop2::default_encoding() {
@@ -219,7 +221,8 @@ void Vop3::implicit_uses(RegisterSet &uses) const {
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
         if (auto ref = dst->to_register_ref())
-          uses.expand(*ref);
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -270,7 +273,8 @@ void Vop3p::implicit_uses(RegisterSet &uses) const {
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
         if (auto ref = dst->to_register_ref())
-          uses.expand(*ref);
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3p::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
@@ -448,7 +452,8 @@ void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
     for (int i = 0; i < num_dst_operands(); ++i)
       if (const auto *dst = dst_operand(i))
         if (auto ref = dst->to_register_ref())
-          uses.expand(*ref);
+          if (ref->cls == RegClass::VGPR)
+            uses.expand(*ref);
 }
 
 bool Vop3SdstEnc::has_lit_0() {
