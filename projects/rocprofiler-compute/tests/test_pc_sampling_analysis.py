@@ -132,10 +132,9 @@ def make_agent(handle: int, node_id: int, agent_type: int) -> dict:
 def make_code_object(
     code_object_id: int,
     load_base: int = 0,
-    uri: str = "",
 ) -> dict:
-    """A code_objects catalog entry carrying load_base and uri."""
-    return {"code_object_id": code_object_id, "load_base": load_base, "uri": uri}
+    """A code_objects catalog entry carrying load_base."""
+    return {"code_object_id": code_object_id, "load_base": load_base}
 
 
 def make_tool_data(
@@ -1320,7 +1319,7 @@ def test_normalize_missing_tool_data_returns_empty() -> None:
 
 
 def test_normalize_groups_by_code_object_with_catalog() -> None:
-    """Records group per code object carrying load_base and uri."""
+    """Records group per code object carrying load_base."""
     tool_data = make_tool_data(
         stochastic=[
             make_record(5, 0x10, 0, dispatch_id=0, inst_type=f"{INST_PREFIX}VALU"),
@@ -1340,13 +1339,12 @@ def test_normalize_groups_by_code_object_with_catalog() -> None:
             make_dispatch(2, 102),
         ],
         code_objects=[
-            make_code_object(5, load_base=0x1000, uri="file:///a.hsaco"),
-            make_code_object(6, load_base=0x2000, uri="file:///b.hsaco"),
+            make_code_object(5, load_base=0x1000),
+            make_code_object(6, load_base=0x2000),
         ],
     )
     records = {r.code_object_id: r for r in normalize_pc_sampling_for_db(tool_data)}
     assert records[5].load_base == 0x1000
-    assert records[5].uri == "file:///a.hsaco"
     assert len(records[5].instruction_lines) == 2
     assert len(records[6].instruction_lines) == 1
 

@@ -192,7 +192,6 @@ class CodeObjectRecord(NamedTuple):
 
     code_object_id: int
     load_base: Optional[int]
-    uri: Optional[str]
     instruction_lines: list["InstructionLineRecord"]
 
 
@@ -216,7 +215,7 @@ def normalize_pc_sampling_for_db(tool_data: dict[str, Any]) -> list[CodeObjectRe
     Pure computation: groups samples by (code_object_id, offset, kernel_id) so
     each line is attributed to the kernel its dispatch ran, attaches the
     instruction/comment and typed count dicts, and joins the code object catalog
-    (load_base, uri).
+    (load_base).
     """
     records_df = load_pc_sample_records(tool_data)
     aggregated_df = aggregate_pc_sample_records(
@@ -241,7 +240,6 @@ def normalize_pc_sampling_for_db(tool_data: dict[str, Any]) -> list[CodeObjectRe
             CodeObjectRecord(
                 code_object_id=int(code_object_id),
                 load_base=catalog_entry.get("load_base"),
-                uri=catalog_entry.get("uri"),
                 instruction_lines=[
                     _to_instruction_line_record(row) for row in group.itertuples()
                 ],

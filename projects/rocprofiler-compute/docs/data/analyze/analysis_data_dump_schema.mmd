@@ -38,17 +38,16 @@ erDiagram
     }
 
     compute_code_object_store {
-        int id PK
+        int code_object_uuid PK
         int workload_id FK
         int pid
         int code_object_id
         int load_base
-        string uri
     }
 
     compute_instruction_line {
-        int id PK
-        int code_object_store_id FK
+        int instruction_uuid PK
+        int code_object_uuid FK
         int kernel_uuid FK
         int code_object_offset
         text comment
@@ -56,34 +55,34 @@ erDiagram
     }
 
     compute_pc_sample_state {
-        int id PK
-        int instruction_line_id FK
+        int pc_sample_state_uuid PK
+        int instruction_uuid FK
         int total_count
         int issue_count
         int stall_count
     }
 
     compute_pc_sample_stall_reason_type {
-        int id PK
+        int pc_sample_stall_reason_type_uuid PK
         string text
     }
 
     compute_pc_sample_stall_reason {
-        int id PK
-        int pc_sample_state_id FK
-        int pc_sample_stall_reason_type_id FK
+        int pc_sample_stall_reason_uuid PK
+        int pc_sample_state_uuid FK
+        int pc_sample_stall_reason_type_uuid FK
         int count
     }
 
     compute_instruction_sample_type {
-        int id PK
+        int instruction_sample_type_uuid PK
         string text
     }
 
     compute_instruction_sample {
-        int id PK
-        int pc_sample_state_id FK
-        int instruction_sample_type_id FK
+        int instruction_sample_uuid PK
+        int pc_sample_state_uuid FK
+        int instruction_sample_type_uuid FK
         int count
     }
 
@@ -143,12 +142,12 @@ erDiagram
     compute_kernel ||--o{ compute_kernel_metric_value : kernel_uuid
     compute_kernel ||--o{ compute_instruction_line : kernel_uuid
 
-    compute_code_object_store ||--o{ compute_instruction_line : code_object_store_id
-    compute_instruction_line ||--o| compute_pc_sample_state : instruction_line_id
-    compute_pc_sample_state ||--o{ compute_pc_sample_stall_reason : pc_sample_state_id
-    compute_pc_sample_state ||--o{ compute_instruction_sample : pc_sample_state_id
-    compute_pc_sample_stall_reason_type ||--o{ compute_pc_sample_stall_reason : pc_sample_stall_reason_type_id
-    compute_instruction_sample_type ||--o{ compute_instruction_sample : instruction_sample_type_id
+    compute_code_object_store ||--o{ compute_instruction_line : code_object_uuid
+    compute_instruction_line ||--o| compute_pc_sample_state : instruction_uuid
+    compute_pc_sample_state ||--o{ compute_pc_sample_stall_reason : pc_sample_state_uuid
+    compute_pc_sample_state ||--o{ compute_instruction_sample : pc_sample_state_uuid
+    compute_pc_sample_stall_reason_type ||--o{ compute_pc_sample_stall_reason : pc_sample_stall_reason_type_uuid
+    compute_instruction_sample_type ||--o{ compute_instruction_sample : instruction_sample_type_uuid
 
     compute_metric_definition ||--o{ compute_kernel_metric_value : metric_uuid
     compute_metric_definition ||--o{ compute_workload_metric_value : metric_uuid

@@ -226,15 +226,14 @@ class db_analysis(OmniAnalyze_Base):
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
 
-            # Add metadata
-            version = get_version(rocprof_compute_home)
-            Database.get_session().add(
-                orm.Metadata(
-                    compute_version=version["version"],
-                    git_version=version["sha"],
-                    schema_version=orm.SCHEMA_VERSION,
-                )
+        version = get_version(rocprof_compute_home)
+        Database.get_session().add(
+            orm.Metadata(
+                compute_version=version["version"],
+                git_version=version["sha"],
+                schema_version=orm.SCHEMA_VERSION,
             )
+        )
 
         if self.get_args().output_format == "csv":
             Database.commit()
@@ -411,7 +410,6 @@ class db_analysis(OmniAnalyze_Base):
                 pid=pid,
                 code_object_id=code_object.code_object_id,
                 load_base=code_object.load_base,
-                uri=code_object.uri,
                 workload=workload_obj,
             )
             Database.get_session().add(code_object_store)

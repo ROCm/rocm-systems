@@ -76,6 +76,8 @@ class Workload(Base):
 
 class MetricDefinition(Base):
     __tablename__ = f"{PREFIX}metric_definition"
+    # One definition per metric per workload.
+    __table_args__ = (UniqueConstraint("workload_id", "metric_id"),)
 
     metric_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -102,8 +104,9 @@ class KernelRooflineData(Base):
     __tablename__ = f"{PREFIX}kernel_roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
+    # One roofline data point per kernel.
     kernel_uuid = Column(
-        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False
+        Integer, ForeignKey(f"{PREFIX}kernel.kernel_uuid"), nullable=False, unique=True
     )
     total_flops = Column(Float)
     l0_cache_data = Column(Float)
@@ -118,6 +121,8 @@ class KernelRooflineData(Base):
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
+    # dispatch_id is unique within a kernel.
+    __table_args__ = (UniqueConstraint("kernel_uuid", "dispatch_id"),)
 
     dispatch_uuid = Column(Integer, primary_key=True)
     kernel_uuid = Column(
@@ -134,6 +139,8 @@ class Dispatch(Base):
 
 class Kernel(Base):
     __tablename__ = f"{PREFIX}kernel"
+    # One kernel row per name per workload.
+    __table_args__ = (UniqueConstraint("workload_id", "kernel_name"),)
 
     kernel_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
@@ -155,16 +162,16 @@ class Kernel(Base):
 
 class CodeObjectStore(Base):
     __tablename__ = f"{PREFIX}code_object_store"
+    # code_object_id is only unique per process, so pid disambiguates it.
     __table_args__ = (UniqueConstraint("workload_id", "pid", "code_object_id"),)
 
-    id = Column(Integer, primary_key=True)
+    code_object_uuid = Column(Integer, primary_key=True)
     workload_id = Column(
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     pid = Column(Integer)
     code_object_id = Column(Integer)
     load_base = Column(Integer, nullable=True)
-    uri = Column(String, nullable=True)
 
     # Code object belongs to one workload
     workload = relationship("Workload", back_populates="code_object_stores")
@@ -176,13 +183,16 @@ class CodeObjectStore(Base):
 
 class InstructionLine(Base):
     __tablename__ = f"{PREFIX}instruction_line"
+    # A shared code object samples one offset under several kernels.
     __table_args__ = (
-        UniqueConstraint("code_object_store_id", "code_object_offset", "kernel_uuid"),
+        UniqueConstraint("code_object_uuid", "code_object_offset", "kernel_uuid"),
     )
 
-    id = Column(Integer, primary_key=True)
-    code_object_store_id = Column(
-        Integer, ForeignKey(f"{PREFIX}code_object_store.id"), nullable=False
+    instruction_uuid = Column(Integer, primary_key=True)
+    code_object_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}code_object_store.code_object_uuid"),
+        nullable=False,
     )
     # Attributed per-sample via dispatch correlation; nullable when the sample's
     # dispatch has no kernel mapping.
@@ -208,9 +218,11 @@ class InstructionLine(Base):
 class PCSampleState(Base):
     __tablename__ = f"{PREFIX}pc_sample_state"
 
-    id = Column(Integer, primary_key=True)
-    instruction_line_id = Column(
-        Integer, ForeignKey(f"{PREFIX}instruction_line.id"), nullable=False
+    pc_sample_state_uuid = Column(Integer, primary_key=True)
+    instruction_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_line.instruction_uuid"),
+        nullable=False,
     )
     total_count = Column(Integer)
     issue_count = Column(Integer, nullable=True)
@@ -231,7 +243,8 @@ class PCSampleState(Base):
 class PCSampleStallReasonType(Base):
     __tablename__ = f"{PREFIX}pc_sample_stall_reason_type"
 
-    id = Column(Integer, primary_key=True)
+    pc_sample_stall_reason_type_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct stall-reason string.
     text = Column(String, unique=True)
 
     stall_reasons = relationship(
@@ -242,13 +255,17 @@ class PCSampleStallReasonType(Base):
 class PCSampleStallReason(Base):
     __tablename__ = f"{PREFIX}pc_sample_stall_reason"
 
-    id = Column(Integer, primary_key=True)
-    pc_sample_state_id = Column(
-        Integer, ForeignKey(f"{PREFIX}pc_sample_state.id"), nullable=False
-    )
-    pc_sample_stall_reason_type_id = Column(
+    pc_sample_stall_reason_uuid = Column(Integer, primary_key=True)
+    pc_sample_state_uuid = Column(
         Integer,
-        ForeignKey(f"{PREFIX}pc_sample_stall_reason_type.id"),
+        ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
+        nullable=False,
+    )
+    pc_sample_stall_reason_type_uuid = Column(
+        Integer,
+        ForeignKey(
+            f"{PREFIX}pc_sample_stall_reason_type.pc_sample_stall_reason_type_uuid"
+        ),
         nullable=False,
     )
     count = Column(Integer)
@@ -262,7 +279,8 @@ class PCSampleStallReason(Base):
 class InstructionSampleType(Base):
     __tablename__ = f"{PREFIX}instruction_sample_type"
 
-    id = Column(Integer, primary_key=True)
+    instruction_sample_type_uuid = Column(Integer, primary_key=True)
+    # Deduplicated: one row per distinct instruction-type string.
     text = Column(String, unique=True)
 
     instruction_samples = relationship(
@@ -273,13 +291,15 @@ class InstructionSampleType(Base):
 class InstructionSample(Base):
     __tablename__ = f"{PREFIX}instruction_sample"
 
-    id = Column(Integer, primary_key=True)
-    pc_sample_state_id = Column(
-        Integer, ForeignKey(f"{PREFIX}pc_sample_state.id"), nullable=False
-    )
-    instruction_sample_type_id = Column(
+    instruction_sample_uuid = Column(Integer, primary_key=True)
+    pc_sample_state_uuid = Column(
         Integer,
-        ForeignKey(f"{PREFIX}instruction_sample_type.id"),
+        ForeignKey(f"{PREFIX}pc_sample_state.pc_sample_state_uuid"),
+        nullable=False,
+    )
+    instruction_sample_type_uuid = Column(
+        Integer,
+        ForeignKey(f"{PREFIX}instruction_sample_type.instruction_sample_type_uuid"),
         nullable=False,
     )
     count = Column(Integer)
@@ -294,6 +314,8 @@ class InstructionSample(Base):
 
 class KernelMetricValue(Base):
     __tablename__ = f"{PREFIX}kernel_metric_value"
+    # One value per (kernel, metric, value_name e.g. min/max/avg).
+    __table_args__ = (UniqueConstraint("kernel_uuid", "metric_uuid", "value_name"),)
 
     value_uuid = Column(Integer, primary_key=True)
     metric_uuid = Column(
@@ -313,6 +335,8 @@ class KernelMetricValue(Base):
 
 class WorkloadMetricValue(Base):
     __tablename__ = f"{PREFIX}workload_metric_value"
+    # One value per (workload, metric, value_name e.g. min/max/avg).
+    __table_args__ = (UniqueConstraint("workload_id", "metric_uuid", "value_name"),)
 
     value_uuid = Column(Integer, primary_key=True)
     metric_uuid = Column(
@@ -333,8 +357,12 @@ class WorkloadRooflineData(Base):
     __tablename__ = f"{PREFIX}workload_roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
+    # One roofline data point per workload.
     workload_id = Column(
-        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+        Integer,
+        ForeignKey(f"{PREFIX}workload.workload_id"),
+        nullable=False,
+        unique=True,
     )
     total_flops = Column(Float)
     l0_cache_data = Column(Float)
@@ -504,6 +532,22 @@ class Database:
             .group_by(median_sort_subquery.c.kernel_uuid)
         ).subquery()
 
+        stall_reason_json_subquery = (
+            select(
+                PCSampleStallReason.pc_sample_state_uuid,
+                func.json_group_object(
+                    PCSampleStallReasonType.text, PCSampleStallReason.count
+                ).label("stall_reason"),
+            )
+            .select_from(PCSampleStallReason)
+            .join(
+                PCSampleStallReasonType,
+                PCSampleStallReason.pc_sample_stall_reason_type_uuid
+                == PCSampleStallReasonType.pc_sample_stall_reason_type_uuid,
+            )
+            .group_by(PCSampleStallReason.pc_sample_state_uuid)
+        ).subquery()
+
         definitions: dict[str, Select[Any]] = {
             "kernel": select(
                 Kernel.kernel_uuid.label("kernel_uuid"),
@@ -580,6 +624,33 @@ class Database:
             .join(
                 WorkloadMetricValue,
                 MetricDefinition.metric_uuid == WorkloadMetricValue.metric_uuid,
+            ),
+            "pc_sampling": select(
+                CodeObjectStore.workload_id.label("workload_id"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.kernel_name,
+                InstructionLine.code_object_offset.label("offset"),
+                InstructionLine.instruction,
+                InstructionLine.comment.label("source"),
+                PCSampleState.total_count.label("count"),
+                PCSampleState.issue_count.label("count_issue"),
+                PCSampleState.stall_count.label("count_stall"),
+                stall_reason_json_subquery.c.stall_reason,
+            )
+            .select_from(PCSampleState)
+            .join(
+                InstructionLine,
+                PCSampleState.instruction_uuid == InstructionLine.instruction_uuid,
+            )
+            .join(
+                CodeObjectStore,
+                InstructionLine.code_object_uuid == CodeObjectStore.code_object_uuid,
+            )
+            .outerjoin(Kernel, InstructionLine.kernel_uuid == Kernel.kernel_uuid)
+            .outerjoin(
+                stall_reason_json_subquery,
+                PCSampleState.pc_sample_state_uuid
+                == stall_reason_json_subquery.c.pc_sample_state_uuid,
             ),
         }
 
