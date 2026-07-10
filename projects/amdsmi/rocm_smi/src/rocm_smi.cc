@@ -4174,6 +4174,35 @@ rsmi_status_t rsmi_dev_supported_power_cap_get(uint32_t dv_ind, uint32_t* sensor
   CATCH
 }
 
+namespace amd {
+namespace smi {
+// Decide whether the KFD topology (mem_banks) total should be preferred over
+// the sysfs mem_info_vram_total value for VRAM. The sysfs value is unusable
+// when the read failed or returned 0. It is also misleading in multi-partition
+// compute modes (CPX/DPX/TPX/QPX), where it reports the whole-device memory
+// split evenly across partitions and ignores reserved memory, disagreeing with
+// the driver's actual per-partition allocation (see SWDEV-536184). In those
+// modes the per-partition KFD total is authoritative.
+//
+// The mirror-image case is APUs (e.g. gfx1151 / Strix Halo): sysfs
+// mem_info_vram_total reports only the small dedicated BIOS VRAM carveout while
+// the GPU addresses the unified memory pool that KFD mem_banks reports. When KFD
+// reports more memory than sysfs, KFD is authoritative. Discrete GPUs are
+// unaffected because the two sources agree.
+bool vram_total_prefer_kfd(bool sysfs_read_ok, uint64_t sysfs_total,
+                           const std::string& compute_partition, uint64_t kfd_total) {
+  if (!sysfs_read_ok || sysfs_total == 0) {
+    return true;
+  }
+  if (compute_partition == "CPX" || compute_partition == "DPX" || compute_partition == "TPX" ||
+      compute_partition == "QPX") {
+    return true;
+  }
+  return kfd_total > 0 && kfd_total > sysfs_total;
+}
+}  // namespace smi
+}  // namespace amd
+
 rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
                                         uint64_t* total) {
   TRY rsmi_status_t ret;
@@ -4207,10 +4236,33 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Fallback to KFD reported memory if VRAM total is 0 or sysfs read fails
-  if (mem_type == RSMI_MEM_TYPE_VRAM && (*total == 0 || ret != RSMI_STATUS_SUCCESS)) {
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
+  // The KFD topology (mem_banks) reports the true per-partition VRAM size.
+  // Prefer it for VRAM total when the sysfs read is unusable (0 or failure), or
+  // when the GPU is in a multi-partition compute mode (CPX/DPX/TPX/QPX). In
+  // those modes sysfs mem_info_vram_total reports the whole-device memory split
+  // evenly across partitions, which ignores reserved memory and disagrees with
+  // the driver's actual per-partition allocation (see SWDEV-536184).
+  if (mem_type == RSMI_MEM_TYPE_VRAM) {
+    bool sysfs_read_ok = (ret == RSMI_STATUS_SUCCESS);
+    std::string compute_partition_str;
+    // The compute partition mode only matters when the sysfs value itself is
+    // usable; otherwise we already fall back to the KFD total.
+    if (sysfs_read_ok && *total != 0) {
+      get_dev_value_str(amd::smi::kDevComputePartition, dv_ind, &compute_partition_str);
+    }
+    // Look up the KFD per-partition total non-fatally. A missing KFD node must
+    // not discard an otherwise valid sysfs value, so unlike
+    // GET_DEV_AND_KFDNODE_FROM_INDX this does not early-return on absence.
+    uint64_t kfd_total = 0;
+    auto& kfd_nodes = smi.kfd_node_map();
+    auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
+    if (kfd_it != kfd_nodes.end()) {
+      kfd_it->second->get_total_memory(&kfd_total);
+    }
+    if (kfd_total > 0 &&
+        amd::smi::vram_total_prefer_kfd(sysfs_read_ok, *total, compute_partition_str, kfd_total)) {
+      *total = kfd_total;
+      ret = RSMI_STATUS_SUCCESS;
       ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)

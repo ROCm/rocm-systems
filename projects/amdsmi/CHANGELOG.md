@@ -71,6 +71,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_nic_rdma_dev_info()` returns `AMDSMI_STATUS_SUCCESS` with `num_rdma_dev` set to 0.
   - `amd-smi static` reports `RDMA_DEVICES: N/A` instead of omitting the device. All other NIC information is reported as usual.
 
+- **Fixed VRAM total reporting incorrect values in CPX/DPX/TPX/QPX compute-partition modes and on APUs**.  
+  - In multi-partition modes, `amdsmi_get_gpu_memory_total()` / `rsmi_dev_memory_total_get()` reported the whole-device VRAM split evenly across partitions instead of the driver's actual per-partition allocation; on APUs (for example gfx1151 / Strix Halo) they reported only the small BIOS VRAM carveout instead of the unified pool the GPU addresses.
+  - The VRAM total is now sourced from the KFD topology (`mem_banks`) in multi-partition modes, when the sysfs read is unusable, or on APUs where sysfs under-reports the carveout. Discrete and SPX GPUs are unaffected.
+
 ### Upcoming Changes
 
 - **UUIDs will be replaced by CUIDs in an upcoming version**.  
