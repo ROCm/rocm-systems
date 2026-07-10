@@ -2656,7 +2656,15 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
     return false;
   }
 
-  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this);
+  // Query this device's backing without allocating. On multi-GPU the same VA can be
+  // probed on a device that does not physically back the allocation (e.g. hipMemUnmap
+  // iterates every device); getDeviceMemory() would otherwise attempt an allocation as
+  // a side effect and can return nullptr, which was dereferenced below and crashed.
+  device::Memory* phys_dev_mem = phys_mem_obj->getDeviceMemory(*this, false);
+  if (phys_dev_mem == nullptr) {
+    // This device does not back the allocation; report no access rather than crashing.
+    return false;
+  }
   device::Memory::MemAccess mem_access = phys_dev_mem->GetAccess();
   *access_flags_ptr = static_cast<VmmAccess>(mem_access);
 
