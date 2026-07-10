@@ -44,20 +44,26 @@ namespace
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
 
-// True if `pid` appears in `str` as a whole number -- i.e. its digits are not part of a
-// longer digit run (so pid 23 does NOT match "out_1234", but DOES match "out_23" or the
-// "23" left by a %pid% expansion). Used to avoid double-suffixing a name that already
-// embeds this process's pid, without false-matching coincidental digit substrings.
+// True if the *raw* (unexpanded) output-file format contains a token that expands to this
+// process's pid: %pid%, {pid}, or the %p shorthand. We scan raw tokens rather than the
+// expanded string so we never false-match coincidental digits (e.g. a hostname like
+// "a7d0fdf91494" containing the pid's digits). This mirrors format_path's own precedence:
+// longer %p-prefixed tokens (%ppid%, %pgid%, %psid%, %psize%) are distinct from the %p
+// shorthand and must not be treated as a pid.
 bool
-contains_pid_token(const std::string& str, const std::string& pid)
+format_has_pid_token(std::string_view raw)
 {
-    auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
-    for(auto pos = str.find(pid); pos != std::string::npos; pos = str.find(pid, pos + 1))
+    if(raw.find("%pid%") != std::string_view::npos) return true;
+    if(raw.find("{pid}") != std::string_view::npos) return true;
+
+    // %p shorthand: any "%p" that is not the start of a longer non-pid %p-token.
+    for(auto pos = raw.find("%p"); pos != std::string_view::npos; pos = raw.find("%p", pos + 1))
     {
-        bool digit_before = pos > 0 && is_digit(str[pos - 1]);
-        auto end          = pos + pid.size();
-        bool digit_after  = end < str.size() && is_digit(str[end]);
-        if(!digit_before && !digit_after) return true;
+        auto rest = raw.substr(pos);
+        if(rest.rfind("%ppid%", 0) == 0 || rest.rfind("%pgid%", 0) == 0 ||
+           rest.rfind("%psid%", 0) == 0 || rest.rfind("%psize%", 0) == 0)
+            continue;
+        return true;
     }
     return false;
 }
@@ -79,14 +85,13 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     // Descendants of the root append their PID so they don't overwrite the root's
     // output; recomputed per call so a process that forks later still gets its PID.
-    // We check the already-expanded prefix for this PID rather than scanning raw
-    // tokens: that skips the suffix only when the name truly embeds THIS process's
-    // pid (%pid%/%p/%nid%), not a fork-shared token like %ppid%/%pgid% that would
-    // collide across siblings.
+    // We skip the suffix only when the raw format already asks for this process's pid
+    // (%pid%/{pid}/%p) -- checking raw tokens rather than expanded digits avoids
+    // false-matching coincidental digits from %hostname% or %ppid%.
     auto _pid           = std::to_string(getpid());
     auto _root_pid      = common::get_env_optional("ROCPROF_OUTPUT_ROOT_PID");
     bool _is_descendant = _root_pid.has_value() && *_root_pid != _pid;
-    if(_is_descendant && !contains_pid_token(output_prefix, _pid))
+    if(_is_descendant && !format_has_pid_token(cfg.output_file))
     {
         output_prefix += fmt::format("_{}", _pid);
     }
