@@ -65,20 +65,16 @@ struct CodeObjectView {
   std::string uri;
 };
 
-// Entry-trampoline hotswap rewriting for gfx12.5 targets (the generic
-// gfx12.5 rewrite path and the gfx1250 B0->A0 retarget) is opt-in: disabled
-// by default and enabled only when the caller sets
-// AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES to a truthy value.
-inline constexpr bool kDefaultEntryTrampolinesEnabled = false;
-
 struct RewriteOptions {
-  bool entry_trampolines_enabled = kDefaultEntryTrampolinesEnabled;
+  bool gfx12_5_rewrite_enabled = true;
+  bool strict_mode_enabled = true;
 };
 
 struct RewriteDecision {
   std::string source_isa;
   std::string target_isa;
   bool request_entry_trampolines = false;
+  bool request_strict_mode = false;
 };
 
 using LoadOriginalCodeObjectFn = hsa_status_t (*)(
@@ -102,7 +98,8 @@ std::string GetCodeObjectIsaName(const void* elf_data, size_t elf_size);
 bool RetargetCodeObject(const void* elf_data, size_t elf_size,
                         const char* source_isa, const char* target_isa,
                         OwnedElfBuffer* out_elf_buffer, size_t* out_elf_size,
-                        bool request_entry_trampolines = false);
+                        bool request_entry_trampolines = false,
+                        bool request_strict_mode = false);
 
 bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
                            OwnedElfBuffer* out_elf_buffer,
@@ -127,7 +124,7 @@ std::optional<RewriteDecision> DecideHotswapRewriteForTesting(
     const AgentGfxRevision& gfx, const std::string& source_isa,
     const std::string& target_isa, const RewriteOptions& options);
 size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable);
-bool EntryTrampolineRewriteAvailableForTesting();
+bool HotswapRewriteWithOptionsAvailableForTesting();
 #endif
 
 }  // namespace hotswap

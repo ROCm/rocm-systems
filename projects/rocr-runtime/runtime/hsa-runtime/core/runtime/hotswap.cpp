@@ -96,15 +96,10 @@ bool IsEnvFlagEnabled(const char* name) {
 
 bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 
-bool AreEntryTrampolinesRequested() {
-  // Entry-trampoline rewriting is opt-in: disabled unless the caller sets
-  // AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES to a truthy value. Unset falls back to
-  // the compiled-in default; false-like values keep it disabled.
+bool IsGfx12_5RewriteRequested() {
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  if (!os::IsEnvVarSet(kEnvName)) {
-    return kDefaultEntryTrampolinesEnabled;
-  }
-  return IsEnvFlagEnabled(kEnvName);
+  // Default-on policy owned by ROCR: only literal "0" opts out.
+  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
 }
 
 bool IsVerboseLoggingEnabled() {
@@ -131,6 +126,7 @@ struct ComgrHotswapRewriteOptions {
 constexpr int kComgrStatusSuccess = 0;
 constexpr int kComgrDataKindExecutable = 0x8;
 constexpr uint64_t kComgrHotswapRewriteFlagEntryTrampolines = 0x1;
+constexpr uint64_t kComgrHotswapRewriteFlagStrictMode = 0x2;
 
 struct ComgrApi {
   os::LibHandle lib = nullptr;
@@ -282,8 +278,9 @@ std::string WithGfx1250SteppingFeature(const std::string& isa_name,
 
 bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
-  return IsHotswapSupportedGfxRevision(gfx) ||
-      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target));
+  return (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
+         (options.gfx12_5_rewrite_enabled &&
+          IsGfx12_5Target(gfx.gfx_target));
 }
 
 std::optional<RewriteDecision> DecideHotswapRewrite(
@@ -297,20 +294,30 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
-    // B0->A0 retarget defaults to the legacy (non entry-trampoline) rewrite
-    // path and only requests entry trampolines when explicitly opted in.
-    return RewriteDecision{WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
-                           WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
-                           options.entry_trampolines_enabled};
+    if (!options.strict_mode_enabled) {
+      return std::nullopt;
+    }
+    return RewriteDecision{
+        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
+        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
+        false,
+        true};
   }
 
-  if (!options.entry_trampolines_enabled || !IsGfx12_5Target(gfx.gfx_target) ||
-      !IsGfx12_5Target(source_gfx)) {
+  const bool request_entry_trampolines =
+      options.gfx12_5_rewrite_enabled &&
+      IsGfx12_5Target(gfx.gfx_target) && IsGfx12_5Target(source_gfx);
+  const bool request_strict_mode =
+      options.strict_mode_enabled && gfx.gfx_target == kGfx1250 &&
+      source_gfx == kGfx1250;
+  if (!request_entry_trampolines && !request_strict_mode) {
     return std::nullopt;
   }
 
-  RewriteDecision decision{source_isa, source_isa, true};
-  if (source_gfx == kGfx1250) {
+  RewriteDecision decision{source_isa, source_isa,
+                           request_entry_trampolines,
+                           request_strict_mode};
+  if (request_strict_mode) {
     decision.source_isa =
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
     decision.target_isa =
@@ -372,7 +379,8 @@ void LogRewrittenCodeObjectLoadFailure(hsa_status_t status) {
 
 bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* source_isa,
                         const char* target_isa, OwnedElfBuffer* out_elf_buffer,
-                        size_t* out_elf_size, bool request_entry_trampolines) {
+                        size_t* out_elf_size, bool request_entry_trampolines,
+                        bool request_strict_mode) {
   ComgrApi* api = GetComgrApi();
   if (!api || !elf_data || elf_size == 0 || !source_isa || !target_isa || !out_elf_buffer ||
       !out_elf_size) {
@@ -391,15 +399,18 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
 
   ComgrData output = {};
   int status = kComgrStatusSuccess;
-  if (request_entry_trampolines) {
+  const uint64_t rewrite_flags =
+      (request_entry_trampolines ? kComgrHotswapRewriteFlagEntryTrampolines : 0) |
+      (request_strict_mode ? kComgrHotswapRewriteFlagStrictMode : 0);
+  if (rewrite_flags != 0) {
     if (!api->hotswap_rewrite_with_options) {
       api->release_data(input);
-      HOTSWAP_LOG("hotswap: COMGR entry-trampoline rewrite entry point unavailable\n");
+      HOTSWAP_LOG("hotswap: COMGR rewrite-with-options entry point unavailable\n");
       return false;
     }
     const ComgrHotswapRewriteOptions options{
         sizeof(ComgrHotswapRewriteOptions),
-        kComgrHotswapRewriteFlagEntryTrampolines};
+        rewrite_flags};
     status = api->hotswap_rewrite_with_options(input, source_isa, target_isa,
                                                &options, &output);
   } else {
@@ -444,7 +455,8 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   }
 
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
-  const RewriteOptions options{AreEntryTrampolinesRequested()};
+  RewriteOptions options;
+  options.gfx12_5_rewrite_enabled = IsGfx12_5RewriteRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return false;
   }
@@ -463,11 +475,13 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
       RetargetCodeObject(code_object.data, code_object.size,
                          decision->source_isa.c_str(), decision->target_isa.c_str(),
                          out_elf_buffer, out_elf_size,
-                         decision->request_entry_trampolines);
-  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
+                         decision->request_entry_trampolines,
+                         decision->request_strict_mode);
+  HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d strict=%d "
+              "in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
-              decision->request_entry_trampolines, code_object.size,
-              rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
+              decision->request_entry_trampolines, decision->request_strict_mode,
+              code_object.size, rewritten ? *out_elf_size : 0, rewritten ? 1 : 0);
   return rewritten;
 }
 
@@ -542,7 +556,7 @@ size_t RetainedRewrittenElfBufferCountForTesting(hsa_executable_t executable) {
   return it == g_retained_rewritten_elf_buffers.end() ? 0 : it->second.size();
 }
 
-bool EntryTrampolineRewriteAvailableForTesting() {
+bool HotswapRewriteWithOptionsAvailableForTesting() {
   ComgrApi* api = GetComgrApi();
   return api && api->hotswap_rewrite_with_options;
 }
