@@ -1882,20 +1882,26 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
       result.resource_plans.push_back(std::move(candidate_plan));
       continue;
     }
-    if (owners.size() != 1) {
-      candidate_plan.reason = ConSanRegisterPlanReason::AmbiguousOwners;
-      result.resource_plans.push_back(std::move(candidate_plan));
-      continue;
+    candidate_plan.current_vgpr_count = kMaxVgprs;
+    candidate_plan.current_sgpr_count = kMaxSgprs;
+    RegisterSet common_live_before;
+    bool descriptors_valid = true;
+    for (MoiKernelResourceContext *owner : owners) {
+      candidate_plan.current_vgpr_count =
+          std::min(candidate_plan.current_vgpr_count, owner->current_vgpr_count);
+      candidate_plan.max_referenced_vgpr_count =
+          std::max(candidate_plan.max_referenced_vgpr_count, owner->max_referenced_vgpr_count);
+      candidate_plan.current_sgpr_count =
+          std::min(candidate_plan.current_sgpr_count, owner->current_sgpr_count);
+      candidate_plan.max_referenced_sgpr_count =
+          std::max(candidate_plan.max_referenced_sgpr_count, owner->max_referenced_sgpr_count);
+      candidate_plan.original_private_segment_size = std::max(
+          candidate_plan.original_private_segment_size, owner->original_private_segment_size);
+      common_live_before |= owner->liveness->live_before(*anchor);
+      descriptors_valid &= owner->descriptor_valid;
     }
-
-    MoiKernelResourceContext &owner = *owners.front();
-    candidate_plan.current_vgpr_count = owner.current_vgpr_count;
-    candidate_plan.max_referenced_vgpr_count = owner.max_referenced_vgpr_count;
-    candidate_plan.required_vgpr_count = owner.current_vgpr_count;
-    candidate_plan.current_sgpr_count = owner.current_sgpr_count;
-    candidate_plan.max_referenced_sgpr_count = owner.max_referenced_sgpr_count;
-    candidate_plan.original_private_segment_size = owner.original_private_segment_size;
-    if (!owner.descriptor_valid) {
+    candidate_plan.required_vgpr_count = candidate_plan.current_vgpr_count;
+    if (!descriptors_valid) {
       candidate_plan.reason = ConSanRegisterPlanReason::InvalidDescriptor;
       result.resource_plans.push_back(std::move(candidate_plan));
       continue;
@@ -1905,8 +1911,8 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
     ConSanRegisterRequest request;
     request.reg_class = RegClass::VGPR;
     request.count = scratch_count;
-    request.current_allocation_count = owner.current_vgpr_count;
-    request.max_referenced_count = owner.max_referenced_vgpr_count;
+    request.current_allocation_count = candidate_plan.current_vgpr_count;
+    request.max_referenced_count = candidate_plan.max_referenced_vgpr_count;
     request.architecture_limit = kMaxVgprs;
     request.explicit_base = options.scratch_vgpr;
     request.force_spill = options.force_vgpr_spill;
@@ -1916,8 +1922,7 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
     if (options.moi_epoch_vgpr)
       request.forbidden.expand({RegClass::VGPR, *options.moi_epoch_vgpr, 1});
 
-    const ConSanRegisterPlan register_plan =
-        plan_consan_registers(request, owner.liveness->live_before(*anchor));
+    const ConSanRegisterPlan register_plan = plan_consan_registers(request, common_live_before);
     candidate_plan.source = register_plan.source;
     candidate_plan.reason = register_plan.reason;
     candidate_plan.scratch_vgpr = register_plan.base;
@@ -1978,20 +1983,6 @@ resolve_moi_scratch(const ConSanResult &result, const ConSanMoiCandidate &candid
     return resolved;
   }
 
-  // Until R1G, retain caller-selected function registers as an explicit debug
-  // compatibility path. Automatic plans never guess descriptor ownership for
-  // unreachable or multiply-owned shared text.
-  if (!candidate.in_kernel && options.scratch_vgpr &&
-      static_cast<uint32_t>(*options.scratch_vgpr) + expected_count <= kMaxVgprs) {
-    ResolvedMoiScratchPlan resolved;
-    resolved.base = *options.scratch_vgpr;
-    resolved.count = expected_count;
-    resolved.required_vgpr_count = static_cast<uint16_t>(*options.scratch_vgpr + expected_count);
-    resolved.source = ConSanRegisterAllocationSource::Explicit;
-    for (const ConSanKernelInfo &kernel : result.kernels)
-      resolved.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
-    return resolved;
-  }
   return std::nullopt;
 }
 
@@ -2080,17 +2071,17 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
 
   uint32_t first = 0;
-  bool found_direct_kernel_scope = false;
+  bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.size() != 1)
+    if (plan.owner_descriptor_file_offsets.empty())
       continue;
-    found_direct_kernel_scope = true;
+    found_owned_scope = true;
     first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
   }
-  if (!found_direct_kernel_scope) {
+  if (!found_owned_scope) {
     result.warnings.emplace_back(
-        "ConSan MOI could not derive automatic EXEC-save SGPRs without a direct kernel "
-        "candidate scope");
+        "ConSan MOI could not derive automatic EXEC-save SGPRs without an owned candidate "
+        "scope");
     return false;
   }
 
@@ -2120,17 +2111,17 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
 
   uint32_t first = 0;
-  bool found_direct_kernel_scope = false;
+  bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.size() != 1)
+    if (plan.owner_descriptor_file_offsets.empty())
       continue;
-    found_direct_kernel_scope = true;
+    found_owned_scope = true;
     first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
   }
-  if (!found_direct_kernel_scope) {
+  if (!found_owned_scope) {
     result.warnings.emplace_back(
-        "ConSan MOI could not derive an automatic hw_id owner SGPR without a direct kernel "
-        "candidate scope");
+        "ConSan MOI could not derive an automatic hw_id owner SGPR without an owned candidate "
+        "scope");
     return false;
   }
 
@@ -2163,11 +2154,11 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
 
   uint32_t persistent_base = 0;
-  bool found_direct_kernel_scope = false;
+  bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.owner_descriptor_file_offsets.size() != 1)
+    if (plan.owner_descriptor_file_offsets.empty())
       continue;
-    found_direct_kernel_scope = true;
+    found_owned_scope = true;
     persistent_base = std::max<uint32_t>(persistent_base, plan.max_referenced_vgpr_count);
     if (plan.scratch_vgpr) {
       persistent_base = std::max<uint32_t>(
@@ -2175,10 +2166,10 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     }
   }
 
-  if (!found_direct_kernel_scope) {
+  if (!found_owned_scope) {
     result.warnings.emplace_back(
-        "ConSan MOI could not derive automatic persistent VGPRs without a direct kernel "
-        "candidate scope");
+        "ConSan MOI could not derive automatic persistent VGPRs without an owned candidate "
+        "scope");
     return false;
   }
   if (options.force_private_epoch || persistent_base + 2u > kMaxVgprs) {
@@ -2264,22 +2255,47 @@ struct MoiPrivateEpochLayout {
   uint32_t ephemeral_base = 0;
 };
 
+[[nodiscard]] std::optional<uint16_t>
+common_moi_private_owner_shift(std::span<const uint8_t> image,
+                               const ResolvedMoiScratchPlan &resources,
+                               std::vector<std::string> &warnings) {
+  std::optional<uint16_t> common_shift;
+  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
+    std::vector<std::string> errors;
+    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, errors);
+    if (!shift) {
+      warnings.insert(warnings.end(), errors.begin(), errors.end());
+      return std::nullopt;
+    }
+    if (common_shift && *common_shift != *shift) {
+      warnings.emplace_back("ConSan MOI shared private owner has incompatible owner wave sizes");
+      return std::nullopt;
+    }
+    common_shift = shift;
+  }
+  if (!common_shift)
+    warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
+  return common_shift;
+}
+
 [[nodiscard]] std::optional<MoiPrivateEpochLayout>
 build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
                                std::vector<std::string> &warnings) {
-  if (resources.owner_descriptor_file_offsets.size() != 1) {
-    warnings.emplace_back("ConSan MOI private epoch requires exactly one owning kernel descriptor");
+  if (resources.owner_descriptor_file_offsets.empty()) {
+    warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
   }
-  const ConSanKernelInfo *kernel =
-      kernel_for_descriptor(result, resources.owner_descriptor_file_offsets.front());
-  if (kernel == nullptr) {
-    warnings.emplace_back("ConSan MOI private epoch references an unknown kernel descriptor");
-    return std::nullopt;
-  }
-  if (kernel->uses_dynamic_stack.value_or(false)) {
-    warnings.emplace_back("ConSan MOI private epoch does not yet support a dynamic-stack kernel");
-    return std::nullopt;
+  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr) {
+      warnings.emplace_back("ConSan MOI private epoch references an unknown kernel descriptor");
+      return std::nullopt;
+    }
+    if (kernel->uses_dynamic_stack.value_or(false)) {
+      warnings.emplace_back(
+          "ConSan MOI private epoch does not support a dynamic-stack owning kernel");
+      return std::nullopt;
+    }
   }
   const uint64_t epoch_offset =
       util::align_up(resources.original_private_segment_size, SpillManager::kDbiZoneAlignment);
@@ -2299,21 +2315,36 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
                          std::optional<uint32_t> private_layout_base = std::nullopt) {
   if (resources.source != ConSanRegisterAllocationSource::SpillRequired)
     return std::nullopt;
-  if (resources.owner_descriptor_file_offsets.size() != 1) {
-    warnings.emplace_back("ConSan MOI spill requires exactly one owning kernel descriptor");
+  if (resources.owner_descriptor_file_offsets.empty()) {
+    warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
     return std::nullopt;
   }
 
+  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr) {
+      warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
+      return std::nullopt;
+    }
+    if (kernel->uses_dynamic_stack.value_or(false)) {
+      warnings.emplace_back("ConSan MOI spill does not support a dynamic-stack owning kernel");
+      return std::nullopt;
+    }
+  }
+
+  if (resources.owner_descriptor_file_offsets.size() > 1) {
+    // Shared text needs one immediate layout. Starting above the maximum
+    // original private size makes the same save/fill sequence legal for every
+    // owner; site-local spill frames may safely reuse these offsets.
+    SpillManager shared_manager(resources.original_private_segment_size,
+                                kMaxAddressFreeScratchPrivateBytes);
+    auto spill = build_vgpr_spill_sequence(shared_manager, resources.base, resources.count, arch);
+    if (!spill)
+      warnings.emplace_back("ConSan MOI could not encode the shared-owner VGPR spill window");
+    return spill;
+  }
+
   const uint64_t descriptor_offset = resources.owner_descriptor_file_offsets.front();
-  const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
-  if (kernel == nullptr) {
-    warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
-    return std::nullopt;
-  }
-  if (kernel->uses_dynamic_stack.value_or(false)) {
-    warnings.emplace_back("ConSan MOI spill does not yet support a dynamic-stack kernel");
-    return std::nullopt;
-  }
   auto [it, inserted] = managers.try_emplace(
       descriptor_offset, private_layout_base.value_or(resources.original_private_segment_size),
       kMaxAddressFreeScratchPrivateBytes);
@@ -2341,21 +2372,31 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   return true;
 }
 
-[[nodiscard]] bool apply_spill_descriptor_requirements(
-    CodeObjectPatcher &patcher, std::span<const uint8_t> image, const ConSanResult &result,
-    const MoiDescriptorPrivateRequirements &requirements, std::vector<std::string> &errors) {
+[[nodiscard]] bool
+apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
+                                    std::span<const uint8_t> image, const ConSanResult &result,
+                                    const MoiDescriptorPrivateRequirements &requirements,
+                                    std::vector<std::string> &errors) {
   (void)image;
   for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    const auto active_kernel =
+        kernel == nullptr
+            ? code_object.kernels().end()
+            : std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
+                return candidate.name == kernel->name;
+              });
     const std::span<const uint8_t> current_image = patcher.image_bytes();
-    if (kernel == nullptr || descriptor_offset > current_image.size() ||
-        sizeof(KD) > current_image.size() - descriptor_offset) {
+    if (kernel == nullptr || active_kernel == code_object.kernels().end() ||
+        active_kernel->descriptor_file_offset > current_image.size() ||
+        sizeof(KD) > current_image.size() - active_kernel->descriptor_file_offset) {
       errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
       return false;
     }
 
     std::vector<uint8_t> descriptor(sizeof(KD));
-    std::memcpy(descriptor.data(), current_image.data() + descriptor_offset, sizeof(KD));
+    std::memcpy(descriptor.data(), current_image.data() + active_kernel->descriptor_file_offset,
+                sizeof(KD));
     const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
         descriptor, /*descriptor_file_offset=*/0, required_private_bytes,
         kernel->uses_dynamic_stack.value_or(false));
@@ -2363,7 +2404,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
       errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
       return false;
     }
-    if (!patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
+    if (!patcher.patch_kernel_descriptor(active_kernel->descriptor_file_offset, descriptor)) {
       errors.emplace_back("ConSan MOI could not patch the owning kernel spill descriptor");
       return false;
     }
@@ -2861,28 +2902,28 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 }
 
 [[nodiscard]] bool append_inline_shadow_owner_field(std::vector<uint32_t> &words,
-                                                    std::span<const uint8_t> bytes,
-                                                    const ConSanMoiCandidate &candidate,
                                                     const ConSanOptions &options, uint16_t low_vgpr,
                                                     uint16_t tmp_vgpr, rj_code_arch_t arch,
+                                                    std::optional<uint16_t> private_owner_shift,
                                                     std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift, tmp_vgpr, arch);
   }
-  if (!options.automatic_moi_private_epoch || !candidate.kernel_descriptor_file_offset) {
+  if (!options.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no persistent owner representation");
     return false;
   }
 
   switch (options.moi_owner_source) {
   case ConSanMoiOwnerSource::WorkitemId: {
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
-    if (!owner_shift)
+    if (!private_owner_shift) {
+      errors.emplace_back(
+          "ConSan MOI private owner has no descriptor-compatible workitem-id encoding");
       return false;
-    const auto owner = build_v_lshrrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(*owner_shift),
-                                               kRdna4WorkitemIdX, arch);
+    }
+    const auto owner = build_v_lshrrev_b32_e32(
+        tmp_vgpr, scalar_positive_inline_u32(*private_owner_shift), kRdna4WorkitemIdX, arch);
     if (!owner) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from workitem id");
       return false;
@@ -3143,7 +3184,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    std::optional<uint32_t> private_epoch_offset, std::vector<std::string> &errors) {
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint16_t> private_owner_shift,
+    std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -3211,8 +3253,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     return std::nullopt;
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if (!append_inline_shadow_owner_field(words, bytes, candidate, options, low_vgpr, tmp_vgpr, arch,
-                                        errors)) {
+  if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, arch,
+                                        private_owner_shift, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }
@@ -3318,10 +3360,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::vector<const ConSanMoiCandidate *> candidates =
       find_inline_shadow_access_candidates(result, bytes);
   apply_test_kernel_filter(candidates, options);
-  if (automatic_moi_persistent_state(options)) {
-    std::erase_if(candidates,
-                  [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
-  }
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow probe found no supported native LDS load/store candidate");
@@ -3335,6 +3373,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
     std::optional<uint32_t> private_epoch_offset;
+    std::optional<uint16_t> private_owner_shift;
     uint32_t required_private_bytes = 0;
   };
   std::vector<PlannedInlineShadowPatch> planned_patches;
@@ -3354,10 +3393,16 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       continue;
 
     std::optional<MoiPrivateEpochLayout> private_layout;
+    std::optional<uint16_t> private_owner_shift;
     if (options.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(result, *resources, result.warnings);
       if (!private_layout)
         continue;
+      if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+        private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+        if (!private_owner_shift)
+          continue;
+      }
     }
 
     std::optional<VgprSpillSequence> spill;
@@ -3375,7 +3420,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     auto words = build_inline_shadow_words(
         bytes, candidate, candidate_options, arch, layout,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        candidate_errors);
+        private_owner_shift, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -3408,6 +3453,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           planned.spill = spill;
           if (private_layout)
             planned.private_epoch_offset = private_layout->epoch_offset;
+          planned.private_owner_shift = private_owner_shift;
           planned.required_private_bytes = required_private_bytes;
           appended_cave_candidates.push_back(std::move(planned));
           continue;
@@ -3441,6 +3487,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.patch_bytes = patch_bytes;
     planned.resources = *resources;
     planned.spill = spill;
+    if (private_layout)
+      planned.private_epoch_offset = private_layout->epoch_offset;
+    planned.private_owner_shift = private_owner_shift;
     planned.required_private_bytes = required_private_bytes;
     planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == options.max_patches)
@@ -3496,8 +3545,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!apply_descriptor_requirements(patcher, bytes, result, descriptor_requirements,
                                        result.errors))
       return;
-    if (!apply_spill_descriptor_requirements(patcher, bytes, result, private_requirements,
-                                             result.errors))
+    if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
+                                             private_requirements, result.errors))
       return;
     if (!apply_sgpr_descriptor_requirements(patcher, result, scalar_requirements, result.errors))
       return;
@@ -3514,7 +3563,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       ConSanOptions candidate_options = options;
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
-                                             planned_patch.private_epoch_offset, result.errors);
+                                             planned_patch.private_epoch_offset,
+                                             planned_patch.private_owner_shift, result.errors);
       if (!words)
         return;
 
@@ -3523,6 +3573,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                   : ConSanPatchKind::InlineMoiExactShadowStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
+      info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.required_private_segment_size = planned_patch.required_private_bytes;
       if (planned_patch.spill)
@@ -3610,7 +3661,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned_patch.resources.base;
     auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
-                                           planned_patch.private_epoch_offset, result.errors);
+                                           planned_patch.private_epoch_offset,
+                                           planned_patch.private_owner_shift, result.errors);
     if (!words) {
       result.elf_bytes.clear();
       return;
@@ -3645,6 +3697,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
+    info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
     result.patches.push_back(info);
   }
 
@@ -3966,8 +4019,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                        result.errors)) {
       return;
     }
-    if (!apply_spill_descriptor_requirements(patcher, bytes, result, private_requirements,
-                                             result.errors)) {
+    if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
+                                             private_requirements, result.errors)) {
       return;
     }
     if (!apply_sgpr_descriptor_requirements(patcher, result, scalar_requirements, result.errors))
@@ -3997,6 +4050,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
+      info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       if (planned_patch.spill) {
         info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
         info.required_private_segment_size = planned_patch.spill->total_private_bytes;
@@ -4121,6 +4175,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
+    info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
     result.patches.push_back(info);
   }
 
@@ -4350,8 +4405,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                        result.errors)) {
       return;
     }
-    if (!apply_spill_descriptor_requirements(patcher, bytes, result, private_requirements,
-                                             result.errors)) {
+    if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
+                                             private_requirements, result.errors)) {
       return;
     }
     if (!apply_sgpr_descriptor_requirements(patcher, result, scalar_requirements, result.errors))
@@ -4379,6 +4434,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                   : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
+      info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
       if (planned_patch.spill) {
         info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
         info.required_private_segment_size = planned_patch.spill->total_private_bytes;
@@ -4502,6 +4558,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
+    info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
     result.patches.push_back(info);
   }
 
@@ -4595,6 +4652,14 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
          patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
 }
 
+[[nodiscard]] bool kernel_owns_patch(const ConSanKernelInfo &kernel, const ConSanPatchInfo &patch) {
+  if (!patch.owner_descriptor_file_offsets.empty()) {
+    return std::ranges::find(patch.owner_descriptor_file_offsets, kernel.descriptor_file_offset) !=
+           patch.owner_descriptor_file_offsets.end();
+  }
+  return kernel_contains_patch_anchor(kernel, patch);
+}
+
 [[nodiscard]] bool grow_moi_kernel_descriptor_registers(
     CodeObjectPatcher &patcher, std::span<const uint8_t> image, const ConSanKernelInfo &kernel,
     uint32_t required_vgpr_count, uint32_t required_sgpr_count, std::vector<std::string> &errors) {
@@ -4641,6 +4706,8 @@ void try_apply_private_epoch_prologue_patch(rj_code_arch_t arch, ConSanResult &r
 
   struct PlannedPrivateEpochPrologue {
     const ConSanKernelInfo *kernel = nullptr;
+    uint64_t active_descriptor_file_offset = 0;
+    uint64_t active_entry_text_offset = 0;
     uint16_t scratch_vgpr = 0;
     MoiPrivateEpochLayout layout;
     VgprSpillSequence spill;
@@ -4653,10 +4720,20 @@ void try_apply_private_epoch_prologue_patch(rj_code_arch_t arch, ConSanResult &r
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
           return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
                   patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
-                 patch.scratch_vgpr && kernel_contains_patch_anchor(kernel, patch);
+                 patch.scratch_vgpr && kernel_owns_patch(kernel, patch);
         });
     if (access_patch == result.patches.end())
       continue;
+
+    const auto active_kernel =
+        std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
+          return candidate.name == kernel.name;
+        });
+    if (active_kernel == code_object.kernels().end()) {
+      result.warnings.emplace_back(
+          "ConSan MOI private-epoch prologue could not resolve an active kernel descriptor");
+      continue;
+    }
 
     if (!access_patch->persistent_epoch_private_offset)
       continue;
@@ -4674,21 +4751,22 @@ void try_apply_private_epoch_prologue_patch(rj_code_arch_t arch, ConSanResult &r
     }
     uint32_t required_private_bytes = spill->total_private_bytes;
     for (const ConSanPatchInfo &patch : result.patches) {
-      if (kernel_contains_patch_anchor(kernel, patch))
+      if (kernel_owns_patch(kernel, patch))
         required_private_bytes =
             std::max(required_private_bytes, patch.required_private_segment_size);
     }
     private_requirements[kernel.descriptor_file_offset] = required_private_bytes;
-    planned.push_back(
-        {&kernel, *access_patch->scratch_vgpr, layout, *spill, required_private_bytes});
+    planned.push_back({&kernel, active_kernel->descriptor_file_offset,
+                       active_kernel->entry_text_offset, *access_patch->scratch_vgpr, layout,
+                       *spill, required_private_bytes});
   }
 
   if (planned.empty()) {
     result.warnings.emplace_back("ConSan MOI private-epoch prologue found no patchable kernels");
     return;
   }
-  if (!apply_spill_descriptor_requirements(patcher, active_bytes, result, private_requirements,
-                                           result.errors))
+  if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                           private_requirements, result.errors))
     return;
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
@@ -4698,12 +4776,12 @@ void try_apply_private_epoch_prologue_patch(rj_code_arch_t arch, ConSanResult &r
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
     auto words = build_private_epoch_prologue_words(
-        prologue_text_offset, item.kernel->entry_text_offset, item.scratch_vgpr,
+        prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
         item.layout.epoch_offset, item.spill, arch, result.errors);
     if (!words)
       return;
-    if (!patcher.redirect_kernel_entry(item.kernel->descriptor_file_offset,
-                                       item.kernel->entry_text_offset, prologue_text_offset)) {
+    if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
+                                       item.active_entry_text_offset, prologue_text_offset)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue could not redirect kernel entry");
       return;
@@ -4783,21 +4861,34 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
   const uint32_t required_sgpr_count = options.moi_owner_source == ConSanMoiOwnerSource::HwId
                                            ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
                                            : 0u;
-  std::vector<const ConSanKernelInfo *> target_kernels;
+  std::vector<ConSanKernelInfo> target_kernels;
   target_kernels.reserve(result.kernels.size());
   for (const ConSanKernelInfo &kernel : result.kernels) {
     if (!kernel.has_text_range)
       continue;
     if (options.automatic_moi_persistent_vgprs &&
         std::ranges::none_of(result.patches, [&](const ConSanPatchInfo &patch) {
-          return kernel_contains_patch_anchor(kernel, patch);
+          return kernel_owns_patch(kernel, patch);
         })) {
       continue;
     }
-    target_kernels.push_back(&kernel);
+    const auto active_kernel =
+        std::ranges::find_if(code_object.kernels(), [&](const AmdGpuKernelInfo &candidate) {
+          return candidate.name == kernel.name;
+        });
+    if (active_kernel == code_object.kernels().end()) {
+      result.warnings.emplace_back(
+          "ConSan MOI owner/epoch prologue could not resolve an active kernel descriptor");
+      continue;
+    }
+    ConSanKernelInfo active = kernel;
+    active.descriptor_file_offset = active_kernel->descriptor_file_offset;
+    active.entry_text_offset = active_kernel->entry_text_offset;
+    active.text_file_offset = active_kernel->text_file_offset;
+    target_kernels.push_back(std::move(active));
   }
-  for (const ConSanKernelInfo *kernel : target_kernels) {
-    if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, *kernel, required_vgpr_count,
+  for (const ConSanKernelInfo &kernel : target_kernels) {
+    if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, kernel, required_vgpr_count,
                                               required_sgpr_count, result.errors)) {
       return;
     }
@@ -4805,8 +4896,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
   std::vector<ConSanPatchInfo> patches;
-  for (const ConSanKernelInfo *kernel_ptr : target_kernels) {
-    const ConSanKernelInfo &kernel = *kernel_ptr;
+  for (const ConSanKernelInfo &kernel : target_kernels) {
 
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
@@ -5233,7 +5323,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
             return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
                     patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
                    patch.scratch_vgpr && patch.persistent_epoch_private_offset &&
-                   kernel_contains_patch_anchor(*kernel, patch);
+                   kernel_owns_patch(*kernel, patch);
           });
       if (access_patch == result.patches.end()) {
         result.warnings.emplace_back(
@@ -5261,8 +5351,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
                                     access_patch->persistent_epoch_private_offset, std::move(spill),
                                     required_private_bytes});
     }
-    if (!apply_spill_descriptor_requirements(patcher, active_bytes, result, private_requirements,
-                                             result.errors))
+    if (!apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
+                                             private_requirements, result.errors))
       return;
   } else if (options.automatic_moi_persistent_vgprs) {
     MoiDescriptorVgprRequirements requirements;

@@ -91,8 +91,8 @@ flowchart LR
   R1D["R1D: Spill-Backed Access Probes"]:::done
   R1E["R1E: Persistent Owner And Epoch State"]:::done
   R1F["R1F: Scalar And Special-State Policy"]:::done
-  R1G["R1G: Shared-Function Resource Plans"]:::todo
-  R1H["R1H: MOI Resource Parity Rollout"]:::todo
+  R1G["R1G: Shared-Function Resource Plans"]:::done
+  R1H["R1H: MOI Resource Parity Rollout"]:::active
   R1{"R1: Register/Spill Policy Ready"}:::todo
 
   B0 --> R1A
@@ -238,32 +238,31 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1G` after the direct-kernel resource slices. `R1F` now provides
-   automatic scalar allocation and special-state preservation for direct
-   kernels.
-2. Converge the completed resource paths in `R1H`; reaching the `R1` diamond
+1. Converge the completed direct- and shared-function resource paths in
+   `R1H`; reaching the `R1` diamond
    means the whole register/spill policy, rather than only its first backend,
    is ready.
-3. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
+2. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
    branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
-4. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
+3. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
    taken in bounded slices when they unblock the main path. Freeze profiles in
    `O1B` only after the engine behavior and automatic resource choices named
    by its incoming edges are stable.
-5. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
+4. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
    and sampled checking paths are ready. Passing it reaches the `T1` parity
    milestone and permits the final `M0` broad-turn-on acceptance review.
-6. Refresh the durable team snapshot in `D1` after `M0` is accepted.
+5. Refresh the durable team snapshot in `D1` after `M0` is accepted.
 
 `A1` remains in the full project DAG, but it is intentionally outside the
 current local execution window while only `gfx1201` hardware is available. Its
 only incoming edge is the existing baseline; it neither gates nor is gated by
 the gfx1201 `M0` path.
 
-The most important design dependency is `R1`. Direct-kernel access probes now
-have automatic ephemeral, persistent, scalar, and spill-backed resources. The
-remaining resource-policy risk is shared helper text, followed by migrating
-the non-access probe implementations through the same planner.
+The most important design dependency is `R1`. Direct-kernel and shared-helper
+access probes now have automatic ephemeral, persistent, scalar, and
+spill-backed resources. The remaining resource-policy work is migrating the
+non-access probe implementations through the same planner and qualifying the
+standard profiles.
 
 ## M0: MOI Broad Turn-On Readiness - TARGET
 
@@ -851,7 +850,7 @@ Done criteria:
 - A descriptor-full scalar failure is visible and bounded; if a borrow path is
   implemented, a deliberately live SGPR pair survives it on hardware.
 
-## R1G: Shared-Function Resource Plans - TODO
+## R1G: Shared-Function Resource Plans - DONE
 
 Goal: instrument a helper reached by multiple kernels without giving shared
 text incompatible register or private-scratch assumptions.
@@ -871,6 +870,25 @@ Work:
   specific reason. A clear skip is acceptable until ownership is proven; an
   orphan descriptor update is not.
 
+Landed boundary:
+
+- Resource planning unions the live-before sets of every reachable owner,
+  limits dead-window search to the smallest current allocation, and grows a
+  fresh window only when it is legal for every owner.
+- Spill-backed shared text uses one address-free scratch sequence above the
+  maximum original private size. Every owner descriptor and named metadata
+  record receives the same sufficient private extent; unrelated kernels do
+  not.
+- Inline shadow can initialize one persistent owner/epoch pair for every
+  owner, or use one common private epoch layout. Workitem-derived private
+  owner state is rejected when reachable owners disagree on wave size.
+- Staged text growth resolves active descriptors by kernel name before later
+  private growth or entry redirection, rather than reusing stale pre-growth
+  file offsets.
+- Unreachable or indirect helper text remains a typed missing-owner outcome;
+  an explicit register override no longer guesses that every descriptor owns
+  it.
+
 Done criteria:
 
 - A synthetic two-kernel shared-helper object passes dead, fresh, spill, and
@@ -880,7 +898,7 @@ Done criteria:
 - Broad logs distinguish unsupported shared ownership from ordinary
   no-candidate and allocation failures.
 
-## R1H: MOI Resource Parity Rollout - TODO
+## R1H: MOI Resource Parity Rollout - ACTIVE
 
 Goal: integrate the completed R1 resource paths into standard MOI profiles and
 demonstrate that register configuration is no longer the reason MOI trails
@@ -899,6 +917,15 @@ Work:
 - Run focused rocJITsu tests, hip-moi controls, IREE TileAndFuse, the scan and
   softmax regressions, and then broad IREE e2e for every engine with GPU
   parallelism around `8` and explicit timeouts.
+- Create `SPILLING.md` alongside `DESIGN.md` as the durable guide to the R1
+  deliverable. Document the allocator hierarchy, private-segment spill layout,
+  descriptor and text-patch transaction, direct- and shared-function ownership,
+  supported failure boundaries, and the tests that protect each layer. Credit
+  Kunwar Grover and his `origin/users/Groverkss/text-relocation-land` branch as
+  the implementation starting point, while distinguishing the allocation and
+  spill-frame ideas adapted from that branch from the new gfx1201 emitter and
+  ConSan integration. Cross-reference the guide from `DESIGN.md`, `USAGE.md`,
+  `TUTORIAL.md`, `LOCAL_TESTING.md`, and this plan.
 - Update `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and `LOCAL_TESTING.md` as each
   engine stops requiring manual registers. Keep unsupported shared or scalar
   cases explicit until their nodes are complete.
@@ -911,6 +938,8 @@ Done criteria:
   and includes at least one observed spill-backed patch.
 - Guards distinguish no candidate, unsupported candidate, allocation failure,
   spill/descriptor failure, successful instrumentation, and race diagnostics.
+- `SPILLING.md` is complete, cross-linked, and accurately attributes the
+  branch on which the initial implementation work was based.
 - Remaining MOI parity gaps belong to other named DAG nodes rather than hidden
   manual-register assumptions.
 

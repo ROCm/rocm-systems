@@ -358,6 +358,9 @@ struct ConSanPatchInfo {
   std::optional<uint32_t> persistent_epoch_private_offset;
   uint16_t spilled_vgpr_count = 0;
   uint32_t required_private_segment_size = 0;
+  /// Kernel descriptors whose dispatches can execute this patch. Shared
+  /// helper patches name every reachable owner.
+  std::vector<uint64_t> owner_descriptor_file_offsets;
 };
 
 struct ConSanCandidateResourcePlan {

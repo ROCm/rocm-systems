@@ -560,6 +560,219 @@ std::vector<uint8_t> make_rdna4_code_object_with_local_function(
   return image;
 }
 
+struct TwoKernelSharedFixtureOptions {
+  uint32_t first_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
+  uint32_t second_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
+  uint32_t first_private_bytes = 0;
+  uint32_t second_private_bytes = 0;
+  bool first_wave32 = false;
+  bool second_wave32 = false;
+  bool first_continuation_uses_v1 = false;
+  bool helper_keeps_v1_v3_live = false;
+};
+
+std::vector<uint8_t>
+make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &options = {}) {
+  constexpr uint16_t kReturnSgpr = 30;
+  std::vector<uint32_t> first_kernel{0};
+  if (options.first_continuation_uses_v1) {
+    first_kernel.push_back(
+        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  first_kernel.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
+  std::vector<uint32_t> second_kernel{0, build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  const std::vector<uint32_t> unrelated_kernel{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  std::vector<uint32_t> helper{
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  if (options.helper_keeps_v1_v3_live) {
+    helper.push_back(
+        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
+    helper.push_back(
+        build_v_mov_b32_e32(/*vdst=*/2, vector_source_vgpr(2), ROCJITSU_CODE_ARCH_RDNA4));
+    helper.push_back(
+        build_v_mov_b32_e32(/*vdst=*/3, vector_source_vgpr(3), ROCJITSU_CODE_ARCH_RDNA4));
+  }
+  helper.push_back(pack_sop1(/*s_setpc_b64=*/0x48, 0, kReturnSgpr));
+
+  const uint64_t first_entry = 0;
+  const uint64_t second_entry = first_kernel.size() * sizeof(uint32_t);
+  const uint64_t unrelated_entry = (first_kernel.size() + second_kernel.size()) * sizeof(uint32_t);
+  const uint64_t helper_entry =
+      (first_kernel.size() + second_kernel.size() + unrelated_kernel.size()) * sizeof(uint32_t);
+  first_kernel[0] = pack_sopk(
+      /*s_call_b64=*/0x14, kReturnSgpr,
+      static_cast<uint16_t>((helper_entry - (first_entry + sizeof(uint32_t))) / sizeof(uint32_t)));
+  second_kernel[0] = pack_sopk(
+      /*s_call_b64=*/0x14, kReturnSgpr,
+      static_cast<uint16_t>((helper_entry - (second_entry + sizeof(uint32_t))) / sizeof(uint32_t)));
+
+  constexpr uint64_t text_offset = 0x100;
+  constexpr uint64_t text_vaddr = 0x1100;
+  constexpr uint64_t rodata_vaddr = 0x2100;
+  constexpr uint64_t descriptor_size = sizeof(KD);
+  const uint64_t first_kernel_size = first_kernel.size() * sizeof(uint32_t);
+  const uint64_t second_kernel_size = second_kernel.size() * sizeof(uint32_t);
+  const uint64_t unrelated_kernel_size = unrelated_kernel.size() * sizeof(uint32_t);
+  const uint64_t helper_size = helper.size() * sizeof(uint32_t);
+  const uint64_t text_size =
+      first_kernel_size + second_kernel_size + unrelated_kernel_size + helper_size;
+
+  std::vector<uint8_t> shstrtab{'\0'};
+  const uint32_t text_name = add_elf_name(shstrtab, ".text");
+  const uint32_t rodata_name = add_elf_name(shstrtab, ".rodata");
+  const uint32_t symtab_name = add_elf_name(shstrtab, ".symtab");
+  const uint32_t strtab_name = add_elf_name(shstrtab, ".strtab");
+  const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
+
+  std::vector<uint8_t> strtab{'\0'};
+  const uint32_t helper_symbol_name = add_elf_name(strtab, "shared_lds_helper");
+  const uint32_t first_kernel_name = add_elf_name(strtab, "shared_owner_0");
+  const uint32_t second_kernel_name = add_elf_name(strtab, "shared_owner_1");
+  const uint32_t unrelated_kernel_name = add_elf_name(strtab, "unrelated_kernel");
+  const uint32_t first_kd_name = add_elf_name(strtab, "shared_owner_0.kd");
+  const uint32_t second_kd_name = add_elf_name(strtab, "shared_owner_1.kd");
+  const uint32_t unrelated_kd_name = add_elf_name(strtab, "unrelated_kernel.kd");
+
+  const uint64_t rodata_offset = text_offset + text_size;
+  const uint64_t strtab_offset = rodata_offset + 3u * descriptor_size;
+  const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
+  constexpr size_t symbol_count = 8;
+  const uint64_t shstrtab_offset = symtab_offset + symbol_count * sizeof(Elf64_Sym);
+  const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
+  constexpr uint16_t section_count = 6;
+  std::vector<uint8_t> image(shoff + section_count * sizeof(Elf64_Shdr), 0);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  ehdr.e_ident[EI_CLASS] = ELFCLASS64;
+  ehdr.e_ident[EI_DATA] = 1;
+  ehdr.e_ident[EI_VERSION] = 1;
+  ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  ehdr.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  ehdr.e_type = ET_DYN;
+  ehdr.e_machine = EM_AMDGPU;
+  ehdr.e_version = 1;
+  ehdr.e_shoff = shoff;
+  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_shentsize = sizeof(Elf64_Shdr);
+  ehdr.e_shnum = section_count;
+  ehdr.e_shstrndx = 5;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::memcpy(image.data() + text_offset, first_kernel.data(), first_kernel_size);
+  std::memcpy(image.data() + text_offset + first_kernel_size, second_kernel.data(),
+              second_kernel_size);
+  std::memcpy(image.data() + text_offset + first_kernel_size + second_kernel_size,
+              unrelated_kernel.data(), unrelated_kernel_size);
+  std::memcpy(image.data() + text_offset + first_kernel_size + second_kernel_size +
+                  unrelated_kernel_size,
+              helper.data(), helper_size);
+
+  const auto write_descriptor = [&](uint64_t offset, uint64_t descriptor_vaddr,
+                                    uint64_t entry_text_offset, uint32_t vgpr_granulated,
+                                    uint32_t private_bytes, bool wave32) {
+    KD descriptor{};
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(text_vaddr + entry_text_offset) -
+        static_cast<int64_t>(descriptor_vaddr);
+    descriptor.private_segment_fixed_size = private_bytes;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, vgpr_granulated);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+                    private_bytes != 0 ? 1u : 0u);
+    const uint32_t wave32_value = wave32 ? 1u : 0u;
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32_value);
+    std::memcpy(image.data() + offset, &descriptor, sizeof(descriptor));
+  };
+  write_descriptor(rodata_offset, rodata_vaddr, first_entry, options.first_vgpr_granulated,
+                   options.first_private_bytes, options.first_wave32);
+  write_descriptor(rodata_offset + descriptor_size, rodata_vaddr + descriptor_size, second_entry,
+                   options.second_vgpr_granulated, options.second_private_bytes,
+                   options.second_wave32);
+  write_descriptor(rodata_offset + 2u * descriptor_size, rodata_vaddr + 2u * descriptor_size,
+                   unrelated_entry, kRdna4Wave64AllVgprsGranulated, 0, false);
+  std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
+  std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
+
+  std::array<Elf64_Sym, symbol_count> symbols{};
+  symbols[1].st_name = helper_symbol_name;
+  symbols[1].st_info = elf_symbol_info(kElfSymbolBindLocal, kElfSymbolTypeFunc);
+  symbols[1].st_shndx = 1;
+  symbols[1].st_value = text_vaddr + helper_entry;
+  symbols[1].st_size = helper_size;
+  symbols[2].st_name = first_kernel_name;
+  symbols[2].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  symbols[2].st_shndx = 1;
+  symbols[2].st_value = text_vaddr + first_entry;
+  symbols[2].st_size = first_kernel_size;
+  symbols[3].st_name = second_kernel_name;
+  symbols[3].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  symbols[3].st_shndx = 1;
+  symbols[3].st_value = text_vaddr + second_entry;
+  symbols[3].st_size = second_kernel_size;
+  symbols[4].st_name = unrelated_kernel_name;
+  symbols[4].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc);
+  symbols[4].st_shndx = 1;
+  symbols[4].st_value = text_vaddr + unrelated_entry;
+  symbols[4].st_size = unrelated_kernel_size;
+  symbols[5].st_name = first_kd_name;
+  symbols[5].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  symbols[5].st_shndx = 2;
+  symbols[5].st_value = rodata_vaddr;
+  symbols[5].st_size = descriptor_size;
+  symbols[6].st_name = second_kd_name;
+  symbols[6].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  symbols[6].st_shndx = 2;
+  symbols[6].st_value = rodata_vaddr + descriptor_size;
+  symbols[6].st_size = descriptor_size;
+  symbols[7].st_name = unrelated_kd_name;
+  symbols[7].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);
+  symbols[7].st_shndx = 2;
+  symbols[7].st_value = rodata_vaddr + 2u * descriptor_size;
+  symbols[7].st_size = descriptor_size;
+  std::memcpy(image.data() + symtab_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+
+  std::array<Elf64_Shdr, section_count> sections{};
+  sections[1].sh_name = text_name;
+  sections[1].sh_type = SHT_PROGBITS;
+  sections[1].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  sections[1].sh_addr = text_vaddr;
+  sections[1].sh_offset = text_offset;
+  sections[1].sh_size = text_size;
+  sections[1].sh_addralign = sizeof(uint32_t);
+  sections[2].sh_name = rodata_name;
+  sections[2].sh_type = SHT_PROGBITS;
+  sections[2].sh_flags = SHF_ALLOC;
+  sections[2].sh_addr = rodata_vaddr;
+  sections[2].sh_offset = rodata_offset;
+  sections[2].sh_size = 3u * descriptor_size;
+  sections[2].sh_addralign = 64;
+  sections[3].sh_name = symtab_name;
+  sections[3].sh_type = SHT_SYMTAB;
+  sections[3].sh_offset = symtab_offset;
+  sections[3].sh_size = symbol_count * sizeof(Elf64_Sym);
+  sections[3].sh_link = 4;
+  sections[3].sh_info = 2;
+  sections[3].sh_addralign = 8;
+  sections[3].sh_entsize = sizeof(Elf64_Sym);
+  sections[4].sh_name = strtab_name;
+  sections[4].sh_type = SHT_STRTAB;
+  sections[4].sh_offset = strtab_offset;
+  sections[4].sh_size = strtab.size();
+  sections[4].sh_addralign = 1;
+  sections[5].sh_name = shstrtab_name;
+  sections[5].sh_type = SHT_STRTAB;
+  sections[5].sh_offset = shstrtab_offset;
+  sections[5].sh_size = shstrtab.size();
+  sections[5].sh_addralign = 1;
+  std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
 std::vector<uint8_t> make_rdna4_supported_lds_code_object() {
   const std::array<uint32_t, 6> text_words = {
       0xD8340000u, 0x00000000u, // ds_store_b32
@@ -938,7 +1151,10 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified) << "candidates=" << result.moi_candidates.size()
+                               << " plans=" << result.resource_plans.size()
+                               << " patches=" << result.patches.size()
+                               << " warnings=" << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_vgpr, 15);
   EXPECT_EQ(result.resolved_moi_epoch_vgpr, 16);
@@ -1108,7 +1324,7 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
-  ASSERT_TRUE(result.modified);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
@@ -1562,6 +1778,319 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_TRUE(result.resource_plans.front().owner_descriptor_file_offsets.empty());
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
+}
+
+TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 3u);
+  ASSERT_EQ(result.functions.size(), 1u);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_FALSE(result.moi_candidates.front().in_kernel);
+  EXPECT_EQ(result.moi_candidates.front().container_name, "shared_lds_helper");
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
+  EXPECT_EQ(plan.scratch_vgpr, 1);
+  EXPECT_EQ(plan.scratch_vgpr_count, 3u);
+}
+
+TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnchanged) {
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  const auto original_unrelated =
+      std::ranges::find_if(original.kernels(), [](const AmdGpuKernelInfo &kernel) {
+        return kernel.name == "unrelated_kernel";
+      });
+  ASSERT_NE(original_unrelated, original.kernels().end());
+  KD original_unrelated_descriptor{};
+  std::memcpy(&original_unrelated_descriptor,
+              bytes.data() + original_unrelated->descriptor_file_offset,
+              sizeof(original_unrelated_descriptor));
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  EXPECT_EQ(patch.anchor_offset, 20u);
+  ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch.owner_descriptor_file_offsets,
+            result.resource_plans.front().owner_descriptor_file_offsets);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto patched_unrelated =
+      std::ranges::find_if(patched.kernels(), [](const AmdGpuKernelInfo &kernel) {
+        return kernel.name == "unrelated_kernel";
+      });
+  ASSERT_NE(patched_unrelated, patched.kernels().end());
+  KD patched_unrelated_descriptor{};
+  std::memcpy(&patched_unrelated_descriptor,
+              result.elf_bytes.data() + patched_unrelated->descriptor_file_offset,
+              sizeof(patched_unrelated_descriptor));
+  // Text growth legitimately adjusts KD-relative entry offsets. Resource and
+  // ABI fields for a kernel that cannot reach the helper stay unchanged.
+  EXPECT_EQ(patched_unrelated_descriptor.compute_pgm_rsrc1,
+            original_unrelated_descriptor.compute_pgm_rsrc1);
+  EXPECT_EQ(patched_unrelated_descriptor.compute_pgm_rsrc2,
+            original_unrelated_descriptor.compute_pgm_rsrc2);
+  EXPECT_EQ(patched_unrelated_descriptor.private_segment_fixed_size,
+            original_unrelated_descriptor.private_segment_fixed_size);
+  EXPECT_EQ(patched_unrelated_descriptor.kernel_code_properties,
+            original_unrelated_descriptor.kernel_code_properties);
+}
+
+TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_vgpr_granulated = 0;
+  fixture.second_vgpr_granulated = 0;
+  fixture.helper_keeps_v1_v3_live = true;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  EXPECT_EQ(plan.scratch_vgpr, 4);
+  EXPECT_EQ(plan.required_vgpr_count, 7u);
+  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    const uint32_t granulated = AMDHSA_BITS_GET(
+        descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(granulated, 1u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(granulated, kRdna4Wave64AllVgprsGranulated);
+  }
+}
+
+TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().original_private_segment_size, 20u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch.required_private_segment_size, 44u);
+  ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const std::vector<uint32_t> expected_save =
+      expected_vgpr_spill_words(/*base=*/1, /*count=*/3, /*restore=*/false, /*slot_base=*/32);
+  ASSERT_FALSE(expected_save.empty());
+  std::vector<uint32_t> trampoline_words(patch.trampoline_size / sizeof(uint32_t));
+  std::memcpy(trampoline_words.data(),
+              patched.text_sections().front()->data() + patch.trampoline_offset,
+              patch.trampoline_size);
+  ASSERT_GE(trampoline_words.size(), expected_save.size());
+  EXPECT_TRUE(std::equal(expected_save.begin(), expected_save.end(), trampoline_words.begin()));
+
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+  }
+}
+
+TEST(ConSanMoi, SharedHelperRejectsAssignmentLiveInAnyOwnerScope) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_continuation_uses_v1 = true;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 1;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::ExplicitLive);
+  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+}
+
+TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
+  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
+                          [](const ConSanPatchInfo &patch) {
+                            return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+                          }),
+            1);
+  EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
+                          [](const ConSanPatchInfo &patch) {
+                            return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+                          }),
+            2);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  std::vector<uint64_t> prologue_anchors;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue)
+      prologue_anchors.push_back(patch.anchor_offset);
+  }
+  std::ranges::sort(prologue_anchors);
+  EXPECT_EQ(prologue_anchors, (std::vector<uint64_t>{0u, 8u}));
+}
+
+TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << "candidates=" << result.moi_candidates.size()
+                               << " plans=" << result.resource_plans.size()
+                               << " patches=" << result.patches.size()
+                               << " warnings=" << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->persistent_epoch_private_offset, 32u);
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
+                          [](const ConSanPatchInfo &patch) {
+                            return patch.kind ==
+                                   ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+                          }),
+            2);
+  std::vector<uint64_t> prologue_anchors;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) {
+      prologue_anchors.push_back(patch.anchor_offset);
+      EXPECT_EQ(patch.persistent_epoch_private_offset, 32u);
+      EXPECT_EQ(patch.required_private_segment_size, 52u);
+    }
+  }
+  std::ranges::sort(prologue_anchors);
+  EXPECT_EQ(prologue_anchors, (std::vector<uint64_t>{0u, 8u}));
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+  }
+}
+
+TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.first_wave32 = true;
+  fixture.second_wave32 = false;
+  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject original(bytes.data(), bytes.size());
+  ASSERT_TRUE(original.is_valid());
+  for (const AmdGpuKernelInfo &kernel : original.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
+    if (kernel.name == "shared_owner_0") {
+      EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                                kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32),
+                1u);
+    } else if (kernel.name == "shared_owner_1") {
+      EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                                kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32),
+                0u);
+    }
+  }
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.force_private_epoch = true;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("incompatible owner wave sizes") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
@@ -3108,7 +3637,8 @@ std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {
 }
 
 TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
-  const std::array<uint32_t, 1> kernel_words = {
+  const std::array<uint32_t, 2> kernel_words = {
+      pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
   const std::vector<uint32_t> function_words = make_padded_moi_flat_first_light_function_words();
@@ -3130,15 +3660,15 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
   EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_b32");
-  EXPECT_EQ(result.moi_candidates.front().text_offset, 24u);
+  EXPECT_EQ(result.moi_candidates.front().text_offset, 28u);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
-  EXPECT_EQ(result.patches.front().anchor_offset, 24u);
-  EXPECT_EQ(result.patches.front().trampoline_offset, 36u);
+  EXPECT_EQ(result.patches.front().anchor_offset, 28u);
+  EXPECT_EQ(result.patches.front().trampoline_offset, 40u);
   EXPECT_EQ(result.patches.front().original_size, 143u * sizeof(uint32_t));
 
   std::array<uint32_t, 4> rewritten_prefix{};
-  std::memcpy(rewritten_prefix.data(), result.elf_bytes.data() + 0x118,
+  std::memcpy(rewritten_prefix.data(), result.elf_bytes.data() + 0x11c,
               rewritten_prefix.size() * sizeof(uint32_t));
   EXPECT_EQ(rewritten_prefix[0], 0xEC05007Cu);
   EXPECT_EQ(rewritten_prefix[1], 0x00000002u);
@@ -3147,7 +3677,8 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
 }
 
 TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingFlatAddressPair) {
-  const std::array<uint32_t, 1> kernel_words = {
+  const std::array<uint32_t, 2> kernel_words = {
+      pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
   const std::vector<uint32_t> function_words = make_padded_moi_flat_first_light_function_words();
@@ -3163,10 +3694,8 @@ TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingFlatAddressPair) {
 
   EXPECT_TRUE(result.errors.empty());
   EXPECT_FALSE(result.modified);
-  bool saw_overlap = false;
-  for (const std::string &warning : result.warnings)
-    saw_overlap |= warning.find("overlap the LDS address VGPRs") != std::string::npos;
-  EXPECT_TRUE(saw_overlap);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::ForbiddenOverlap);
 }
 
 TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
