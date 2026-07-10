@@ -53,6 +53,13 @@ init_logging();
 void
 initialize();
 
+// true while client initialization is being driven by the OMPT entry point (ompt_start_tool).
+// libomp invokes ompt_start_tool while holding its non-recursive init lock, so find_clients()
+// must avoid dlopen (which can re-enter libomp and deadlock) on this path. Returns a reference so
+// callers can scope the flag with a common::scope_destructor.
+bool&
+ompt_init_active();
+
 // finalize the clients
 void
 finalize();

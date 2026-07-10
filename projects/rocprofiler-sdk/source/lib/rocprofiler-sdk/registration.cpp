@@ -629,6 +629,23 @@ find_clients()
     // libraries
     if(_default_configure)
     {
+        // Resolve the configure symbols via the ELF symbol table + load bias instead of
+        // dlopen/dlsym when reached through the OMPT entry point. libomp invokes ompt_start_tool
+        // while holding its non-recursive init lock; a dlopen here (even RTLD_NOLOAD) can re-run a
+        // pending DT_INIT of an already-mapped library and deadlock libomp. This path bypasses the
+        // library's DT_INIT_ARRAY (global C++ constructors), so it is only used on the OMPT path
+        // (where dlopen would otherwise deadlock) or when explicitly forced via
+        // ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN.
+        const bool avoid_dlopen =
+            ompt_init_active() ||
+            common::get_env("ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN", false);
+        ROCP_WARNING_IF(avoid_dlopen)
+            << "rocprofiler-sdk is discovering client tools via ELF symbol resolution (bypassing "
+               "dlopen) because it was invoked during OpenMP (OMPT) initialization (where dlopen "
+               "can deadlock) or ROCPROFILER_FIND_CLIENTS_AVOID_DLOPEN was set. Client libraries "
+               "whose rocprofiler_configure relies on global static initialization (DT_INIT_ARRAY) "
+               "may be affected.";
+
         for(const auto& [itr, load_bias] : get_link_map())
         {
             ROCP_INFO << "searching " << itr << " for 'rocprofiler_configure' symbol...";
@@ -640,14 +657,41 @@ find_clients()
                 continue;
             }
 
-            // resolve the configure symbols via the ELF symbol table + load bias instead of
-            // dlopen/dlsym; dlopen here can re-run a pending DT_INIT and deadlock libomp during
-            // OMPT bring-up (see resolve_symbol_no_dlopen)
-            auto  elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
-            auto* _sym    = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure)*>(
-                elfinfo, load_bias, "rocprofiler_configure");
-            auto* _attach_sym = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure_attach)*>(
-                elfinfo, load_bias, "rocprofiler_configure_attach");
+            decltype(::rocprofiler_configure)*        _sym        = nullptr;
+            decltype(::rocprofiler_configure_attach)* _attach_sym = nullptr;
+            void*                                     handle      = nullptr;
+
+            if(avoid_dlopen)
+            {
+                // resolve without invoking the loader (see resolve_symbol_no_dlopen)
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+                _sym         = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure)*>(
+                    elfinfo, load_bias, "rocprofiler_configure");
+                _attach_sym = resolve_symbol_no_dlopen<decltype(::rocprofiler_configure_attach)*>(
+                    elfinfo, load_bias, "rocprofiler_configure_attach");
+            }
+            else
+            {
+                auto elfinfo = common::elf_utils::read(itr, optimize_elf_parsing);
+                if(!elfinfo.has_symbol([](std::string_view symname) {
+                       return (symname == "rocprofiler_configure");
+                   }))
+                {
+                    ROCP_TRACE << fmt::format(
+                        "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "
+                        "(search method: ELF parsing) required by rocprofiler-sdk for tools",
+                        itr);
+                    continue;
+                }
+
+                ROCP_INFO << "dlopening " << itr << " for 'rocprofiler_configure' symbol...";
+
+                handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+                ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;
+
+                _sym        = rocprofiler_configure_dlsym(handle);
+                _attach_sym = rocprofiler_configure_attach_dlsym(handle);
+            }
 
             // symbol not found
             if(!_sym)
@@ -676,7 +720,7 @@ find_clients()
             if(_sym == &rocprofiler_configure && data.size() == 1)
             {
                 data.front()->name                    = itr;
-                data.front()->dlhandle                = nullptr;
+                data.front()->dlhandle                = handle;
                 data.front()->internal_client_id.name = "default";
             }
             else if(is_unique_configure_func(_sym))
@@ -1052,6 +1096,13 @@ get_client_offset()
             std::numeric_limits<uint32_t>::max() - std::numeric_limits<uint8_t>::max()};
         return rng(gen);
     }();
+    return _v;
+}
+
+bool&
+ompt_init_active()
+{
+    static thread_local bool _v = false;
     return _v;
 }
 
