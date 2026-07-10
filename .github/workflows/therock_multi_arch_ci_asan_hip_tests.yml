@@ -1,0 +1,121 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Multi-Arch CI ASAN (hip-tests only) for rocm-systems
+#
+# This workflow is a scoped variant of therock_multi_arch_ci_asan.yml.
+# It builds only the compiler-runtime and runtime-tests stages (which includes
+# HIP and hip-tests), skipping math-libs and all other downstream stages.
+#
+# Downstream stages (math-libs, comm-libs, storage-libs, debug-tools,
+# dctools-core, profiler-apps, media-libs, wsl-rocdxg) are pulled from the
+# latest successful nightly ASAN run via prebuilt_stages, so they are not
+# rebuilt. The baseline_run_id can be overridden manually via workflow_dispatch.
+
+name: TheRock Multi-Arch CI ASAN (hip-tests only)
+
+on:
+  push:
+    branches:
+      - users/dlytovch/hip-tests-asan
+  workflow_dispatch:
+    inputs:
+      linux_amdgpu_families:
+        type: string
+        description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X"
+        default: ""
+      baseline_run_id:
+        type: string
+        default: ""
+        description: "Workflow run ID to copy prebuilt stage artifacts from; defaults to latest successful nightly ASAN run"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  resolve_baseline:
+    name: Resolve Baseline Run ID
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline_run_id: ${{ steps.fetch.outputs.baseline_run_id }}
+    steps:
+      - name: Fetch latest successful nightly ASAN run
+        id: fetch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.baseline_run_id }}" ]; then
+            echo "baseline_run_id=${{ inputs.baseline_run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            RUN_ID=$(gh api \
+              "repos/${{ github.repository }}/actions/workflows/therock_multi_arch_ci_asan.yml/runs?status=success&event=schedule&per_page=1" \
+              --jq '.workflow_runs[0].id')
+            if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+              echo "::error::No successful scheduled ASAN run found to use as baseline."
+              exit 1
+            fi
+            echo "baseline_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+  setup:
+    needs: resolve_baseline
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    with:
+      build_variant: "host-asan"
+      linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
+      linux_test_labels: "test:hip-tests"
+      prebuilt_stages: "math-libs,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg"
+      baseline_run_id: ${{ needs.resolve_baseline.outputs.baseline_run_id }}
+      repository: ROCm/TheRock
+      ref: "main"
+      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+
+  linux_build_and_test:
+    name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
+    needs: [resolve_baseline, setup]
+    if: >-
+      ${{
+        needs.setup.outputs.linux_build_config != '' &&
+        needs.setup.outputs.enable_build_jobs == 'true'
+      }}
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    secrets: inherit
+    with:
+      build_config: ${{ needs.setup.outputs.linux_build_config }}
+      test_labels: ${{ needs.setup.outputs.linux_test_labels }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      test_type: ${{ needs.setup.outputs.test_type }}
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
+      repository: ROCm/TheRock
+      ref: "main"
+    permissions:
+      contents: read
+      id-token: write
+
+  multi_arch_ci_summary:
+    name: Multi-Arch CI Summary
+    if: always()
+    needs:
+      - resolve_baseline
+      - setup
+      - linux_build_and_test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: "main"
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Evaluate workflow results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json '${{ toJSON(needs) }}'
