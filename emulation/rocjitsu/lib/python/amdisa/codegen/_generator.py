@@ -1716,8 +1716,9 @@ class CodeGenerator:
                 '(dpp_bound_ctrl_ == 0 && '
                 'amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_))); '
                 'if (sdwa_preserve || dpp_partial) '
-                'uses.expand(RegisterRef{RegClass::VGPR, '
-                'static_cast<uint16_t>(inst_.vdst), 1});'
+                'if (const auto *dst = dst_operand(0)) '
+                'if (auto ref = dst->to_register_ref()) '
+                'uses.expand(*ref);'
             )
         # VOP3 gained DPP on gfx11+ (no SDWA). Its vdst can name an SGPR
         # (re-encoded compares), so derive the ref from the decoded dst operand

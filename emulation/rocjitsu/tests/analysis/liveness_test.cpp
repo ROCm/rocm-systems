@@ -854,6 +854,22 @@ TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+TEST(GeneratedInstDefUse, Vop1DppPartialMaskReadsFullWidthDestination) {
+  // v_rcp_f64_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask preserves
+  // the whole 64-bit destination, so the implicit use must match the width-2
+  // def -- not just the low dword.
+  // CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17]=6, op[16:9]=37
+  // (v_rcp_f64), src0[8:0]=250 (SRC_DPP).
+  constexpr uint32_t kVop1RcpF64Word0Dpp = (0x3Fu << 25) | (6u << 17) | (37u << 9) | 250u;
+  auto inst = decode_cdna4({kVop1RcpF64Word0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_rcp_f64");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 2}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 6, 2}));
+}
+
 // --- Generated VOP2 SDWA/DPP destination-preserve reads (real decode) ---
 //
 // VOP2 shares VOP1's destination-preserve rules: SDWA dst_unused:PRESERVE and a
