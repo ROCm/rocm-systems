@@ -1369,7 +1369,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
 
   size_t granule_size = pool_i.alloc_granule;
   size_t alloc_size = granule_size * 10;
-  static const int kMemoryAllocSize = static_cast<int>(alloc_size / sizeof(int));
+  const int kMemoryAllocSize = static_cast<int>(alloc_size / sizeof(int));
 
   void* addr1 = nullptr;
   void* addr2 = nullptr;
@@ -1497,7 +1497,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t cpuAgent, hsa_agent_t
 
   size_t& granule_size = pool_i.alloc_granule;
   size_t alloc_size = granule_size * 10;
-  static const int kMemoryAllocSize = alloc_size / sizeof(int);
+  const int kMemoryAllocSize = alloc_size / sizeof(int);
 
   // Get queue size and create queue
   uint32_t queue_size = 0;
