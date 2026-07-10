@@ -583,6 +583,9 @@ Current implementation:
   one 4-byte cell per entry.
 - Instruments decoded native scalar, B64, B128, d16, and two-address LDS
   loads/stores, publishing every rounded 4-byte cell in each access range.
+- Instruments supported zero-offset flat/VFLAT loads and stores admitted by
+  the configured F1 provenance policy. The low address VGPR is normalized as
+  the LDS byte offset and feeds the same cell-range publisher as native DS.
 - Uses `flat_atomic_swap_b64` to publish a packed exact-shadow word and obtain
   the prior word atomically.
 - Reports a conflict when the prior entry is non-empty, from a different owner,
@@ -620,7 +623,8 @@ Important current simplifications:
 Intended role:
 
 - Become the exact low-volume sanitizer.
-- Cover wider LDS forms and likely-group-flat LDS after provenance is stronger.
+- Extend flat/VFLAT encoding coverage beyond the current supported forms while
+  preserving the explicit provenance policy.
 - Use automatic scratch/spill policy instead of manual register knobs.
 - Emit structured bounded diagnostics that are useful without reading raw logs.
 

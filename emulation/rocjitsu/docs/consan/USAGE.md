@@ -144,8 +144,9 @@ The MVP uses this HSA tools loader path. A separate waitcheck-style
   shadow entry and emits one compact diagnostic for the first implemented
   conflict predicate: prior entry nonzero, prior owner different from the
   current owner, same epoch, and not a read/read pair. Barrier epochs and a
-  narrow same-address atomic handoff are supported; likely-group flat LDS is
-  the remaining access-form gap.
+  narrow same-address atomic handoff are supported. Supported zero-offset
+  likely-group flat LDS loads/stores use the same exact-shadow cell layout;
+  `RJ_CONSAN_FLAT_PROVENANCE` controls whether `MaybeGroup` sites participate.
 - `RJ_CONSAN_MOI_BACKEND=context|sampled_watchpoint`: legacy alias. It is used
   only when `RJ_CONSAN_MOI_ENGINE` is unset. `context` maps to `record_replay`;
   `sampled_watchpoint` maps to `sampled`.

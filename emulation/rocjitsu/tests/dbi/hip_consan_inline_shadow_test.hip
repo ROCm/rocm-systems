@@ -119,6 +119,16 @@ __device__ __forceinline__ void padded_ds_store_b128(uint32_t lds_addr, uint4 va
                : "memory");
 }
 
+__device__ __forceinline__ void padded_strong_group_flat_store_b32(uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t"
+               "flat_store_b32 v[0:1], %0\n\t" RJ_CONSAN_INLINE_SHADOW_NOP_CAVE
+               :
+               : "v"(value)
+               : "s14", "s15", "v0", "v1", "memory");
+}
+
 __device__ __forceinline__ void release_flat_atomic(uint32_t *counter) {
   uint32_t one = 1;
   asm volatile("flat_atomic_add_u32 %0, %1 scope:SCOPE_DEV\n\t"
@@ -202,6 +212,13 @@ __global__ __launch_bounds__(64) void padded_cross_wave_lds_store_b128(uint32_t 
   __syncthreads();
   if (tid == 0)
     out[0] = lds[0] ^ lds[1] ^ lds[2] ^ lds[3];
+}
+
+__global__ __launch_bounds__(64) void padded_cross_wave_flat_lds_store(uint32_t *out) {
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  padded_strong_group_flat_store_b32(0xF1A70000u | tid);
+  if (tid == 0)
+    out[0] = tid;
 }
 
 __global__ __launch_bounds__(128) void padded_barrier_ordered_lds_store(uint32_t *out) {
@@ -331,6 +348,15 @@ TEST(ConSanInlineShadowTest, CrossWaveRacyB128StoreCompletes) {
   ASSERT_EQ(sync, hipSuccess) << "HIP error: " << hipGetErrorString(sync);
 
   free_device_ptr(d_out);
+}
+
+TEST(ConSanInlineShadowTest, CrossWaveRacyFlatLdsStoreCompletes) {
+  uint32_t *out = nullptr;
+  HIP_ASSERT(hipMalloc(&out, sizeof(*out)));
+  padded_cross_wave_flat_lds_store<<<1, 64>>>(out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  HIP_ASSERT(hipFree(out));
 }
 
 TEST(ConSanInlineShadowTest, SameAddressAtomicHandoffCompletes) {

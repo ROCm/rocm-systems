@@ -127,8 +127,8 @@ flowchart LR
     R2["R2: Patch Placement"]:::done
     F1["F1: Flat Provenance"]:::done
     I1A["I1A: Native DS<br/>Multi-Cell"]:::done
-    I1B["I1B: Likely-Group<br/>Flat Coverage"]:::active
-    I1{"I1: LDS Coverage Ready"}:::todo
+    I1B["I1B: Likely-Group<br/>Flat Coverage"]:::done
+    I1{"I1: LDS Coverage Ready"}:::done
 
     R2 --> I1B
     F1 --> I1B
@@ -149,7 +149,7 @@ flowchart LR
   subgraph OPS["Operational profile"]
     direction LR
     O1A["O1A: Buffer And<br/>Failure Defaults"]:::done
-    O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::todo
+    O1B["O1B: Freeze Standard<br/>Engine Profiles"]:::active
     O1{"O1: Operational<br/>Defaults Ready"}:::todo
 
     O1A --> O1B
@@ -1109,19 +1109,20 @@ Qualification evidence:
 - The gfx1201 live ConSan spill, SuperCollider, inline-shadow, and MOI tier:
   35/35 passed.
 
-## I1: Inline-Shadow LDS Coverage - TODO
+## I1: Inline-Shadow LDS Coverage - DONE
 
 Goal: make `RJ_CONSAN_MOI_ENGINE=inline_shadow` cover the LDS forms that matter
 for IREE and hip-moi-style workloads.
 
-Current state:
+Landed state:
 
 - Exact-shadow publication is live for native scalar, B64, B128, d16, and
   two-address LDS loads/stores.
 - It publishes every rounded 4-byte cell in each decoded access range.
 - It can emit compact diagnostics for prior non-empty, different-owner,
   same-epoch conflicts, suppressing read/read pairs.
-- It does not yet cover likely-group flat accesses.
+- Supported zero-offset `Group` and policy-admitted `MaybeGroup` flat/VFLAT
+  loads/stores use the same cell-range publisher after F1 normalization.
 
 Dependency split:
 
@@ -1161,7 +1162,7 @@ Landed evidence:
   diagnostic reports `[0,8)` ranges, proving a native B64 site reached the
   multi-cell path.
 
-### I1B: Likely-Group Flat Coverage - TODO
+### I1B: Likely-Group Flat Coverage - DONE
 
 Work:
 
@@ -1184,6 +1185,18 @@ Tests:
 - Focused rocJITsu inline-shadow HIP controls.
 - IREE TileAndFuse RDNA4 matmul subset with
   `RJ_CONSAN_MOI_ENGINE=inline_shadow`.
+
+Landed evidence:
+
+- A synthetic strict-policy `FlatGroup` control verifies that the low address
+  VGPR feeds one exact-shadow cell publication.
+- A live hand-authored gfx1201 control contains no native DS sites and one
+  strongly classified `flat_store_b32`. Inline shadow reports its cross-wave
+  write/write conflict at `[0,4)`; record/replay reports the same conflict.
+- Unknown/private/global sites remain absent from the candidate set, while
+  strict-policy `MaybeGroup` exclusions are counted in warnings.
+- All 163 ConSan/MOI unit tests and the 37-test live tier pass. The guarded
+  five-test IREE TileAndFuse subset also passes in strict inline-shadow mode.
 
 ## I2: Inline Diagnostics ABI - DONE
 

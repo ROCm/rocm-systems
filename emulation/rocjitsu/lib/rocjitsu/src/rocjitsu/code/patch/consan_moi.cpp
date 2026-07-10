@@ -3198,7 +3198,11 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 
 [[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate,
                                                      std::span<const uint8_t> bytes) {
-  if (candidate.source != ConSanMoiCandidateSource::NativeLds)
+  const bool native_lds = candidate.source == ConSanMoiCandidateSource::NativeLds;
+  const bool normalized_flat = (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
+                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
+                               is_first_light_flat_candidate(candidate);
+  if (!native_lds && !normalized_flat)
     return false;
   if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write)
     return false;
@@ -3626,7 +3630,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   apply_test_kernel_filter(candidates, options);
   if (candidates.empty()) {
     result.warnings.emplace_back(
-        "ConSan MOI inline-shadow probe found no supported native LDS load/store candidate");
+        "ConSan MOI inline-shadow probe found no supported native LDS or normalized group-flat "
+        "load/store candidate");
     return;
   }
 
@@ -3709,7 +3714,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::string placement_error;
     const auto placement = placement_planner.plan(placement_request, &placement_error);
     if (!placement) {
-      result.warnings.emplace_back("ConSan MOI inline-shadow probe skipped native LDS site: " +
+      result.warnings.emplace_back("ConSan MOI inline-shadow probe skipped access site: " +
                                    placement_error);
       continue;
     }

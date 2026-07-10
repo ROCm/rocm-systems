@@ -1454,6 +1454,10 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ConSanInlineShadowTest.CrossWaveRacyB128StoreCompletes"
             )
             set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_FLAT_RACY_TEST
+                "ConSanInlineShadowTest.CrossWaveRacyFlatLdsStoreCompletes"
+            )
+            set(
                 RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST
                 "ConSanInlineShadowTest.BarrierOrderedCrossWaveStoreCompletes"
             )
@@ -1678,6 +1682,45 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
                     "RJ_CONSAN_TEST_KERNEL_FILTER=padded_cross_wave_lds_store_b128"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiReportsCrossWaveFlatLdsRace"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_FLAT_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_FLAT_PROVENANCE=strict"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=padded_cross_wave_flat_lds_store"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.RecordReplayReportsCrossWaveFlatLdsRace"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_FLAT_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_FLAT_PROVENANCE=strict"
+                    "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=padded_cross_wave_flat_lds_store"
                     "RJ_CONSAN_MAX_PATCHES=1"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )

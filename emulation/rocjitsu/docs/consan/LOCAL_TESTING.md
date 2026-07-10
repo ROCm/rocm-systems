@@ -303,6 +303,9 @@ Known local result:
   proving that a native B64 access uses the multi-cell exact-shadow path.
 - The live rocJITsu tier also includes a two-wave B128 store race whose four
   cells are instrumented and diagnosed.
+- A strongly classified, zero-offset `flat_store_b32` control with no native DS
+  access reports the same cross-wave `[0,4)` conflict under inline shadow and
+  record/replay. The inline run uses `RJ_CONSAN_FLAT_PROVENANCE=strict`.
 - Scan/softmax regression subset: 3/3 passed on `gfx1201`.
 - IREE e2e broad sweep: 209/209 passed on `gfx1201` with a 60-second per-test
   timeout and no register-number or buffer-size configuration. The earlier

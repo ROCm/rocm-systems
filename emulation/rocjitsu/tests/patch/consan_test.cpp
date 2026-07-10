@@ -3833,6 +3833,51 @@ std::vector<uint32_t> make_padded_moi_flat_first_light_function_words() {
   return function_words;
 }
 
+TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {
+  const std::array<uint32_t, 2> kernel_words = {
+      pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint32_t> function_words = make_padded_moi_flat_first_light_function_words();
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 24;
+  options.moi_epoch_vgpr = 25;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> text_words(patched.text_sections().front()->size() / sizeof(uint32_t));
+  std::memcpy(text_words.data(), patched.text_sections().front()->data(),
+              patched.text_sections().front()->size());
+  const auto start_cell_shift = build_v_lshrrev_b32_e32(
+      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vsrc=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
+      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/13, /*return_old_value=*/true, /*scope=*/2,
+      ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(start_cell_shift);
+  ASSERT_TRUE(atomic_swap);
+  EXPECT_TRUE(contains_subsequence(text_words, std::span<const uint32_t>(&*start_cell_shift, 1)));
+  EXPECT_EQ(count_subsequence(text_words, *atomic_swap), 1u);
+}
+
 TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
   const std::array<uint32_t, 2> kernel_words = {
       pack_sopk(/*s_call_b64=*/0x14, /*sdst=*/30, /*simm16=*/1),
