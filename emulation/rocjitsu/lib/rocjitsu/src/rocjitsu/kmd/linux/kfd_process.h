@@ -230,7 +230,7 @@ public:
   std::mutex runtime_mutex_;
   RuntimeState runtime_state_;
 
-  std::mutex debug_mutex_;
+  mutable std::mutex debug_mutex_;
   DebugSession debug_session_;
 
 private:
