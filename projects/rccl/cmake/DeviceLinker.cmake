@@ -365,7 +365,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         -x hip --offload-device-only --offload-arch=${DL_GPU_TARGET}
         ${DL_HIP_COMPILER_FLAGS}
         -gline-tables-only
-        -std=c++17 -w ${DL_OPT_FLAGS}
+        -std=c++17 ${DL_OPT_FLAGS}
         -emit-llvm -S
         -o ${IR_OUT}
         ${SRC}
@@ -440,7 +440,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     ${DL_HOST_COMPRESS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
@@ -465,7 +464,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     -c -o ${ONERANK_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/onerank.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp
@@ -499,7 +497,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${DL_OPT_FLAGS}
       -std=c++17
       -fPIC
-      -w
       -MD -MF ${COLLECTIVES_DEPFILE}
       -c -o ${COLLECTIVES_FAT_OBJ}
       ${HIPIFY_DIR}/src/collectives.cc
@@ -520,7 +517,6 @@ else()
       ${DL_OPT_FLAGS}
       -std=c++17
       -fPIC
-      -w
       -c -o ${COLLECTIVES_FAT_OBJ}
       ${HIPIFY_DIR}/src/collectives.cc
     DEPENDS ${HIPIFY_DIR}/src/collectives.cc
@@ -550,7 +546,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_all_reduce_ipc.cu.cpp
@@ -569,7 +564,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_reduce_scatter_ipc.cu.cpp
@@ -588,7 +582,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_all_gather_ipc.cu.cpp
@@ -607,7 +600,6 @@ add_custom_command(
     ${DL_OPT_FLAGS}
     -std=c++17
     -fPIC
-    -w
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/dda_alltoall_ipc.cu.cpp
@@ -619,16 +611,6 @@ add_custom_command(
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
 # Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
 # entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
-#
-# RCCL_DEVICE_TABLE_OMIT mirrors what specialized .cpp files do: it suppresses
-# the cross-TU ncclDevFuncTable_2 emission inside common.h. Without this guard
-# each sym TU pulls in the table and demands ncclDevFunc_* definitions that
-# only live in other TUs, breaking amdgcn-link on stricter toolchains
-# (lld error: undefined hidden symbol: ncclDevFunc_*).
-#
-# Compile every .cpp under gensrc/symmetric/. Some files (all_gather.cpp)
-# define __global__ kernels directly; others (all_reduce.cpp, reduce_scatter.cpp)
-# are include-only stubs that compile to empty objects — harmless.
 #
 # SYM_FAT_OBJS is plural (vs the singular COMMON/ONERANK/COLLECTIVES_FAT_OBJ
 # siblings) because the symmetric generator emits one TU per instantiation.
@@ -645,13 +627,11 @@ if(GENERATE_SYM_KERNELS)
         -x hip ${DL_OFFLOAD_ARCH_FLAGS}
         ${DL_HIP_COMPILER_FLAGS}
         -DRCCL_DEVICE_LINKER
-        -DRCCL_DEVICE_TABLE_OMIT
         ${_link_def_flags}
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
         -std=c++17
         -fPIC
-        -w
         -c -o ${_sym_obj}
         ${_sym_src}
       DEPENDS ${_sym_src}

@@ -3,7 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
@@ -70,6 +70,7 @@ protected:
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
+    soc_ = soc;
     auto num_xcds = soc->num_xcds();
 
     loaded_.engine_config.max_ticks = 0;
@@ -98,7 +99,8 @@ protected:
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
-  rocjitsu::SimulatedDriver *driver_ = nullptr;
+  rocjitsu::SoC *soc_ = nullptr;
+  rocjitsu::SimulatedKfd *driver_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -190,7 +192,8 @@ TEST_F(KfdIoctlTest, GetTileConfigRejectsUnknownGpuId) {
 }
 
 TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
-  rocjitsu::SimulatedDriver daemon_driver(*loaded_.soc(), true);
+  ASSERT_NE(soc_, nullptr);
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, true);
   uint32_t process_id = daemon_driver.open_process();
   ASSERT_NE(process_id, 0u);
 

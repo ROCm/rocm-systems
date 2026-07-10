@@ -2951,8 +2951,7 @@ inline void execute_v_add_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     inst.vdst.write_lane(wf, lane,
                          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) +
-                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
+                             (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -2963,9 +2962,7 @@ inline void execute_v_add_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) +
-                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -2993,8 +2990,7 @@ inline void execute_v_add_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     inst.vdst.write_lane(wf, lane,
                          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) +
-                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
+                             (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -3005,9 +3001,7 @@ inline void execute_v_add_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) +
-                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) + inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -13162,10 +13156,9 @@ inline void execute_v_mad_legacy_u16_vop3([[maybe_unused]] Inst &inst,
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         static_cast<uint32_t>(static_cast<uint16_t>(
-                             ((static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *
-                               static_cast<uint16_t>(inst.src1.read_lane(wf, lane))) +
-                              static_cast<uint16_t>(inst.src2.read_lane(wf, lane))))));
+                         static_cast<uint32_t>(static_cast<uint16_t>(::rocjitsu::amdgpu::mad_lo_u16(
+                             inst.src0.read_lane(wf, lane), inst.src1.read_lane(wf, lane),
+                             inst.src2.read_lane(wf, lane)))));
   }
 }
 
@@ -18341,8 +18334,7 @@ inline void execute_v_sub_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
       continue;
     inst.vdst.write_lane(wf, lane,
                          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) -
-                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
+                             (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -18353,9 +18345,7 @@ inline void execute_v_sub_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) -
-                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane)));
   }
 }
 
@@ -18367,8 +18357,7 @@ inline void execute_v_sub_nc_i16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
       continue;
     inst.vdst.write_lane(wf, lane,
                          static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(
-                             (static_cast<int16_t>(inst.src0.read_lane(wf, lane)) -
-                              static_cast<int16_t>(inst.src1.read_lane(wf, lane)))))));
+                             (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane))))));
   }
 }
 
@@ -18379,9 +18368,7 @@ inline void execute_v_sub_nc_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<int32_t>(inst.src0.read_lane(wf, lane)) -
-                          static_cast<int32_t>(inst.src1.read_lane(wf, lane))));
+    inst.vdst.write_lane(wf, lane, (inst.src0.read_lane(wf, lane) - inst.src1.read_lane(wf, lane)));
   }
 }
 
