@@ -70,6 +70,13 @@ inline uint32_t mad_i24_u32(uint32_t lhs, uint32_t rhs, uint32_t addend) {
   return mul_i24_u32(lhs, rhs) + addend;
 }
 
+inline uint32_t mad_lo_u16(uint32_t lhs, uint32_t rhs, uint32_t addend) {
+  const uint32_t a = lhs & 0xffffu;
+  const uint32_t b = rhs & 0xffffu;
+  const uint32_t c = addend & 0xffffu;
+  return (a * b + c) & 0xffffu;
+}
+
 /// Return whether signed integer add/sub overflows. The unsigned parameter type
 /// is deduced, so the same helper serves 32- and 64-bit scalar add/sub.
 template <typename U> inline bool signed_add_overflows(U a, U b) {

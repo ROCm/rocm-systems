@@ -1,5 +1,7 @@
 {
-  "iree": [],
+  "iree": [
+    "iree.gfx1100.e2e.pack_i8.static_pack_vnni_lhs_large"
+  ],
   "cts": [
     "cts.gfx1100.fpsan.fpsan_wmma_gfx11_w64_test",
     "cts.gfx1100.fpsan.fpsan_xlane_w64_test",

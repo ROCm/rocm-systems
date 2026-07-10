@@ -1,5 +1,7 @@
 {
-  "iree": [],
+  "iree": [
+    "iree.gfx942.e2e.pack_i8.static_pack_vnni_lhs_large"
+  ],
   "cts": [
     "cts.gfx942.fpsan.fpsan_smfmac_cdna3_test",
     "cts.gfx942.fpsan.fpsan_atomic_test",
