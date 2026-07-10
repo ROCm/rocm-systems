@@ -206,6 +206,66 @@
   .endif
  .endm
 
+ // ============================================================================
+ // GFX9.4+ PC Sampling Refactored Macros
+ // ============================================================================
+ // These macros unify duplicated code between hosttrap and stochastic paths.
+
+ // CALC_XCC_OFFSET_GFX94 - Calculate per-XCC buffer address for multi-XCC systems
+ // Input:
+ //   ttmp[2:3] = buffer base address
+ //   ttmp4     = per_xcc_size (stride per XCC)
+ //   ttmp5     = XCC_ID
+ // Output:
+ //   ttmp[14:15] = buffer_base + (XCC_ID * per_xcc_size)
+ // Clobbers: ttmp[14:15] (output), uses ttmp4, ttmp5
+ .macro CALC_XCC_OFFSET_GFX94
+  .if (.amdgcn.gfx_generation_minor >= 4)
+    s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
+    s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
+    s_add_u32                             ttmp14, ttmp2, ttmp14           // ttmp14:15 = base + offset
+    s_addc_u32                            ttmp15, ttmp3, ttmp15
+  .endif
+ .endm
+
+ // FILL_SAMPLE_COMMON_GFX94 - Store common sample fields shared by hosttrap and stochastic
+ // This stores: timestamp, EXEC mask, workgroup IDs, wave_in_wg with chiplet, HW_ID
+ // Input:
+ //   ttmp[2:3] = pointer to sample buffer entry (&buffer[local_entry])
+ //   ttmp[4:5] = timestamp (from s_memrealtime, must be read before calling)
+ //   ttmp[8:9:10] = workgroup IDs (from ABI)
+ //   ttmp11 = wave_in_wg info (from ABI)
+ // Output:
+ //   Stores fields at offsets 0x08-0x20, 0x30 in sample structure
+ // Clobbers: ttmp4, ttmp5, ttmp6 (on gfx94x)
+ .macro FILL_SAMPLE_COMMON_GFX94
+  .if (.amdgcn.gfx_generation_minor >= 4)
+    // Store timestamp at offset 0x30
+    s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30
+
+    // Store EXEC mask at offset 0x08-0x0c
+    s_mov_b32                             ttmp6, exec_lo
+    s_store_dword                         ttmp6, ttmp[2:3], 0x8
+    s_mov_b32                             ttmp6, exec_hi
+    s_store_dword                         ttmp6, ttmp[2:3], 0xc
+
+    // Store workgroup IDs at offsets 0x10-0x18
+    s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10
+    s_store_dword                         ttmp10, ttmp[2:3], 0x18
+
+    // Store wave_in_wg and chiplet (XCC_ID) at offset 0x1c
+    s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)
+    s_lshl_b32                            ttmp4, ttmp4, 8
+    s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
+    s_or_b32                              ttmp4, ttmp4, ttmp5
+    s_store_dword                         ttmp4, ttmp[2:3], 0x1c
+
+    // Store HW_ID at offset 0x20
+    s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
+    s_store_dword                         ttmp4, ttmp[2:3], 0x20
+  .endif
+ .endm
+
 .endif
 
 // ABI between first and second level trap handler:
@@ -317,13 +377,8 @@ trap_entry:
   s_cmp_eq_u64                          ttmp[2:3], 0
   s_cbranch_scc1                        .exit_trap
 
-  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
-  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
-  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
-
-  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
-  s_add_u32                             ttmp14, ttmp2, ttmp14
-  s_addc_u32                            ttmp15, ttmp3, ttmp15
+  // Calculate per-XCC buffer address: ttmp[14:15] = ttmp[2:3] + (ttmp4 * ttmp5)
+  CALC_XCC_OFFSET_GFX94
   s_branch                              .profile_trap_handlers_gfx9
 .else
   // GFX9.0-9.3 (single-XCC): Simple pointer copy, no per-XCC offset needed
@@ -383,13 +438,8 @@ trap_entry:
   s_cmp_eq_u64                          ttmp[2:3], 0
   s_cbranch_scc1                        .exit_trap
 
-  // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
-  s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
-  s_mul_hi_u32                          ttmp15, ttmp4, ttmp5            // ttmp15 = hi32(offset)
-
-  // ttmp14:15 = base (ttmp2:3) + offset (ttmp14:15)
-  s_add_u32                             ttmp14, ttmp2, ttmp14
-  s_addc_u32                            ttmp15, ttmp3, ttmp15
+  // Calculate per-XCC buffer address: ttmp[14:15] = ttmp[2:3] + (ttmp4 * ttmp5)
+  CALC_XCC_OFFSET_GFX94
   s_branch                              .profile_trap_handlers_gfx9      // Off to the profile handlers
 .else
   s_branch                              .no_skip_debugtrap
@@ -526,14 +576,25 @@ trap_entry:
   //    buf->correlation_id = get_correlation_id();
   // }
 .fill_sample_hosttrap:
+  // Calculate buffer entry address: ttmp[2:3] = &bufferX[local_entry]
   s_mul_i32                             ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
   s_mul_hi_u32                          ttmp3, ttmp7, 0x40              // ttmp[2:3] will contain byte ...
   s_add_u32                             ttmp2, ttmp2, ttmp4
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&bufferX[local_entry]
+
+  // Read timestamp and wait for it
   s_memrealtime                         ttmp[4:5]
+  s_waitcnt                             lgkmcnt(0)
+
+  // Store hosttrap-specific field: PC at offset 0x00
   s_and_b32                             ttmp1, ttmp1, 0xffff            // clear out extra data from PC_HI
   s_store_dwordx2                       ttmp[0:1], ttmp[2:3]            // store PC
-  s_waitcnt                             lgkmcnt(0)                      // wait for timestamp
+
+.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
+  // GFX9.4+: Use unified macro for common sample fields
+  FILL_SAMPLE_COMMON_GFX94
+.else
+  // GFX9.0-9.3: Store common fields inline (no XCC_ID, different register usage)
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_lo
   S_STORE_DWORD_PCS_TTMP_REG1           ttmp[2:3], 0x8                  // store EXEC_LO
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_hi
@@ -541,53 +602,36 @@ trap_entry:
   s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
   s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
   s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30      // store timestamp
-
-.if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)     //store XCC_ID
-  s_lshl_b32                            ttmp4, ttmp4, 8
-  s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
-  s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
-.else
   s_and_b32                             ttmp4, ttmp11, 0x3f
   s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
-.endif
   s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
   s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+.endif
 
   s_branch                              .get_correlation_id
 
 .if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
 .fill_sample_stochastic:
+  // Calculate buffer entry address: ttmp[2:3] = &buffer[local_entry]
   s_mul_i32                             ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
   s_mul_hi_u32                          ttmp3, ttmp7, 0x40
   s_add_u32                             ttmp2, ttmp2, ttmp4
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&buffer[local_entry]
+
+  // Read timestamp and wait for it
   s_memrealtime                         ttmp[4:5]
-  s_waitcnt                             lgkmcnt(0)                      // Wait for timestamp
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
+  s_waitcnt                             lgkmcnt(0)
 
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
-  s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
+  // Store stochastic-specific fields: snapshot PC and data
+  s_getreg_b32                          ttmp6, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
+  s_getreg_b32                          ttmp7, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
+  s_store_dwordx2                       ttmp[6:7], ttmp[2:3] 0x00       // store snapshot PC at offset 0x00
+  s_getreg_b32                          ttmp7, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
+  s_getreg_b32                          ttmp6, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
+  s_store_dwordx2                       ttmp[6:7], ttmp[2:3], 0x24      // store snapshot data at offset 0x24
 
-  s_mov_b32                             ttmp6, exec_lo
-  s_store_dword                         ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
-  s_mov_b32                             ttmp6, exec_hi
-  s_store_dword                         ttmp6, ttmp[2:3], 0xc           // store EXEC_HI
-
-  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
-  s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)
-  s_lshl_b32                            ttmp4, ttmp4, 8
-  s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
-  s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store chiplet_and_wave_id
-  s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
-  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+  // Store common sample fields using unified macro
+  FILL_SAMPLE_COMMON_GFX94
   // ttmp[2:3]=&buffer[local_entry]; ttmp[4:5], ttmp[6:7] are free
   // ttmp[14:15]=ptr to ‘tma’ and is live out; ttmp11.b31 is buf_to_use, 0 or 1
   s_branch                              .get_correlation_id
