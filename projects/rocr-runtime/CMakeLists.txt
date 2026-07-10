@@ -105,6 +105,10 @@ endif()
 # for Shared Library Only.
 if (BUILD_SHARED_LIBS)
   set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+  # LTTng-UST package dep default OFF while ROCR_ENABLE_LTTNG_UST defaults
+  # OFF; the subdir CMakeLists overrides this to ON if the option is
+  # explicitly enabled.
+  set(HSA_DEP_LTTNG_UST OFF CACHE INTERNAL "")
 endif()
 
 if (HSA_DEP_ROCPROFILER_REGISTER)

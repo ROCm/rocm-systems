@@ -260,8 +260,10 @@ set ( SRCS core/driver/driver.cpp
            libamdhsacode/amd_elf_image.cpp
            libamdhsacode/amd_hsa_code_util.cpp
            libamdhsacode/amd_hsa_locks.cpp
-           libamdhsacode/amd_options.cpp
-           libamdhsacode/amd_hsa_code.cpp)
+            libamdhsacode/amd_options.cpp
+            libamdhsacode/amd_hsa_code.cpp
+            lttng/rocm_hsa_tp.cpp
+            lttng/rocm_trace_init.cpp)
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
@@ -411,6 +413,151 @@ if( BUILD_SHARED_LIBS )
     else()
       set(HSA_DEP_ROCPROFILER_REGISTER OFF CACHE INTERNAL "")
     endif() # end rocprofiler-register_FOUND
+
+    ## LTTng-UST tracepoint provider — see runtime/hsa-runtime/lttng/.
+    ## Producer-side instrumentation that runs in parallel with the
+    ## rocprofiler-register dispatch table; the dispatch table itself is
+    ## unmodified. OFF by default while this feature is being staged in.
+    option(ROCR_ENABLE_LTTNG_UST "Build with LTTng-UST tracepoint emission" OFF)
+
+    if(ROCR_ENABLE_LTTNG_UST)
+      # Vendored LTTng-UST: built from the lttng-ust + userspace-rcu git
+      # submodules under shared/lttng/ (canonical, shared with CLR),
+      # installed into the build tree at <build>/_deps/lttng-prefix/, and
+      # shipped at runtime under /opt/rocm/lib/ alongside libhsa-runtime64.so.
+      # libhsa-runtime64 picks them up via RPATH $ORIGIN (set below).
+      # See shared/lttng/README.md.
+      set(LTTNG_VENDORED_ROOT
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/lttng"
+          CACHE PATH "Path to shared vendored LTTng tree (shared/lttng/)")
+      if(NOT EXISTS "${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake")
+        message(FATAL_ERROR
+            "ROCR_ENABLE_LTTNG_UST=ON but shared/lttng/ was not found at\n"
+            "    ${LTTNG_VENDORED_ROOT}\n"
+            "Either checkout the rocm-systems super-repo (which provides "
+            "shared/lttng/), set -DLTTNG_VENDORED_ROOT=<path>, or disable "
+            "with -DROCR_ENABLE_LTTNG_UST=OFF.")
+      endif()
+      set(LTTNG_VENDORED_URCU_SRC "${LTTNG_VENDORED_ROOT}/userspace-rcu")
+      set(LTTNG_VENDORED_UST_SRC  "${LTTNG_VENDORED_ROOT}/lttng-ust")
+      include(${LTTNG_VENDORED_ROOT}/cmake/VendorLttng.cmake)
+
+      find_package(PkgConfig REQUIRED)
+      # Prepend the vendored .pc dir so pkg_check_modules picks it
+      # before any system lttng-ust the distro might also ship.
+      set(ENV{PKG_CONFIG_PATH} "${LTTNG_VENDORED_PKGCONFIG}:$ENV{PKG_CONFIG_PATH}")
+      pkg_check_modules(LTTNG_UST REQUIRED IMPORTED_TARGET lttng-ust>=2.13)
+
+      # HSA_ENABLE_LTTNG_UST + the provider header/include path are needed by
+      # ${CORE_RUNTIME_TARGET} both at the call sites (via rocm_trace_emit.h)
+      # and in the definition-only TU (lttng/rocm_hsa_tp.cpp), which both
+      # include rocm_hsa_tp.h.
+      target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_LTTNG_UST=1)
+      target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/lttng
+          ${LTTNG_VENDORED_INCLUDE_DIR})
+      set(HSA_DEP_LTTNG_UST ON CACHE INTERNAL "")
+
+      # Build the runtime only after the vendored libs exist (the .pc query
+      # above happens at configure time, but the actual .so/header files are
+      # only produced when the lttng_ust_vendored ExternalProject runs at
+      # build time; without this dependency, the link step races the build).
+      add_dependencies(${CORE_RUNTIME_TARGET} lttng_ust_vendored)
+
+      # ${CORE_RUNTIME_TARGET} both defines and creates the tracepoint
+      # probes (via lttng/rocm_hsa_tp.cpp) and links liblttng-ust directly.
+      #
+      # Explicitly add the vendored lib directory to the link search path.
+      # pkg_check_modules(IMPORTED_TARGET) generated PkgConfig::LTTNG_UST from
+      # the stub .pc file written at configure time; in some pkg-config / CMake
+      # combinations the -L directive in the stub is dropped from the imported
+      # target's interface (the .so files do not exist yet at configure time
+      # because the ExternalProject builds them later), leaving only -llttng-ust
+      # / -llttng-ust-common in the link line and the linker fails with
+      # "cannot find -llttng-ust". Adding the directory directly guarantees
+      # the search path is present at link time.
+      target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LTTNG_VENDORED_LIB_DIR})
+      target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE
+          PkgConfig::LTTNG_UST ${CMAKE_DL_LIBS})
+
+      # RPATH:
+      #   BUILD_RPATH   — let in-tree tests find the vendored .so files.
+      #   INSTALL_RPATH — at /opt/rocm/lib/libhsa-runtime64.so, the
+      #                   vendored libs sit directly in /opt/rocm/lib/.
+      # We append rather than overwrite because rocr-runtime sets RPATH
+      # in several places; use APPEND to preserve any prior settings.
+      set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
+                   BUILD_RPATH "${LTTNG_VENDORED_LIB_DIR}")
+      set_property(TARGET ${CORE_RUNTIME_TARGET} APPEND PROPERTY
+                   INSTALL_RPATH "\$ORIGIN")
+
+      # Stage the vendored .so files into the same build-tree directory
+      # as libhsa-runtime64.so. This is what fixes downstream link
+      # failures (e.g. TheRock CI: rocFFT, rocRoller, rocprofiler-systems
+      # link against -lhsa-runtime64; the linker reads NEEDED entries
+      # like liblttng-ust.so.1 and resolves them via the same -L path
+      # used to find libhsa-runtime64.so). With the vendored .so files
+      # co-located in the build dir, no extra -rpath-link or downstream
+      # coordination is required. Mirrors the installed flat layout.
+      #
+      # PRE_LINK runs after object compilation but before the link step,
+      # so the vendored .so files are present when the linker resolves
+      # -llttng-ust via the target's link directory. Attaching to the
+      # core runtime target directly (rather than using
+      # add_custom_target + add_dependencies) avoids the cyclic
+      # dependency that arises when $<TARGET_FILE_DIR:...> is used in a
+      # separate custom target.
+      if(NOT WIN32)
+        # Use a sane shell-based existence check rather than
+        # `cp ... 2>/dev/null || true`. The previous form silently
+        # masked the case where the vendored .so files were missing
+        # (e.g. the FetchContent build failed in a hard-to-spot way),
+        # which then broke downstream link consumers later. Now we
+        # explicitly probe for liblttng-ust.so* (the canonical
+        # vendored library) and fail the build with an actionable
+        # error message if absent. The cp itself uses the original
+        # glob style and lets `set -e` surface any real failures.
+        #
+        # Single-line shell script: make's recipe parser does not
+        # allow bare newlines inside a command argument.
+        add_custom_command(TARGET ${CORE_RUNTIME_TARGET} PRE_LINK
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>"
+            COMMAND sh -c "set -e; if ! ls '${LTTNG_VENDORED_LIB_DIR}'/liblttng-ust.so* >/dev/null 2>&1; then echo 'error: no vendored LTTng-UST shared libraries found to stage from ${LTTNG_VENDORED_LIB_DIR}' >&2; exit 1; fi; cp -P '${LTTNG_VENDORED_LIB_DIR}'/liblttng*.so* '${LTTNG_VENDORED_LIB_DIR}'/liburcu*.so* '$<TARGET_FILE_DIR:${CORE_RUNTIME_TARGET}>/'"
+            COMMENT "Staging vendored LTTng-UST .so files into ${CORE_RUNTIME_TARGET} build dir"
+            VERBATIM)
+      endif()
+
+      # direct-only packaging: install the vendored .so files directly
+      # under ${CMAKE_INSTALL_LIBDIR} alongside libhsa-runtime64.so (no
+      # lttng/ subdirectory). This lets downstream consumers that link
+      # -lhsa-runtime64 also resolve the NEEDED liblttng-ust.so.1 etc. via
+      # the same -L path, and matches direct mode's INSTALL_RPATH
+      # ($ORIGIN pointing directly at ${CMAKE_INSTALL_LIBDIR}, set above).
+      # The version-suffixed symlinks are preserved so NEEDED entries
+      # that reference e.g. liblttng-ust.so.1 resolve correctly. NB:
+      # when both HIP and HSA are installed to the same prefix this
+      # writes the same files twice; CMake's install rule is idempotent
+      # so that is harmless.
+      install(DIRECTORY ${LTTNG_VENDORED_LIB_DIR}/
+              DESTINATION ${CMAKE_INSTALL_LIBDIR}
+              COMPONENT binary
+              USE_SOURCE_PERMISSIONS
+              FILES_MATCHING
+              PATTERN "liblttng*.so*"
+              PATTERN "liburcu*.so*")
+
+      ## Symbol-coverage gate: post-build, diff the .so's exported HSA symbols
+      ## against the migration inventory. Fail the build on any miss.
+      add_custom_command(TARGET ${CORE_RUNTIME_TARGET} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E echo "Running LTTng symbol-coverage gate..."
+          COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_coverage_gate.sh
+                  $<TARGET_FILE:${CORE_RUNTIME_TARGET}>
+                  ${CMAKE_CURRENT_SOURCE_DIR}/scripts/lttng_migration_inventory.txt
+          VERBATIM)
+    else()
+      set(HSA_DEP_LTTNG_UST OFF CACHE INTERNAL "")
+    endif()
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt::hsakmt)
   endif()

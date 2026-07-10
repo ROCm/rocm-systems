@@ -2796,11 +2796,19 @@ void Runtime::InitIPCDmaBufSupport() {
 #endif
 }
 
+extern "C" void __rocm_hsa_tp_init(void);
+
 void Runtime::LoadTools() {
   typedef bool (*tool_init_t)(::HsaApiTable*, uint64_t, uint64_t,
                               const char* const*);
   typedef Agent* (*tool_wrap_t)(Agent*);
   typedef void (*tool_add_t)(Runtime*);
+
+  /* Initialize the LTTng-UST tracepoint provider once per process. Idempotent.
+   * Lives next to the rocprofiler-register registration since both are
+   * "tools wiring" that needs to happen after the API table is populated
+   * but before user code can call into instrumented APIs. */
+  __rocm_hsa_tp_init();
 
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
   if (!flag().disable_tool_register()) {

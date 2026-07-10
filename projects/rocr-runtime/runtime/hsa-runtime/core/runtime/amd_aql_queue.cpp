@@ -73,6 +73,8 @@
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
 
+#include "lttng/rocm_trace_emit.h"
+
 namespace rocr {
 namespace AMD {
 
@@ -480,6 +482,26 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+  /* Universal kernel-dispatch chokepoint for AMD GPU agents. AqlQueue is
+   * its own DoorbellSignal, so every HSA submit on a hardware AQL queue
+   * (HIP launches, direct HSA enqueues, PM4 IB submits) ends up here.
+   * Emit a single rocm_hsa:hsa_doorbell_ring tracepoint with a
+   * packet_type discriminator so consumers can filter at LTTng-event
+   * level (--filter 'packet_type == 0' to keep only KERNEL_DISPATCH).
+   *
+   * For PM4 packets the AQL header sniff returns UNKNOWN; the PM4 path
+   * (ExecutePM4) sets a TLS hint to ROCM_PKT_PM4 before ringing, which
+   * we consume here to override the sniff result. */
+  uint8_t pkt_type = rocm_trace_consume_packet_type_hint();
+  if (pkt_type == ROCM_PKT_UNKNOWN /* hint not set: do AQL header sniff */) {
+    pkt_type = rocm_trace_sniff_packet_type(
+        amd_queue_.hsa_queue.base_address,
+        amd_queue_.hsa_queue.size - 1, /* size is power-of-2 */
+        (int64_t)value);
+  }
+  rocm_trace_emit_hsa_doorbell_ring(
+      (uint32_t)queue_id_, (int64_t)value, pkt_type);
+
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
@@ -1699,6 +1721,12 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 
   // Submit the packet slot.
+  // Set the TLS hint so AqlQueue::StoreRelaxed (called via StoreRelease)
+  // emits the doorbell-ring tracepoint with packet_type = PM4 instead
+  // of sniffing the AQL header (which would return UNKNOWN — PM4 packets
+  // do not share the AQL header layout). Single-thread-owned TLS slot,
+  // consumed by the StoreRelaxed call below.
+  rocm_trace_set_packet_type_hint(ROCM_PKT_PM4);
   core::Signal* doorbell = core::Signal::Convert(queue->amd_queue_.hsa_queue.doorbell_signal);
   doorbell->StoreRelease(write_idx);
 
