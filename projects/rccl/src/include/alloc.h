@@ -691,7 +691,7 @@ static inline ncclResult_t ncclCuMemFreeAddr(void *ptr, struct ncclMemManager* m
   return ncclInternalError;
 }
 
-static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments) {
+static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize, CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize, int* numSegments, bool* hasSysmemSegment = nullptr) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }
