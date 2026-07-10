@@ -144,10 +144,12 @@ CountersVec(std::vector<EventRequest>& events, Pm4Factory* pm4_factory)
         int num_sq = 0;
         for(const auto& ev : events)
         {
-            if(ev.block_name == static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SP) && !ev.bInternal && !ev.flags.raw)
+            if(ev.block_name ==
+                   static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SP) &&
+               !ev.bInternal && !ev.flags.raw)
                 num_sp++;
-            else if(ev.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ &&
-                    !ev.bInternal && !ev.flags.raw)
+            else if(ev.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ && !ev.bInternal &&
+                    !ev.flags.raw)
                 num_sq++;
         }
 
@@ -161,15 +163,15 @@ CountersVec(std::vector<EventRequest>& events, Pm4Factory* pm4_factory)
             events.push_back(EventRequest{dummy, /*bInternal=*/true});
         }
 
-        if(num_padding > 0)
-            std::stable_sort(events.begin(), events.end());
+        if(num_padding > 0) std::stable_sort(events.begin(), events.end());
     }
 
     int num_sp_events = 0;
     if(pm4_factory->IsGFX1250())
     {
         for(const auto& ev : events)
-            if(ev.block_name == static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SP) &&
+            if(ev.block_name ==
+                   static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SP) &&
                !ev.bInternal && !ev.flags.raw)
                 num_sp_events++;
     }
