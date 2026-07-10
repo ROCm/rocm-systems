@@ -1163,6 +1163,18 @@ class _VectorBinop(_ScalarDeriver):
             body = _assign(_cast(_dst(0), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op in ('add', 'sub', 'subrev', 'rsub') and ty.base == 'I':
+            # Integer vector ALU wraps in two's-complement; emit raw unsigned
+            # arithmetic so generated C++ has no signed-overflow UB.
+            u_ty = SemaType('U', ty.size)
+            src0 = _src(0, u_ty)
+            src1 = _src(1, u_ty)
+            lhs, rhs = (src1, src0) if op in ('subrev', 'rsub') else (src0, src1)
+            kind = SemaNodeKind.ADD if op == 'add' else SemaNodeKind.SUB
+            result = SemaNode(kind, ty=u_ty, children=(lhs, rhs))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
         result = _vec_binop_expr(op, src0, src1, ty)
@@ -1189,6 +1201,21 @@ class _VectorTernary(_ScalarDeriver):
                     _cast(_src(0), ty),
                     _cast(_src(1), ty),
                     _cast(_src(2), ty),
+                ),
+            )
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'mad' and dtype == 'u16':
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=ty,
+                call_name='mad_lo_u16',
+                children=(
+                    _id('mad_lo_u16'),
+                    _src(0),
+                    _src(1),
+                    _src(2),
                 ),
             )
             body = _assign(_cast(_dst(0), ty), result)

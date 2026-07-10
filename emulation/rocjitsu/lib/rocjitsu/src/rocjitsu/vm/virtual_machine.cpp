@@ -3,7 +3,7 @@
 
 #include "rocjitsu/vm/virtual_machine.h"
 
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 
 #include <cassert>
 #include <memory>
@@ -25,7 +25,7 @@ VirtualMachine::VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode)
   set_weight(0);
   adopt_children(*soc);
   add_child(std::move(soc));
-  driver_ = std::make_unique<SimulatedDriver>(*soc_, daemon_mode);
+  driver_ = std::make_unique<SimulatedKfd>(*soc_, daemon_mode);
 }
 
 VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
@@ -42,7 +42,7 @@ VirtualMachine::VirtualMachine(std::vector<std::unique_ptr<SoC>> socs,
     adopt_children(*socs[i]);
     add_child(std::move(socs[i]));
   }
-  driver_ = std::make_unique<SimulatedDriver>(ptrs, std::move(gpu_ids), daemon_mode);
+  driver_ = std::make_unique<SimulatedKfd>(ptrs, std::move(gpu_ids), daemon_mode);
 }
 
 VirtualMachine::~VirtualMachine() = default;
