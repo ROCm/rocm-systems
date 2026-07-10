@@ -1505,6 +1505,18 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_CONSAN_LDS_MOI_ATOMIC_HANDOFF_TEST
                 "ConSanMoiHipTest.AtomicHandoffOrdersTwoWaveAccesses"
             )
+            set(
+                RJ_CONSAN_GFX1201_VGPR_SPILL_TEST
+                "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"
+            )
+            rj_add_test(
+                NAME "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_GFX1201_VGPR_SPILL_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+            )
             rj_add_test(
                 NAME "ConSanLdsTest.BaselinePaddedCleanStore"
                 COMMAND

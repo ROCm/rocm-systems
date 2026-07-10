@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,7 @@ struct AmdGpuKernelInfo {
   uint64_t text_size = 0;
   uint64_t code_size = 0;
   bool has_text_range = false;
+  std::optional<bool> uses_dynamic_stack;
 };
 
 struct AmdGpuFunctionInfo {

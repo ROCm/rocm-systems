@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -270,6 +271,7 @@ void AmdGpuCodeObject::load_sections() {
   // only have the latter.
   std::unordered_map<std::string, uint64_t> descriptor_file_offsets;
   std::unordered_map<std::string, FunctionSymbolInfo> function_symbols;
+  std::unordered_map<std::string, bool> dynamic_stack_symbols;
   for (size_t i = 0; i < section_hdrs.size(); ++i) {
     if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
       continue;
@@ -301,6 +303,13 @@ void AmdGpuCodeObject::load_sections() {
         continue;
       std::string sym_name(sym_strtab + sym.st_name,
                            strnlen(sym_strtab + sym.st_name, strtab_shdr.sh_size - sym.st_name));
+      constexpr std::string_view kDynamicStackSuffix = ".has_dyn_sized_stack";
+      if (sym.st_shndx == SHN_ABS && sym_name.ends_with(kDynamicStackSuffix)) {
+        const std::string kernel_name =
+            sym_name.substr(0, sym_name.size() - kDynamicStackSuffix.size());
+        dynamic_stack_symbols[kernel_name] = sym.st_value != 0;
+        continue;
+      }
       // AMDHSA kernel descriptors have a ".kd" suffix symbol.
       if (sym_name.size() > 3 && sym_name.substr(sym_name.size() - 3) == ".kd") {
         std::string kernel_name = sym_name.substr(0, sym_name.size() - 3);
@@ -344,6 +353,10 @@ void AmdGpuCodeObject::load_sections() {
     } else {
       kernel.code_size = 0;
       kernel.has_text_range = false;
+    }
+    if (auto dynamic_stack = dynamic_stack_symbols.find(kernel_name);
+        dynamic_stack != dynamic_stack_symbols.end()) {
+      kernel.uses_dynamic_stack = dynamic_stack->second;
     }
     kernels_.push_back(std::move(kernel));
   }

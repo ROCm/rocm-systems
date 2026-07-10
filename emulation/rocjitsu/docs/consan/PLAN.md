@@ -87,8 +87,8 @@ flowchart LR
   B0["B0: Current ConSan Baseline"]:::done
   R1A["R1A: Kernel Scope And Resource Model"]:::done
   R1B["R1B: Automatic Non-Spill Allocation"]:::done
-  R1C["R1C: gfx1201 VGPR Spill Backend"]:::active
-  R1D["R1D: Spill-Backed Access Probes"]:::todo
+  R1C["R1C: gfx1201 VGPR Spill Backend"]:::done
+  R1D["R1D: Spill-Backed Access Probes"]:::active
   R1E["R1E: Persistent Owner And Epoch State"]:::todo
   R1F["R1F: Scalar And Special-State Policy"]:::todo
   R1G["R1G: Shared-Function Resource Plans"]:::todo
@@ -238,26 +238,24 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1C`, the gfx1201 spill emitter and hardware smoke. `R1A` and
-   `R1B` are complete; their kernel-scoped plans now select dead or fresh
-   descriptor-backed VGPRs for static record/replay and sampled probes.
-2. Once `R1B` and `R1C` are both complete, land `R1D`, the first forced-spill
-   record/replay and sampled vertical slice.
-3. Complete `R1E` and `R1G` after that vertical slice. `R1F` becomes ready
-   earlier, after `R1B`, because dead/fresh scalar allocation does not require
-   the VGPR spill emitter.
-4. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
+1. Complete `R1D`, the first forced-spill record/replay and sampled vertical
+   slice. `R1A`, `R1B`, and the standalone gfx1201 `R1C` spill backend are
+   complete.
+2. Complete `R1E` and `R1G` after that vertical slice. `R1F` is already ready
+   after `R1B` and may be interleaved because dead/fresh scalar allocation does
+   not require the VGPR spill emitter.
+3. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
    register/spill policy, rather than only its first backend, is ready.
-5. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
+4. After `R1`, advance `I1A`, `I2`, `I3`, and `S1` as independent feature
    branches. `I1B` additionally waits for `F1`, and `S2` waits for `S1`.
-6. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
+5. `O1A`, `R2`, `F1`, and `T1A` are already ready from the baseline and can be
    taken in bounded slices when they unblock the main path. Freeze profiles in
    `O1B` only after the engine behavior and automatic resource choices named
    by its incoming edges are stable.
-7. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
+6. Run `T1B` only when the standard profiles, placement, diagnostics, ordering,
    and sampled checking paths are ready. Passing it reaches the `T1` parity
    milestone and permits the final `M0` broad-turn-on acceptance review.
-8. Refresh the durable team snapshot in `D1` after `M0` is accepted.
+7. Refresh the durable team snapshot in `D1` after `M0` is accepted.
 
 `A1` remains in the full project DAG, but it is intentionally outside the
 current local execution window while only `gfx1201` hardware is available. Its
@@ -637,7 +635,7 @@ Done criteria:
 - A 256-VGPR site returns `spill-required` rather than selecting an unproven
   high register or pretending that descriptor growth succeeded.
 
-## R1C: gfx1201 VGPR Spill Backend - ACTIVE
+## R1C: gfx1201 VGPR Spill Backend - DONE
 
 Goal: provide a standalone, tested backend that can preserve an ordinary VGPR
 window through per-lane private scratch on the local gfx1201 target.
@@ -680,7 +678,7 @@ Done criteria:
 - A focused gfx1201 hardware smoke saves a deliberately live VGPR, clobbers it,
   restores it, and produces the uninstrumented result.
 
-## R1D: Spill-Backed Access Probes - TODO
+## R1D: Spill-Backed Access Probes - ACTIVE
 
 Goal: land one complete ConSan vertical slice that uses `R1A`/`R1B` planning and
 `R1C` preservation when no dead or fresh VGPR window exists.

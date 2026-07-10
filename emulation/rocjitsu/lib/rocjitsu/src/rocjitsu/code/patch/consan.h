@@ -304,6 +304,7 @@ struct ConSanKernelInfo {
   uint64_t text_file_offset = 0;
   uint64_t code_size = 0;
   bool has_text_range = false;
+  std::optional<bool> uses_dynamic_stack;
   bool decoded = false;
   ConSanKernelStats stats;
   std::vector<ConSanLdsSite> lds_sites;

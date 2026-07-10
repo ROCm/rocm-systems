@@ -56,7 +56,22 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 
 Known local result:
 
-- `ConSanMoi.*`: 71/71 passed on `gfx1201`.
+- Full non-benchmark `rocjitsu_tests`: 1311/1311 passed after R1C.
+- R1C spill encoder/layout/descriptor focus: 36/36 passed.
+
+Focused gfx1201 spill hardware smoke:
+
+```sh
+ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+  -R '^ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip$' \
+  --output-on-failure
+```
+
+Known local result:
+
+- 1/1 passed. The kernel has a 32-byte fixed private segment and executes the
+  same address-free `scratch_store_b32` / `scratch_load_b32` encodings emitted
+  by the R1C backend around a deliberately clobbered live VGPR.
 
 ## SuperCollider Coverage
 
@@ -238,4 +253,3 @@ Current local status:
 | `gfx942` | Planned target, not validated on this machine. |
 | `gfx950` | Planned target, not validated on this machine. |
 | `gfx1250` | Planned target, not validated on this machine. |
-

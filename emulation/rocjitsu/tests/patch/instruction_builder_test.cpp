@@ -121,6 +121,58 @@ TEST(InstructionBuilder, BuildSEndpgm) {
   EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
 }
 
+TEST(InstructionBuilder, BuildAddressFreeScratchB32) {
+  const auto store = build_address_free_scratch_store_b32(
+      /*vsrc=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load = build_address_free_scratch_load_b32(
+      /*vdst=*/5, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(load);
+  EXPECT_EQ(*store, (std::array<uint32_t, 3>{0xed06807cu, 0x02800000u, 0x00001000u}));
+  EXPECT_EQ(*load, (std::array<uint32_t, 3>{0xed05007cu, 0x00000005u, 0x00001000u}));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
+  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  ASSERT_NE(store_inst, nullptr);
+  ASSERT_NE(load_inst, nullptr);
+  EXPECT_EQ(store_inst->mnemonic(), "scratch_store_b32");
+  EXPECT_EQ(load_inst->mnemonic(), "scratch_load_b32");
+  EXPECT_EQ(store_inst->size(), 12u);
+  EXPECT_EQ(load_inst->size(), 12u);
+}
+
+TEST(InstructionBuilder, AddressFreeScratchOffsetBoundary) {
+  const auto store = build_address_free_scratch_store_b32(
+      /*vsrc=*/255, kMaxAddressFreeScratchDwordOffset, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load = build_address_free_scratch_load_b32(
+      /*vdst=*/255, kMaxAddressFreeScratchDwordOffset, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(load);
+  EXPECT_EQ(*store, (std::array<uint32_t, 3>{0xed06807cu, 0x7f800000u, 0x7ffffc00u}));
+  EXPECT_EQ(*load, (std::array<uint32_t, 3>{0xed05007cu, 0x000000ffu, 0x7ffffc00u}));
+
+  EXPECT_FALSE(build_address_free_scratch_store_b32(0, kMaxAddressFreeScratchPrivateBytes,
+                                                    ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_address_free_scratch_load_b32(0, kMaxAddressFreeScratchPrivateBytes,
+                                                   ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_address_free_scratch_store_b32(0, 2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_address_free_scratch_load_b32(0, 2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_address_free_scratch_store_b32(0, 0, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
+TEST(InstructionBuilder, BuildSplitScratchWaits) {
+  const auto store_wait = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto load_wait = build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(store_wait);
+  ASSERT_TRUE(load_wait);
+  EXPECT_EQ(*store_wait, 0xbfc10000u);
+  EXPECT_EQ(*load_wait, 0xbfc00000u);
+  EXPECT_FALSE(build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
   constexpr uint16_t kDst = 4;
   constexpr uint16_t kSrc = 8;

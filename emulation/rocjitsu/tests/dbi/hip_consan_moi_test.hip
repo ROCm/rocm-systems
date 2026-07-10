@@ -570,6 +570,23 @@ __global__ __launch_bounds__(64) void moi_two_wave_lds_accesses(uint32_t *out) {
   }
 }
 
+__global__ __launch_bounds__(64) void gfx1201_vgpr_scratch_roundtrip(uint32_t *out) {
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  volatile uint32_t private_words[4];
+  private_words[tid & 3u] = tid;
+
+  uint32_t value = 0x5A170000u ^ tid;
+  asm volatile("scratch_store_b32 off, %0, off offset:0\n\t"
+               "s_wait_storecnt 0\n\t"
+               "v_mov_b32 %0, 0\n\t"
+               "scratch_load_b32 %0, off, off offset:0\n\t"
+               "s_wait_loadcnt 0\n\t"
+               : "+v"(value)
+               :
+               : "memory");
+  out[tid] = value;
+}
+
 __global__
 __launch_bounds__(64) void moi_equivalent_lds_accesses_in_different_workgroups(uint32_t *out) {
   __shared__ uint32_t lds[1];
@@ -791,6 +808,23 @@ void run_live_atomic_handoff(bool same_atomic_address, LiveAtomicHandoffRecords 
 }
 
 } // namespace
+
+TEST(ConSanSpillHipTest, Gfx1201VgprScratchRoundTrip) {
+  constexpr uint32_t kThreads = 64;
+  uint32_t *d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kThreads * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_out, 0, kThreads * sizeof(uint32_t)));
+
+  gfx1201_vgpr_scratch_roundtrip<<<1, kThreads>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<uint32_t> out(kThreads);
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, kThreads * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  free_device_ptr(d_out);
+  for (uint32_t tid = 0; tid < kThreads; ++tid)
+    EXPECT_EQ(out[tid], 0x5A170000u ^ tid) << "tid=" << tid;
+}
 
 TEST(ConSanMoiHipTest, TwoWaveAccessesWriteDynamicRecords) {
   constexpr uint32_t kAccessRecords = 2;

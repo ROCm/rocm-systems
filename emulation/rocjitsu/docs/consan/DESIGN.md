@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans automatically select per-site scratch for static record/replay and sampled access probes; other probe families still use explicit knobs and no ConSan path spills yet. | Extend the shared planner through spill-backed and persistent-state paths. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes. A standalone gfx1201 VGPR spill backend is hardware-tested, but access probes do not consume it yet. | Extend the shared planner through spill-backed and persistent-state paths. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -67,7 +67,9 @@ Primary files:
 - `lib/rocjitsu/src/rocjitsu/code/patch/trampoline_builder.*`,
   `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*`
   - Reusable patch-placement and DBT utilities that ConSan should lean on more
-    heavily as probe size grows.
+    heavily as probe size grows. `spill_manager.*` now also emits transactional
+    gfx1201 B32 VGPR save/restore batches and performs kernel-local fixed-private
+    descriptor growth.
 
 Test anchors:
 
@@ -131,8 +133,8 @@ The gap is not one feature. It is a set of concrete blockers:
   single scratch-planning policy that can find free registers when possible,
   grow descriptors when legal, and spill/fill when necessary. The first
   implementation reference is Kunwar Grover's
-  `origin/users/Groverkss/text-relocation-land` branch, which is confirmed to
-  contain initial VGPR spilling support.
+  `origin/users/Groverkss/text-relocation-land` branch, whose reusable
+  contribution is the initial VGPR spill-slot allocator.
 - **Owner and epoch state.** `inline_shadow` needs an owner and epoch live at
   instrumented accesses. Today those values can be initialized by prologue code,
   but the registers are manually chosen and the owner derivation is still
@@ -252,12 +254,19 @@ Current register policy:
 - Spill-required sites are reported with a typed resource outcome and left
   unmodified. Dynamic, barrier, atomic, inline-shadow, owner/epoch, and
   EXEC-save paths still rely on explicit env knobs.
-- There is no general ConSan spilling policy yet.
+- A standalone gfx1201 spill backend allocates stable slots through
+  `SpillManager`, emits address-free `scratch_store/load_b32` batches with
+  conservative split waits, and grows only the selected descriptor's fixed
+  private segment. Dynamic-stack kernels are detected from compiler-emitted
+  symbols and rejected by this first backend.
+- No ConSan probe family consumes that backend yet, so there is not yet a
+  complete spill-backed instrumentation policy.
 
-Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch is now the
-confirmed first reference for spilling work. It contains initial VGPR-only
-spilling support plus related text-relocation mechanics. ConSan should study,
-reuse, or lightly adapt that implementation before adding new local machinery.
+Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
+first reference for spilling work. Its directly reusable piece is the
+`SpillManager` slot allocator: it provides aligned, stable per-lane offsets but
+does not emit gfx1201 scratch instructions or update descriptors. ConSan reuses
+that allocator and supplies the small target-specific backend around it.
 If ConSan needs SGPR spilling before rocJITsu has a shared implementation, the
 right near-term response is a minimal ConSan-local SGPR spill/fill path for the
 specific probe shape that needs it, not a comprehensive spill allocator.
@@ -725,22 +734,21 @@ What it does not mean:
 
 ## Immediate Engineering Gaps
 
-The non-spill scratch policy is now in place for static record/replay and
-sampled access probes. The immediate gap is preserving a selected live victim
-when that policy returns `spill-required`, then extending the same resource
-model to the remaining probe families and persistent state.
+The non-spill scratch policy and standalone gfx1201 save/restore backend are now
+in place. The immediate gap is wrapping a real access probe in that backend
+when planning returns `spill-required`, then extending the same resource model
+to the remaining probe families and persistent state.
 
-Before implementing new spilling machinery, start from Kunwar Grover's
-`text-relocation-land` branch:
+Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
+branch:
 
 - `origin/users/Groverkss/text-relocation-land`
 
-That branch is confirmed to contain initial VGPR-only spilling support. The
-first ConSan task is to understand its data structures, spill/fill placement
-rules, and interaction with text relocation, then reuse or adapt the smallest
-useful subset. `origin/users/Groverkss/dbt-tooling` and
-`origin/users/Groverkss/dbt_interposer` remain useful background references,
-but `text-relocation-land` is the primary branch for spill implementation.
+That branch contributes the `SpillManager` slot allocator but no target spill
+instructions or spill/fill placement. ConSan now reuses that allocator beneath
+its gfx1201 B32 backend. `origin/users/Groverkss/dbt-tooling` and
+`origin/users/Groverkss/dbt_interposer` remain useful background references;
+the remaining work is probe integration rather than another allocator.
 
 If ConSan needs SGPR spilling, assume it is not already covered there. Implement
 only the minimal SGPR support needed for the current probe family, keep it

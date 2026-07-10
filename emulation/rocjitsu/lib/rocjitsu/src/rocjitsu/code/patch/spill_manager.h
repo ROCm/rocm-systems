@@ -7,13 +7,16 @@
 #ifndef ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 #define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility> // for std::pair
+#include <vector>
 
 namespace rocjitsu {
 
@@ -95,6 +98,50 @@ private:
   uint32_t next_offset_; ///< Next free byte within DBI zone.
   std::unordered_map<std::pair<RegClass, uint16_t>, uint32_t, RegKeyHash> reg_to_offset_;
 };
+
+/// @brief Standalone save/restore program for one ordinary VGPR window.
+///
+/// @details Each register receives one stable B32 per-lane slot. Save and
+/// restore end in zero-threshold waits so callers can safely clobber the
+/// window after save and resume guest code after restore. The instructions
+/// run under the caller's current EXEC mask and do not modify EXEC. These
+/// conservative waits also drain older wave scratch stores/loads; relaxing
+/// that ordering requires a hardware-backed same-address ordering proof.
+struct VgprSpillSequence {
+  uint16_t vgpr_base = 0;
+  uint16_t vgpr_count = 0;
+  std::vector<uint32_t> slot_offsets;
+  std::vector<uint32_t> save_words;
+  std::vector<uint32_t> restore_words;
+  uint32_t total_private_bytes = 0;
+};
+
+/// @brief Reserve slots and encode a gfx1201 VGPR spill/fill sequence.
+///
+/// @returns A complete sequence, or nullopt for an unsupported architecture,
+/// invalid VGPR range, unencodable slot, or capacity failure. On failure
+/// @p manager is unchanged.
+[[nodiscard]] std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager,
+                                                                         uint16_t vgpr_base,
+                                                                         uint16_t vgpr_count,
+                                                                         rj_code_arch_t arch);
+
+enum class SpillDescriptorUpdate : uint8_t {
+  Updated,
+  Unchanged,
+  InvalidDescriptor,
+  InvalidPrivateSize,
+  DynamicStack,
+};
+
+/// @brief Grow one kernel descriptor's fixed private segment for spill slots.
+///
+/// @details Sets ENABLE_PRIVATE_SEGMENT when needed and preserves all other
+/// descriptor fields. Dynamic-stack kernels are rejected until appending a
+/// fixed spill zone is proven compatible with their stack convention.
+[[nodiscard]] SpillDescriptorUpdate
+update_kernel_descriptor_for_spills(std::span<uint8_t> image, uint64_t descriptor_file_offset,
+                                    uint32_t required_private_bytes, bool uses_dynamic_stack);
 
 } // namespace rocjitsu
 

@@ -55,6 +55,12 @@ inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 inline constexpr uint16_t kVectorSourceVgprBase = 256;
 inline constexpr uint16_t kVopLiteralSource = 255;
+/// Largest non-negative, dword-aligned offset in VSCRATCH's signed 24-bit
+/// immediate field.
+inline constexpr uint32_t kMaxAddressFreeScratchDwordOffset = 0x7ffffcu;
+/// Largest per-lane private segment whose last dword starts at an encodable
+/// address-free VSCRATCH offset.
+inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
@@ -623,6 +629,50 @@ build_flat_load_b32_vaddr_vdst(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arc
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
   return std::array<uint32_t, 3>{0xEC050000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vdst),
                                  static_cast<uint32_t>(vaddr)};
+}
+
+/// @brief Encode gfx12 `scratch_store_b32 off, vsrc, off offset:byte_offset`.
+///
+/// @details The address-free form uses only the implicit per-lane scratch base
+/// and the positive signed-24-bit immediate. ConSan spill slots are dword
+/// aligned, so unaligned offsets are rejected even though the ISA field itself
+/// is byte-addressed.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vsrc > 255 ||
+      byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+    return std::nullopt;
+  }
+  constexpr uint32_t kRdna4ScratchNoSaddr = 0x7c;
+  return std::array<uint32_t, 3>{0xed068000u | kRdna4ScratchNoSaddr,
+                                 static_cast<uint32_t>(vsrc) << 23u, byte_offset << 8u};
+}
+
+/// @brief Encode gfx12 `scratch_load_b32 vdst, off, off offset:byte_offset`.
+/// @copydetails build_address_free_scratch_store_b32
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+build_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 ||
+      byte_offset > kMaxAddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+    return std::nullopt;
+  }
+  constexpr uint32_t kRdna4ScratchNoSaddr = 0x7c;
+  return std::array<uint32_t, 3>{0xed050000u | kRdna4ScratchNoSaddr, static_cast<uint32_t>(vdst),
+                                 byte_offset << 8u};
+}
+
+/// @brief Encode gfx12 `s_wait_storecnt 0`.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_storecnt0(rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return std::nullopt;
+  return pack_sopp(rdna4::kSWaitStorecntSopp, 0);
+}
+
+/// @brief Encode gfx12 `s_wait_loadcnt 0`.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_loadcnt0(rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return std::nullopt;
+  return pack_sopp(rdna4::kSWaitLoadcntSopp, 0);
 }
 
 /// @brief Encode RDNA4 `flat_atomic_add_u32 vdst, v[vaddr:vaddr+1], vsrc`.

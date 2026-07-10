@@ -3578,6 +3578,7 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     info.text_file_offset = kernel.text_file_offset;
     info.code_size = kernel.code_size;
     info.has_text_range = kernel.has_text_range;
+    info.uses_dynamic_stack = kernel.uses_dynamic_stack;
     result.kernels.push_back(std::move(info));
   }
 

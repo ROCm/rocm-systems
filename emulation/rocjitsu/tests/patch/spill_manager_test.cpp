@@ -6,10 +6,17 @@
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
+
+#include "rocjitsu/base/rj_compiler.h"
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -513,6 +520,122 @@ TEST(SpillManager, ConstructorOverLimitFailsAllAllocations) {
   RegisterSet set;
   set.expand(sgpr(2));
   EXPECT_FALSE(m.reserve(set));
+}
+
+TEST(SpillManager, BuildsGfx1201VgprSaveRestoreSequence) {
+  SpillManager manager(/*original_private_bytes=*/0, kMaxAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/10, /*vgpr_count=*/3,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{0, 4, 8}));
+  EXPECT_EQ(sequence->total_private_bytes, 12u);
+  EXPECT_EQ(manager.total_private_bytes(), 12u);
+  ASSERT_EQ(sequence->save_words.size(), 10u);
+  ASSERT_EQ(sequence->restore_words.size(), 10u);
+  EXPECT_EQ(sequence->save_words[0], 0xed06807cu);
+  EXPECT_EQ(sequence->save_words[1], 10u << 23u);
+  EXPECT_EQ(sequence->save_words[2], 0u);
+  EXPECT_EQ(sequence->save_words[9], 0xbfc10000u);
+  EXPECT_EQ(sequence->restore_words[0], 0xed05007cu);
+  EXPECT_EQ(sequence->restore_words[1], 10u);
+  EXPECT_EQ(sequence->restore_words[2], 0u);
+  EXPECT_EQ(sequence->restore_words[9], 0xbfc00000u);
+}
+
+TEST(SpillManager, VgprSequenceAppendsAfterOriginalPrivateSegment) {
+  SpillManager manager(/*original_private_bytes=*/20, kMaxAddressFreeScratchPrivateBytes);
+  const auto sequence = build_vgpr_spill_sequence(manager, /*vgpr_base=*/7, /*vgpr_count=*/2,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ(sequence->slot_offsets, (std::vector<uint32_t>{32, 36}));
+  EXPECT_EQ(sequence->total_private_bytes, 40u);
+
+  const auto repeated = build_vgpr_spill_sequence(manager, /*vgpr_base=*/7, /*vgpr_count=*/2,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(repeated);
+  EXPECT_EQ(repeated->slot_offsets, sequence->slot_offsets);
+  EXPECT_EQ(manager.total_private_bytes(), 40u);
+}
+
+TEST(SpillManager, VgprSequenceFailureRollsBack) {
+  SpillManager capacity_limited(/*original_private_bytes=*/0, /*limit=*/8);
+  EXPECT_FALSE(build_vgpr_spill_sequence(capacity_limited, 10, 3, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(capacity_limited.total_private_bytes(), 0u);
+  EXPECT_EQ(capacity_limited.offset_for(vgpr(10)), std::nullopt);
+
+  SpillManager unencodable(/*original_private_bytes=*/kMaxAddressFreeScratchPrivateBytes,
+                           /*limit=*/kMaxAddressFreeScratchPrivateBytes + 4u);
+  EXPECT_FALSE(build_vgpr_spill_sequence(unencodable, 10, 1, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(unencodable.offset_for(vgpr(10)), std::nullopt);
+
+  SpillManager unsupported(/*original_private_bytes=*/0, /*limit=*/16);
+  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 10, 1, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_vgpr_spill_sequence(unsupported, 255, 2, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(unsupported.total_private_bytes(), 0u);
+}
+
+TEST(SpillManager, DescriptorGrowthEnablesPrivateSegmentAndIsKernelLocal) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+  std::array<uint8_t, 2 * sizeof(KD)> image{};
+  KD first{};
+  first.compute_pgm_rsrc1 = 0x12345678u;
+  first.compute_pgm_rsrc2 = 0x87654000u;
+  first.kernel_code_entry_byte_offset = -0x1000;
+  first.group_segment_fixed_size = 96;
+  KD second{};
+  second.compute_pgm_rsrc1 = 0xa5a5a5a5u;
+  second.compute_pgm_rsrc2 = 0x5a5a5a5au;
+  second.private_segment_fixed_size = 64;
+  std::memcpy(image.data(), &first, sizeof(first));
+  std::memcpy(image.data() + sizeof(KD), &second, sizeof(second));
+  const std::array<uint8_t, sizeof(KD)> second_before = [&] {
+    std::array<uint8_t, sizeof(KD)> bytes{};
+    std::memcpy(bytes.data(), image.data() + sizeof(KD), sizeof(KD));
+    return bytes;
+  }();
+
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, /*descriptor_file_offset=*/0,
+                                                /*required_private_bytes=*/12,
+                                                /*uses_dynamic_stack=*/false),
+            SpillDescriptorUpdate::Updated);
+  KD patched{};
+  std::memcpy(&patched, image.data(), sizeof(patched));
+  EXPECT_EQ(patched.private_segment_fixed_size, 12u);
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(patched.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT), 1u);
+  EXPECT_EQ(patched.compute_pgm_rsrc1, first.compute_pgm_rsrc1);
+  EXPECT_EQ(patched.kernel_code_entry_byte_offset, first.kernel_code_entry_byte_offset);
+  EXPECT_EQ(patched.group_segment_fixed_size, first.group_segment_fixed_size);
+  EXPECT_TRUE(std::equal(second_before.begin(), second_before.end(), image.begin() + sizeof(KD)));
+}
+
+TEST(SpillManager, DescriptorGrowthHandlesNonzeroPrivateSegmentAndRejectsDynamicStack) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+  KD descriptor{};
+  descriptor.private_segment_fixed_size = 32;
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  std::array<uint8_t, sizeof(KD)> image{};
+  std::memcpy(image.data(), &descriptor, sizeof(descriptor));
+
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 16, false),
+            SpillDescriptorUpdate::Unchanged);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 48, false),
+            SpillDescriptorUpdate::Updated);
+  KD grown{};
+  std::memcpy(&grown, image.data(), sizeof(grown));
+  EXPECT_EQ(grown.private_segment_fixed_size, 48u);
+  const auto before = image;
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, 0, 64, true),
+            SpillDescriptorUpdate::DynamicStack);
+  EXPECT_EQ(image, before);
+  EXPECT_EQ(
+      update_kernel_descriptor_for_spills(image, 0, kMaxAddressFreeScratchPrivateBytes + 1u, false),
+      SpillDescriptorUpdate::InvalidPrivateSize);
+  EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48, false),
+            SpillDescriptorUpdate::InvalidDescriptor);
+  EXPECT_EQ(image, before);
 }
 
 // End-to-end smoke test: feed a real LivenessAnalysis result into SpillManager.

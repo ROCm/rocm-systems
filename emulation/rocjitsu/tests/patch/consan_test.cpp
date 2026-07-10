@@ -32,6 +32,7 @@ namespace rocjitsu {
 namespace {
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
+inline constexpr uint8_t kElfSymbolTypeNotype = 0;
 inline constexpr uint16_t kRdna4VccLo = 106;
 inline constexpr uint16_t kRdna4ExecLo = 126;
 inline constexpr uint32_t kWaitAluDepctrSaSdst0 = 0xBF88FF9Eu;
@@ -274,9 +275,11 @@ constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
 
-std::vector<uint8_t> make_rdna4_lds_code_object(
-    std::span<const uint32_t> text_words, std::string_view kernel_name = "lds_probe",
-    uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated, bool wave32 = false) {
+std::vector<uint8_t>
+make_rdna4_lds_code_object(std::span<const uint32_t> text_words,
+                           std::string_view kernel_name = "lds_probe",
+                           uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated,
+                           bool wave32 = false, bool uses_dynamic_stack = false) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t rodata_vaddr = 0x2100;
@@ -295,11 +298,13 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   const uint32_t kernel_symbol_name = add_elf_name(strtab, kernel_name);
   const std::string kd_name = std::string(kernel_name) + ".kd";
   const uint32_t kd_symbol_name = add_elf_name(strtab, kd_name);
+  const std::string dynamic_stack_name = std::string(kernel_name) + ".has_dyn_sized_stack";
+  const uint32_t dynamic_stack_symbol_name = add_elf_name(strtab, dynamic_stack_name);
 
   const uint64_t rodata_offset = text_offset + text_size;
   const uint64_t strtab_offset = rodata_offset + kernel_descriptor_size;
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
-  constexpr size_t sym_count = 3;
+  constexpr size_t sym_count = 4;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -351,6 +356,10 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   symbols[2].st_shndx = 2;
   symbols[2].st_value = rodata_vaddr;
   symbols[2].st_size = kernel_descriptor_size;
+  symbols[3].st_name = dynamic_stack_symbol_name;
+  symbols[3].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeNotype);
+  symbols[3].st_shndx = SHN_ABS;
+  symbols[3].st_value = uses_dynamic_stack ? 1u : 0u;
   std::memcpy(image.data() + symtab_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
 
   std::array<Elf64_Shdr, section_count> sections{};
@@ -694,6 +703,8 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
+  ASSERT_TRUE(kernel.uses_dynamic_stack.has_value());
+  EXPECT_FALSE(*kernel.uses_dynamic_stack);
   EXPECT_TRUE(kernel.decoded);
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::NotRun);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
@@ -729,6 +740,24 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
     EXPECT_EQ(plan.original_private_segment_size, 0u);
   }
   EXPECT_FALSE(result.warnings.empty());
+}
+
+TEST(ConSanMoi, InventoriesDynamicStackMarker) {
+  const std::array<uint32_t, 1> text_words = {
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "dynamic_stack_kernel", kRdna4Wave64AllVgprsGranulated,
+                                 /*wave32=*/false, /*uses_dynamic_stack=*/true);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_TRUE(result.kernels.front().uses_dynamic_stack.has_value());
+  EXPECT_TRUE(*result.kernels.front().uses_dynamic_stack);
 }
 
 TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {

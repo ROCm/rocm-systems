@@ -2257,50 +2257,55 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.kernels) {
       if (kernel.has_text_range) {
-        log_message(kLogInfo,
-                    "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
-                    "text_file=0x%llx entry_text=0x%llx code_size=%llu decoded=%s "
-                    "insts=%llu lds_reads=%llu lds_writes=%llu lds_atomics=%llu ds_other=%llu "
-                    "flat_reads=%llu flat_writes=%llu flat_atomics=%llu flat_group_hints=%llu "
-                    "flat_private_hints=%llu flat_maybe_group_hints=%llu "
-                    "flat_maybe_private_hints=%llu flat_global_hints=%llu "
-                    "flat_unknown_hints=%llu global_mem=%llu scratch_mem=%llu barriers=%llu "
-                    "waits=%llu fences=%llu decode_errors=%llu "
-                    "preflight=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-                    static_cast<unsigned long long>(kernel.descriptor_file_offset),
-                    static_cast<unsigned long long>(kernel.text_file_offset),
-                    static_cast<unsigned long long>(kernel.entry_text_offset),
-                    static_cast<unsigned long long>(kernel.code_size),
-                    kernel.decoded ? "true" : "false",
-                    static_cast<unsigned long long>(kernel.stats.instruction_count),
-                    static_cast<unsigned long long>(kernel.stats.lds_read_count),
-                    static_cast<unsigned long long>(kernel.stats.lds_write_count),
-                    static_cast<unsigned long long>(kernel.stats.lds_atomic_count),
-                    static_cast<unsigned long long>(kernel.stats.ds_other_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_read_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_write_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_atomic_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_group_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_private_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_maybe_group_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_maybe_private_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_global_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.flat_unknown_hint_count),
-                    static_cast<unsigned long long>(kernel.stats.global_memory_count),
-                    static_cast<unsigned long long>(kernel.stats.scratch_memory_count),
-                    static_cast<unsigned long long>(kernel.stats.barrier_count),
-                    static_cast<unsigned long long>(kernel.stats.wait_count),
-                    static_cast<unsigned long long>(kernel.stats.fence_like_count),
-                    static_cast<unsigned long long>(kernel.stats.decode_error_count),
-                    preflight_action_name(kernel.preflight_action));
+        log_message(
+            kLogInfo,
+            "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
+            "text_file=0x%llx entry_text=0x%llx code_size=%llu decoded=%s "
+            "dynamic_stack=%s "
+            "insts=%llu lds_reads=%llu lds_writes=%llu lds_atomics=%llu ds_other=%llu "
+            "flat_reads=%llu flat_writes=%llu flat_atomics=%llu flat_group_hints=%llu "
+            "flat_private_hints=%llu flat_maybe_group_hints=%llu "
+            "flat_maybe_private_hints=%llu flat_global_hints=%llu "
+            "flat_unknown_hints=%llu global_mem=%llu scratch_mem=%llu barriers=%llu "
+            "waits=%llu fences=%llu decode_errors=%llu "
+            "preflight=%s",
+            static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
+            static_cast<unsigned long long>(kernel.descriptor_file_offset),
+            static_cast<unsigned long long>(kernel.text_file_offset),
+            static_cast<unsigned long long>(kernel.entry_text_offset),
+            static_cast<unsigned long long>(kernel.code_size), kernel.decoded ? "true" : "false",
+            kernel.uses_dynamic_stack ? (*kernel.uses_dynamic_stack ? "true" : "false") : "unknown",
+            static_cast<unsigned long long>(kernel.stats.instruction_count),
+            static_cast<unsigned long long>(kernel.stats.lds_read_count),
+            static_cast<unsigned long long>(kernel.stats.lds_write_count),
+            static_cast<unsigned long long>(kernel.stats.lds_atomic_count),
+            static_cast<unsigned long long>(kernel.stats.ds_other_count),
+            static_cast<unsigned long long>(kernel.stats.flat_read_count),
+            static_cast<unsigned long long>(kernel.stats.flat_write_count),
+            static_cast<unsigned long long>(kernel.stats.flat_atomic_count),
+            static_cast<unsigned long long>(kernel.stats.flat_group_hint_count),
+            static_cast<unsigned long long>(kernel.stats.flat_private_hint_count),
+            static_cast<unsigned long long>(kernel.stats.flat_maybe_group_hint_count),
+            static_cast<unsigned long long>(kernel.stats.flat_maybe_private_hint_count),
+            static_cast<unsigned long long>(kernel.stats.flat_global_hint_count),
+            static_cast<unsigned long long>(kernel.stats.flat_unknown_hint_count),
+            static_cast<unsigned long long>(kernel.stats.global_memory_count),
+            static_cast<unsigned long long>(kernel.stats.scratch_memory_count),
+            static_cast<unsigned long long>(kernel.stats.barrier_count),
+            static_cast<unsigned long long>(kernel.stats.wait_count),
+            static_cast<unsigned long long>(kernel.stats.fence_like_count),
+            static_cast<unsigned long long>(kernel.stats.decode_error_count),
+            preflight_action_name(kernel.preflight_action));
       } else {
         log_message(kLogInfo,
                     "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
-                    "text_range=unavailable decoded=%s decode_errors=%llu preflight=%s",
+                    "text_range=unavailable decoded=%s dynamic_stack=%s decode_errors=%llu "
+                    "preflight=%s",
                     static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
                     static_cast<unsigned long long>(kernel.descriptor_file_offset),
                     kernel.decoded ? "true" : "false",
+                    kernel.uses_dynamic_stack ? (*kernel.uses_dynamic_stack ? "true" : "false")
+                                              : "unknown",
                     static_cast<unsigned long long>(kernel.stats.decode_error_count),
                     preflight_action_name(kernel.preflight_action));
       }

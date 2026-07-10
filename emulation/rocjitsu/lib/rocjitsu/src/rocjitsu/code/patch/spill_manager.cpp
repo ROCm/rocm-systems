@@ -3,10 +3,19 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
+#include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/patch/instruction_builder.h"
 #include "util/bit.h"
 
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "hsa/AMDHSAKernelDescriptor.h"
+RJ_DIAGNOSTIC_POP
+
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <utility> // for std::pair
 
@@ -116,6 +125,83 @@ std::optional<uint32_t> SpillManager::offset_for(RegisterRef reg) const {
     return std::nullopt;
   }
   return it->second;
+}
+
+std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager,
+                                                           uint16_t vgpr_base, uint16_t vgpr_count,
+                                                           rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vgpr_count == 0 ||
+      static_cast<uint32_t>(vgpr_base) + vgpr_count > REGISTER_SET_MAX_VGPRS) {
+    return std::nullopt;
+  }
+
+  SpillManager planned_manager = manager;
+  const auto first_offset =
+      planned_manager.allocate_slots(RegisterRef{RegClass::VGPR, vgpr_base, 1}, vgpr_count);
+  if (!first_offset || planned_manager.total_private_bytes() > kMaxAddressFreeScratchPrivateBytes) {
+    return std::nullopt;
+  }
+
+  const auto wait_store = build_s_wait_storecnt0(arch);
+  const auto wait_load = build_s_wait_loadcnt0(arch);
+  if (!wait_store || !wait_load)
+    return std::nullopt;
+
+  VgprSpillSequence sequence;
+  sequence.vgpr_base = vgpr_base;
+  sequence.vgpr_count = vgpr_count;
+  sequence.slot_offsets.reserve(vgpr_count);
+  sequence.save_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
+  sequence.restore_words.reserve(static_cast<size_t>(vgpr_count) * 3u + 1u);
+  for (uint16_t i = 0; i < vgpr_count; ++i) {
+    const uint16_t vgpr = static_cast<uint16_t>(vgpr_base + i);
+    const auto offset = planned_manager.offset_for(RegisterRef{RegClass::VGPR, vgpr, 1});
+    if (!offset)
+      return std::nullopt;
+    const auto store = build_address_free_scratch_store_b32(vgpr, *offset, arch);
+    const auto load = build_address_free_scratch_load_b32(vgpr, *offset, arch);
+    if (!store || !load)
+      return std::nullopt;
+    sequence.slot_offsets.push_back(*offset);
+    sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+    sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+  }
+  sequence.save_words.push_back(*wait_store);
+  sequence.restore_words.push_back(*wait_load);
+  sequence.total_private_bytes = planned_manager.total_private_bytes();
+  manager = std::move(planned_manager);
+  return sequence;
+}
+
+SpillDescriptorUpdate update_kernel_descriptor_for_spills(std::span<uint8_t> image,
+                                                          uint64_t descriptor_file_offset,
+                                                          uint32_t required_private_bytes,
+                                                          bool uses_dynamic_stack) {
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  namespace kd = rocr::llvm::amdhsa;
+  if (uses_dynamic_stack)
+    return SpillDescriptorUpdate::DynamicStack;
+  if (required_private_bytes == 0 || required_private_bytes > kMaxAddressFreeScratchPrivateBytes) {
+    return SpillDescriptorUpdate::InvalidPrivateSize;
+  }
+  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
+    return SpillDescriptorUpdate::InvalidDescriptor;
+  }
+
+  KD descriptor{};
+  std::memcpy(&descriptor, image.data() + descriptor_file_offset, sizeof(descriptor));
+  const uint32_t grown_private_bytes =
+      std::max(descriptor.private_segment_fixed_size, required_private_bytes);
+  const bool private_segment_enabled =
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) !=
+      0;
+  if (grown_private_bytes == descriptor.private_segment_fixed_size && private_segment_enabled)
+    return SpillDescriptorUpdate::Unchanged;
+
+  descriptor.private_segment_fixed_size = grown_private_bytes;
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  std::memcpy(image.data() + descriptor_file_offset, &descriptor, sizeof(descriptor));
+  return SpillDescriptorUpdate::Updated;
 }
 
 } // namespace rocjitsu
