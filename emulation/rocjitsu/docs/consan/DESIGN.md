@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes. A standalone gfx1201 VGPR spill backend is hardware-tested, but access probes do not consume it yet. | Extend the shared planner through spill-backed and persistent-state paths. |
+| Registers | Kernel-scoped liveness plans select per-site scratch for static record/replay and sampled probes, and direct-kernel sites can preserve a live victim window through gfx1201 private scratch when the kernel already has a private segment. | Extend the shared planner through persistent state, scalar/special state, shared functions, and zero-private flat-scratch activation. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -68,8 +68,9 @@ Primary files:
   `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*`
   - Reusable patch-placement and DBT utilities that ConSan should lean on more
     heavily as probe size grows. `spill_manager.*` now also emits transactional
-    gfx1201 B32 VGPR save/restore batches and performs kernel-local fixed-private
-    descriptor growth.
+    gfx1201 B32 VGPR save/restore batches, performs kernel-local fixed-private
+    descriptor growth, and keeps the matching AMDGPU MessagePack metadata
+    coherent in place.
 
 Test anchors:
 
@@ -125,14 +126,16 @@ configuration and has narrower coverage in its exact inline path.
 The gap is not one feature. It is a set of concrete blockers:
 
 - **Scratch register allocation.** Static record/replay and sampled access
-  probes now choose per-site dead or fresh descriptor-backed VGPR windows.
+  probes now choose per-site dead or fresh descriptor-backed VGPR windows and
+  can spill live windows for direct kernels that already establish private
+  scratch.
   Dynamic, barrier, atomic, inline-shadow, and persistent-state paths still use
   explicit knobs such as `RJ_CONSAN_TMP_VGPR`, `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`,
   `RJ_CONSAN_MOI_OWNER_SGPR`, `RJ_CONSAN_MOI_OWNER_VGPR`, and
   `RJ_CONSAN_MOI_EPOCH_VGPR` for important paths. Broad operation needs a
-  single scratch-planning policy that can find free registers when possible,
-  grow descriptors when legal, and spill/fill when necessary. The first
-  implementation reference is Kunwar Grover's
+  single scratch-planning policy across those remaining families. Private
+  fallback also needs entry setup for kernels compiled with a zero-byte private
+  segment. The first implementation reference is Kunwar Grover's
   `origin/users/Groverkss/text-relocation-land` branch, whose reusable
   contribution is the initial VGPR spill-slot allocator.
 - **Owner and epoch state.** `inline_shadow` needs an owner and epoch live at
@@ -251,16 +254,25 @@ Current register policy:
   references, growing only the owning descriptor when needed.
 - Symbol-backed code ranges exclude alignment padding from CFG decoding, so
   the same planning path works on normal multi-kernel HIP code objects.
-- Spill-required sites are reported with a typed resource outcome and left
-  unmodified. Dynamic, barrier, atomic, inline-shadow, owner/epoch, and
-  EXEC-save paths still rely on explicit env knobs.
+- Direct-kernel static record/replay and sampled sites consume a typed
+  spill-required outcome. They use an appended cave containing the spill save,
+  derived-owner setup, original access, conservative LDS wait,
+  instrumentation, spill restore, and return.
+- Spill plans currently require a compiled nonzero private segment. The patcher
+  grows both the owning descriptor and the named kernel's AMDGPU MessagePack
+  private size. A zero-private kernel is left unmodified with a precise warning
+  because descriptor/metadata edits do not synthesize its missing flat-scratch
+  entry setup.
+- Dynamic, barrier, atomic, inline-shadow, owner/epoch, and EXEC-save paths
+  still rely on explicit env knobs.
 - A standalone gfx1201 spill backend allocates stable slots through
   `SpillManager`, emits address-free `scratch_store/load_b32` batches with
   conservative split waits, and grows only the selected descriptor's fixed
   private segment. Dynamic-stack kernels are detected from compiler-emitted
   symbols and rejected by this first backend.
-- No ConSan probe family consumes that backend yet, so there is not yet a
-  complete spill-backed instrumentation policy.
+- Static record/replay and sampled access probes consume that backend for
+  direct kernels. Shared functions, persistent state, scalar state, dynamic
+  stacks, and zero-private kernels remain outside this first vertical slice.
 
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
 first reference for spilling work. Its directly reusable piece is the
@@ -275,8 +287,9 @@ This code should be treated as prototype integration work. Other rocJITsu work
 is expected to make spilling more comprehensive, so ConSan should avoid
 over-engineering interfaces that may be replaced by shared DBI infrastructure.
 
-This register policy is the biggest gap between current implementation and the
-intended architecture.
+Completing the same policy for persistent, scalar, and shared-function state is
+still the biggest gap between current implementation and the intended
+architecture.
 
 ## SuperCollider Flavor
 
@@ -734,10 +747,12 @@ What it does not mean:
 
 ## Immediate Engineering Gaps
 
-The non-spill scratch policy and standalone gfx1201 save/restore backend are now
-in place. The immediate gap is wrapping a real access probe in that backend
-when planning returns `spill-required`, then extending the same resource model
-to the remaining probe families and persistent state.
+The non-spill scratch policy and the first complete gfx1201 spill-backed access
+slice are now in place for static record/replay and sampled probes. The
+immediate gap is persistent owner/epoch placement. Descriptor-full fallback
+also has to establish flat-scratch entry state for kernels compiled with no
+private segment; changing the descriptor and metadata alone was tested on
+gfx1201 and is not sufficient.
 
 Spill reconnaissance started from Kunwar Grover's `text-relocation-land`
 branch:
@@ -746,9 +761,11 @@ branch:
 
 That branch contributes the `SpillManager` slot allocator but no target spill
 instructions or spill/fill placement. ConSan now reuses that allocator beneath
-its gfx1201 B32 backend. `origin/users/Groverkss/dbt-tooling` and
+its gfx1201 B32 backend and the record/replay and sampled access integrations.
+`origin/users/Groverkss/dbt-tooling` and
 `origin/users/Groverkss/dbt_interposer` remain useful background references;
-the remaining work is probe integration rather than another allocator.
+the remaining work is persistent/scalar/shared resource integration rather than
+another allocator.
 
 If ConSan needs SGPR spilling, assume it is not already covered there. Implement
 only the minimal SGPR support needed for the current probe family, keep it

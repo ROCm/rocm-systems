@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <utility> // for std::pair
 #include <vector>
@@ -142,6 +143,25 @@ enum class SpillDescriptorUpdate : uint8_t {
 [[nodiscard]] SpillDescriptorUpdate
 update_kernel_descriptor_for_spills(std::span<uint8_t> image, uint64_t descriptor_file_offset,
                                     uint32_t required_private_bytes, bool uses_dynamic_stack);
+
+enum class SpillMetadataUpdate : uint8_t {
+  Updated,
+  Unchanged,
+  NoMetadata,
+  KernelNotFound,
+  InvalidMetadata,
+  UnencodableGrowth,
+};
+
+/// @brief Keep AMDGPU MessagePack metadata coherent with spill descriptor growth.
+///
+/// @details The HSA loader consults this metadata when deciding whether to
+/// allocate dispatch scratch. The update is intentionally in-place: growth
+/// that crosses the existing MessagePack integer encoding width is rejected
+/// precisely instead of shifting the ELF note and every following section.
+[[nodiscard]] SpillMetadataUpdate
+update_amdgpu_metadata_for_spills(std::span<uint8_t> image, std::string_view kernel_name,
+                                  uint32_t required_private_bytes);
 
 } // namespace rocjitsu
 

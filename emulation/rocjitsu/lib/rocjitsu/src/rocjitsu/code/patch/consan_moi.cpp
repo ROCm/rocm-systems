@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
@@ -1952,6 +1953,7 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
     request.max_referenced_count = owner.max_referenced_vgpr_count;
     request.architecture_limit = kMaxVgprs;
     request.explicit_base = options.scratch_vgpr;
+    request.force_spill = options.force_vgpr_spill;
     request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
     if (options.moi_owner_vgpr)
       request.forbidden.expand({RegClass::VGPR, *options.moi_owner_vgpr, 1});
@@ -1972,6 +1974,7 @@ struct ResolvedMoiScratchPlan {
   uint16_t base = 0;
   uint16_t count = 0;
   uint16_t required_vgpr_count = 0;
+  uint32_t original_private_segment_size = 0;
   std::vector<uint64_t> owner_descriptor_file_offsets;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
 };
@@ -1993,17 +1996,19 @@ resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate
 }
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
-resolve_nonspill_moi_scratch(const ConSanResult &result, const ConSanMoiCandidate &candidate,
-                             const ConSanOptions &options, uint16_t expected_count) {
+resolve_moi_scratch(const ConSanResult &result, const ConSanMoiCandidate &candidate,
+                    const ConSanOptions &options, uint16_t expected_count) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
   if (plan != nullptr && plan->scratch_vgpr && plan->scratch_vgpr_count == expected_count &&
       (plan->source == ConSanRegisterAllocationSource::Explicit ||
        plan->source == ConSanRegisterAllocationSource::LivenessDead ||
-       plan->source == ConSanRegisterAllocationSource::DescriptorGrowth)) {
+       plan->source == ConSanRegisterAllocationSource::DescriptorGrowth ||
+       plan->source == ConSanRegisterAllocationSource::SpillRequired)) {
     ResolvedMoiScratchPlan resolved;
     resolved.base = *plan->scratch_vgpr;
     resolved.count = expected_count;
     resolved.required_vgpr_count = plan->required_vgpr_count;
+    resolved.original_private_segment_size = plan->original_private_segment_size;
     resolved.owner_descriptor_file_offsets = plan->owner_descriptor_file_offsets;
     resolved.source = plan->source;
     if (options.moi_owner_vgpr) {
@@ -2034,7 +2039,19 @@ resolve_nonspill_moi_scratch(const ConSanResult &result, const ConSanMoiCandidat
   return std::nullopt;
 }
 
+void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidates,
+                              const ConSanOptions &options) {
+  if (options.test_kernel_name_filter.empty())
+    return;
+  std::erase_if(candidates, [&](const ConSanMoiCandidate *candidate) {
+    return candidate == nullptr ||
+           candidate->container_name.find(options.test_kernel_name_filter) == std::string::npos;
+  });
+}
+
 using MoiDescriptorVgprRequirements = std::unordered_map<uint64_t, uint16_t>;
+using MoiDescriptorPrivateRequirements = std::unordered_map<uint64_t, uint32_t>;
+using MoiSpillManagers = std::unordered_map<uint64_t, SpillManager>;
 
 void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
                                   const ResolvedMoiScratchPlan &plan) {
@@ -2045,12 +2062,60 @@ void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
   }
 }
 
+void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requirements,
+                                        const ResolvedMoiScratchPlan &plan,
+                                        const VgprSpillSequence &spill) {
+  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+    auto [it, inserted] = requirements.emplace(descriptor_offset, spill.total_private_bytes);
+    if (!inserted)
+      it->second = std::max(it->second, spill.total_private_bytes);
+  }
+}
+
 [[nodiscard]] const ConSanKernelInfo *kernel_for_descriptor(const ConSanResult &result,
                                                             uint64_t descriptor_offset) {
   const auto it = std::ranges::find_if(result.kernels, [descriptor_offset](const auto &kernel) {
     return kernel.descriptor_file_offset == descriptor_offset;
   });
   return it == result.kernels.end() ? nullptr : &*it;
+}
+
+[[nodiscard]] std::optional<VgprSpillSequence>
+build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
+                         MoiSpillManagers &managers, rj_code_arch_t arch,
+                         std::vector<std::string> &warnings) {
+  if (resources.source != ConSanRegisterAllocationSource::SpillRequired)
+    return std::nullopt;
+  if (resources.owner_descriptor_file_offsets.size() != 1) {
+    warnings.emplace_back("ConSan MOI spill requires exactly one owning kernel descriptor");
+    return std::nullopt;
+  }
+
+  const uint64_t descriptor_offset = resources.owner_descriptor_file_offsets.front();
+  const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+  if (kernel == nullptr) {
+    warnings.emplace_back("ConSan MOI spill references an unknown kernel descriptor");
+    return std::nullopt;
+  }
+  if (kernel->uses_dynamic_stack.value_or(false)) {
+    warnings.emplace_back("ConSan MOI spill does not yet support a dynamic-stack kernel");
+    return std::nullopt;
+  }
+  if (resources.original_private_segment_size == 0) {
+    warnings.emplace_back(
+        "ConSan MOI spill requires a pre-existing private segment; the HSA DBI load hook cannot "
+        "safely establish zero-to-nonzero dispatch scratch");
+    return std::nullopt;
+  }
+
+  auto [it, inserted] =
+      managers.try_emplace(descriptor_offset, resources.original_private_segment_size,
+                           kMaxAddressFreeScratchPrivateBytes);
+  (void)inserted;
+  auto spill = build_vgpr_spill_sequence(it->second, resources.base, resources.count, arch);
+  if (!spill)
+    warnings.emplace_back("ConSan MOI could not encode or reserve the planned VGPR spill window");
+  return spill;
 }
 
 [[nodiscard]] bool apply_descriptor_requirements(CodeObjectPatcher &patcher,
@@ -2066,6 +2131,66 @@ void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
     }
     if (!grow_moi_kernel_descriptor_vgprs(patcher, image, *kernel, required_count, errors))
       return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool apply_spill_descriptor_requirements(
+    CodeObjectPatcher &patcher, std::span<const uint8_t> image, const ConSanResult &result,
+    const MoiDescriptorPrivateRequirements &requirements, std::vector<std::string> &errors) {
+  for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr || descriptor_offset > image.size() ||
+        sizeof(KD) > image.size() - descriptor_offset) {
+      errors.emplace_back("ConSan MOI spill descriptor exceeds ELF bytes or has no kernel owner");
+      return false;
+    }
+
+    std::vector<uint8_t> descriptor(sizeof(KD));
+    std::memcpy(descriptor.data(), image.data() + descriptor_offset, sizeof(KD));
+    const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
+        descriptor, /*descriptor_file_offset=*/0, required_private_bytes,
+        kernel->uses_dynamic_stack.value_or(false));
+    if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
+      errors.emplace_back("ConSan MOI could not grow the owning kernel's private spill segment");
+      return false;
+    }
+    if (!patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
+      errors.emplace_back("ConSan MOI could not patch the owning kernel spill descriptor");
+      return false;
+    }
+  }
+  return true;
+}
+
+[[nodiscard]] bool
+apply_spill_metadata_requirements(std::vector<uint8_t> &image, const ConSanResult &result,
+                                  const MoiDescriptorPrivateRequirements &requirements,
+                                  std::vector<std::string> &errors) {
+  for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr) {
+      errors.emplace_back("ConSan MOI spill metadata references an unknown kernel descriptor");
+      return false;
+    }
+    const SpillMetadataUpdate update =
+        update_amdgpu_metadata_for_spills(image, kernel->name, required_private_bytes);
+    switch (update) {
+    case SpillMetadataUpdate::Updated:
+    case SpillMetadataUpdate::Unchanged:
+    case SpillMetadataUpdate::NoMetadata:
+      break;
+    case SpillMetadataUpdate::KernelNotFound:
+      errors.emplace_back("ConSan MOI spill could not find the owning kernel in AMDGPU metadata");
+      return false;
+    case SpillMetadataUpdate::InvalidMetadata:
+      errors.emplace_back("ConSan MOI spill found malformed AMDGPU metadata");
+      return false;
+    case SpillMetadataUpdate::UnencodableGrowth:
+      errors.emplace_back(
+          "ConSan MOI spill private growth crosses the in-place metadata integer width");
+      return false;
+    }
   }
   return true;
 }
@@ -3220,6 +3345,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   std::vector<const ConSanMoiCandidate *> candidates =
       find_first_light_access_record_candidates(result, bytes);
+  apply_test_kernel_filter(candidates, options);
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled probe found no native LDS or likely group flat load/store candidate");
@@ -3237,6 +3363,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     uint64_t patch_bytes = 0;
     bool use_appended_cave = false;
     ResolvedMoiScratchPlan resources;
+    std::optional<VgprSpillSequence> spill;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   std::vector<PlannedSampledPatch> appended_cave_candidates;
@@ -3247,20 +3374,22 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   if (code_object.text_sections().size() == 1)
     appended_cave_text_offset = code_object.text_sections().front()->size();
   uint32_t sampled_candidate_index = 0;
+  MoiSpillManagers spill_managers;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const uint32_t current_sample_index = sampled_candidate_index++;
     if (current_sample_index % options.moi_sample_stride != options.moi_sample_offset)
       continue;
 
     const ConSanMoiCandidate &candidate = *candidate_ptr;
-    const auto resources = resolve_nonspill_moi_scratch(result, candidate, options, 5);
+    const auto resources = resolve_moi_scratch(result, candidate, options, 5);
     if (!resources) {
-      const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
-      if (plan != nullptr && plan->source == ConSanRegisterAllocationSource::SpillRequired) {
-        result.warnings.emplace_back(
-            "ConSan MOI sampled probe deferred a spill-required candidate");
-      }
       continue;
+    }
+    std::optional<VgprSpillSequence> spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+      spill = build_moi_spill_sequence(result, *resources, spill_managers, arch, result.warnings);
+      if (!spill)
+        continue;
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
@@ -3274,12 +3403,17 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
     }
 
-    const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
+    const uint64_t spill_bytes =
+        spill ? static_cast<uint64_t>((spill->save_words.size() + spill->restore_words.size()) *
+                                      sizeof(uint32_t))
+              : 0;
+    const uint64_t patch_bytes =
+        static_cast<uint64_t>(words->size() * sizeof(uint32_t)) + spill_bytes;
     const uint32_t available_padding =
         count_nop_padding(bytes, candidate.file_offset + candidate.size, arch);
     const uint64_t available_bytes =
         candidate.size + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
-    if (patch_bytes > available_bytes) {
+    if (spill || patch_bytes > available_bytes) {
       if (appended_cave_text_offset != 0 && candidate.size >= sizeof(uint32_t)) {
         const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
         if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
@@ -3289,6 +3423,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           planned.patch_bytes = patch_bytes;
           planned.use_appended_cave = true;
           planned.resources = *resources;
+          planned.spill = spill;
           appended_cave_candidates.push_back(std::move(planned));
           continue;
         }
@@ -3319,6 +3454,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.candidate = candidate_ptr;
     planned.patch_bytes = patch_bytes;
     planned.resources = *resources;
+    planned.spill = spill;
     planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == max_candidates)
       break;
@@ -3363,8 +3499,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
 
   MoiDescriptorVgprRequirements descriptor_requirements;
-  for (const PlannedSampledPatch &planned_patch : planned_patches)
+  MoiDescriptorPrivateRequirements private_requirements;
+  for (const PlannedSampledPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
+    if (planned_patch.spill) {
+      note_spill_descriptor_requirements(private_requirements, planned_patch.resources,
+                                         *planned_patch.spill);
+    }
+  }
 
   const bool uses_appended_cave = std::ranges::any_of(
       planned_patches, [](const PlannedSampledPatch &patch) { return patch.use_appended_cave; });
@@ -3372,6 +3514,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, bytes, result, descriptor_requirements,
                                        result.errors)) {
+      return;
+    }
+    if (!apply_spill_descriptor_requirements(patcher, bytes, result, private_requirements,
+                                             result.errors)) {
       return;
     }
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3399,12 +3545,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
+      if (planned_patch.spill) {
+        info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
+        info.required_private_segment_size = planned_patch.spill->total_private_bytes;
+      }
 
       if (planned_patch.use_appended_cave) {
         const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
         const auto fwd = compute_sopp_branch_simm16(candidate.text_offset, cave_text_offset);
-        const uint64_t return_branch_pc =
-            cave_text_offset + static_cast<uint64_t>(words->size()) * sizeof(uint32_t);
+        const uint64_t return_branch_pc = cave_text_offset + planned_patch.patch_bytes;
         const auto ret =
             compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size);
         if (!fwd || !ret) {
@@ -3427,7 +3576,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         std::memcpy(new_text.data() + candidate.text_offset, anchor_words.data(),
                     anchor_words.size() * sizeof(uint32_t));
 
-        std::vector<uint32_t> cave_words = *words;
+        std::vector<uint32_t> cave_words;
+        if (planned_patch.spill) {
+          cave_words.insert(cave_words.end(), planned_patch.spill->save_words.begin(),
+                            planned_patch.spill->save_words.end());
+        }
+        cave_words.insert(cave_words.end(), words->begin(), words->end());
+        if (planned_patch.spill) {
+          cave_words.insert(cave_words.end(), planned_patch.spill->restore_words.begin(),
+                            planned_patch.spill->restore_words.end());
+        }
         cave_words.push_back(build_s_branch(*ret, arch));
         append_words_bytes(new_text, cave_words);
         info.trampoline_offset = cave_text_offset;
@@ -3458,6 +3616,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       return;
     }
     result.elf_bytes = patcher.emit();
+    if (!apply_spill_metadata_requirements(result.elf_bytes, result, private_requirements,
+                                           result.errors)) {
+      result.elf_bytes.clear();
+      return;
+    }
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.modified = true;
     return;
@@ -3541,6 +3704,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   std::vector<const ConSanMoiCandidate *> candidates =
       find_first_light_access_record_candidates(result, bytes);
+  apply_test_kernel_filter(candidates, options);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI first-light probe found no native LDS or likely group "
                                  "flat load/store candidate");
@@ -3554,6 +3718,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     uint32_t record_index = 0;
     uint32_t record_count = 0;
     ResolvedMoiScratchPlan resources;
+    std::optional<VgprSpillSequence> spill;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   std::vector<PlannedAccessRecordPatch> appended_cave_candidates;
@@ -3564,17 +3729,14 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   uint64_t appended_cave_text_offset = 0;
   if (code_object.text_sections().size() == 1)
     appended_cave_text_offset = code_object.text_sections().front()->size();
+  MoiSpillManagers spill_managers;
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
-    const auto resources =
-        resolve_nonspill_moi_scratch(result, candidate, options, access_scratch_count);
+    const auto resources = resolve_moi_scratch(result, candidate, options, access_scratch_count);
     if (!resources) {
       const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
-      if (plan != nullptr && plan->source == ConSanRegisterAllocationSource::SpillRequired) {
-        result.warnings.emplace_back(
-            "ConSan MOI first-light probe deferred a spill-required candidate");
-      } else if (plan != nullptr && plan->reason == ConSanRegisterPlanReason::ForbiddenOverlap &&
-                 options.scratch_vgpr) {
+      if (plan != nullptr && plan->reason == ConSanRegisterPlanReason::ForbiddenOverlap &&
+          options.scratch_vgpr) {
         std::vector<std::string> overlap_errors;
         const bool rejected = reject_candidate_scratch_range_overlap(
             candidate, *options.scratch_vgpr, access_scratch_count, overlap_errors);
@@ -3583,6 +3745,12 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         result.warnings.insert(result.warnings.end(), overlap_errors.begin(), overlap_errors.end());
       }
       continue;
+    }
+    std::optional<VgprSpillSequence> spill;
+    if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
+      spill = build_moi_spill_sequence(result, *resources, spill_managers, arch, result.warnings);
+      if (!spill)
+        continue;
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
@@ -3608,12 +3776,17 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     }
 
-    const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
+    const uint64_t spill_bytes =
+        spill ? static_cast<uint64_t>((spill->save_words.size() + spill->restore_words.size()) *
+                                      sizeof(uint32_t))
+              : 0;
+    const uint64_t patch_bytes =
+        static_cast<uint64_t>(words->size() * sizeof(uint32_t)) + spill_bytes;
     const uint32_t available_padding =
         count_nop_padding(bytes, candidate.file_offset + candidate.size, arch);
     const uint64_t available_bytes =
         candidate.size + static_cast<uint64_t>(available_padding) * sizeof(uint32_t);
-    if (patch_bytes > available_bytes) {
+    if (spill || patch_bytes > available_bytes) {
       if (appended_cave_text_offset != 0 && candidate.size >= sizeof(uint32_t)) {
         const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
         if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
@@ -3624,6 +3797,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           planned.use_appended_cave = true;
           planned.record_count = candidate_record_count;
           planned.resources = *resources;
+          planned.spill = spill;
           appended_cave_candidates.push_back(std::move(planned));
           continue;
         }
@@ -3657,6 +3831,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.record_index = planned_record_count;
     planned.record_count = candidate_record_count;
     planned.resources = *resources;
+    planned.spill = spill;
     planned_patches.push_back(std::move(planned));
     planned_record_count += candidate_record_count;
     if (planned_patches.size() == options.max_patches)
@@ -3697,8 +3872,14 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     return;
 
   MoiDescriptorVgprRequirements descriptor_requirements;
-  for (const PlannedAccessRecordPatch &planned_patch : planned_patches)
+  MoiDescriptorPrivateRequirements private_requirements;
+  for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
+    if (planned_patch.spill) {
+      note_spill_descriptor_requirements(private_requirements, planned_patch.resources,
+                                         *planned_patch.spill);
+    }
+  }
 
   const bool uses_appended_cave =
       std::ranges::any_of(planned_patches, [](const PlannedAccessRecordPatch &patch) {
@@ -3708,6 +3889,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, bytes, result, descriptor_requirements,
                                        result.errors)) {
+      return;
+    }
+    if (!apply_spill_descriptor_requirements(patcher, bytes, result, private_requirements,
+                                             result.errors)) {
       return;
     }
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3733,12 +3918,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                   : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
+      if (planned_patch.spill) {
+        info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
+        info.required_private_segment_size = planned_patch.spill->total_private_bytes;
+      }
 
       if (planned_patch.use_appended_cave) {
         const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
         const auto fwd = compute_sopp_branch_simm16(candidate.text_offset, cave_text_offset);
-        const uint64_t return_branch_pc =
-            cave_text_offset + static_cast<uint64_t>(words->size()) * sizeof(uint32_t);
+        const uint64_t return_branch_pc = cave_text_offset + planned_patch.patch_bytes;
         const auto ret =
             compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size);
         if (!fwd || !ret) {
@@ -3761,7 +3949,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         std::memcpy(new_text.data() + candidate.text_offset, anchor_words.data(),
                     anchor_words.size() * sizeof(uint32_t));
 
-        std::vector<uint32_t> cave_words = *words;
+        std::vector<uint32_t> cave_words;
+        if (planned_patch.spill) {
+          cave_words.insert(cave_words.end(), planned_patch.spill->save_words.begin(),
+                            planned_patch.spill->save_words.end());
+        }
+        cave_words.insert(cave_words.end(), words->begin(), words->end());
+        if (planned_patch.spill) {
+          cave_words.insert(cave_words.end(), planned_patch.spill->restore_words.begin(),
+                            planned_patch.spill->restore_words.end());
+        }
         cave_words.push_back(build_s_branch(*ret, arch));
         append_words_bytes(new_text, cave_words);
         info.trampoline_offset = cave_text_offset;
@@ -3792,6 +3989,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       return;
     }
     result.elf_bytes = patcher.emit();
+    if (!apply_spill_metadata_requirements(result.elf_bytes, result, private_requirements,
+                                           result.errors)) {
+      result.elf_bytes.clear();
+      return;
+    }
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.modified = true;
     return;

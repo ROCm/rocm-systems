@@ -94,6 +94,18 @@ TEST(ConSanResourcePlan, FullRegisterFileSelectsAllowedLiveVictim) {
   EXPECT_EQ(plan.required_descriptor_count, 256);
 }
 
+TEST(ConSanResourcePlan, ForceSpillBypassesDeadAndGrowthWindows) {
+  RegisterSet live;
+  ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  request.force_spill = true;
+  request.forbidden.expand({RegClass::VGPR, 0, 1});
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.base, 1);
+  EXPECT_EQ(plan.required_descriptor_count, 8);
+}
+
 TEST(ConSanResourcePlan, ExplicitOverrideCannotClobberLiveGuestValue) {
   RegisterSet live;
   live.expand({RegClass::VGPR, 4, 1});
@@ -172,6 +184,28 @@ size_t count_subsequence(std::span<const uint32_t> haystack, std::span<const uin
     ++it;
   }
   return count;
+}
+
+std::vector<uint32_t> expected_vgpr_spill_words(uint16_t base, uint16_t count, bool restore,
+                                                uint32_t slot_base = 0) {
+  std::vector<uint32_t> words;
+  for (uint16_t i = 0; i < count; ++i) {
+    const auto instruction =
+        restore
+            ? build_address_free_scratch_load_b32(static_cast<uint16_t>(base + i),
+                                                  slot_base + 4u * i, ROCJITSU_CODE_ARCH_RDNA4)
+            : build_address_free_scratch_store_b32(static_cast<uint16_t>(base + i),
+                                                   slot_base + 4u * i, ROCJITSU_CODE_ARCH_RDNA4);
+    if (!instruction)
+      return {};
+    words.insert(words.end(), instruction->begin(), instruction->end());
+  }
+  const auto wait = restore ? build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4)
+                            : build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  if (!wait)
+    return {};
+  words.push_back(*wait);
+  return words;
 }
 
 std::vector<uint32_t> make_expected_vgpr_store_words(uint64_t address, uint16_t value_vgpr,
@@ -1543,6 +1577,116 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
             1u);
 }
 
+TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    descriptor.private_segment_fixed_size = 32;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  EXPECT_EQ(patch.scratch_vgpr, 1);
+  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch.required_private_segment_size, 44u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text = patched.text_sections().front();
+  std::vector<uint32_t> actual(text->size() / sizeof(uint32_t));
+  std::memcpy(actual.data(), text->data(), text->size());
+  const std::vector<uint32_t> save =
+      expected_vgpr_spill_words(1, 3, /*restore=*/false, /*slot_base=*/32);
+  const std::vector<uint32_t> restore =
+      expected_vgpr_spill_words(1, 3, /*restore=*/true, /*slot_base=*/32);
+  ASSERT_FALSE(save.empty());
+  ASSERT_FALSE(restore.empty());
+  const size_t cave = patch.trampoline_offset / sizeof(uint32_t);
+  const auto owner_init =
+      build_v_lshrrev_b32_e32(3, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(owner_init);
+  ASSERT_LE(cave + save.size() + restore.size() + 4u, actual.size());
+  EXPECT_TRUE(std::equal(save.begin(), save.end(), actual.begin() + cave));
+  EXPECT_EQ(actual[cave + save.size()], *owner_init);
+  EXPECT_EQ(actual[cave + save.size() + 1u], text_words[0]);
+  EXPECT_EQ(actual[cave + save.size() + 2u], text_words[1]);
+  EXPECT_TRUE(std::equal(restore.begin(), restore.end(), actual.end() - 1u - restore.size()));
+
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  const uint64_t descriptor_offset = patched.kernels().front().descriptor_file_offset;
+  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+      1u);
+}
+
+TEST(ConSanMoi, FirstLightProbeBlocksZeroToNonzeroDispatchScratch) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("pre-existing private segment") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, FirstLightProbeRejectsSpillingDynamicStackKernel) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "dynamic_spill", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+      /*uses_dynamic_stack=*/true);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("dynamic-stack") != std::string::npos;
+  }));
+}
+
 TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   std::array<uint32_t, 170> text_words{};
   text_words[0] = 0xD8340000u;
@@ -1827,6 +1971,71 @@ TEST(ConSanMoi, DirectSampledProbeAutomaticallyUsesDeadVgprs) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiSampledWatchpointStore);
   EXPECT_EQ(result.patches.front().scratch_vgpr, 1);
+}
+
+TEST(ConSanMoi, DirectSampledProbeSpillsFiveVgprsInAppendedCave) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD8340000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    descriptor.private_segment_fixed_size = 32;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiSampledWatchpointStore);
+  EXPECT_EQ(patch.scratch_vgpr, 1);
+  EXPECT_EQ(patch.spilled_vgpr_count, 5u);
+  EXPECT_EQ(patch.required_private_segment_size, 52u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const auto *text = patched.text_sections().front();
+  std::vector<uint32_t> actual(text->size() / sizeof(uint32_t));
+  std::memcpy(actual.data(), text->data(), text->size());
+  const std::vector<uint32_t> save =
+      expected_vgpr_spill_words(1, 5, /*restore=*/false, /*slot_base=*/32);
+  const std::vector<uint32_t> restore =
+      expected_vgpr_spill_words(1, 5, /*restore=*/true, /*slot_base=*/32);
+  ASSERT_FALSE(save.empty());
+  ASSERT_FALSE(restore.empty());
+  const size_t cave = patch.trampoline_offset / sizeof(uint32_t);
+  const auto owner_init =
+      build_v_lshrrev_b32_e32(5, scalar_positive_inline_u32(6), 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(owner_init);
+  ASSERT_LE(cave + save.size() + restore.size() + 4u, actual.size());
+  EXPECT_TRUE(std::equal(save.begin(), save.end(), actual.begin() + cave));
+  EXPECT_EQ(actual[cave + save.size()], *owner_init);
+  EXPECT_EQ(actual[cave + save.size() + 1u], text_words[0]);
+  EXPECT_EQ(actual[cave + save.size() + 2u], text_words[1]);
+  EXPECT_TRUE(std::equal(restore.begin(), restore.end(), actual.end() - 1u - restore.size()));
+
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  const uint64_t descriptor_offset = patched.kernels().front().descriptor_file_offset;
+  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
+      1u);
 }
 
 TEST(ConSanMoi, DirectSampledProbeCanUseSleepDelay) {

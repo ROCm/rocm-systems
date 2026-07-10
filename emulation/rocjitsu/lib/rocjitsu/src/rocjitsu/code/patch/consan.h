@@ -78,6 +78,11 @@ struct ConSanOptions {
   bool moi_track_barriers = false;
   bool moi_track_atomics = false;
   bool moi_dynamic_access_records = false;
+  /// Test-only control that exercises the spill tier even when a dead or
+  /// descriptor-growth VGPR window is available.
+  bool force_vgpr_spill = false;
+  /// Test-only substring filter for selecting MOI candidates from one kernel.
+  std::string test_kernel_name_filter;
   uint32_t fault_barrier_index = 0;
   ConSanDelayMode delay_mode = ConSanDelayMode::Nop;
   uint16_t delay_var_ssrc = 106;
@@ -337,6 +342,8 @@ struct ConSanPatchInfo {
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
   std::optional<uint16_t> scratch_vgpr;
+  uint16_t spilled_vgpr_count = 0;
+  uint32_t required_private_segment_size = 0;
 };
 
 struct ConSanCandidateResourcePlan {

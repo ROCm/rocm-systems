@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/spill_manager.h"
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
@@ -39,6 +40,50 @@ constexpr uint32_t kBigLimit = 16384;
 RegisterRef sgpr(uint16_t i) { return RegisterRef{RegClass::SGPR, i, 1}; }
 RegisterRef vgpr(uint16_t i) { return RegisterRef{RegClass::VGPR, i, 1}; }
 RegisterRef accvgpr(uint16_t i) { return RegisterRef{RegClass::ACC_VGPR, i, 1}; }
+
+std::vector<uint8_t> make_metadata_note_elf() {
+  std::vector<uint8_t> payload;
+  auto append_string = [&](std::string_view value) {
+    EXPECT_LE(value.size(), 31u);
+    payload.push_back(static_cast<uint8_t>(0xa0u | value.size()));
+    payload.insert(payload.end(), value.begin(), value.end());
+  };
+  payload.push_back(0x81u); // root map(1)
+  append_string("amdhsa.kernels");
+  payload.push_back(0x92u); // array(2)
+  for (std::string_view name : {std::string_view("target"), std::string_view("other")}) {
+    payload.push_back(0x82u); // kernel map(2)
+    append_string(".name");
+    append_string(name);
+    append_string(".private_segment_fixed_size");
+    payload.push_back(0u);
+  }
+
+  constexpr uint64_t kNoteOffset = 0x100;
+  constexpr std::array<uint8_t, 8> kNoteName = {'A', 'M', 'D', 'G', 'P', 'U', 0, 0};
+  const uint64_t note_size = sizeof(Elf64_Nhdr) + kNoteName.size() + ((payload.size() + 3u) & ~3u);
+  std::vector<uint8_t> image(kNoteOffset + note_size, 0);
+  Elf64_Ehdr header{};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_phoff = sizeof(Elf64_Ehdr);
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  header.e_phnum = 1;
+  std::memcpy(image.data(), &header, sizeof(header));
+  Elf64_Phdr program_header{};
+  program_header.p_type = PT_NOTE;
+  program_header.p_offset = kNoteOffset;
+  program_header.p_filesz = note_size;
+  std::memcpy(image.data() + header.e_phoff, &program_header, sizeof(program_header));
+  Elf64_Nhdr note{};
+  note.n_namesz = 7;
+  note.n_descsz = static_cast<uint32_t>(payload.size());
+  note.n_type = NT_AMDGPU_METADATA;
+  std::memcpy(image.data() + kNoteOffset, &note, sizeof(note));
+  std::memcpy(image.data() + kNoteOffset + sizeof(note), kNoteName.data(), kNoteName.size());
+  std::memcpy(image.data() + kNoteOffset + sizeof(note) + kNoteName.size(), payload.data(),
+              payload.size());
+  return image;
+}
 
 // Minimal synthetic Operand/Instruction/CodeObject/Decoder for integration
 // tests. Mirrors the pattern in tests/analysis/liveness_test.cpp;
@@ -636,6 +681,29 @@ TEST(SpillManager, DescriptorGrowthHandlesNonzeroPrivateSegmentAndRejectsDynamic
   EXPECT_EQ(update_kernel_descriptor_for_spills(image, image.size(), 48, false),
             SpillDescriptorUpdate::InvalidDescriptor);
   EXPECT_EQ(image, before);
+}
+
+TEST(SpillManager, MetadataGrowthUpdatesOnlyNamedKernelInPlace) {
+  std::vector<uint8_t> image = make_metadata_note_elf();
+
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "target", 12), SpillMetadataUpdate::Updated);
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "target", 8), SpillMetadataUpdate::Unchanged);
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "other", 4), SpillMetadataUpdate::Updated);
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "missing", 4),
+            SpillMetadataUpdate::KernelNotFound);
+}
+
+TEST(SpillManager, MetadataGrowthRejectsIntegerWidthChangeAndAllowsNoMetadataElf) {
+  std::vector<uint8_t> image = make_metadata_note_elf();
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "target", 128),
+            SpillMetadataUpdate::UnencodableGrowth);
+
+  Elf64_Ehdr header{};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  std::vector<uint8_t> no_metadata(sizeof(header));
+  std::memcpy(no_metadata.data(), &header, sizeof(header));
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(no_metadata, "target", 12),
+            SpillMetadataUpdate::NoMetadata);
 }
 
 // End-to-end smoke test: feed a real LivenessAnalysis result into SpillManager.

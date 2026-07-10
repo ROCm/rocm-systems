@@ -26,6 +26,7 @@ struct ConSanRegisterRequest {
   std::optional<uint16_t> explicit_base;
   RegisterSet forbidden;
   bool allow_spill = true;
+  bool force_spill = false;
 };
 
 /// @brief Read-only result of planning one register request.

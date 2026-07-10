@@ -76,6 +76,8 @@ struct HookConfig {
   bool moi_track_barriers = false;
   bool moi_track_atomics = false;
   bool moi_dynamic_access_records = false;
+  bool test_force_vgpr_spill = false;
+  std::string test_kernel_name_filter;
   bool moi_require_records = false;
   bool moi_require_diagnostics = false;
   bool moi_forbid_diagnostics = false;
@@ -668,6 +670,11 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_env("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", false,
                       &config.moi_dynamic_access_records))
     return std::nullopt;
+  // Deliberately test-only: this is not part of the public ConSan knob set.
+  if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_VGPR_SPILL", false, &config.test_force_vgpr_spill))
+    return std::nullopt;
+  if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
+    config.test_kernel_name_filter = test_filter;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", false, &config.moi_require_records))
     return std::nullopt;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS", false, &config.moi_require_diagnostics))
@@ -2011,6 +2018,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_track_barriers = config->moi_track_barriers;
     patch_options.moi_track_atomics = config->moi_track_atomics;
     patch_options.moi_dynamic_access_records = config->moi_dynamic_access_records;
+    patch_options.force_vgpr_spill = config->test_force_vgpr_spill;
+    patch_options.test_kernel_name_filter = config->test_kernel_name_filter;
     patch_options.fault_barrier_index = config->fault_barrier_index;
     patch_options.delay_mode = config->delay_mode;
     patch_options.delay_var_ssrc = config->delay_var_ssrc;
@@ -2429,11 +2438,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";
       log_message(kLogInfo,
                   "ConSan proof patch reader=%llu kind=%s anchor=0x%llx "
-                  "trampoline=0x%llx original_size=%u scratch_vgpr=%s",
+                  "trampoline=0x%llx original_size=%u scratch_vgpr=%s "
+                  "spilled_vgprs=%u private_bytes=%u",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_kind_name(patch.kind), static_cast<unsigned long long>(patch.anchor_offset),
                   static_cast<unsigned long long>(patch.trampoline_offset), patch.original_size,
-                  scratch_vgpr.c_str());
+                  scratch_vgpr.c_str(), patch.spilled_vgpr_count,
+                  patch.required_private_segment_size);
     }
     if (config->require_patch && !patch_result.modified) {
       const bool required = (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&

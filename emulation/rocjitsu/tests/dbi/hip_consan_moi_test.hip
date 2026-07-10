@@ -12,6 +12,7 @@
 #include <cstring>
 #include <hip/hip_runtime.h>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -547,6 +548,34 @@ MoiReplayDiagnostic replay_first_moi_conflict_with_atomics(const MoiReportHeader
   return {};
 }
 
+__global__ __launch_bounds__(
+    64) void moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  volatile uint32_t private_words[4];
+  private_words[tid & 3u] = tid;
+  const auto lds_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
+  uint32_t values[8] = {
+      0x11000000u ^ tid, 0x22000000u ^ tid, 0x33000000u ^ tid, 0x44000000u ^ tid,
+      0x55000000u ^ tid, 0x66000000u ^ tid, 0x77000000u ^ tid, 0x88000000u ^ tid,
+  };
+
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  asm volatile("ds_store_b32 %0, %1\n\t" RJ_CONSAN_MOI_RECORD_NOP_CAVE
+               :
+               : "v"(lds_addr), "v"(values[0])
+               : "memory");
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+
+  const uint32_t output_base = tid * 8u;
+  for (uint32_t i = 0; i < 8u; ++i)
+    out[output_base + i] = values[i];
+}
+
 __global__ __launch_bounds__(64) void moi_two_wave_lds_accesses(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -824,6 +853,104 @@ TEST(ConSanSpillHipTest, Gfx1201VgprScratchRoundTrip) {
   free_device_ptr(d_out);
   for (uint32_t tid = 0; tid < kThreads; ++tid)
     EXPECT_EQ(out[tid], 0x5A170000u ^ tid) << "tid=" << tid;
+}
+
+TEST(ConSanMoiHipTest, ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord) {
+  constexpr uint32_t kThreads = 64;
+  constexpr uint32_t kValuesPerThread = 8;
+  constexpr uint32_t kRecordSlots = 1;
+  constexpr size_t kReportBytes = moi_report_buffer_bytes(kRecordSlots);
+  uint32_t *d_out = nullptr;
+  void *d_report = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&d_report, kReportBytes));
+  HIP_ASSERT(hipMemset(d_out, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_report, 0, kReportBytes));
+
+  ReportEnvGuard report_env;
+  ASSERT_TRUE(set_moi_report_buffer_env(d_report, kReportBytes));
+  moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation<<<1, kThreads>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<uint32_t> out(kThreads * kValuesPerThread);
+  std::vector<uint8_t> report(kReportBytes);
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(report.data(), d_report, report.size(), hipMemcpyDeviceToHost));
+  free_device_ptr(static_cast<uint32_t *>(d_report));
+  free_device_ptr(d_out);
+
+  constexpr uint32_t kBases[kValuesPerThread] = {
+      0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u,
+      0x55000000u, 0x66000000u, 0x77000000u, 0x88000000u,
+  };
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    for (uint32_t i = 0; i < kValuesPerThread; ++i)
+      EXPECT_EQ(out[tid * kValuesPerThread + i], kBases[i] ^ tid)
+          << "tid=" << tid << " value=" << i;
+  }
+
+  std::vector<MoiAccessRecord> records(kRecordSlots);
+  std::memcpy(records.data(), report.data() + sizeof(MoiReportHeader),
+              records.size() * sizeof(MoiAccessRecord));
+  const auto record = std::find_if(records.begin(), records.end(), [](const MoiAccessRecord &item) {
+    return item.access_kind != 0;
+  });
+  ASSERT_NE(record, records.end());
+  EXPECT_EQ(record->access_kind, kMoiAccessKindWrite);
+  EXPECT_EQ(record->lds_byte_count, sizeof(uint32_t));
+  EXPECT_EQ(record->cell_count, 1u);
+}
+
+TEST(ConSanMoiHipTest, ForcedSpillSampledPreservesLiveVgprsAndWritesEntry) {
+  constexpr uint32_t kThreads = 64;
+  constexpr uint32_t kValuesPerThread = 8;
+  constexpr uint32_t kSampledSlots = 1;
+  constexpr size_t kReportBytes = moi_direct_sampled_report_buffer_bytes(kSampledSlots);
+  uint32_t *d_out = nullptr;
+  void *d_report = nullptr;
+  HIP_ASSERT(hipMalloc(&d_out, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&d_report, kReportBytes));
+  HIP_ASSERT(hipMemset(d_out, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(d_report, 0, kReportBytes));
+
+  ReportEnvGuard report_env;
+  ASSERT_TRUE(set_moi_report_buffer_env(d_report, kReportBytes));
+  moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation<<<1, kThreads>>>(d_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<uint32_t> out(kThreads * kValuesPerThread);
+  std::vector<uint8_t> report(kReportBytes);
+  HIP_ASSERT(hipMemcpy(out.data(), d_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(report.data(), d_report, report.size(), hipMemcpyDeviceToHost));
+  free_device_ptr(static_cast<uint32_t *>(d_report));
+  free_device_ptr(d_out);
+
+  constexpr uint32_t kBases[kValuesPerThread] = {
+      0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u,
+      0x55000000u, 0x66000000u, 0x77000000u, 0x88000000u,
+  };
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    for (uint32_t i = 0; i < kValuesPerThread; ++i)
+      EXPECT_EQ(out[tid * kValuesPerThread + i], kBases[i] ^ tid)
+          << "tid=" << tid << " value=" << i;
+  }
+
+  std::optional<MoiSampledEntry> live_entry;
+  for (uint32_t i = 0; i < kSampledSlots; ++i) {
+    uint64_t raw_entry = 0;
+    std::memcpy(&raw_entry, report.data() + sizeof(MoiReportHeader) + i * sizeof(uint64_t),
+                sizeof(raw_entry));
+    const MoiSampledEntry entry = decode_moi_sampled_entry(raw_entry);
+    if (entry.valid) {
+      live_entry = entry;
+      break;
+    }
+  }
+  ASSERT_TRUE(live_entry);
+  EXPECT_EQ(live_entry->kind, kMoiAccessKindWrite);
+  EXPECT_EQ(live_entry->cell_count, 1u);
 }
 
 TEST(ConSanMoiHipTest, TwoWaveAccessesWriteDynamicRecords) {

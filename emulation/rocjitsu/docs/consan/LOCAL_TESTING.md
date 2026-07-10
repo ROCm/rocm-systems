@@ -51,13 +51,14 @@ Focused ConSan unit/synthetic tests:
 ```sh
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build/tests/rocjitsu_tests \
-  '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*'
+  '--gtest_filter=ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
 Known local result:
 
-- Full non-benchmark `rocjitsu_tests`: 1311/1311 passed after R1C.
-- R1C spill encoder/layout/descriptor focus: 36/36 passed.
+- Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
+  passed after the R1D implementation.
+- R1D resource/MOI/spill-manager focus: 121/121 passed.
 
 Focused gfx1201 spill hardware smoke:
 
@@ -72,6 +73,22 @@ Known local result:
 - 1/1 passed. The kernel has a 32-byte fixed private segment and executes the
   same address-free `scratch_store_b32` / `scratch_load_b32` encodings emitted
   by the R1C backend around a deliberately clobbered live VGPR.
+
+Focused MOI spill vertical and live regression slice:
+
+```sh
+ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+  -R '^(ConSanSpillHipTest|ConSanMoiHipTest\.)' \
+  --parallel 8 --output-on-failure
+```
+
+Known local result:
+
+- 15/15 passed. This includes forced-spill record/replay and sampled tests that
+  keep eight values live across the patched LDS access, verify every value
+  after restoration, and require a visible MOI record/entry.
+- The forced tier and kernel selector are internal CTest controls, not public
+  ConSan configuration.
 
 ## SuperCollider Coverage
 
@@ -120,6 +137,18 @@ RJ_CONSAN_MOI_ENGINE=inline_shadow
 ```
 
 ### MOI Record/Replay
+
+R1D descriptor-pressure check:
+
+- `check_rocm_hip_scan_configured.mlir` completed 5/5 checks under a 30-second
+  timeout with forced spill planning scoped to the large
+  `scan_64x256xf32` kernel.
+- That kernel has 640 DS operations currently classified as unsupported access
+  kinds, so it reaches a precise pre-allocation blocker rather than a spill
+  patch. There was no hang and no silent high-VGPR borrowing.
+- Live forced-spill coverage uses a kernel with an existing 32-byte private
+  segment. Zero-to-nonzero private scratch is deliberately rejected until the
+  missing flat-scratch entry setup is implemented.
 
 Broad IREE compatibility:
 

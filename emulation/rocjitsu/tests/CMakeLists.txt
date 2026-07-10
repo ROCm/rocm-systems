@@ -1509,6 +1509,14 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_CONSAN_GFX1201_VGPR_SPILL_TEST
                 "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"
             )
+            set(
+                RJ_CONSAN_MOI_FORCED_SPILL_RECORD_TEST
+                "ConSanMoiHipTest.ForcedSpillRecordReplayPreservesLiveVgprsAndWritesRecord"
+            )
+            set(
+                RJ_CONSAN_MOI_FORCED_SPILL_SAMPLED_TEST
+                "ConSanMoiHipTest.ForcedSpillSampledPreservesLiveVgprsAndWritesEntry"
+            )
             rj_add_test(
                 NAME "ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip"
                 COMMAND
@@ -1516,6 +1524,40 @@ if(RJ_ENABLE_HIP_TESTS)
                     "--gtest_filter=${RJ_CONSAN_GFX1201_VGPR_SPILL_TEST}"
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 TIMEOUT 30
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiForcedSpillRecordReplayPreservesLiveVgprs"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_MOI_FORCED_SPILL_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiForcedSpillSampledPreservesLiveVgprs"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_MOI_FORCED_SPILL_SAMPLED_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=moi_forced_spill_preserves_live_vgprs_test_kernel_for_instrumentation"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
             )
             rj_add_test(
                 NAME "ConSanLdsTest.BaselinePaddedCleanStore"

@@ -84,6 +84,19 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
     return plan;
   }
 
+  if (request.force_spill) {
+    if (request.allow_spill) {
+      if (auto victim = find_window(request, live_before, request.current_allocation_count,
+                                    /*require_dead=*/false)) {
+        plan.source = ConSanRegisterAllocationSource::SpillRequired;
+        plan.base = victim;
+        return plan;
+      }
+    }
+    plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
+    return plan;
+  }
+
   if (auto dead = find_window(request, live_before, request.current_allocation_count,
                               /*require_dead=*/true)) {
     plan.source = ConSanRegisterAllocationSource::LivenessDead;

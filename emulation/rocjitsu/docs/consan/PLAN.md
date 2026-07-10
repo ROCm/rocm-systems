@@ -88,12 +88,12 @@ flowchart LR
   R1A["R1A: Kernel Scope And Resource Model"]:::done
   R1B["R1B: Automatic Non-Spill Allocation"]:::done
   R1C["R1C: gfx1201 VGPR Spill Backend"]:::done
-  R1D["R1D: Spill-Backed Access Probes"]:::active
-  R1E["R1E: Persistent Owner And Epoch State"]:::todo
+  R1D["R1D: Spill-Backed Access Probes"]:::done
+  R1E["R1E: Persistent Owner And Epoch State"]:::active
   R1F["R1F: Scalar And Special-State Policy"]:::todo
   R1G["R1G: Shared-Function Resource Plans"]:::todo
   R1H["R1H: MOI Resource Parity Rollout"]:::todo
-  R1{"R1: Register/Spill Policy Ready"}:::active
+  R1{"R1: Register/Spill Policy Ready"}:::todo
 
   B0 --> R1A
   B0 --> R1C
@@ -118,7 +118,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   B0["B0: Baseline"]:::done
-  R1{"R1: Register/Spill<br/>Policy Ready"}:::active
+  R1{"R1: Register/Spill<br/>Policy Ready"}:::todo
 
   subgraph INLINE["Inline-shadow coverage"]
     direction LR
@@ -238,10 +238,10 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1D`, the first forced-spill record/replay and sampled vertical
-   slice. `R1A`, `R1B`, and the standalone gfx1201 `R1C` spill backend are
-   complete.
-2. Complete `R1E` and `R1G` after that vertical slice. `R1F` is already ready
+1. Complete `R1E`, including zero-to-nonzero scratch activation for kernels
+   that were compiled without a private segment. The first forced-spill
+   record/replay and sampled vertical slice in `R1D` is complete.
+2. Complete `R1G` after that vertical slice. `R1F` is already ready
    after `R1B` and may be interleaved because dead/fresh scalar allocation does
    not require the VGPR spill emitter.
 3. Converge those paths in `R1H`; reaching the `R1` diamond means the whole
@@ -497,7 +497,7 @@ Allocation policy:
 
 R1 is split below into independently completable nodes. `R1A` unlocks `R1B`,
 while the ISA-local `R1C` backend can be built directly from the baseline.
-`R1B` and `R1C` converge at `R1D`, the first spill-backed vertical slice.
+`R1B` and `R1C` converge at the completed `R1D` spill-backed vertical slice.
 Persistent state (`R1E`) and shared functions (`R1G`) require that slice;
 scalar allocation (`R1F`) needs only the resource model and non-spill
 allocator. `R1H` integrates the completed paths, and only then is the `R1`
@@ -678,7 +678,7 @@ Done criteria:
 - A focused gfx1201 hardware smoke saves a deliberately live VGPR, clobbers it,
   restores it, and produces the uninstrumented result.
 
-## R1D: Spill-Backed Access Probes - ACTIVE
+## R1D: Spill-Backed Access Probes - DONE
 
 Goal: land one complete ConSan vertical slice that uses `R1A`/`R1B` planning and
 `R1C` preservation when no dead or fresh VGPR window exists.
@@ -704,6 +704,30 @@ Work:
 - Use the descriptor-full IREE scan kernel as the first real pressure case with
   a timeout and process-cleanup strategy.
 
+Landed boundary:
+
+- Static three-VGPR record/replay and five-VGPR sampled probes both consume a
+  `spill-required` plan for direct kernel sites. Spill sites always use the
+  appended-cave transaction: save, derive transient owner state, execute the
+  original access, wait for LDS completion, publish the probe result, restore,
+  and return.
+- The victim window excludes the anchor's full def/use set and explicit
+  persistent owner/epoch registers. Spill bytes participate in branch/cave
+  preflight, and proof records expose the spill width and resulting private
+  size.
+- The owning descriptor and its AMDGPU MessagePack metadata grow together.
+  Dynamic-stack kernels, ambiguous ownership, unencodable metadata growth, and
+  placement failures remain precise non-patching outcomes.
+- The current HSA load-hook path can append slots only when the compiled kernel
+  already has a private segment and therefore already establishes flat-scratch
+  state. Merely changing a zero-private descriptor and metadata is insufficient
+  on gfx1201. Zero-to-nonzero flat-scratch activation is now explicit `R1E`
+  work before private-backed persistent state can be general.
+- The descriptor-full IREE scan pressure test finishes 5/5 under a timeout. Its
+  large scan kernel currently stops before allocation because all 640 DS sites
+  decode as unsupported access kinds; the log is a precise non-spill blocker
+  and the run neither hangs nor borrows high VGPRs silently.
+
 Done criteria:
 
 - Synthetic tests decode the exact save/original/probe/restore/return shape.
@@ -715,13 +739,17 @@ Done criteria:
 - Record/replay and sampled access probes can reach the spill tier without a
   caller-selected VGPR.
 
-## R1E: Persistent Owner And Epoch State - TODO
+## R1E: Persistent Owner And Epoch State - ACTIVE
 
 Goal: place inline-shadow owner and epoch state safely across an entire kernel,
 which cannot be solved by a site-local scratch lease.
 
 Work:
 
+- Establish flat-scratch state for zero-private kernels before selecting a
+  private-backed persistent representation. This requires the missing entry
+  prologue/runtime setup; descriptor and MessagePack size edits alone are not
+  a safe zero-to-nonzero transition.
 - Prefer a dedicated whole-kernel VGPR pair above every guest reference, grow
   only the owning descriptor, and initialize it in the existing entry prologue.
 - For descriptor-full kernels, compare two bounded fallbacks:
