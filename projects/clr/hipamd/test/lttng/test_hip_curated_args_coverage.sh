@@ -615,6 +615,19 @@ print(','.join(f'rocm_hip:{a[\"api\"]}_args' for a in parse_yaml_file('$YAML')))
 lttng enable-event --userspace --channel=ch1 "$EVENTS" >/dev/null
 
 lttng start "$SESSION_NAME" >/dev/null
+
+# In HIP_LTTNG_UST_LINK_MODE=dynamic (the default), amdhip64 does not link
+# liblttng-ust and does not create the tracepoint probes itself -- probe
+# creation lives in the separate rocm_hip_lttng_provider DSO, which must
+# be loaded (e.g. via LD_PRELOAD) for any rocm_hip:* event to fire. Only
+# preload it when present, so this script remains backward-compatible
+# with a 'direct'-mode build (no provider .so is built at all in that
+# mode) and correctly exercises the dynamic-mode default otherwise.
+HIP_LTTNG_PROVIDER="$BUILD_LIB_DIR/librocm_hip_lttng_provider.so"
+if [ -f "$HIP_LTTNG_PROVIDER" ]; then
+    export LD_PRELOAD="$HIP_LTTNG_PROVIDER${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
 APP_RC=0
 "$WORK/coverage_test" || APP_RC=$?   # placeholder args may cause hipError or
                                       # segfault on env-specific blit-JIT bugs

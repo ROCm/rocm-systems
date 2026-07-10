@@ -97,6 +97,18 @@ lttng enable-event --userspace --channel=ch1 \
     'rocm_hip:hipMalloc_args,rocm_hip:hipMemcpyAsync_args,rocm_hip:hipDeviceSynchronize_args' >/dev/null
 lttng start "$SESSION_NAME" >/dev/null
 
+# In HIP_LTTNG_UST_LINK_MODE=dynamic (the default), amdhip64 does not link
+# liblttng-ust and does not create the tracepoint probes itself -- probe
+# creation lives in the separate rocm_hip_lttng_provider DSO, which must
+# be loaded (e.g. via LD_PRELOAD) for any rocm_hip:* event to fire. Only
+# preload it when present, so this script remains backward-compatible
+# with a 'direct'-mode build (no provider .so is built at all in that
+# mode) and correctly exercises the dynamic-mode default otherwise.
+HIP_LTTNG_PROVIDER="$BUILD_LIB_DIR/librocm_hip_lttng_provider.so"
+if [ -f "$HIP_LTTNG_PROVIDER" ]; then
+    export LD_PRELOAD="$HIP_LTTNG_PROVIDER${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
 # The binary may segfault mid-flight on systems where the rocclr blit-
 # kernel JIT can't resolve __amd_streamOps* externs (a build-environment
 # issue independent of LTTng). Use a wrapper to capture the exit code

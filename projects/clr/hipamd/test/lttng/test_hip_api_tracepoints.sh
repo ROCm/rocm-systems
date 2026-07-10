@@ -111,6 +111,18 @@ lttng enable-event --userspace --channel=default \
 
 lttng start
 
+# In HIP_LTTNG_UST_LINK_MODE=dynamic (the default), amdhip64 does not link
+# liblttng-ust and does not create the tracepoint probes itself -- probe
+# creation lives in the separate rocm_hip_lttng_provider DSO, which must
+# be loaded (e.g. via LD_PRELOAD) for any rocm_hip:* event to fire. Only
+# preload it when present, so this script remains backward-compatible
+# with a 'direct'-mode build (no provider .so is built at all in that
+# mode) and correctly exercises the dynamic-mode default otherwise.
+HIP_LTTNG_PROVIDER="$BUILD_LIB_DIR/librocm_hip_lttng_provider.so"
+if [ -f "$HIP_LTTNG_PROVIDER" ]; then
+    export LD_PRELOAD="$HIP_LTTNG_PROVIDER${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
 # Run with the just-built libamdhip64.so.
 LD_LIBRARY_PATH="$BUILD_LIB_DIR:${LD_LIBRARY_PATH:-}" "$WORK/tiny"
 
