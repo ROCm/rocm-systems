@@ -345,6 +345,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
+    patch/consan_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
@@ -1408,6 +1409,585 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipVectorAddTest.CorrectResult"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+
+        rj_add_hip_test(
+            hip_consan_lds_test
+            ARCH gfx1201
+            SOURCE dbi/hip_consan_lds_test.hip
+        )
+        add_dependencies(hip_consan_lds_test_target rocjitsu_dbi_hooks)
+        rj_add_hip_test(
+            hip_consan_inline_shadow_test
+            ARCH gfx1201
+            SOURCE dbi/hip_consan_inline_shadow_test.hip
+        )
+        add_dependencies(hip_consan_inline_shadow_test_target rocjitsu_dbi_hooks)
+        rj_add_hip_test(
+            hip_consan_moi_test
+            ARCH gfx1201
+            SOURCE dbi/hip_consan_moi_test.hip
+        )
+        add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
+        if(HAS_GFX1201_GPU)
+            set(
+                RJ_CONSAN_LDS_CLEAN_TEST
+                "ConSanLdsTest.PaddedCleanStoreCompletes"
+            )
+            set(
+                RJ_CONSAN_LDS_RACY_TEST
+                "ConSanLdsTest.PaddedRacyStoreCompletesOrTripsDbiTrap"
+            )
+            set(
+                RJ_CONSAN_LDS_CLEAN_REPORT_TEST
+                "ConSanLdsTest.PaddedCleanStoreReportBufferStaysZero"
+            )
+            set(
+                RJ_CONSAN_LDS_RACY_REPORT_TEST
+                "ConSanLdsTest.PaddedRacyStoreReportsMarker"
+            )
+            set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST
+                "ConSanInlineShadowTest.CrossWaveRacyStoreCompletes"
+            )
+            set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST
+                "ConSanInlineShadowTest.BarrierOrderedCrossWaveStoreCompletes"
+            )
+            set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_SAME_ADDRESS_TEST
+                "ConSanInlineShadowTest.SameAddressAtomicHandoffCompletes"
+            )
+            set(
+                RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_WRONG_ADDRESS_TEST
+                "ConSanInlineShadowTest.WrongAddressAtomicHandoffCompletes"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_RECORD_TEST
+                "ConSanMoiHipTest.TwoWaveAccessesWriteDynamicRecords"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_SAMPLED_DIRECT_TEST
+                "ConSanMoiHipTest.SampledBackendWritesDirectEntries"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_DYNAMIC_ACCESS_RECORD_TEST
+                "ConSanMoiHipTest.DynamicAccessRecordsAppendActiveLanes"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST
+                "ConSanMoiHipTest.TwoWaveAccessesRunWithAutoReportBuffer"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_WORKGROUP_RECORD_TEST
+                "ConSanMoiHipTest.EquivalentAccessesInDifferentWorkgroupsDoNotConflict"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_WORKGROUP_2D_RECORD_TEST
+                "ConSanMoiHipTest.EquivalentAccessesInDifferent2DWorkgroupsDoNotConflict"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_WORKGROUP_3D_RECORD_TEST
+                "ConSanMoiHipTest.EquivalentAccessesInDifferent3DWorkgroupsDoNotConflict"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_LIMITED_RECORD_TEST
+                "ConSanMoiHipTest.OneRecordCapacityLimitsAccessPatches"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST
+                "ConSanMoiHipTest.BarrierRecordOrdersTwoWaveAccesses"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_ATOMIC_RECORD_TEST
+                "ConSanMoiHipTest.FlatAtomicWritesDynamicRecord"
+            )
+            set(
+                RJ_CONSAN_LDS_MOI_ATOMIC_HANDOFF_TEST
+                "ConSanMoiHipTest.AtomicHandoffOrdersTwoWaveAccesses"
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.BaselinePaddedCleanStore"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_CLEAN_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.DbiPaddedCleanStoreDoesNotTrap"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_CLEAN_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TMP_VGPR=3"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.BaselinePaddedRacyStore"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.DbiPaddedRacyStoreTripsTrap"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TMP_VGPR=3"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+                    "RJ_CONSAN_EXPECT_TRAP=1"
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.DbiPaddedCleanStoreReportBufferStaysZero"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_CLEAN_REPORT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TMP_VGPR=3"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanLdsTest.DbiPaddedRacyStoreReportsMarker"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_lds_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_RACY_REPORT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=supercollider"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_DELAY=2"
+                    "RJ_CONSAN_TMP_VGPR=3"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiReportsCrossWaveRace"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=4"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiReportsCrossWaveRaceHwIdOwnerSource"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_RACY_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id"
+                    "RJ_CONSAN_MOI_OWNER_SGPR=20"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=4"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiBarrierEpochOrdersCrossWaveAccesses"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiBarrierEpochOrdersCrossWaveAccessesHwIdOwnerSource"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_BARRIER_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id"
+                    "RJ_CONSAN_MOI_OWNER_SGPR=20"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiAtomicHandoffSameAddressIsClean"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_SAME_ADDRESS_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiAtomicHandoffSameAddressIsCleanHwIdOwnerSource"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_SAME_ADDRESS_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id"
+                    "RJ_CONSAN_MOI_OWNER_SGPR=20"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiAtomicHandoffWrongAddressReports"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_WRONG_ADDRESS_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanInlineShadowTest.DbiAtomicHandoffWrongAddressReportsHwIdOwnerSource"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_inline_shadow_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_INLINE_SHADOW_ATOMIC_WRONG_ADDRESS_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MOI_OWNER_SOURCE=hw_id"
+                    "RJ_CONSAN_MOI_OWNER_SGPR=20"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=102"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=103"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiTwoWaveAccessesWriteDynamicRecords"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiEquivalentAccessesInDifferentWorkgroupsDoNotConflict"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_WORKGROUP_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiEquivalentAccessesInDifferent2DWorkgroupsDoNotConflict"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_WORKGROUP_2D_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=10"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiEquivalentAccessesInDifferent3DWorkgroupsDoNotConflict"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_WORKGROUP_3D_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=12"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiSampledBackendWritesDirectEntries"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_SAMPLED_DIRECT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiSampledAutoBufferReportsConflict"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=sampled"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=4096"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiDynamicAccessRecordsAppendActiveLanes"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_DYNAMIC_ACCESS_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiAutoReportBufferReplaysConflict"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_AUTO_REPLAY_CONFLICT_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiOneRecordCapacityLimitsAccessPatches"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_LIMITED_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=4"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiBarrierRecordOrdersTwoWaveAccesses"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_BARRIER_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_EXEC_SAVE_SGPR=30"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiFlatAtomicWritesDynamicRecord"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_ATOMIC_RECORD_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MAX_PATCHES=1"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            rj_add_test(
+                NAME "ConSanMoiHipTest.DbiAtomicHandoffOrdersTwoWaveAccesses"
+                COMMAND
+                    ${CMAKE_CURRENT_BINARY_DIR}/hip_consan_moi_test
+                    "--gtest_filter=${RJ_CONSAN_LDS_MOI_ATOMIC_HANDOFF_TEST}"
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=record_replay"
+                    "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_TMP_VGPR=104"
+                    "RJ_CONSAN_MOI_OWNER_VGPR=100"
+                    "RJ_CONSAN_MOI_EPOCH_VGPR=101"
+                    "RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1"
+                    "RJ_CONSAN_MAX_PATCHES=8"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+        endif()
 
         # --- Daemon RPC tests (gtest-driven) ---
         # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in

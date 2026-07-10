@@ -255,6 +255,17 @@ TEST(Validator, RejectsDenylistedMnemonic) {
   }
 }
 
+TEST(Validator, RejectsSClauseAnchor) {
+  static constexpr uint32_t kRaw = 0xBF850001u;
+  TestInstruction anchor("s_clause", 4, /*flags=*/0, std::nullopt, &kRaw);
+  auto text = dummy_text();
+  InstrumentationPoint pt;
+
+  std::string err;
+  EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_RDNA4, &err).has_value());
+  EXPECT_NE(err.find("s_clause"), std::string::npos) << "error was: " << err;
+}
+
 // Instruction::size() is a signed int; the `size != 4 && size != 8` check must
 // reject negative sizes (which decoders never emit in practice) rather than let
 // them through to the later cast to unsigned, where they would wrap.
@@ -679,6 +690,27 @@ TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
   EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, RejectsInstructionInsideSClauseRun) {
+  const std::vector<uint32_t> words = {
+      0xBF850001u,              // s_clause 1
+      0xF4002200u, 0xF8000020u, // s_load_b64 s[8:9], s[0:1], 0x20
+      0xF4006000u, 0xF8000000u, // s_load_b256 s[0:7], s[0:1], 0x0
+      0x06040F06u,              // v_add_f32_e32 v2, v6, v7
+  };
+  auto image = make_gfx950_elf_with_text_words(words);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("inside an s_clause run"), std::string::npos)
       << "error was: " << result.errors.front();
 }
 

@@ -48,6 +48,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -284,6 +285,9 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
+  // .text-relative byte offsets that cannot be trampoline anchors because they
+  // are an s_clause or are covered by one.
+  std::unordered_set<uint64_t> clause_blocked_offsets_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

@@ -6,7 +6,10 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
 
+#include <algorithm>
 #include <cstring>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu {
@@ -51,6 +54,27 @@ using detail::fits_in_bounds;
  * \NPI new GPU: map its MACH value and its gfxNNNN triple to a target id in \
  * both target_from_machine_flags() and target_from_triple() below.
  */
+
+struct FunctionSymbolInfo {
+  uint64_t entry_text_offset = 0;
+  uint64_t text_file_offset = 0;
+  uint64_t text_size = 0;
+  uint64_t code_size = 0;
+};
+
+[[nodiscard]] std::optional<uint64_t> symbol_file_offset(const Elf64_Sym &sym,
+                                                         const std::vector<Elf64_Shdr> &shdrs) {
+  if (sym.st_shndx >= shdrs.size())
+    return std::nullopt;
+  const auto &section = shdrs[sym.st_shndx];
+  if (sym.st_value < section.sh_addr)
+    return std::nullopt;
+  const uint64_t section_delta = sym.st_value - section.sh_addr;
+  if (section_delta > section.sh_size)
+    return std::nullopt;
+  return section.sh_offset + section_delta;
+}
+
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)
@@ -95,6 +119,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
+  kd_offsets_ = std::move(other.kd_offsets_);
+  kernels_ = std::move(other.kernels_);
+  functions_ = std::move(other.functions_);
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
@@ -205,19 +232,28 @@ void AmdGpuCodeObject::load_sections() {
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (const auto &shdr : section_hdrs) {
+  std::vector<std::string> section_names(section_hdrs.size());
+  for (size_t i = 0; i < section_hdrs.size(); ++i) {
+    const auto &shdr = section_hdrs[i];
+    if (shdr.sh_name >= shstrtab.sh_size)
+      continue;
+    size_t max_len = shstrtab.sh_size - shdr.sh_name;
+    section_names[i] =
+        std::string(shstrtab_data + shdr.sh_name, strnlen(shstrtab_data + shdr.sh_name, max_len));
+  }
+
+  for (size_t i = 0; i < section_hdrs.size(); ++i) {
+    const auto &shdr = section_hdrs[i];
     if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
       continue;
-    if (shdr.sh_name >= shstrtab.sh_size)
+    if (section_names[i].empty())
       continue;
     if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
       is_valid_ = false;
       return;
     }
 
-    size_t max_len = shstrtab.sh_size - shdr.sh_name;
-    std::string sec_name(shstrtab_data + shdr.sh_name,
-                         strnlen(shstrtab_data + shdr.sh_name, max_len));
+    const std::string &sec_name = section_names[i];
 
     auto sec_data = std::make_unique<char[]>(shdr.sh_size);
     std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
@@ -232,6 +268,8 @@ void AmdGpuCodeObject::load_sections() {
   // Parse symbol table for kernel descriptor offsets.
   // Scan both SHT_SYMTAB and SHT_DYNSYM — stripped code objects may
   // only have the latter.
+  std::unordered_map<std::string, uint64_t> descriptor_file_offsets;
+  std::unordered_map<std::string, FunctionSymbolInfo> function_symbols;
   for (size_t i = 0; i < section_hdrs.size(); ++i) {
     if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
       continue;
@@ -267,9 +305,67 @@ void AmdGpuCodeObject::load_sections() {
       if (sym_name.size() > 3 && sym_name.substr(sym_name.size() - 3) == ".kd") {
         std::string kernel_name = sym_name.substr(0, sym_name.size() - 3);
         kd_offsets_[kernel_name] = sym.st_value;
+        if (auto file_offset = symbol_file_offset(sym, section_hdrs))
+          descriptor_file_offsets[kernel_name] = *file_offset;
+        continue;
+      }
+
+      if (elf_symbol_type(sym.st_info) == kElfSymbolTypeFunc && sym.st_size > 0 &&
+          sym.st_shndx < section_hdrs.size() && section_names[sym.st_shndx] == ".text") {
+        const auto &text = section_hdrs[sym.st_shndx];
+        if (sym.st_value >= text.sh_addr && sym.st_value - text.sh_addr <= text.sh_size) {
+          FunctionSymbolInfo info;
+          info.entry_text_offset = sym.st_value - text.sh_addr;
+          info.text_file_offset = text.sh_offset;
+          info.text_size = text.sh_size;
+          info.code_size = sym.st_size;
+          function_symbols[sym_name] = info;
+        }
       }
     }
   }
+
+  kernels_.clear();
+  kernels_.reserve(kd_offsets_.size());
+  for (const auto &entry : kd_offsets_) {
+    const std::string &kernel_name = entry.first;
+    AmdGpuKernelInfo kernel;
+    kernel.name = kernel_name;
+    if (auto file_offset = descriptor_file_offsets.find(kernel_name);
+        file_offset != descriptor_file_offsets.end())
+      kernel.descriptor_file_offset = file_offset->second;
+
+    if (auto func = function_symbols.find(kernel_name); func != function_symbols.end()) {
+      kernel.entry_text_offset = func->second.entry_text_offset;
+      kernel.text_file_offset = func->second.text_file_offset;
+      kernel.text_size = func->second.text_size;
+      kernel.code_size = func->second.code_size;
+      kernel.has_text_range = true;
+    } else {
+      kernel.code_size = 0;
+      kernel.has_text_range = false;
+    }
+    kernels_.push_back(std::move(kernel));
+  }
+  std::sort(kernels_.begin(), kernels_.end(),
+            [](const auto &lhs, const auto &rhs) { return lhs.name < rhs.name; });
+
+  functions_.clear();
+  functions_.reserve(function_symbols.size());
+  for (const auto &entry : function_symbols) {
+    AmdGpuFunctionInfo function;
+    function.name = entry.first;
+    function.entry_text_offset = entry.second.entry_text_offset;
+    function.text_file_offset = entry.second.text_file_offset;
+    function.text_size = entry.second.text_size;
+    function.code_size = entry.second.code_size;
+    functions_.push_back(std::move(function));
+  }
+  std::sort(functions_.begin(), functions_.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs.entry_text_offset != rhs.entry_text_offset)
+      return lhs.entry_text_offset < rhs.entry_text_offset;
+    return lhs.name < rhs.name;
+  });
 
   is_valid_ = true;
 }

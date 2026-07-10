@@ -1,0 +1,389 @@
+# ConSan Tutorial
+
+This tutorial is the team-facing entry point for trying ConSan in rocJITsu. It
+covers both top-level flavors:
+
+- `supercollider`: redundant-access LDS checking. This is the shortest useful
+  mode to try on a normal workload.
+- `moi`: structured memory-order instrumentation. This is useful now for
+  developer experiments and focused tests; it is not yet as polished as
+  `supercollider`.
+
+ConSan runs through the HSA tools hook and patches final native RDNA4 /
+`gfx1201` GPU code objects at load time. It does not require rebuilding the
+application being tested.
+
+## Prerequisites
+
+Use existing build directories:
+
+- `ROCM_SYSTEMS_DIR`: checkout of `ROCm/rocm-systems` containing ConSan.
+- `ROCJITSU_BUILD_DIR`: rocJITsu CMake build directory.
+- `ROCM_DIST_DIR`: ROCm installation or TheRock-built ROCm distribution.
+- `IREE_BUILD_DIR`: optional HIP-enabled IREE build directory with CTest
+  metadata.
+
+Build the hook:
+
+```sh
+cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks -j8
+```
+
+Common environment:
+
+```sh
+export HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export RJ_CONSAN_LOG=1
+```
+
+The first log line to look for is a ConSan summary with:
+
+```text
+patches=N modified=true
+```
+
+`modified=true` means the HSA hook loaded patched code-object bytes.
+`patches=N` counts emitted DBI patches.
+
+## Choosing A Flavor
+
+Use `supercollider` first when the goal is to show that ConSan can instrument a
+real workload today:
+
+```sh
+export RJ_CONSAN_FLAVOR=supercollider
+```
+
+Use `moi` when the goal is to exercise structured records, exact-shadow
+diagnostics, sampled watchpoints, or barrier/atomic ordering controls:
+
+```sh
+export RJ_CONSAN_FLAVOR=moi
+export RJ_CONSAN_MOI_ENGINE=record_replay    # or inline_shadow, sampled
+```
+
+The MOI engine choices are:
+
+| Engine | What it does now | Best current use |
+| --- | --- | --- |
+| `record_replay` | DBI probes write access/barrier/atomic records; host code replays them into diagnostics. | Reference/debug mode and IREE dynamic-record evidence. |
+| `inline_shadow` | DBI probes update/check exact shadow state on the GPU for a narrow native LDS subset. | Focused race controls and first exact GPU-side diagnostics. |
+| `sampled` | DBI probes publish compact sampled watchpoint entries; host teardown scans them for sampled conflicts. | Lower-overhead prototype and sampled-mode bring-up. |
+
+## Non-Vacuity Guards
+
+Passing a known-correct workload is not enough evidence. The hook might have
+loaded but not patched anything. Use guards to make the result meaningful.
+
+`RJ_CONSAN_REQUIRE_PATCH=1` rejects a code object when ConSan sees supported
+candidate sites for the selected mode but cannot patch any of them:
+
+```sh
+export RJ_CONSAN_REQUIRE_PATCH=1
+```
+
+For MOI auto-buffer runs, `RJ_CONSAN_MOI_REQUIRE_RECORDS=1` fails at process
+teardown if no visible ConSan state was produced:
+
+```sh
+export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
+```
+
+Diagnostic-focused MOI runs can use:
+
+```sh
+export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1
+export RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1
+```
+
+Do not enable both diagnostic guards at the same time.
+
+## Tutorial 1: SuperCollider On Any HIP/HSA Program
+
+This is the shortest useful external snapshot.
+
+```sh
+export RJ_CONSAN_FLAVOR=supercollider
+export RJ_CONSAN_DELAY_MODE=sleep
+export RJ_CONSAN_DELAY=1
+export RJ_CONSAN_MAX_PATCHES=1
+
+./your-hip-or-hsa-program
+```
+
+Expected evidence:
+
+```text
+ConSan summary ... patches=1 modified=true
+```
+
+Once a focused workload is known to contain supported LDS sites, add:
+
+```sh
+export RJ_CONSAN_REQUIRE_PATCH=1
+```
+
+What this mode instruments today:
+
+- selected native LDS `ds_load_*` and `ds_store_*` instructions;
+- selected likely group/LDS `flat_load_*` and `flat_store_*` instructions;
+- compact sites through local or appended trampoline caves when possible.
+
+What it reports:
+
+- default: `s_trap 0` on mismatch;
+- optional: one-word marker buffer with `RJ_CONSAN_REPORT_BUFFER=0xADDR`.
+
+## Tutorial 2: SuperCollider On IREE E2E Tests
+
+Use this when you have an existing HIP-enabled IREE build directory.
+
+Focused WMMA smoke:
+
+```sh
+export RJ_CONSAN_FLAVOR=supercollider
+export RJ_CONSAN_DELAY_MODE=sleep
+export RJ_CONSAN_DELAY=1
+export RJ_CONSAN_MAX_PATCHES=4
+export RJ_CONSAN_REQUIRE_PATCH=1
+
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/rocm_specific/check_rocm_hip_wmma_matmul_f16_wmma_matmul_f16\.mlir$' \
+  --parallel 1 \
+  --output-on-failure
+```
+
+Broader IREE e2e LDS-relevant inventory:
+
+```sh
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/(encoding|linalg|math|matmul|rocm_specific|stablehlo_ops)/.*(rocm_hip|rocm-rocm)' \
+  --parallel 8 \
+  --output-on-failure
+```
+
+Observed evidence in the current workspace for the broader command:
+
+```text
+100% tests passed, 0 tests failed out of 152
+```
+
+Representative patch evidence from the focused WMMA run:
+
+```text
+kind=local-cave-lds-load-check-trap anchor=0x3cc trampoline=0x810 original_size=8 scratch_vgpr=104
+```
+
+What this proves:
+
+- the HSA hook loaded;
+- ConSan found supported native LDS sites in final IREE RDNA4 code;
+- at least one supported site was patched in each instrumentable code object;
+- the known-correct IREE workload still produced correct results.
+
+What this does not prove:
+
+- it does not prove that the IREE kernel has a race;
+- it does not produce a structured race diagnostic;
+- it does not validate all LDS opcodes.
+
+## Tutorial 3: MOI Record/Replay On IREE TileAndFuse
+
+This mode records structured access events and replays them on the host. It is
+the clearest MOI mode for seeing DBI-written data from real IREE kernels.
+
+```sh
+export RJ_CONSAN_FLAVOR=moi
+export RJ_CONSAN_MOI_ENGINE=record_replay
+export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
+export RJ_CONSAN_TMP_VGPR=104
+export RJ_CONSAN_MAX_PATCHES=4
+export RJ_CONSAN_REQUIRE_PATCH=1
+export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
+
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*large_rdna4_tileandfusewmma.*_rocm_hip$' \
+  --parallel 8 \
+  --output-on-failure
+```
+
+Observed evidence in the current workspace:
+
+```text
+100% tests passed, 0 tests failed out of 5
+```
+
+Typical verbose evidence:
+
+```text
+ConSan MOI record_replay engine emitted an appended-cave first-light access record probe
+ConSan proof patch ... kind=trampoline-moi-access-record-store ...
+ConSan MOI auto report ... access_records=4 visible_records=4 ...
+ConSan MOI auto record ... kind=2 ... lds_offset=616 lds_bytes=8 ...
+```
+
+What this proves:
+
+- MOI can patch final IREE LDS instructions;
+- DBI probes executed and wrote records into an HSA-tool-owned report buffer;
+- the host teardown path can decode those records.
+
+Current limitations:
+
+- static record slots are the default;
+- dynamic per-lane append requires `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1` and
+  `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`;
+- IREE e2e tests are correctness tests, not intentional race tests.
+
+## Tutorial 4: MOI Sampled Mode
+
+Sampled mode is the lower-fidelity MOI path. It publishes compact sampled
+watchpoint entries directly from DBI probes and checks them host-side at
+teardown.
+
+```sh
+export RJ_CONSAN_FLAVOR=moi
+export RJ_CONSAN_MOI_ENGINE=sampled
+export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=65536
+export RJ_CONSAN_TMP_VGPR=104
+export RJ_CONSAN_MAX_PATCHES=4
+export RJ_CONSAN_REQUIRE_PATCH=1
+export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
+
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*large_rdna4_tileandfusewmma.*_rocm_hip$' \
+  --parallel 8 \
+  --output-on-failure
+```
+
+Optional static site throttling:
+
+```sh
+export RJ_CONSAN_MOI_SAMPLE_STRIDE=2
+export RJ_CONSAN_MOI_SAMPLE_OFFSET=0
+```
+
+Interpretation:
+
+- visible sampled entries prove DBI probes executed;
+- sampled conflicts are lower-fidelity diagnostics;
+- a clean sampled run is inconclusive and must not be presented as proof of no
+  races.
+
+## Tutorial 5: MOI Inline Shadow
+
+Inline shadow is the exact GPU-side MOI direction. The current implementation
+is still narrow, but it can demonstrate direct exact-shadow updates and compact
+diagnostics.
+
+For focused IREE patchability smoke with hardware-ID owner initialization:
+
+```sh
+export RJ_CONSAN_FLAVOR=moi
+export RJ_CONSAN_MOI_ENGINE=inline_shadow
+export RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE=262144
+export RJ_CONSAN_MOI_REQUIRE_RECORDS=1
+export RJ_CONSAN_REQUIRE_PATCH=1
+export RJ_CONSAN_TMP_VGPR=240
+export RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1
+export RJ_CONSAN_MOI_OWNER_SOURCE=hw_id
+export RJ_CONSAN_MOI_OWNER_SGPR=100
+export RJ_CONSAN_MOI_OWNER_VGPR=250
+export RJ_CONSAN_MOI_EPOCH_VGPR=251
+export RJ_CONSAN_MAX_PATCHES=1
+
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*rdna4_tileandfusewmma.*rocm_hip$' \
+  --parallel 8 \
+  --output-on-failure
+```
+
+Observed evidence in the current workspace:
+
+```text
+100% tests passed, 0 tests failed out of 5
+```
+
+Interpretation:
+
+- the inline-shadow engine can patch and execute in real IREE kernels;
+- IREE correctness means non-corruption, not race detection;
+- explicit registers are still prototype knobs, not the intended final user
+  interface.
+
+For intentional race diagnostics, prefer the focused rocJITsu HIP controls
+rather than known-correct IREE tests:
+
+```sh
+ctest --test-dir "$ROCJITSU_BUILD_DIR" -j8 \
+  -R 'ConSanInlineShadowTest\.DbiReportsCrossWaveRace' \
+  --output-on-failure
+```
+
+Related controls cover barrier ordering and same-address atomic handoff.
+
+## Optional: Barrier Fault Injection
+
+This is a destructive diagnostic, not a sanitizer mode. It proves that ConSan
+can modify synchronization instructions in final native code.
+
+```sh
+export RJ_CONSAN_FLAVOR=supercollider
+export RJ_CONSAN_DELAY=2
+export RJ_CONSAN_REQUIRE_PATCH=1
+export RJ_CONSAN_FAULT_DROP_BARRIER=1
+export RJ_CONSAN_FAULT_BARRIER_INDEX=0
+
+ctest --test-dir "$IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/rocm_specific/check_rocm_hip_wmma_matmul_f16_wmma_matmul_f16\.mlir$' \
+  --parallel 1 \
+  --output-on-failure
+```
+
+A timeout or failure here is expected when the selected barrier is semantically
+important. This is not a polished race report; it is an explicit fault
+injection check.
+
+## Troubleshooting
+
+No ConSan logs:
+
+- Check `HSA_TOOLS_LIB`.
+- Check that the process uses the same ROCm runtime whose loader honors HSA
+  tools.
+- Check `LD_LIBRARY_PATH` includes the ROCm `lib` directory when needed.
+
+Logs show `patches=0 modified=false`:
+
+- The workload may not contain supported LDS sites.
+- Increase `RJ_CONSAN_LOG` for more inventory detail.
+- Try the IREE WMMA or TileAndFuse commands above.
+
+`RJ_CONSAN_REQUIRE_PATCH=1` makes broad runs fail:
+
+- This guard is best for focused workloads.
+- Broad applications often load many helper code objects, some of which have no
+  supported sites or contain unsupported forms.
+
+MOI inline-shadow run fails with register-related errors:
+
+- The current inline-shadow recipes still require explicit scratch, owner,
+  epoch, and sometimes SGPR temp choices.
+- Make sure the selected register windows do not overlap.
+- The longer-term fix is the register/spill policy work tracked in `PLAN.md`.
+
+Sampled mode reports no conflicts:
+
+- That is not proof of no races.
+- Sampled currently publishes static sampled entries and scans them host-side.
+- Use exact `record_replay` or `inline_shadow` controls when a definitive race
+  diagnostic is required.
+
+## Reading Order
+
+- `README.md`: overview and recommended starting point.
+- `TUTORIAL.md`: commands to run.
+- `DESIGN.md`: current architecture and prototype gaps.
+- `USAGE.md`: detailed environment-variable reference.
+- `PLAN.md`: near-future work DAG.
