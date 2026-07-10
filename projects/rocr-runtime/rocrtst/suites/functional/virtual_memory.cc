@@ -1425,6 +1425,7 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory
   }
   int* data1 = reinterpret_cast<int*>(addr1);
   for (int i = 0; i < kMemoryAllocSize; ++i) {
+    std::cout << "    write data1[" << i << "] = " << i << std::endl;
     data1[i] = i;
   }
 
