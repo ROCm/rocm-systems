@@ -25,8 +25,9 @@ Project rules:
 - Use the workspace TheRock ROCm build for ROCm runtime tests.
 - Keep hip-moi as a semantic reference, not as public ConSan terminology.
 - Start spilling work from Kunwar Grover's
-  `origin/users/Groverkss/text-relocation-land` branch. It is confirmed to
-  contain initial VGPR-only spilling support. Add minimal ConSan-local SGPR
+  `origin/users/Groverkss/text-relocation-land` branch. It contains a reusable
+  VGPR allocation/spill-frame pattern and a CDNA3 save/restore emitter. Add
+  RDNA4 emission for ConSan's local target, and add minimal ConSan-local SGPR
   spilling only if a current probe truly needs it before shared rocJITsu
   spilling exists.
 - Keep spill/cave code prototype-shaped. Broader rocJITsu spilling work may
@@ -184,6 +185,12 @@ Current state:
 - MOI still needs explicit report-buffer sizing and, for several paths,
   manually selected scratch/owner/epoch registers.
 
+The primary technical dependency for broad MOI operation is `R1`. The other
+gaps below still matter, but broad runs with hand-picked register numbers do not
+establish that instrumentation is safe for arbitrary kernels. ConSan first
+needs to acquire, preserve, and account for its temporary and persistent
+register state automatically.
+
 Blocking reasons to close:
 
 - Scratch register allocation and spilling are not automatic enough.
@@ -226,8 +233,9 @@ Done criteria:
 
 ## R1: Register And Spill Policy - ACTIVE
 
-Goal: replace ad hoc explicit scratch-register selection with a documented,
-testable policy that can support larger DBI probes.
+Goal: give every ConSan probe a documented, testable way to acquire temporary
+registers and persistent sanitizer state without relying on caller-chosen
+register numbers or clobbering application state.
 
 Current state:
 
@@ -238,60 +246,175 @@ Current state:
   `RJ_CONSAN_MOI_EPOCH_VGPR`, and `RJ_CONSAN_MOI_OWNER_SGPR`.
 - ConSan can grow descriptor SGPR/VGPR allocation for selected explicit regs,
   but it does not prove those regs are dead and does not spill live values.
-- The repo has `SpillManager`.
-- Kunwar's `origin/users/Groverkss/text-relocation-land` branch is confirmed to
-  contain initial VGPR-only spilling support and related text-relocation
-  mechanics.
-- SGPR spilling is not assumed to exist there. If ConSan needs it before shared
-  support lands, implement the smallest SGPR spill/fill path required by the
-  immediate probe shape.
+- The patch layer already has `SpillManager`. It allocates stable per-lane
+  private-memory offsets and computes the enlarged private segment, but it does
+  not choose victim registers, emit save/restore instructions, or patch a
+  ConSan kernel descriptor by itself.
+- Kunwar's `origin/users/Groverkss/text-relocation-land` branch has a more
+  complete VGPR-only pattern:
+  - `code/dbt/semantic_scratch.*` prefers a liveness-dead aligned VGPR window,
+    then borrows an allowed live window and assigns transient private-memory
+    spill slots;
+  - `code/dbt/semantic/cdna3_scratch.*` emits target-specific
+    `flat_scratch` dword save/restore sequences and waits;
+  - `TranslationContext` separates persistent spill storage from a reusable
+    per-instruction spill frame and feeds VGPR, SGPR, and private-segment
+    high-water marks back into descriptor translation;
+  - `BinaryTranslator` computes kernel-scoped CFG liveness, relocates expanded
+    kernel text, and commits descriptor growth only after lowering succeeds.
+- Kunwar's concrete spill emitter is CDNA3-only. ConSan's first live target is
+  RDNA4 / `gfx1201`, so R1 needs an RDNA4 spill/fill encoder and wait policy,
+  not a direct copy of that emitter.
+- Kunwar's branch has no general SGPR spill stack. It uses liveness-proven or
+  descriptor-backed SGPRs where possible and has special-purpose scalar
+  preservation only for specific lowerings.
+- ConSan currently instruments both kernel ranges and separately discovered
+  functions. Private spill storage is descriptor-owned, so the first spill
+  implementation must remain kernel-scoped; a shared function may only use it
+  after every owning kernel and call path is known and updated.
+
+Current MOI resource demand, before any future probe simplification:
+
+| Probe family | Ephemeral VGPR window | Other state |
+| --- | ---: | --- |
+| Record/replay access | 3 static-site; 8 dynamic | Dynamic append also needs an EXEC-save SGPR pair. |
+| Sampled access | 5 | No persistent owner/epoch requirement in the current direct publication path. |
+| Inline shadow | 7 basic; 9 with rich diagnostics | Persistent owner and optional epoch VGPRs; diagnostic paths can use up to four temporary SGPR pairs. |
+| Barrier record / inline barrier | 6 for a record | Record mode needs an EXEC-save SGPR pair; inline mode updates persistent epoch state. |
+| Atomic record / inline atomic | 3 record; 5 inline | Inline mode needs owner/epoch and scalar save state. |
+
+The distinction between ephemeral and persistent state is important. A
+site-local spill lease can safely borrow a live VGPR around one probe, but it
+cannot hold owner or epoch state across the kernel. Persistent state needs a
+dedicated descriptor-backed register or a private-memory representation that
+is materialized at each probe.
 
 Dependencies:
 
 - `origin/users/Groverkss/text-relocation-land` is the first implementation
-  reference for R1.
+  reference for allocation policy, spill frames, save/restore emission,
+  descriptor feedback, and kernel-local relocation.
 - `origin/users/Groverkss/dbt-tooling` remains useful context for earlier DBT
   utilities.
+- Existing `LivenessAnalysis`, `SpillManager`, `CodeObjectPatcher`, and kernel
+  descriptor helpers are the local primitives to extend or share.
+- `R2` owns the general placement cleanup. R1 may use the existing appended
+  cave path for its first forced-spill probe, but must account for the larger
+  save/probe/restore sequence in placement and branch-range checks.
 
-Work:
+Allocation policy:
 
-- Audit current ConSan register consumers by probe kind.
-- Document which probe kinds can use liveness-free registers today and which
-  still rely on explicit user knobs.
-- Read `text-relocation-land`'s VGPR spilling implementation and identify the
-  smallest reusable pieces for ConSan.
-- Determine whether existing `SpillManager` plus Kunwar's VGPR spill/fill path
-  is sufficient for first automatic scratch selection.
-- Decide whether ConSan can continue avoiding SGPR spilling in the short term.
-  If not, add a minimal isolated SGPR spill/fill prototype and document exactly
-  which probes use it.
-- Add an internal `ConSanScratchPlan` style abstraction if it reduces repeated
-  manual register plumbing.
-- Keep descriptor growth as fallback, not as proof of register availability.
-- Keep the integration replaceable by future shared rocJITsu spilling work.
-- Add tests that reject overlapping explicit owner/epoch/scratch choices.
-- Add tests for automatic allocation once it exists.
+- Plan resources per kernel before mutating code-object bytes. A plan must name
+  each register window, forbidden operand/state ranges, preservation strategy,
+  private-memory offsets, descriptor changes, and placement size.
+- Keep explicit environment-selected registers as debug overrides. Validate
+  them through the same planner instead of bypassing safety checks.
+- For ephemeral VGPR windows, try in this order:
+  1. a liveness-dead window inside the existing allocation;
+  2. a fresh descriptor-backed window above every guest register reference;
+  3. an allowed live window saved and restored through per-lane private memory;
+  4. a visible unsupported/failure result when none is legal.
+- Treat descriptor growth as resource allocation, not as proof that an
+  existing guest register is dead.
+- For owner/epoch state, prefer dedicated registers above all guest references.
+  If the register file has no persistent window, store the state in persistent
+  per-lane private slots and load/store it around probes; never borrow a
+  site-local live register across unrelated instructions.
+- For temporary SGPRs, first use kernel-scoped liveness and safe
+  descriptor-backed growth. Do not build general SGPR spilling speculatively.
+  If real parity tests still require it, add only the smallest save/fill path
+  needed by the blocking probe and account explicitly for EXEC, VCC, SCC, and
+  lane-selection constraints.
+- Initially skip spill-backed function candidates whose owning kernel set is
+  ambiguous. Log the reason instead of patching a descriptor-incompatible
+  shared function.
+
+Implementation stages:
+
+1. **R1a - shared planning.** Add a per-kernel resource context and a
+   `ConSanScratchPlan`-style result. Build kernel-scoped liveness once, map each
+   selected MOI site to its kernel, centralize forbidden ranges, and report
+   whether each resource is explicit, dead, descriptor-grown, or spilled.
+2. **R1b - automatic non-spilling allocation.** Move record/replay and sampled
+   access probes onto the planner first, then barrier/atomic probes. Add
+   persistent owner/epoch allocation for inline shadow. Ordinary runs should no
+   longer require register environment variables when a dead or fresh window
+   exists.
+3. **R1c - RDNA4 VGPR spilling.** Share or adapt Kunwar's scratch request,
+   lease, and transient-frame model; use `SpillManager` for per-kernel offsets;
+   add RDNA4 `scratch_store`/`scratch_load` emission and required waits; wrap a
+   probe with save/original-access/instrumentation/restore; and raise
+   `private_segment_fixed_size` plus the descriptor private-segment enable bit
+   transactionally.
+4. **R1d - persistent-state fallback.** Materialize owner/epoch from persistent
+   private slots when no whole-kernel VGPRs are available. Make barrier epoch
+   updates use the same representation. Decide from measured corpus failures,
+   not anticipation, whether a minimal SGPR spill path is necessary.
+5. **R1e - parity rollout.** Enable forced-spill tests, then remove manual
+   register recipes from record/replay and sampled broad runs. Advance inline
+   shadow only after its owner/epoch and scalar-state paths are automatic.
+
+Correctness requirements:
+
+- Save before the borrowed value can be clobbered and restore before every
+  fallthrough/return edge from the probe.
+- Preserve original memory-access behavior and required EXEC/VCC/SCC state.
+- Model scratch load/store wait-counter effects; do not reuse a victim before
+  its save completes or return to guest code before its restore completes.
+- Update only descriptors for kernels that can execute the spill-backed probe,
+  including private-segment size and enablement.
+- Reject unencodable scratch offsets, private-segment overflow, missing flat
+  scratch initialization, ambiguous shared-function ownership, and placement
+  failure with a specific diagnostic.
+- Commit code bytes, placement, and descriptors as one transaction so a failed
+  plan cannot leave a partially modified code object.
+- Keep the integration replaceable by shared rocJITsu scratch infrastructure;
+  factor generally useful allocator/emitter pieces instead of cloning them
+  inside each ConSan engine.
 
 Done criteria:
 
 - A future ConSan probe author can request scratch resources through one policy
   path instead of open-coding env-var register choices.
 - Existing explicit knobs still work for targeted debugging.
-- Every standard MOI recipe can run without hand-picking every register except
-  where spilling is still intentionally unsupported and documented.
+- Record/replay and sampled standard recipes run without hand-picking registers
+  on the broad `gfx1201` compatibility tier, including a test that forces the
+  VGPR spill tier.
+- Inline shadow runs its targeted tier without hand-picked scratch, owner,
+  epoch, or SGPR registers before it is promoted to the broad tier.
+- Spill-backed probes preserve a deliberately live victim value and produce the
+  same application result as an uninstrumented control.
+- Descriptor tests prove that only owning kernels receive the required VGPR,
+  SGPR, and private-segment changes.
+- Allocation and spill failures are distinguishable from "no race found" and
+  from "no supported site found" in logs and guards.
 - The docs clearly state whether ConSan is using Kunwar-style VGPR spilling,
   ConSan-local SGPR spilling, or still falling back to explicit registers for a
   given probe family.
 
-Tests:
+Validation order:
+
+- Unit-test allocation precedence, alignment, forbidden ranges, transient and
+  persistent slot separation, offset limits, descriptor growth, and rollback.
+- Add instruction-builder/decode tests for RDNA4 spill/fill encodings and wait
+  sequences.
+- Add synthetic patch-shape tests for dead, fresh, forced-spill, and failure
+  plans, including multi-kernel and shared-function code objects.
+- Add a focused HIP test whose victim VGPR is live across the instrumented LDS
+  access and verify both the application output and ConSan report.
+- Run focused rocJITsu tests, hip-moi controls, IREE TileAndFuse, and then the
+  broad IREE e2e tier for each engine. Keep GPU test parallelism around `8` and
+  use timeouts for inline-shadow triage.
+
+Focused build and unit-test entry point:
 
 ```sh
-cmake --build emulation/rocjitsu/build --target rocjitsu_tests rocjitsu_dbi_hooks -j8
+cmake --build emulation/rocjitsu/build --target rocjitsu_tests rocjitsu_dbi_hooks
 
 ROCM_PATH=/path/to/rocm HIP_PATH=/path/to/rocm \
 LD_LIBRARY_PATH=/path/to/rocm/lib \
 emulation/rocjitsu/build/tests/rocjitsu_tests \
-  '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*'
+  '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*:SpillManager.*:LivenessAnalysis.*'
 ```
 
 ## O1: MOI Operational Defaults - TODO
@@ -651,12 +774,15 @@ next spilling and text-relocation work:
 
 - `origin/users/Groverkss/text-relocation-land`
   - Primary branch for ConSan's next spilling work.
-  - Confirmed to contain initial VGPR-only spilling support.
-  - Look for kernel-local text relocation, appended/near code placement,
-    sidecar metadata, kernarg extension, virtual LDS ideas, liveness-related
-    refinements, and spill/fill implementation details.
-  - Do not assume SGPR spilling is present. Add only minimal ConSan-local SGPR
-    support if the current probe work truly needs it.
+  - Its reusable pattern is split across `semantic_scratch.*`,
+    `semantic/cdna3_scratch.*`, `TranslationContext`, kernel-scoped liveness,
+    descriptor feedback, and kernel text relocation.
+  - The current concrete save/restore emitter is CDNA3-only and the allocator
+    is VGPR-only. R1 must provide RDNA4 emission for local validation and should
+    not claim general SGPR spilling.
+  - Kernarg extension, virtual LDS, and sidecars are useful examples of
+    persistent state and transactional descriptor/text updates, but they are
+    not prerequisites for the first ConSan VGPR spill probe.
 - `origin/users/Groverkss/dbt-tooling`
   - Earlier/smaller DBT tooling branch.
   - Look for reusable translation/HSA-tool scaffolding, ELF code-cave
