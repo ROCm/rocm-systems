@@ -27,6 +27,11 @@ if(BUILD_CTESTS)
     enable_testing()
 endif()
 
+if(BUILD_CTESTS)
+    include(${CMAKE_SOURCE_DIR}/cmake/EnsurePyYAML.cmake)
+    rocshmem_ensure_pyyaml()
+endif()
+
 IF (BUILD_FUNCTIONAL_TESTS)
     add_subdirectory(functional_tests)
 ENDIF()

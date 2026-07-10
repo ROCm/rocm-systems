@@ -178,46 +178,17 @@ if(BUILD_CTESTS)
         # Register all tests (this will populate both build-time and install-time)
         register_all_functional_tests()
 
-        # Apply YAML-based tier labels (build-time only)
+        # Apply YAML-based tier labels (build-time only).
+        # PyYAML availability and the interpreter to use are resolved once in
+        # tests/CMakeLists.txt and stored in cache variables.
         set(_test_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
 
-        # Find Python3 for YAML parsing
-        find_package(Python3 COMPONENTS Interpreter QUIET)
-
-        # Ensure PyYAML is available before attempting to parse YAML files
-        if(Python3_FOUND AND NOT DEFINED ROCSHMEM_PYYAML_CHECKED)
-            execute_process(
-                COMMAND ${Python3_EXECUTABLE} -c "import yaml"
-                RESULT_VARIABLE ROCSHMEM_PYYAML_CHECK
-                OUTPUT_QUIET
-                ERROR_QUIET
-            )
-
-            if(NOT ROCSHMEM_PYYAML_CHECK EQUAL 0)
-                message(STATUS "PyYAML not found, attempting to install...")
-                execute_process(
-                    COMMAND ${Python3_EXECUTABLE} -m pip install --user pyyaml
-                    RESULT_VARIABLE ROCSHMEM_PIP_RESULT
-                    OUTPUT_QUIET
-                    ERROR_QUIET
-                )
-                if(NOT ROCSHMEM_PIP_RESULT EQUAL 0)
-                    message(WARNING "Failed to install PyYAML. Test tier labels will not be applied.")
-                    set(ROCSHMEM_PYYAML_AVAILABLE FALSE CACHE INTERNAL "PyYAML availability")
-                else()
-                    message(STATUS "PyYAML installed successfully")
-                    set(ROCSHMEM_PYYAML_AVAILABLE TRUE CACHE INTERNAL "PyYAML availability")
-                endif()
-            else()
-                set(ROCSHMEM_PYYAML_AVAILABLE TRUE CACHE INTERNAL "PyYAML availability")
-            endif()
-            set(ROCSHMEM_PYYAML_CHECKED TRUE CACHE INTERNAL "PyYAML check completed")
-        endif()
-
         if(ROCSHMEM_PYYAML_AVAILABLE)
+            # Point FindPython3 at the interpreter that has pyyaml (may be a venv).
+            set(Python3_EXECUTABLE "${ROCSHMEM_PYTHON_EXECUTABLE}" CACHE FILEPATH "" FORCE)
+
             include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
             if(COMMAND apply_ctest_category_labels AND EXISTS "${_test_categories_yaml}")
-                # Apply tier labels to build-time tests
                 apply_ctest_category_labels("${_test_categories_yaml}")
             endif()
 
