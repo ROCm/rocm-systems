@@ -12,11 +12,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
 from utils.parser import load_pc_sampling_data
-from utils.pc_sampling_analysis import load_pc_sample_records
 
 config = {}
 config["cleanup"] = True

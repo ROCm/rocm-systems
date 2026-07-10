@@ -13,6 +13,13 @@ import common
 import pandas as pd
 import pytest
 
+from pc_sampling.pc_sampling_analysis import (
+    aggregate_pc_sample_records,
+    detect_pc_sampling_method,
+    enrich_with_metadata,
+    load_aggregated_pc_sampling,
+    load_pc_sample_records,
+)
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
@@ -27,13 +34,6 @@ from utils.parser import (
     load_pc_sampling_data_per_kernel,
     load_table_data,
     nullify_unevaluated_metric_values,
-)
-from utils.pc_sampling_analysis import (
-    aggregate_pc_sample_records,
-    detect_pc_sampling_method,
-    enrich_with_metadata,
-    load_aggregated_pc_sampling,
-    load_pc_sample_records,
 )
 from utils.utils_common import is_only_pc_sampling
 
