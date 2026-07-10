@@ -1076,8 +1076,9 @@ Current state:
 - Placement is conservative and still duplicated across probe families.
 - A shared `DbiPatchPlacementPlanner` now models inline, local-cave, and
   appended-cave reservations with explicit anchor/body/return coordinates.
-  Inline-shadow, sampled, and record/replay access probes consume it;
-  synchronization families still need migration.
+  Inline-shadow, sampled, and record/replay access probes plus MOI barrier and
+  atomic synchronization probes consume it. SuperCollider's established local
+  cave selection still needs to be joined to the same reservation model.
 
 Work:
 

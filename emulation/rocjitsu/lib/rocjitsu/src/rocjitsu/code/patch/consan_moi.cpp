@@ -1450,6 +1450,30 @@ void append_words_bytes(std::vector<uint8_t> &bytes, std::span<const uint32_t> w
     append_word_bytes(bytes, word);
 }
 
+[[nodiscard]] std::optional<DbiPatchPlacement>
+plan_prebuilt_appended_cave(DbiPatchPlacementPlanner &planner, uint64_t anchor_offset,
+                            uint32_t original_size, std::span<const uint32_t> cave_words,
+                            std::vector<std::string> &errors, std::string_view probe_name) {
+  if (cave_words.empty()) {
+    errors.emplace_back(std::string(probe_name) + " produced an empty cave");
+    return std::nullopt;
+  }
+  DbiPatchPlacementRequest request;
+  request.anchor_offset = anchor_offset;
+  request.original_size = original_size;
+  request.body_size = static_cast<uint64_t>(cave_words.size() - 1u) * sizeof(uint32_t);
+  request.inline_capacity = 0;
+  std::string placement_error;
+  const auto placement = planner.plan(request, &placement_error);
+  if (!placement || placement->kind != DbiPatchPlacementKind::AppendedCave ||
+      placement->return_branch_offset !=
+          placement->body_offset + (cave_words.size() - 1u) * sizeof(uint32_t)) {
+    errors.emplace_back(std::string(probe_name) + " placement failed: " + placement_error);
+    return std::nullopt;
+  }
+  return placement;
+}
+
 void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t alignment,
                                      rj_code_arch_t arch) {
   if (alignment == 0)
@@ -5724,6 +5748,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
   }
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   std::vector<ConSanPatchInfo> patches;
   patches.reserve(planned_candidates.size());
   for (const PlannedInlineEpochBarrier &planned : planned_candidates) {
@@ -5733,7 +5758,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
 
-    const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
+    const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + site.size;
     std::optional<std::vector<uint32_t>> cave_words;
     if (planned.private_epoch_offset && planned.scratch_vgpr && planned.spill) {
@@ -5748,7 +5773,17 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
     if (!cave_words)
       return;
 
-    const auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_text_offset);
+    const auto placement =
+        plan_prebuilt_appended_cave(placement_planner, site.text_offset, site.size, *cave_words,
+                                    result.errors, "ConSan MOI inline-shadow barrier epoch patch");
+    if (!placement || placement->body_offset != cave_text_offset ||
+        new_text.size() != placement->body_offset) {
+      result.errors.emplace_back(
+          "ConSan MOI inline-shadow barrier epoch patch has a stale cave mapping");
+      return;
+    }
+
+    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, placement->body_offset);
     if (!fwd) {
       result.errors.emplace_back(
           "ConSan MOI inline-shadow barrier epoch forward branch is out of range");
@@ -5930,6 +5965,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
   }
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   std::vector<ConSanPatchInfo> patches;
   for (const PlannedBarrierRecord &planned : selected_candidates) {
     const BarrierRecordCandidate &candidate = planned.candidate;
@@ -5938,7 +5974,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
                 sizeof(original_barrier_word));
 
-    const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
+    const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
@@ -5949,7 +5985,16 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!cave_words)
       return;
 
-    const auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_text_offset);
+    const auto placement =
+        plan_prebuilt_appended_cave(placement_planner, site.text_offset, site.size, *cave_words,
+                                    result.errors, "ConSan MOI barrier record patch");
+    if (!placement || placement->body_offset != cave_text_offset ||
+        new_text.size() != placement->body_offset) {
+      result.errors.emplace_back("ConSan MOI barrier record patch has a stale cave mapping");
+      return;
+    }
+
+    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, placement->body_offset);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI barrier record forward branch is out of range");
       return;
@@ -6436,12 +6481,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   std::vector<ConSanPatchInfo> patches;
   for (const PlannedInlineAtomic &planned : planned_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
 
-    const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
+    const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
@@ -6452,7 +6498,16 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (!cave_words)
       return;
 
-    const auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_text_offset);
+    const auto placement =
+        plan_prebuilt_appended_cave(placement_planner, site.text_offset, site.size, *cave_words,
+                                    result.errors, "ConSan MOI inline atomic patch");
+    if (!placement || placement->body_offset != cave_text_offset ||
+        new_text.size() != placement->body_offset) {
+      result.errors.emplace_back("ConSan MOI inline atomic patch has a stale cave mapping");
+      return;
+    }
+
+    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, placement->body_offset);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI inline atomic forward branch is out of range");
       return;
@@ -6765,13 +6820,14 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   }
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
+  DbiPatchPlacementPlanner placement_planner(arch, old_text.size());
   std::vector<ConSanPatchInfo> patches;
   const uint32_t record_count = static_cast<uint32_t>(selected_candidates.size());
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
     const AtomicRecordCandidate &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
-    const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
+    const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
@@ -6782,7 +6838,16 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!cave_words)
       return;
 
-    const auto fwd = compute_sopp_branch_simm16(site.text_offset, cave_text_offset);
+    const auto placement =
+        plan_prebuilt_appended_cave(placement_planner, site.text_offset, site.size, *cave_words,
+                                    result.errors, "ConSan MOI atomic record patch");
+    if (!placement || placement->body_offset != cave_text_offset ||
+        new_text.size() != placement->body_offset) {
+      result.errors.emplace_back("ConSan MOI atomic record patch has a stale cave mapping");
+      return;
+    }
+
+    const auto fwd = compute_sopp_branch_simm16(placement->anchor_offset, placement->body_offset);
     if (!fwd) {
       result.errors.emplace_back("ConSan MOI atomic record forward branch is out of range");
       return;
