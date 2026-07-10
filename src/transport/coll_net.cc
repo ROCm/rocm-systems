@@ -1729,11 +1729,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
   // CollNetChain can only use heads that will have CollNet resources set up.
   comm->collNetChainSupport = isCollNetChainHeadsSubset(comm, graphs[NCCL_ALGO_COLLNET_CHAIN]);
 
-  if (parent && parent->config.collnetEnable && parent->nNodes == comm->nNodes) {
-    if (!parent->shareResources) {
-      collNetSetupFail = 1;
-      goto fail;
-    }
+  if (parent && parent->config.collnetEnable && parent->nNodes == comm->nNodes && parent->shareResources) {
     NCCLCHECKGOTO(ncclCalloc(&infos, comm->nRanks), ret, fail);
     /* check whether child can share collnet resources of parent. Since parent builds each collnet communicator
      * based on heads with the same head position in each node, as long as the collnet heads of child comm
