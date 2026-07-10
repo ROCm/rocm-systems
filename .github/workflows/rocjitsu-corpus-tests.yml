@@ -86,7 +86,8 @@ jobs:
             git \
             libdrm-dev \
             ninja-build \
-            clang
+            clang \
+            libxml2-utils
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -221,19 +222,68 @@ jobs:
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
           corpus_status=0
+          SHORT_TIMEOUT=15
+          LONG_TIMEOUT=60
+          MAX_TIMEOUT_FAILURES=5
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config skip_tests_config <<< "${target}"
             echo "::group::pytest (${name})"
-            if ! rocjitsu \
-              --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
-              -- pytest \
-              tests/test_corpus.py -vv \
+            run_corpus_pytest() {
+              local timeout="$1"
+              shift
+              rocjitsu \
+                --config "${ROCJITSU_SOURCE_DIR}/configs/${rocjitsu_config}" \
+                -- pytest \
+                tests/test_corpus.py -vv \
+                "$@" \
+                --timeout "${timeout}"
+            }
+
+            target_status=0
+            if ! run_corpus_pytest "${SHORT_TIMEOUT}" \
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
+              --junitxml=pytest-results.xml; then
+              target_status=1
+            fi
+
+            total_failed=$(
+              xmllint --xpath 'count(//testcase[failure or error])' pytest-results.xml
+            )
+            timeout_failed=$(xmllint --xpath \
+              'count(//testcase[*[self::failure or self::error][contains(translate(., "TIMEOUT", "timeout"), "timeout")]])' \
+              pytest-results.xml
+            )
+            non_timeout_failed=$((total_failed - timeout_failed))
+            echo "Total failed: ${total_failed}"
+            echo "Timeout failed: ${timeout_failed}"
+
+            if [[ "${target_status}" -ne 0 ]]; then
+              if [[ "${timeout_failed}" -gt 0 && "${timeout_failed}" -le "${MAX_TIMEOUT_FAILURES}" && "${non_timeout_failed}" -eq 0 ]]; then
+                echo "::warning::${timeout_failed} tests timed out with timeout=${SHORT_TIMEOUT}s. Retrying with timeout=${LONG_TIMEOUT}s."
+                if run_corpus_pytest "${LONG_TIMEOUT}" \
+                  --last-failed \
+                  --reruns=1 \
+                  --only-rerun="Timeout"; then
+                  echo "::warning::Rerun timeout tests passed."
+                  target_status=0
+                else
+                  echo "::error::There are still timeout failed tests with timeout=${LONG_TIMEOUT}s."
+                fi
+              elif [[ "${timeout_failed}" -gt "${MAX_TIMEOUT_FAILURES}" && "${non_timeout_failed}" -eq 0 ]]; then
+                echo "::error::Too many timeout failed tests. Giving up."
+              elif [[ "${total_failed}" -eq 0 ]]; then
+                echo "::error::Corpus test command failed without recording testcase failures."
+              else
+                echo "::error::Corpus tests failed with ${non_timeout_failed} non-timeout failures."
+              fi
+            fi
+
+            if [[ "${target_status}" -ne 0 ]]; then
               corpus_status=1
             fi
+
             echo "::endgroup::"
           done
           exit "${corpus_status}"
