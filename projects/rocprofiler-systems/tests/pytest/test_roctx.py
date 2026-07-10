@@ -13,8 +13,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.roctx,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
-    pytest.mark.rocm,
 ]
 
 # =============================================================================
@@ -44,6 +42,15 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+ROCTX_SAMPLE_CASES = [
+    pytest.param(
+        ["--rocm=hip,marker"],
+        {"marker_labels": ["roctxMark_GPU_workload"]},
+        id="rocm-marker",
+    ),
+]
+
+
 # ============================================================================
 # Test Class: ROCTx Tests
 # ============================================================================
@@ -51,6 +58,19 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 
 class TestROCTx(RocprofsysTest):
     """Tests for rocTX marker API."""
+
+    AMD_SMI_COUNTER_NAMES = [
+        "Temperature",
+        "Avg. Power",
+        "GFX Busy",
+        "Memory Usage",
+        "GFX Clock",
+        "Memory Clock",
+    ]
+    HIP_API_CATEGORY = "rocm_hip_api"
+    KERNEL_DISPATCH_CATEGORY = "rocm_kernel_dispatch"
+    HIP_API_LABELS = ["hipMalloc", "hipDeviceSynchronize", "hipFree"]
+    KERNEL_LABEL_SUBSTRINGS = ["hipKernelLaunch"]
 
     def roctx_legacy_labels(self) -> list[str]:
         # The validate-perfetto-proto.py script aggregates (name, depth) pairs from
@@ -160,7 +180,50 @@ class TestROCTx(RocprofsysTest):
             counts=counts,
             depths=depths,
         )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto kernel dispatch",
+            categories=[self.KERNEL_DISPATCH_CATEGORY],
+            label_substrings=self.KERNEL_LABEL_SUBSTRINGS,
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API",
+            categories=[self.HIP_API_CATEGORY],
+            labels=self.HIP_API_LABELS,
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto AMD-SMI counters",
+            counter_names=self.AMD_SMI_COUNTER_NAMES,
+        )
         self.assert_rocpd(
             result,
             rules_files=roctx_rules,
+        )
+
+
+# ============================================================================
+# Test Class: rocprof-sys-sample CLI on roctx
+# ============================================================================
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.sampling
+@pytest.mark.class_name("roctx-sample-cli")
+class TestROCTxSampleCLI(RocprofsysTest):
+    @pytest.mark.parametrize("sampling_args,expect", ROCTX_SAMPLE_CASES)
+    def test(self, sampling_args, expect):
+        result = self.run_test(
+            "sampling",
+            target="roctx",
+            sampling_args=sampling_args,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto marker validation",
+            categories=["rocm_marker_api"],
+            labels=expect["marker_labels"],
         )

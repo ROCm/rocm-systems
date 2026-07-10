@@ -14,7 +14,6 @@ pytestmark = [
     pytest.mark.scratch_memory,
     pytest.mark.gpu,
     pytest.mark.no_docker,
-    pytest.mark.rocm,
 ]
 
 # =============================================================================
@@ -34,8 +33,21 @@ def scratch_memory_env() -> dict[str, str]:
 def scratch_memory_rules(validation_rules_dir: Path) -> list[Path]:
     rules_dir = validation_rules_dir / "scratch-memory"
     return [
+        validation_rules_dir / "default-rules.json",
         rules_dir / "sdk-metrics-rules.json",
     ]
+
+
+SCRATCH_SAMPLE_CASES = [
+    pytest.param(
+        ["--rocm=hip,kernel"],
+        {
+            "hip_labels": ["hipHostMalloc"],
+            "kernel_substrings": ["test_kern_small"],
+        },
+        id="rocm-hip-kernel",
+    ),
+]
 
 
 # =============================================================================
@@ -57,6 +69,15 @@ class TestScratchMemory(RocprofsysTest):
         "hip error",
         "HSA error",
     ]
+    SCRATCH_MEMORY_LABELS = ["SCRATCH_MEMORY_ALLOC", "SCRATCH_MEMORY_FREE"]
+    KERNEL_LABEL_SUBSTRINGS = [
+        "test_kern_small",
+        "test_kern_medium",
+        "test_kern_large",
+    ]
+    HIP_API_CATEGORY = "rocm_hip_api"
+    KERNEL_DISPATCH_CATEGORY = "rocm_kernel_dispatch"
+    HIP_API_LABELS = ["hipHostMalloc", "hipDeviceSynchronize"]
 
     @pytest.mark.rocpd("scratch_memory_env")
     @pytest.mark.parametrize(
@@ -72,9 +93,59 @@ class TestScratchMemory(RocprofsysTest):
         if mode == "sampling":
             self.assert_perfetto(
                 result,
+                subtest_name="Perfetto scratch memory",
                 categories=["rocm_scratch_memory"],
+                labels=self.SCRATCH_MEMORY_LABELS,
+            )
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto HIP API",
+                categories=[self.HIP_API_CATEGORY],
+                labels=self.HIP_API_LABELS,
+            )
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto kernel dispatch",
+                categories=[self.KERNEL_DISPATCH_CATEGORY],
+                label_substrings=self.KERNEL_LABEL_SUBSTRINGS,
             )
             self.assert_rocpd(
                 result,
                 rules_files=scratch_memory_rules,
             )
+
+
+# =============================================================================
+# rocprof-sys-sample CLI on scratch-memory
+# =============================================================================
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.sampling
+@pytest.mark.class_name("scratch-memory-sample-cli")
+class TestScratchMemorySampleCLI(RocprofsysTest):
+    @pytest.mark.parametrize("sampling_args,expect", SCRATCH_SAMPLE_CASES)
+    def test(self, sampling_args, expect):
+        result = self.run_test(
+            "sampling",
+            target="scratch-memory",
+            sampling_args=sampling_args,
+            check_target_arch=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=TestScratchMemory.SCRATCH_MEMORY_PASS_REGEX,
+            fail_regex=TestScratchMemory.SCRATCH_MEMORY_FAIL_REGEX,
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API",
+            categories=[TestScratchMemory.HIP_API_CATEGORY],
+            labels=expect["hip_labels"],
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto kernel dispatch",
+            categories=[TestScratchMemory.KERNEL_DISPATCH_CATEGORY],
+            label_substrings=expect["kernel_substrings"],
+        )
