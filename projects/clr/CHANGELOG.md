@@ -81,7 +81,7 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 
 ## Known issues
 
-* `cooperative_groups::reduce` will not work correctly with block dimensions whose .y or .z component is different from one, leading to incorrect results or kernel launch failures.
+* Kernels using `cooperative_groups::reduce()` with block dimensions whose .y or .z component is different from 1 may produce incorrect results or fail to launch.
 
 ## HIP 7.13 for ROCm 7.13
 
