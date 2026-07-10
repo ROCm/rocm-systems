@@ -73,7 +73,11 @@ typedef uint64_t (*rocprofiler_kernel_replay_pass_count_cb_t)(
  * @param [in] dispatch_callback_args User data for @p dispatch_callback.
  * @param [in] record_callback Invoked once per pass with counter records for that pass.
  * @param [in] record_callback_args User data for @p record_callback.
- * @param [in] pass_count_callback Invoked by the SDK to learn how many replay passes to run.
+ * @param [in] pass_count_callback Invoked by the SDK once per dispatch, before the replay loop
+ *             begins, to learn N -- the number of passes to run for that kernel. The replay loop is
+ *             bounded by this count (it snapshots device memory, then runs the dispatch N times,
+ *             restoring between passes), so N must be known up front; typically the tool returns
+ * the number of counter groups it needs to collect.
  * @param [in] pass_count_callback_args User data for @p pass_count_callback.
  *
  * @retval ::ROCPROFILER_STATUS_SUCCESS On success.
