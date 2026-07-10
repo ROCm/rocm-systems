@@ -113,7 +113,6 @@ def main() -> None:
         "-k",
         TEST_FILTER,
         f"--junit-xml={test_output_dir / 'junit.xml'}",
-        f"--output-dir={test_output_dir}",
         "--ci-mode",
         "--log-cli-level=info",
     ]

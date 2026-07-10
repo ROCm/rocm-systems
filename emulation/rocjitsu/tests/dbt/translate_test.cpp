@@ -155,6 +155,16 @@ int64_t read_kernel_descriptor_entry_offset(const void *descriptor) {
   return entry_offset;
 }
 
+TestKernelDescriptor read_kernel_descriptor_for_test(const void *descriptor) {
+  TestKernelDescriptor kd{};
+  std::memcpy(&kd, descriptor, sizeof(kd));
+  return kd;
+}
+
+void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescriptor &kd) {
+  std::memcpy(descriptor, &kd, sizeof(kd));
+}
+
 std::vector<uint8_t> make_kernel_descriptor_bytes(int64_t entry_offset) {
   std::vector<uint8_t> descriptor(kKernelDescriptorSize, 0);
   write_kernel_descriptor_entry_offset(descriptor.data(), entry_offset);
@@ -1189,9 +1199,9 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
       return std::nullopt;
 
     const auto patched_image = patcher.emit();
-    const auto *kd = reinterpret_cast<const kernel_descriptor_t *>(
-        patched_image.data() + translation.descriptor_file_offset);
-    return kd->compute_pgm_rsrc1;
+    const auto kd =
+        read_kernel_descriptor_for_test(patched_image.data() + translation.descriptor_file_offset);
+    return kd.compute_pgm_rsrc1;
   };
 
   const auto cdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA3);
@@ -1411,9 +1421,9 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   ASSERT_NE(source_rodata, nullptr);
   ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
 
-  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
@@ -1453,9 +1463,9 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
   ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
-  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      translated.image_data() + target_rodata->sectionOffset());
-  EXPECT_EQ(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+  const auto target_kd =
+      read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
       << "the descriptor is redirected to the synthesized compatibility entry; compatible "
          "firmware still reaches the synthesized +256 entry by adding the ABI skip";
 }
@@ -1485,12 +1495,12 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   ASSERT_NE(source_rodata, nullptr);
   ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
 
-  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
-  source_kd->kernel_code_entry_byte_offset =
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  source_kd.kernel_code_entry_byte_offset =
       static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
       static_cast<int64_t>(source_rodata->vaddr());
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
@@ -1531,15 +1541,15 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
   ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
-  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      translated.image_data() + target_rodata->sectionOffset());
+  const auto target_kd =
+      read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
-                                           target_kd->kernel_code_entry_byte_offset -
+                                           target_kd.kernel_code_entry_byte_offset -
                                            static_cast<int64_t>(text->vaddr());
   EXPECT_EQ(target_entry_text_offset, 0)
       << "the descriptor must be redirected from the moved source entry to the synthesized "
          "compatibility launch stub";
-  EXPECT_NE(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+  EXPECT_NE(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
       << "the source descriptor entry is deliberately nonzero, so this assertion proves the "
          "descriptor was repointed rather than passing because both entries were zero";
 }
@@ -2492,9 +2502,11 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   const auto *source_rodata = rocjitsu::find_section(source_layout, ".rodata");
   ASSERT_NE(source_rodata, nullptr);
   ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
-  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  auto source_kd =
+      rocjitsu::read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(),
+                                             source_kd);
 
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
