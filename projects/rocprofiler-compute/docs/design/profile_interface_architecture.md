@@ -209,20 +209,14 @@ and the `--join-type` references in the docs.
 
 ## Phase B: The Profiling Data Boundary
 
-The boundary owns where PMC profile source data lives and how it is read/written, and exposes two contracts:
+The boundary owns where profile source data stays and how it is read/written. It exposes a **writer** (used by profile) and a **reader**
+(used by analyze):
 
-- `ProfilingDataWriter.finalize_pass(context)` which records a completed profiling
-  pass at the end of profile mode (pandas free)
-- `ProfilingDataReader.read_pmc_frame(workload_dir, filters)` which returns the pmc
-  df built from source for its respective analysis run
-- `ProfilingDataReader.has_profile_data(workload_dir)` which reports whether readable
-  profile data exists so callers stop string matching for specific and hardcoded file names.
+- the writer persists a completed profiling pass's PMC data (pandas-free), without profile mode knowing the on-disk storage format;
+- the reader returns the in-memory PMC DataFrame built from source for a given analysis run;
+- an availability check reports whether readable profile data exists, so callers stop matching hardcoded file names.
 
-Callers obtain an implementation through selection functions rather than
-constructing implementations directly:
-
-- `get_reader(profiling_config, options)` returns the correct reader.
-- `get_writer(format)` returns the correct writer.
+Callers obtain implementations through selection functions (`get_writer` / `get_reader`) rather than constructing them directly.
 
 This is the only place that maps a configured format to an implementation.
 
@@ -251,49 +245,48 @@ flowchart LR
 
 ### Target
 
+> Note: this sequence contains sections with the Profiler Hub integration applied, but does not depend on it. See [Profiler Hub integration HLD](https://github.com/ROCm/rocm-systems/blob/rocprofiler-compute-develop/projects/rocprofiler-compute/docs/design/hld-profiler-hub-integration.md) for the detailed design document.
+
 ```mermaid
-flowchart LR
-    subgraph profile["Profile Mode (pandas free)"]
-        uprof["utils_profile.py<br/>run_prof"]
+sequenceDiagram
+    participant Profile as Profile mode
+    participant SDK as SDK tool (rocprofiler-sdk)
+    participant Native as Native tool (rocprofiler-compute)
+    participant Boundary as profiling_data boundary<br/>(get_writer / get_reader)
+    participant Hub as Profiler Hub
+    participant Store as Workload storage (on disk)
+    participant Analyze as Analyze mode
+
+    note over Profile, Store: Profile (write side)
+    Profile->>SDK: run pass (LD_PRELOAD)
+    Profile->>Native: run pass (LD_PRELOAD)
+    loop each collection pass
+        SDK->>Store: per-process rocpd
+        Native->>Boundary: hand off per-process counters
+    note over Boundary: get_writer(format) selects the native implementation;<br/>compute performs the merge, the implementation only reads/writes
+    alt rocpd_data.py implementation
+        Boundary->>Store: read per-process, write per-pass native rocpd (.db)
+    else profiler_hub_data.py implementation
+        Boundary->>Hub: read per-process, write per-pass (via Hub interface)
+        Hub->>Store: per-pass native storage
     end
-    subgraph analyze["Analyze Mode"]
-        abase["analysis_base.py"]
-        adb["analysis_db.py"]
-        fio["file_io.py"]
-    end
-    subgraph iface["profiling_data/ (boundary)"]
-        writer["ProfilingDataWriter<br/>(pandas free)"]
-        reader["ProfilingDataReader<br/>(pandas)"]
-        sel["get_writer / get_reader"]
-        rocpd["implementations/rocpd_data.py"]
-    end
-    subgraph disk["On-Disk"]
-        db["ROCPD .db"]
-        pmcExport["pmc_perf.csv<br/>(write only export)"]
+    Profile->>Store: merge per-process to per-pass SDK rocpd (compute; raw, no boundary)
+        Profile->>Store: delete per-process intermediates
     end
 
-    uprof -->|"get_writer(format)<br/>.finalize_pass"| writer
-    abase -->|"get_reader(...)<br/>.read_pmc_frame"| reader
-    adb -->|"get_reader(...)<br/>.read_pmc_frame"| reader
-    fio -->|"has_profile_data(...)"| reader
-    sel -.->|"selects"| writer
-    sel -.->|"selects"| reader
-    writer -->|"implemented by"| rocpd
-    reader -->|"implemented by"| rocpd
-    rocpd -->|"writes"| db
-    rocpd -->|"reads source for frame"| db
-    reader -->|"writes per-run (derived from frame, never read back)"| pmcExport
+    note over Analyze, Store: Analyze (read side)
+    Analyze->>Boundary: get_reader(profiling_config).read_pmc_frame(dir, filters)
+    Boundary->>Store: read per-pass SDK rocpd (raw; always)
+    alt rocpd_data.py implementation
+        Boundary->>Store: read per-pass native rocpd (.db)
+    else profiler_hub_data.py implementation
+        Boundary->>Hub: read native counters
+        Hub-->>Boundary: native counter rows
+    end
+    note over Boundary: merge SDK + native, apply filters, normalize to PMC DataFrame (in memory)
+    Boundary-->>Analyze: pmc DataFrame
+    Boundary->>Store: write pmc_perf.csv (one-way export for users/devs, never read back)
 ```
-
-The reader reads its storage implementation, normalizes source specific rows into
-the PMC DataFrame, applies the analysis filters in memory, and returns the frame.
-Analyze callers never branch on storage format, construct file paths, or read
-`pmc_perf.csv`.
-
-> The diagrams show only the PMC counter data path which is all this boundary
-> moves. A workload directory contains many other files (`roofline.csv`, traces,
-> `sysinfo.csv`, `profiling_config.yaml`, perfmon configs, and derived analyze
-> outputs) which are deliberately left unchanged here as they are either untouched by this abstraction or future scope.
 
 ## Phase C: Backend Execution
 
