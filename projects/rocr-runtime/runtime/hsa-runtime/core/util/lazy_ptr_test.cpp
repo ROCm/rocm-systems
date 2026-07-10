@@ -109,22 +109,25 @@ TEST(LazyPtrTest, ResetAfterMoveAssignIsSafe) {
 
 // Self move-assignment must remain well-formed and return self. operator=
 // guards against self-assignment (&rhs == this), so p = std::move(p) does not
-// reduce to a UB self-move of the underlying std::unique_ptr.
+// reduce to a self-move of the underlying obj/func (which would leave func in a
+// valid-but-unspecified state).
 TEST(LazyPtrTest, SelfMoveAssignReturnsSelf) {
   lazy_ptr<Widget> p([]() { return new Widget(3); });
 
   // The self-move is deliberate here; -Wself-move would otherwise flag it.
+  // GCC only knows -Wself-move from GCC 13; guard the version so older GCC does
+  // not emit a -Wpragmas "unknown option" warning (fatal under -Werror).
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wself-move"
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && __GNUC__ >= 13
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wself-move"
 #endif
   lazy_ptr<Widget>& result = (p = std::move(p));
 #if defined(__clang__)
 #pragma clang diagnostic pop
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && __GNUC__ >= 13
 #pragma GCC diagnostic pop
 #endif
 
