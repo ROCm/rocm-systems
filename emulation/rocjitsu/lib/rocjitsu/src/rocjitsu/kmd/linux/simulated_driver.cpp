@@ -298,8 +298,6 @@ int SimulatedDriver::open() {
   }
   uint32_t pid = next_process_id_++;
   auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
-  // Record the caller's Linux pid so AMDKFD_IOC_DBG_TRAP can resolve this
-  // process as a self-debug target (args->pid == getpid()).
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
   for (auto &g : gpus_) {
@@ -1850,20 +1848,11 @@ std::shared_ptr<KfdProcess> SimulatedDriver::find_process_by_client_pid(pid_t pi
   return nullptr;
 }
 
-// AMDKFD_IOC_DBG_TRAP dispatcher. This mirrors the pre-switch validation ladder
-// and per-operation routing of the real driver's kfd_ioctl_set_debug_trap()
-// (amd/amdkfd/kfd_chardev.c, amdgpu-6.16.13). The individual sub-operations are
-// filled in by subsequent changes; reaching the default case means the gate
-// ladder admitted an operation that is not implemented yet.
+// in real kernel, amd/amdkfd/kfd_chardev.c kfd_ioctl_set_debug_trap
 int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   auto *args = static_cast<kfd_ioctl_dbg_trap_args *>(arg);
   util::Logger::cp("DBG_TRAP pid=", args->pid, " op=", args->op);
 
-  // rocjitsu always models hardware scheduling, so the driver's
-  // KFD_SCHED_POLICY_NO_HWS -> EINVAL guard is not applicable.
-
-  // Resolve the target process by Linux pid (kernel: find_get_pid() +
-  // kfd_lookup_process_by_pid()).
   KfdProcess *target = nullptr;
   std::shared_ptr<KfdProcess> target_ref;
   if (caller.client_pid() != 0 && static_cast<pid_t>(args->pid) == caller.client_pid()) {
@@ -1880,10 +1869,6 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
   std::lock_guard<std::mutex> lk(target->debug_mutex_);
   auto &sess = target->debug_session_;
 
-  // PTRACE gate: for any op other than DISABLE, a debugger acting on a process
-  // it does not own must be the attached debugger (kernel: EPERM when
-  // ptrace_parent(target) != current). Cross-process attach is modeled by the
-  // daemon transport in a later change; until then only self-debug is allowed.
   if (!self_debug && args->op != KFD_IOC_DBG_TRAP_DISABLE &&
       sess.debugger_pid != caller.client_pid())
     return -EPERM;
@@ -1898,8 +1883,7 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     return target->runtime_state_.enabled;
   }();
 
-  // DBG_HW_OPs require the runtime to be enabled (kernel: EPERM). Note that the
-  // real driver includes SET_FLAGS in this gated set.
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3132-L3142
   switch (args->op) {
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
   case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
@@ -1915,7 +1899,7 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     break;
   }
 
-  // Address-watch ops validate the target gpu (kernel: ENODEV).
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3144
   if (args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH ||
       args->op == KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH) {
     const uint32_t gpu_id = args->op == KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH
@@ -1925,10 +1909,12 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
       return -ENODEV;
   }
 
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_chardev.c#L3158
   switch (args->op) {
+  // https://github.com/torvalds/linux/blob/a635d6748234582ea287c5ffeae28b9b23f91c7e/drivers/gpu/drm/amd/amdkfd/kfd_debug.c#L788-L847
   case KFD_IOC_DBG_TRAP_ENABLE: {
     if (sess.enabled)
-      return -EINVAL; // target process is already debug enabled
+      return -EALREADY; // target process is already debug enabled
     sess.enabled = true;
     sess.debugger_pid = caller.client_pid();
     sess.dbg_fd = static_cast<int>(args->enable.dbg_fd);
@@ -1956,9 +1942,6 @@ int SimulatedDriver::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     sess = KfdProcess::DebugSession{};
     return 0;
   default:
-    // SEND_RUNTIME_EVENT, SET_EXCEPTIONS_ENABLED, wave-launch, queue suspend/
-    // resume, address watch, flags, and the query/snapshot ops are wired in
-    // subsequent changes.
     return -ENOSYS;
   }
 }
