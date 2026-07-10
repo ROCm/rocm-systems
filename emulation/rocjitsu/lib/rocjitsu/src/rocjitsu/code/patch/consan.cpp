@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/consan_moi.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
@@ -2680,6 +2681,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     bool use_local_cave = false;
     bool use_appended_cave = false;
     std::optional<uint16_t> required_vgpr_allocation_count;
+    std::optional<DbiPatchPlacement> placement;
   };
 
   std::vector<LdsCheckTrapCandidate> inline_candidates;
@@ -2784,7 +2786,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                             requested_words,
                                             false,
                                             true,
-                                            descriptor_growth};
+                                            descriptor_growth,
+                                            std::nullopt};
             appended_cave_candidates.push_back(candidate);
           }
         }
@@ -2803,7 +2806,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                           requested_words,
                                           true,
                                           false,
-                                          descriptor_growth};
+                                          descriptor_growth,
+                                          std::nullopt};
           local_cave_candidates.push_back(candidate);
         }
       }
@@ -2819,7 +2823,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                       requested_words,
                                       false,
                                       false,
-                                      descriptor_growth};
+                                      descriptor_growth,
+                                      std::nullopt};
       inline_candidates.push_back(candidate);
     }
   }
@@ -2844,38 +2849,46 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   const uint32_t max_patches = std::max<uint32_t>(options.max_patches, 1u);
   std::vector<LdsCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(max_patches);
-  std::vector<ByteRange> reserved_ranges;
+  DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
   std::unordered_set<uint64_t> selected_local_cave_kernels;
-  auto try_select_candidate = [&](const LdsCheckTrapCandidate &candidate,
-                                  bool allow_descriptor_growth) {
+  auto try_select_candidate = [&](LdsCheckTrapCandidate candidate, bool allow_descriptor_growth) {
     if (selected_candidates.size() >= max_patches)
       return;
     if (!allow_descriptor_growth && candidate.required_vgpr_allocation_count)
       return;
     const ConSanLdsSite &site = *candidate.site;
+    if (candidate.use_local_cave &&
+        selected_local_cave_kernels.contains(candidate.kernel_entry_text_offset))
+      return;
+
+    DbiPatchPlacementRequest request;
+    request.anchor_offset = site.text_offset;
+    request.original_size = site.size;
+    request.body_size = candidate.requested_words * sizeof(uint32_t);
+    request.inline_capacity =
+        !candidate.use_local_cave && !candidate.use_appended_cave ? request.body_size : 0u;
+    request.allow_appended_cave = candidate.use_appended_cave;
+    if (candidate.use_local_cave && candidate.local_cave)
+      request.local_cave = DbiPatchLocalCave{
+          candidate.local_cave->text_offset,
+          static_cast<uint64_t>(candidate.local_cave->word_count) * sizeof(uint32_t)};
+    const auto placement = placement_planner.plan(request);
+    if (!placement)
+      return;
+    if ((candidate.use_local_cave && placement->kind != DbiPatchPlacementKind::LocalCave) ||
+        (candidate.use_appended_cave && placement->kind != DbiPatchPlacementKind::AppendedCave) ||
+        (!candidate.use_local_cave && !candidate.use_appended_cave &&
+         placement->kind != DbiPatchPlacementKind::Inline))
+      return;
+    candidate.placement = placement;
+
     if (candidate.use_local_cave) {
       if (candidate.local_cave == nullptr)
         return;
-      if (selected_local_cave_kernels.contains(candidate.kernel_entry_text_offset))
-        return;
-      const ByteRange anchor_range{site.file_offset, site.file_offset + site.size};
-      const uint64_t cave_bytes = (candidate.requested_words + 1u) * sizeof(uint32_t);
-      const ByteRange cave_range{candidate.local_cave->file_offset,
-                                 candidate.local_cave->file_offset + cave_bytes};
-      if (overlaps_reserved_range(reserved_ranges, anchor_range) ||
-          overlaps_reserved_range(reserved_ranges, cave_range))
-        return;
-      reserved_ranges.push_back(anchor_range);
-      reserved_ranges.push_back(cave_range);
       selected_local_cave_kernels.insert(candidate.kernel_entry_text_offset);
       selected_candidates.push_back(candidate);
       return;
     }
-
-    const uint64_t patch_bytes = candidate.requested_words * sizeof(uint32_t);
-    const ByteRange patch_range{site.file_offset, site.file_offset + patch_bytes};
-    if (!reserve_byte_range(reserved_ranges, patch_range))
-      return;
     selected_candidates.push_back(candidate);
   };
 
@@ -2891,12 +2904,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   }
   if (selected_candidates.empty()) {
     for (const LdsCheckTrapCandidate &candidate : appended_cave_candidates) {
-      const ConSanLdsSite &site = *candidate.site;
-      const ByteRange anchor_range{site.file_offset, site.file_offset + site.size};
-      if (!reserve_byte_range(reserved_ranges, anchor_range))
-        continue;
-      selected_candidates.push_back(candidate);
-      break;
+      try_select_candidate(candidate, true);
+      if (!selected_candidates.empty())
+        break;
     }
   }
 
@@ -2934,6 +2944,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     bool use_appended_cave = false;
     uint64_t descriptor_file_offset = 0;
     std::optional<uint16_t> required_vgpr_allocation_count;
+    std::optional<DbiPatchPlacement> placement;
   };
 
   std::vector<PlannedLdsCheckTrapPatch> planned_patches;
@@ -2954,12 +2965,17 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     planned.use_appended_cave = candidate.use_appended_cave;
     planned.descriptor_file_offset = candidate.descriptor_file_offset;
     planned.required_vgpr_allocation_count = candidate.required_vgpr_allocation_count;
+    planned.placement = candidate.placement;
     planned.info.kind =
         lds_check_trap_patch_kind(site, candidate.use_local_cave || candidate.use_appended_cave);
     planned.info.anchor_offset = site.text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
 
     if (candidate.use_local_cave || candidate.use_appended_cave) {
+      if (!candidate.placement) {
+        result.errors.emplace_back("ConSan LDS check/trap proof selected missing placement");
+        return;
+      }
       if (candidate.use_local_cave && candidate.local_cave == nullptr) {
         result.errors.emplace_back("ConSan LDS check/trap proof selected missing local cave");
         return;
@@ -2970,13 +2986,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
       }
 
-      const uint64_t trampoline_text_offset = candidate.use_appended_cave
-                                                  ? candidate.appended_cave_text_offset
-                                                  : candidate.local_cave->text_offset;
-      const auto fwd = compute_sopp_branch_simm16(site.text_offset, trampoline_text_offset);
-      const uint64_t return_branch_pc =
-          trampoline_text_offset + planned.words.size() * sizeof(uint32_t);
-      const auto ret = compute_sopp_branch_simm16(return_branch_pc, site.text_offset + site.size);
+      const uint64_t trampoline_text_offset = candidate.placement->body_offset;
+      if (planned.words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
+        result.errors.emplace_back("ConSan LDS check/trap proof body size changed after placement");
+        return;
+      }
+      const auto fwd = compute_sopp_branch_simm16(candidate.placement->anchor_offset,
+                                                  candidate.placement->body_offset);
+      const auto ret = compute_sopp_branch_simm16(candidate.placement->return_branch_offset,
+                                                  candidate.placement->return_target);
       if (!fwd || !ret) {
         result.errors.emplace_back(
             "ConSan LDS check/trap proof local cave branch exceeds s_branch simm16");
@@ -3050,6 +3068,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         std::memcpy(new_text.data() + planned.local_cave->text_offset, planned.cave_words.data(),
                     planned.cave_words.size() * sizeof(uint32_t));
       } else if (planned.use_appended_cave) {
+        if (!planned.placement || new_text.size() != planned.placement->body_offset) {
+          result.errors.emplace_back(
+              "ConSan LDS check/trap proof emitted a stale appended-cave mapping");
+          result.patches.clear();
+          return;
+        }
         std::memcpy(new_text.data() + site.text_offset, planned.anchor_words.data(),
                     planned.anchor_words.size() * sizeof(uint32_t));
         append_words(new_text, planned.cave_words);
@@ -3125,6 +3149,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     uint16_t scratch_vgpr = 0;
     uint64_t requested_words = 0;
     bool use_local_cave = false;
+    std::optional<DbiPatchPlacement> placement;
   };
 
   std::vector<FlatCheckTrapCandidate> inline_candidates;
@@ -3184,11 +3209,11 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!caves.empty())
       ++local_cave_reachable_candidate_count;
     for (const LocalNopCave *cave : caves) {
-      local_cave_candidates.push_back({&site, cave, *scratch, requested_words, true});
+      local_cave_candidates.push_back({&site, cave, *scratch, requested_words, true, std::nullopt});
     }
     if (observed_padding < padding_words)
       return;
-    inline_candidates.push_back({&site, nullptr, *scratch, requested_words, false});
+    inline_candidates.push_back({&site, nullptr, *scratch, requested_words, false, std::nullopt});
   };
 
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -3219,32 +3244,43 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   const uint32_t max_patches = std::max<uint32_t>(options.max_patches, 1u);
   std::vector<FlatCheckTrapCandidate> selected_candidates;
   selected_candidates.reserve(max_patches);
-  std::vector<ByteRange> reserved_ranges(initial_reserved_ranges.begin(),
-                                         initial_reserved_ranges.end());
-  auto try_select_candidate = [&](const FlatCheckTrapCandidate &candidate) {
+  DbiPatchPlacementPlanner placement_planner(arch, appended_cave_offset);
+  auto try_select_candidate = [&](FlatCheckTrapCandidate candidate) {
     if (selected_candidates.size() >= max_patches)
       return;
     const ConSanFlatSite &site = *candidate.site;
+    const uint64_t body_bytes = candidate.requested_words * sizeof(uint32_t);
+    const ByteRange anchor_file_range{site.file_offset, site.file_offset + site.size};
+    if (overlaps_reserved_range(initial_reserved_ranges, anchor_file_range))
+      return;
     if (candidate.use_local_cave) {
       if (candidate.local_cave == nullptr)
         return;
-      const ByteRange anchor_range{site.file_offset, site.file_offset + site.size};
-      const uint64_t cave_bytes = (candidate.requested_words + 1u) * sizeof(uint32_t);
-      const ByteRange cave_range{candidate.local_cave->file_offset,
-                                 candidate.local_cave->file_offset + cave_bytes};
-      if (overlaps_reserved_range(reserved_ranges, anchor_range) ||
-          overlaps_reserved_range(reserved_ranges, cave_range))
+      const ByteRange cave_file_range{candidate.local_cave->file_offset,
+                                      candidate.local_cave->file_offset + body_bytes +
+                                          sizeof(uint32_t)};
+      if (overlaps_reserved_range(initial_reserved_ranges, cave_file_range))
         return;
-      reserved_ranges.push_back(anchor_range);
-      reserved_ranges.push_back(cave_range);
-      selected_candidates.push_back(candidate);
-      return;
     }
-
-    const uint64_t patch_bytes = candidate.requested_words * sizeof(uint32_t);
-    const ByteRange patch_range{site.file_offset, site.file_offset + patch_bytes};
-    if (!reserve_byte_range(reserved_ranges, patch_range))
+    if (!candidate.use_local_cave &&
+        overlaps_reserved_range(initial_reserved_ranges,
+                                {site.file_offset, site.file_offset + body_bytes}))
       return;
+
+    DbiPatchPlacementRequest request;
+    request.anchor_offset = site.text_offset;
+    request.original_size = site.size;
+    request.body_size = body_bytes;
+    request.inline_capacity = candidate.use_local_cave ? 0u : body_bytes;
+    request.allow_appended_cave = false;
+    if (candidate.use_local_cave)
+      request.local_cave = DbiPatchLocalCave{
+          candidate.local_cave->text_offset,
+          static_cast<uint64_t>(candidate.local_cave->word_count) * sizeof(uint32_t)};
+    const auto placement = placement_planner.plan(request);
+    if (!placement)
+      return;
+    candidate.placement = placement;
     selected_candidates.push_back(candidate);
   };
 
@@ -3285,6 +3321,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::array<uint32_t, 3> anchor_words{};
     ConSanPatchInfo info;
     bool use_local_cave = false;
+    std::optional<DbiPatchPlacement> placement;
   };
 
   const auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
@@ -3335,6 +3372,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     planned.site = &site;
     planned.local_cave = candidate.local_cave;
     planned.use_local_cave = candidate.use_local_cave;
+    planned.placement = candidate.placement;
     planned.info.kind = patch_kind;
     planned.info.anchor_offset = site.text_offset;
     planned.info.scratch_vgpr = candidate.scratch_vgpr;
@@ -3377,7 +3415,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
 
     if (candidate.use_local_cave) {
-      if (candidate.local_cave == nullptr) {
+      if (candidate.local_cave == nullptr || !candidate.placement) {
         result.errors.emplace_back("ConSan flat check/trap proof selected missing local cave");
         return;
       }
@@ -3387,11 +3425,15 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
 
-      const auto fwd =
-          compute_sopp_branch_simm16(site.text_offset, candidate.local_cave->text_offset);
-      const uint64_t return_branch_pc =
-          candidate.local_cave->text_offset + planned.words.size() * sizeof(uint32_t);
-      const auto ret = compute_sopp_branch_simm16(return_branch_pc, site.text_offset + site.size);
+      if (planned.words.size() * sizeof(uint32_t) != candidate.placement->body_size) {
+        result.errors.emplace_back(
+            "ConSan flat check/trap proof body size changed after placement");
+        return;
+      }
+      const auto fwd = compute_sopp_branch_simm16(candidate.placement->anchor_offset,
+                                                  candidate.placement->body_offset);
+      const auto ret = compute_sopp_branch_simm16(candidate.placement->return_branch_offset,
+                                                  candidate.placement->return_target);
       if (!fwd || !ret) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof local cave branch exceeds s_branch simm16");
@@ -3407,7 +3449,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 
       planned.anchor_words = {build_s_branch(*fwd, arch), build_s_nop(0, arch),
                               build_s_nop(0, arch)};
-      planned.info.trampoline_offset = candidate.local_cave->text_offset;
+      planned.info.trampoline_offset = candidate.placement->body_offset;
       planned.info.original_size = site.size;
       planned.info.trampoline_size =
           static_cast<uint32_t>(planned.cave_words.size() * sizeof(uint32_t));

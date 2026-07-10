@@ -124,8 +124,8 @@ flowchart LR
 
   subgraph INLINE["Inline-shadow coverage"]
     direction LR
-    R2["R2: Patch Placement"]:::active
-    F1["F1: Flat Provenance"]:::todo
+    R2["R2: Patch Placement"]:::done
+    F1["F1: Flat Provenance"]:::active
     I1A["I1A: Native DS<br/>Multi-Cell"]:::done
     I1B["I1B: Likely-Group<br/>Flat Coverage"]:::todo
     I1{"I1: LDS Coverage Ready"}:::todo
@@ -1062,23 +1062,29 @@ Done criteria:
 - At least one non-gfx1201 code-object or synthetic patch test exercises the
   architecture dispatch path.
 
-## R2: Patch Placement And Caves - TODO
+## R2: Patch Placement And Caves - DONE
 
 Goal: make patch placement robust enough that coverage growth is not blocked by
 small inline space or local-cave fragility.
 
-Current state:
+Landed state:
 
 - SuperCollider supports inline padding, local NOP caves, and appended `.text`
   caves for selected cases.
 - MOI record/replay and inline-shadow also use trampoline placement, including
   appended caves for compact IREE TileAndFuse kernels.
-- Placement is conservative and still duplicated across probe families.
 - A shared `DbiPatchPlacementPlanner` now models inline, local-cave, and
   appended-cave reservations with explicit anchor/body/return coordinates.
   Inline-shadow, sampled, and record/replay access probes plus MOI barrier and
-  atomic synchronization probes consume it. SuperCollider's established local
-  cave selection still needs to be joined to the same reservation model.
+  atomic synchronization probes consume it. SuperCollider's native LDS and
+  likely-group flat check/trap probes use the same planner, including when the
+  native and flat passes compose in one code object.
+- Planning is transactional: failed overlap or branch-reachability checks do
+  not reserve space, return branches are part of cave reservations, and every
+  emitted appended cave verifies that its planned text offset is still current.
+- Focused coverage includes multiple appended probes in one growing text
+  section, inline/local/appended preference and overlap handling, branch-limit
+  failure, and composed native-LDS plus flat patching.
 
 Work:
 
@@ -1094,6 +1100,14 @@ Done criteria:
 - Probe families use a shared placement API for inline/local/appended caves.
 - Composed patches either share a valid mapping or fail loudly before emitting
   stale offsets.
+
+Qualification evidence:
+
+- `rocjitsu_tests --gtest_filter=ConSan.*:DbiPatchPlacementPlanner.*:TrampolineBuilder.*`:
+  71/71 passed.
+- `rocjitsu_tests --gtest_filter=ConSanMoi.*`: 103/103 passed.
+- The gfx1201 live ConSan spill, SuperCollider, inline-shadow, and MOI tier:
+  35/35 passed.
 
 ## I1: Inline-Shadow LDS Coverage - TODO
 

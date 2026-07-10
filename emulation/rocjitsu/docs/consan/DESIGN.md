@@ -243,9 +243,10 @@ Current placement mechanisms:
 `DbiPatchPlacementPlanner` is the shared transactional allocator for these
 choices. It records explicit anchor/body/return mappings, reserves the return
 branch as part of every cave, and leaves its state unchanged on overlap or
-branch-range failure. All MOI access, barrier, and atomic probe families use it
-today. SuperCollider's established local-cave selector still needs to converge
-on the same reservation model.
+branch-range failure. All MOI access, barrier, and atomic probe families use it,
+as do SuperCollider's native LDS and likely-group flat check/trap paths. The
+native and flat passes preserve their explicit text/file-coordinate mapping
+when they compose, and appended-cave emission rejects stale planned offsets.
 
 Current register policy:
 
