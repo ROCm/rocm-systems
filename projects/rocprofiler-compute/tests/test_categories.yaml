@@ -39,10 +39,6 @@ test_categories:
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
-    # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
-    exclude:
-      - test_profile_live_attach_detach
-      - test_metric_validation
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -106,10 +102,6 @@ test_categories:
       - test-pc-sampling-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
-      - test_profile_live_attach_detach
-      - test_metric_validation
-    # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
-    exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:
@@ -176,10 +168,6 @@ test_categories:
       - test_profile_triton_trace
       - test_profile_live_attach_detach
       - test_metric_validation
-    # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
-    exclude:
-      - test_profile_live_attach_detach
-      - test_metric_validation
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -242,10 +230,6 @@ test_categories:
       - test-pc-sampling-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
-      - test_profile_live_attach_detach
-      - test_metric_validation
-    # Remove once ROCm/TheRock#6087 lands and the rocm-systems hash is bumped in TheRock; therock_ci_exclude replaces this.
-    exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
     therock_ci_exclude:

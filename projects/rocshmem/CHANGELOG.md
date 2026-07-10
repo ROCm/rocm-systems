@@ -8,6 +8,8 @@
    * `rocshmem_calloc`
    * `rocshmem_buffer_unregister_all`
    * `rocshmem_buffer_register/unregister` for GDA backend
+   * `rocshmem_buffer_register_symmetric` for IPC backend
+   * `rocshmem_buffer_unregister_symmetric` for IPC backend
    * `rocshmem_reduce_on_stream`
    * `rocshmem_team_split_2D`
 * Added tile-granular RMA operations for the IPC backend
@@ -54,6 +56,7 @@
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX`
   * `ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX`
+  * `ROCSHMEM_MAX_SYMM_REGIONS`
 * Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
    * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
    * Requires ROCm 7.0+ and Linux kernel 5.6+

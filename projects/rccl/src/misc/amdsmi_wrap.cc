@@ -43,6 +43,14 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
+// Use for calls that can silently fail to avoid spamming logs with errors for unsupported features (e.g. fabric on older hardware)
+#define RET_ON_FAIL(call) do { \
+  ncclResult_t RES = call; \
+  if (RES != ncclSuccess) { \
+    return RES; \
+  } \
+} while (0)
+
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
 #include <dlfcn.h>
@@ -460,6 +468,7 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
       AMDSMITRY(amdsmi_topo_get_link_weight, src_processor_handle, dst_processor_handle, &amdsmi_weight);
 
       // amd-smi reports weight=0 for XGMI ??
+      // TODO: add UALoE fabric support which should have proper weight and bandwidth reporting
       if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI) {
         uint64_t min_bw = 0, max_bw = 0;
         AMDSMITRY(amdsmi_get_minmax_bandwidth_between_processors, src_processor_handle, dst_processor_handle, &min_bw, &max_bw);
@@ -643,7 +652,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
 }
 
 ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     *supported = false;
@@ -655,7 +664,7 @@ ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported) {
 }
 
 ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     return ncclInvalidArgument;
@@ -666,7 +675,7 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 }
 
 ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMbps) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     *bandwidthMbps = 0;
