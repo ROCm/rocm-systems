@@ -23,6 +23,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hiprtc.h>
+#include <hip/hip_ext.h>  // hipExtModuleLaunchKernel
 #include <filesystem>
 #include <fstream>
 
@@ -1602,6 +1603,167 @@ TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
 
   HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(g));
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G6: hipExtModuleLaunchKernel (OpenCL-style module kernel launch)
+//
+// hipExtModuleLaunchKernel has a manual playback handler (replay_kernel_launch
+// with ext_global_worksize=true) that reconstructs the kernarg blob and
+// translates the function handle and the device pointer inside the kernargs; it
+// has no prior HRR coverage.  The kernel is compiled at runtime with HIPRTC and
+// loaded via hipModuleLoadData (a manual handler that restores the code object
+// from the archive by hash), so — unlike static fat-binary kernels, which are
+// not captured at static-init on Linux — this replays with full D2H validation.
+// NOTE: hipExtModuleLaunchKernel takes GLOBAL work size (total work items), not
+// grid dims: global=LN, local=256 launches ceil(LN/256) workgroups.
+// Final blob: h[i] == 55.
+// ===========================================================================
+TEST_CASE("Unit_HRR_ExtModuleLaunchKernel_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    LN  = 256;
+  constexpr size_t LSZ = LN * sizeof(int);
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, LSZ));
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreate(&s));
+
+  // Runtime-compiled kernel (captured via hipModuleLoadData, not static init).
+  static const char* ext_fill_src = R"(
+extern "C" __global__ void ext_fill(int* out, int val, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = val;
+}
+)";
+  hiprtcProgram prog = nullptr;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ext_fill_src, "ext_fill.hip",
+                                   0, nullptr, nullptr));
+  hiprtcResult crc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (crc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  hipModule_t mod = nullptr;
+  HIP_CHECK(hipModuleLoadData(&mod, co.data()));
+  hipFunction_t fn = nullptr;
+  HIP_CHECK(hipModuleGetFunction(&fn, mod, "ext_fill"));
+
+  // API under test.  kernelParams holds the address of each argument value;
+  // args[0] = &d is the address of the int* device pointer.
+  int   val = 55;
+  int   n   = LN;
+  void* args[] = { &d, &val, &n };
+  HIP_CHECK(hipExtModuleLaunchKernel(fn,
+      /*globalWorkSize*/ LN, 1, 1,
+      /*localWorkSize */ 256, 1, 1,
+      /*sharedMemBytes*/ 0, s, args, /*extra*/ nullptr,
+      /*startEvent*/ nullptr, /*stopEvent*/ nullptr, /*flags*/ 0));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  HIP_CHECK(hipModuleUnload(mod));
+
+  int* h = new int[LN]();
+  HIP_CHECK(hipMemcpyAsync(h, d, LSZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < LN; ++i) REQUIRE(h[i] == 55);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G7: hipHostFree (pinned host allocation lifecycle)
+//
+// hipHostFree has a real (non-noop) playback handler that translates the
+// recorded pointer via alloc_map and removes the mapping; hipHostMalloc's
+// handler records the pinned allocation (AllocKind::HostMalloc).  Neither is
+// exercised by any existing _Direct workload (the HostMem workload frees pinned
+// memory with hipFree).  The pinned buffer is used as an H2D source so the
+// allocation is genuinely live, then released with hipHostFree *before* the D2H
+// so its alloc-map removal is replayed mid-stream and must not disturb the
+// device->host validation that follows.
+// Final blob: h[i] == 44.
+// ===========================================================================
+TEST_CASE("Unit_HRR_HostFree_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* h_pinned = nullptr;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&h_pinned), SZ,
+                          hipHostMallocDefault));
+  for (int i = 0; i < N; ++i) h_pinned[i] = 44;
+
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemcpyAsync(d, h_pinned, SZ, hipMemcpyHostToDevice, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+
+  // API under test: release the pinned allocation via hipHostFree (not hipFree).
+  HIP_CHECK(hipHostFree(h_pinned));
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 44);
+
+  HIP_CHECK(hipFree(d));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
+// Workload G8: HIP external logging controls
+//
+// hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging each have
+// a real (non-noop) generated playback handler and no prior HRR coverage.  They
+// take only scalar / no arguments (no stale pointers) and always return
+// hipSuccess.  Params are set to level 0 so enabling logging produces no output.
+// None touch device memory, so a memset-based D2H canary confirms the whole
+// replay stream (including the three logging calls) stays intact.
+// Final blob: h[i] == 66.
+// ===========================================================================
+TEST_CASE("Unit_HRR_Logging_Direct", "[.][hrr-direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N  = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  // APIs under test (log_level 0 => enabling logging stays quiet).
+  HIP_CHECK(hipExtSetLoggingParams(/*log_level*/ 0, /*log_size*/ 0,
+                                   /*log_mask*/ 0));
+  HIP_CHECK(hipExtEnableLogging());
+  HIP_CHECK(hipExtDisableLogging());
+
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HIP_CHECK(hipMalloc(&d, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 66, N));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 66);
+
   HIP_CHECK(hipFree(d));
   HIP_CHECK(hipStreamDestroy(s));
   delete[] h;

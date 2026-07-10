@@ -105,6 +105,15 @@ hrr:
   Unit_HRR_GraphLaunchSptRoundtrip:
     <<: *level_2
     tags: [capture, graph, playback, roundtrip]
+  Unit_HRR_ExtModuleLaunchKernelRoundtrip:
+    <<: *level_2
+    tags: [capture, module, launch, playback, roundtrip]
+  Unit_HRR_HostFreeRoundtrip:
+    <<: *level_2
+    tags: [capture, hostmem, playback, roundtrip]
+  Unit_HRR_LoggingRoundtrip:
+    <<: *level_2
+    tags: [capture, logging, playback, roundtrip]
   Unit_HRR_MemsetExtraRoundtrip:
     <<: *level_2
     tags: [capture, memset, playback, roundtrip]
@@ -231,6 +240,15 @@ hrr:
   Unit_HRR_GraphLaunchSpt_Direct:
     <<: *level_2
     tags: [direct, graph]
+  Unit_HRR_ExtModuleLaunchKernel_Direct:
+    <<: *level_2
+    tags: [direct, module, launch]
+  Unit_HRR_HostFree_Direct:
+    <<: *level_2
+    tags: [direct, hostmem]
+  Unit_HRR_Logging_Direct:
+    <<: *level_2
+    tags: [direct, logging]
   Unit_HRR_MemcpyExtra_Direct:
     <<: *level_2
     tags: [direct, memcpy]

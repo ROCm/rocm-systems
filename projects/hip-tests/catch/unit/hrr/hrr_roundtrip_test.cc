@@ -750,6 +750,26 @@ HIP_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
   // Exercises hipGraphLaunch_spt (per-thread-stream graph launch).
   hrr_run_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path);
 }
+
+HIP_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmodulelaunch"};
+  // Exercises hipExtModuleLaunchKernel (manual kernarg + device-ptr replay via
+  // the HIPRTC module path, which is captured/replayed on Linux).
+  hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
+  // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).
+  hrr_run_roundtrip("Unit_HRR_HostFree_Direct", cap.path);
+}
+
+HIP_TEST_CASE(Unit_HRR_LoggingRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_logging"};
+  // Exercises hipExtSetLoggingParams / hipExtEnableLogging / hipExtDisableLogging.
+  hrr_run_roundtrip("Unit_HRR_Logging_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);
