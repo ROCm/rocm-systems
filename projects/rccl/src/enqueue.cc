@@ -651,7 +651,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
     bool regNeedConnect = true;
     ncclRegisterCollNvlsBuffers(comm, task, regBufSend, regBufRecv, &planner->collCleanupQueue, &regNeedConnect);
 
-    if (comm->runtimeConn && comm->initAlgoChannels[task->algorithm] == false) {
+    // Connect PAT on demand even when runtimeConn is off (ROCm default), so PAT QPs are created lazily on first PAT collective.
+    if ((comm->runtimeConn || task->algorithm == NCCL_ALGO_PAT) && comm->initAlgoChannels[task->algorithm] == false) {
       if (task->algorithm == NCCL_ALGO_NVLS_TREE && comm->initAlgoChannels[NCCL_ALGO_NVLS] == false &&
           regNeedConnect == true) {
         comm->initAlgoChannels[NCCL_ALGO_NVLS] = true;

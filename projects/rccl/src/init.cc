@@ -115,6 +115,8 @@ NCCL_PARAM(GroupCudaStream, "GROUP_CUDA_STREAM", NCCL_GROUP_CUDA_STREAM);
 NCCL_PARAM(CheckPointers, "CHECK_POINTERS", 0);
 NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
+// When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
+NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -2179,8 +2181,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     NCCLCHECKGOTO(ncclTransportTreeConnect(comm), ret, fail);
 
     // Connect PAT only for communicators with 1 GPU per node and PAT enabled
-    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable))
-      NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+    if (comm->maxLocalRanks == 1 && (ncclParamPatEnable() || comm->forcePatEnable)) {
+      if (ncclParamPatLazyInit()) {
+        // Leave initAlgoChannels[PAT] unset so ncclPrepareTasks() triggers the on-demand connect (see enqueue.cc / group.cc ncclCollPreconnect).
+        INFO(NCCL_INIT, "PAT lazy init enabled: deferring PAT QP creation until first PAT collective");
+      } else {
+        NCCLCHECKGOTO(ncclTransportPatConnect(comm), ret, fail);
+        comm->initAlgoChannels[NCCL_ALGO_PAT] = true;
+      }
+    }
 
     // Attempt to setup NVLS
     NCCLCHECKGOTO(ncclNvlsSetup(comm, parent), ret, fail);
