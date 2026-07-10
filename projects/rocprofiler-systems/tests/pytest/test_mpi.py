@@ -89,7 +89,8 @@ class TestMPI(RocprofsysTest):
         ]
         BINARY_REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
         BINARY_REWRITE_FAIL_REGEX = [
-            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
+            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)",
+            "Failed to open Symtab for",
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
 
