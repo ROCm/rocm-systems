@@ -2617,6 +2617,13 @@ hsa_status_t Runtime::Load() {
 #endif
 
   g_use_interrupt_wait = flag_.enable_interrupt();
+  /* The KGD/DRM userq path has no event framework yet (no KFD-style event page,
+   * VM-fault/signal event delivery). Interrupt-based waits would require KFD
+   * events, which we must not use in unified-interface mode. Fall back to
+   * polling signals until the KGD userq event patch is ready.
+   */
+  if (flag_.enable_drm())
+    g_use_interrupt_wait = false;
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
 
   if (!AMD::Load()) {

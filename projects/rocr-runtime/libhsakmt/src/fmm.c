@@ -4890,6 +4890,8 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 	HsaApertureInfo ApeInfo;
 	vm_object_t *obj;
 	HSAuint64 offset;
+	bool export_use_drm = false;
+	amdgpu_bo_handle export_drm_bo = NULL;
 	int r;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
@@ -4902,9 +4904,19 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 	if (obj) {
 		offset = VOID_PTRS_SUB(MemoryAddress, obj->start);
 		if (offset + MemorySizeInBytes <= obj->size) {
-			exportArgs.handle = obj->handles[0].kfd;
-			exportArgs.flags = O_CLOEXEC;
-			exportArgs.dmabuf_fd = 0;
+			/* DRM-allocated BOs have no valid KFD handle for the KFD
+			 * export ioctl; export them through libdrm instead so the
+			 * unified interface (hsakmt_enable_drm) works.
+			 */
+			if (hsakmt_enable_drm &&
+			    is_supported_on_drm(obj->alloc_flags)) {
+				export_use_drm = true;
+				export_drm_bo = obj->handles[0].drm;
+			} else {
+				exportArgs.handle = obj->handles[0].kfd;
+				exportArgs.flags = O_CLOEXEC;
+				exportArgs.dmabuf_fd = 0;
+			}
 		} else {
 			obj = NULL;
 		}
@@ -4912,6 +4924,19 @@ HSAKMT_STATUS hsakmt_fmm_export_dma_buf_fd(HsaKFDContext *ctx,
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	if (!obj)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	if (export_use_drm) {
+		uint32_t drm_dmabuf_fd = 0;
+
+		if (amdgpu_bo_export(export_drm_bo,
+				     amdgpu_bo_handle_type_dma_buf_fd,
+				     &drm_dmabuf_fd) != 0)
+			return HSAKMT_STATUS_ERROR;
+
+		*DMABufFd = (int)drm_dmabuf_fd;
+		*Offset = offset;
+		return HSAKMT_STATUS_SUCCESS;
+	}
 
 	r = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_EXPORT_DMABUF, (void *)&exportArgs);
 	if (r)
