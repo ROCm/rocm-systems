@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # MIT License
 #
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
@@ -21,34 +20,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Validate rocprofv3 host_trap PC sampling output collected under --selected-regions.
-
-import sys
-
-import pytest
-
-from rocprofiler_sdk.pc_sampling.selected_regions import csv as pcs_csv
-from rocprofiler_sdk.pc_sampling.selected_regions import json as pcs_json
-
-METHOD = "host_trap"
-
-
-def test_validate_pc_sampling_selected_regions_csv(pc_csv):
-    # CSV schema, sample volume, and per-row values
-    pcs_csv.validate_columns(pc_csv, METHOD)
-    pcs_csv.validate_sample_volume(pc_csv)
-    pcs_csv.validate_values(pc_csv)
-
-
-def test_validate_pc_sampling_selected_regions_json(pc_csv, json_data, request):
-    pcs_json.validate_csv_json_parity(pc_csv, json_data, METHOD)
-    pcs_json.validate_data_integrity(json_data, METHOD)
-    # collection restricted to the resume regions
-    if request.config.getoption("--ref-count"):
-        pcs_json.validate_selected_regions_ref_count_gating(json_data, METHOD)
-    else:
-        pcs_json.validate_selected_regions_gating(json_data, METHOD)
-
-
-if __name__ == "__main__":
-    sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
+from __future__ import absolute_import

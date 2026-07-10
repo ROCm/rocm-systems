@@ -92,6 +92,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/selected-regions-ref-count/out_pc_sampling_host_trap.csv
          --input-json
          ${CMAKE_CURRENT_BINARY_DIR}/selected-regions-ref-count/out_results.json
+         --ref-count
     TIMEOUT 60
     LABELS "integration-tests;pc-sampling;pause-resume;selected-regions"
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-selected-regions-ref-count-host-trap

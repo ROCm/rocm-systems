@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # MIT License
 #
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
@@ -21,34 +20,40 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Validate rocprofv3 host_trap PC sampling output collected under --selected-regions.
+from __future__ import absolute_import
 
-import sys
+HOST_TRAP_COLUMNS = [
+    "Sample_Timestamp",
+    "Exec_Mask",
+    "Dispatch_Id",
+    "Instruction",
+    "Instruction_Comment",
+    "Correlation_Id",
+]
 
-import pytest
+STOCHASTIC_COLUMNS = HOST_TRAP_COLUMNS + [
+    "Wave_Issued_Instruction",
+    "Instruction_Type",
+    "Stall_Reason",
+    "Wave_Count",
+]
 
-from rocprofiler_sdk.pc_sampling.selected_regions import csv as pcs_csv
-from rocprofiler_sdk.pc_sampling.selected_regions import json as pcs_json
-
-METHOD = "host_trap"
-
-
-def test_validate_pc_sampling_selected_regions_csv(pc_csv):
-    # CSV schema, sample volume, and per-row values
-    pcs_csv.validate_columns(pc_csv, METHOD)
-    pcs_csv.validate_sample_volume(pc_csv)
-    pcs_csv.validate_values(pc_csv)
-
-
-def test_validate_pc_sampling_selected_regions_json(pc_csv, json_data, request):
-    pcs_json.validate_csv_json_parity(pc_csv, json_data, METHOD)
-    pcs_json.validate_data_integrity(json_data, METHOD)
-    # collection restricted to the resume regions
-    if request.config.getoption("--ref-count"):
-        pcs_json.validate_selected_regions_ref_count_gating(json_data, METHOD)
-    else:
-        pcs_json.validate_selected_regions_gating(json_data, METHOD)
+MIN_SAMPLES = 100
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
+def validate_columns(df, method):
+    # CSV columns match the exact schema for this sampling method
+    expected = STOCHASTIC_COLUMNS if method == "stochastic" else HOST_TRAP_COLUMNS
+    assert list(df.columns) == expected, f"unexpected columns: {list(df.columns)}"
+
+
+def validate_sample_volume(df):
+    # enough samples were collected
+    assert len(df) >= MIN_SAMPLES, f"too few samples: {len(df)}"
+
+
+def validate_values(df):
+    # per-row fields are within valid ranges
+    assert (df["Exec_Mask"] > 0).all(), "Exec_Mask must be > 0"
+    assert (df["Dispatch_Id"] > 0).all(), "Dispatch_Id must be > 0"
+    assert (df["Correlation_Id"] >= 0).all(), "Correlation_Id must be >= 0"
