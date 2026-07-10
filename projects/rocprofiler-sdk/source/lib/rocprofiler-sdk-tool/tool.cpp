@@ -3731,7 +3731,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          spm_counters_output.get_generator(),
                          hip_graph_output.get_generator(),
                          rocshmem_output.get_generator(),
-                         hipfile_output.get_generator());
+                         hipfile_output.get_generator(),
+                         gpu_event_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -3795,6 +3796,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
         auto rocjpeg_elem_data           = rocjpeg_output.load_all();
+        auto gpu_event_data              = gpu_event_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -3809,7 +3811,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
                          &rccl_elem_data,
                          &memory_allocation_elem_data,
                          &rocdecode_elem_data,
-                         &rocjpeg_elem_data);
+                         &rocjpeg_elem_data,
+                         &gpu_event_data);
     }
 
     if(tool::get_config().summary_output && outdata.num_output > 0 &&

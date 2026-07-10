@@ -133,7 +133,8 @@ enum rocprofiler_location_type_t
     ROCPROFILER_AGENT_NO_TYPE = 0,
     ROCPROFILER_AGENT_MEMORY_COPY_TYPE,
     ROCPROFILER_AGENT_DISPATCH_TYPE,
-    ROCPROFILER_AGENT_MEMORY_ALLOC_TYPE
+    ROCPROFILER_AGENT_MEMORY_ALLOC_TYPE,
+    ROCPROFILER_AGENT_EVENT_TYPE,
 };
 
 struct location_base
@@ -382,7 +383,8 @@ write_otf2(const output_config&                                          cfg,
            std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_data,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
-           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data)
+           std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data,
+           std::deque<rocprofiler_buffer_tracing_gpu_event_record_t>*         gpu_event_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -407,6 +409,9 @@ write_otf2(const output_config&                                          cfg,
     auto agent_memalloc_info =
         std::map<rocprofiler_thread_id_t, std::map<rocprofiler_agent_id_t, event_info>>{};
     auto agent_dispatch_info =
+        std::map<rocprofiler_thread_id_t,
+                 std::map<rocprofiler_agent_id_t, std::map<rocprofiler_queue_id_t, event_info>>>{};
+    auto agent_event_info =
         std::map<rocprofiler_thread_id_t,
                  std::map<rocprofiler_agent_id_t, std::map<rocprofiler_queue_id_t, event_info>>>{};
 
@@ -456,6 +461,13 @@ write_otf2(const output_config&                                          cfg,
             agent_queue_ids[itr.thread_id][itr.dispatch_info.agent_id].emplace(
                 itr.dispatch_info.queue_id);
         }
+
+        for(auto itr : *gpu_event_data)
+        {
+            tids.emplace(itr.thread_id);
+            agent_queue_ids[itr.thread_id][itr.event_info.agent_id].emplace(
+                itr.event_info.queue_id);
+        }
     }
 
     {
@@ -478,6 +490,13 @@ write_otf2(const output_config&                                          cfg,
                     agent_dispatch_info[tid][agent].emplace(
                         queue,
                         location_base{pid, tid, agent, ROCPROFILER_AGENT_DISPATCH_TYPE, queue});
+
+        for(const auto& [tid, itr] : agent_queue_ids)
+            for(const auto& [agent, qitr] : itr)
+                for(auto queue : qitr)
+                    agent_event_info[tid][agent].emplace(
+                        queue,
+                        location_base{pid, tid, agent, ROCPROFILER_AGENT_EVENT_TYPE, queue});
     }
 
     for(auto& [tid, evt] : thread_event_info)
@@ -538,6 +557,16 @@ write_otf2(const output_config&                                          cfg,
         for(auto& qitr : _queue_ids)
             qitr.second = _n++;
     }
+    for(auto& [tid, itr] : agent_event_info)
+        for(auto& [agent, qitr] : itr)
+            for(auto& [queue, evt] : qitr)
+                _queue_ids.emplace(queue, 0);
+
+    {
+        uint64_t _n = 0;
+        for(auto& qitr : _queue_ids)
+            qitr.second = _n++;
+    }
 
     for(auto& [tid, itr] : agent_dispatch_info)
     {
@@ -549,6 +578,24 @@ write_otf2(const output_config&                                          cfg,
                 auto        agent_index_info =
                     tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
                 evt.name = fmt::format("Thread {}, Compute on {} {}, Queue {}",
+                                       tid,
+                                       agent_index_info.type,
+                                       agent_index_info.as_string("-"),
+                                       _queue_ids.at(queue));
+            }
+        }
+    }
+
+    for(auto& [tid, itr] : agent_event_info)
+    {
+        for(auto& [agent, qitr] : itr)
+        {
+            for(auto& [queue, evt] : qitr)
+            {
+                const auto* _agent = _get_agent(agent);
+                auto        agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
+                evt.name = fmt::format("Thread {}, Event on {} {}, Queue {}",
                                        tid,
                                        agent_index_info.type,
                                        agent_index_info.as_string("-"),
@@ -727,6 +774,30 @@ write_otf2(const output_config&                                          cfg,
                                     get_attr(sdk::category::kernel_dispatch{})});
         _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
                                     name,
+                                    _evt_info.get_location(),
+                                    itr.end_timestamp,
+                                    nullptr});
+    }
+
+    for(auto itr : *gpu_event_data)
+    {
+        const auto& info = itr.event_info;
+
+        auto type = info.type_id == 1 ? std::string("WAIT") : std::string("SIGNAL");
+        _hash_data.emplace(
+            get_hash_id(type),
+            region_info{type, OTF2_REGION_ROLE_BARRIER, OTF2_PARADIGM_HIP});
+
+        auto& _evt_info = agent_event_info.at(itr.thread_id).at(info.agent_id).at(info.queue_id);
+        _evt_info.event_count += 1;
+
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
+                                    type,
+                                    _evt_info.get_location(),
+                                    itr.start_timestamp,
+                                    get_attr(sdk::category::gpu_events{})});
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
+                                    type,
                                     _evt_info.get_location(),
                                     itr.end_timestamp,
                                     nullptr});
@@ -925,6 +996,27 @@ write_otf2(const output_config&                                          cfg,
 
     // Dispatch Events
     for(auto& [tid, itr] : agent_dispatch_info)
+    {
+        for(auto& [agent, qitr] : itr)
+        {
+            for(auto& [queue, evt] : qitr)
+            {
+                auto _hash = get_hash_id(evt.name);
+
+                add_write_string(_hash, evt.name);
+                OTF2_CHECK(OTF2_GlobalDefWriter_WriteLocation(global_def_writer,
+                                                              evt.id(),  // id
+                                                              _hash,
+                                                              OTF2_LOCATION_TYPE_ACCELERATOR_STREAM,
+                                                              2 * evt.event_count,  // # events
+                                                              agent.handle  // location group
+                                                              ));
+            }
+        }
+    }
+
+    // GPU Events
+    for(auto& [tid, itr] : agent_event_info)
     {
         for(auto& [agent, qitr] : itr)
         {

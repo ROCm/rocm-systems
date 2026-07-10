@@ -204,7 +204,8 @@ write_json(
     const generator<tool_spm_counter_record_t>&                        spm_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&    graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>& rocshmem_api_gen,
-    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&  hipfile_api_gen)
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&  hipfile_api_gen,
+    const generator<rocprofiler_buffer_tracing_gpu_event_record_t>&    gpu_events_gen)
 {
     // summary
     {
@@ -253,6 +254,7 @@ write_json(
         json_ar(cereal::make_nvp("hip_graph", graph_launch_gen));
         json_ar(cereal::make_nvp("rocshmem_api", rocshmem_api_gen));
         json_ar(cereal::make_nvp("hipfile_api", hipfile_api_gen));
+        json_ar(cereal::make_nvp("gpu_events", gpu_events_gen));
         json_ar.finishNode();
     }
 }
