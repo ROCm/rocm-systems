@@ -1848,6 +1848,26 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg) {
     // mode nothing is owned, so the debugger's own fd is left untouched.
     sess = KfdProcess::DebugSession{};
     return 0;
+
+  // Recognized ops whose handlers are not wired up yet. The kernel dispatches
+  // each to a real implementation; the skeleton reports ENOSYS ("not
+  // implemented") so a debugger can tell a stubbed-but-valid op apart from a
+  // genuinely unknown one (EINVAL below). Each case graduates out of this group
+  // as its handler lands.
+  case KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT:
+  case KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE:
+  case KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE:
+  case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
+  case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
+  case KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH:
+  case KFD_IOC_DBG_TRAP_SET_FLAGS:
+  case KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT:
+  case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
+  case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
+  case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
+    return -ENOSYS;
   default:
     return -EINVAL;
   }
