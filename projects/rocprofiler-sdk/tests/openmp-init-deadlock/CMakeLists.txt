@@ -30,14 +30,12 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# the application is only built when LLVM libomp is found (see
-# tests/bin/openmp-init-deadlock); skip registering the test if the target was not created
+set(IS_DISABLED OFF)
 if(NOT TARGET openmp-init-deadlock)
-    message(
-        STATUS
-            "[openmp-init-deadlock] application target not available; skipping regression test"
-        )
-    return()
+    set(IS_DISABLED ON)
+endif()
+if(NOT OMP_TARGET_COMPILER)
+    set(IS_DISABLED ON)
 endif()
 
 # Regression test for the OMPT-init deadlock fixed in rocprofiler-sdk client discovery.
@@ -57,6 +55,7 @@ rocprofiler_add_integration_execute_test(
     TARGET openmp-init-deadlock
     TIMEOUT 60
     LABELS "integration-tests;openmp-init-deadlock"
+    DISABLED "${IS_DISABLED}"
     ENVIRONMENT
         "OMP_TOOL=enabled"
         "OMP_NUM_THREADS=2"
