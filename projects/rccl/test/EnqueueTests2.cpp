@@ -410,5 +410,87 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // MultiNode_Asymmetric_UsesNChannelsMin
+    //
+    // The nChannelsMax boost is gated on the single-node guard
+    // (comm->nNodes <= 1 && asymmetric). Multi-node collectives use inter-node
+    // channel scheduling and must not receive the single-node boost even when
+    // the traffic is asymmetric. Here planTotalTasks = {N, 0} (asymmetric) but
+    // nNodes > 1, so nChStart must remain nChannelsMin.
+    //
+    // With nNodes > 1 the function reads comm->topo (rcclEffectiveP2pBatchEnable
+    // and the batchP2P arch check), so a minimal topo with one GPU node is
+    // allocated. minPartSize/maxPartSize also change for the multi-node case
+    // (stepSize/2 .. stepSize), which this test exercises.
+    TEST(addP2pToPlan, MultiNode_Asymmetric_UsesNChannelsMin)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        struct ncclTopoSystem* topo = static_cast<struct ncclTopoSystem*>(calloc(1, sizeof(*topo)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+        ASSERT_NE(topo, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 2;               // multi-node: single-node guard is false
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        // Minimal topology: one GPU node whose gcn arch string is read by
+        // rcclEffectiveP2pBatchEnable() and the batchP2P arch check when
+        // nNodes > 1.
+        topo->nodes[GPU].count = 1;
+        snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, GCN_ARCH_NAME_LEN, "gfx942");
+        comm->topo = topo;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        // Multi-node minPartSize/maxPartSize are stepSize/2 .. stepSize
+        // (32KiB..64KiB here). At 256KiB the old nChannelsMin start yields 4
+        // (partSize 64KiB, no doubling) while an nChannelsMax start would yield
+        // 8 -- so this size distinguishes the guarded from the boosted result.
+        // (At larger sizes the partSize doubling loop promotes both to 8 and
+        // the assertion would not prove the guard.)
+        const ssize_t kRecvBytes = 256 * 1024;
+
+        struct ncclTaskP2p recvTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {&recvTask, nullptr};
+
+        // Asymmetric (gather) traffic, but multi-node.
+        int planTotalTasks[2] = {kNChannelsMax, 0};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ -1,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ kRecvBytes,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // Multi-node must not take the single-node nChannelsMax boost.
+        EXPECT_EQ(recvTask.nChannels, kNChannelsMin);
+        EXPECT_LT(recvTask.nChannels, kNChannelsMax);
+
+        free(topo);
+        free(plan);
+        free(comm);
+    }
 }
 }
