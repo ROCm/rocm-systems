@@ -287,7 +287,9 @@ release(bool, HIP_HRR_DEBUG_ARGS, false,                                      \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
-        "Disables certain fallback paths")
+        "Disables certain fallback paths")                                    \
+release(bool, AMD_FORCE_LD_DISPATCH_PACKET, false,                            \
+        "Force use of launch descriptor dispatch packet (Format 4)")
 
 
 namespace amd {
