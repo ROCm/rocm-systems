@@ -14,7 +14,6 @@ pytestmark = [
     pytest.mark.gpu,
     pytest.mark.decode,
     pytest.mark.jpegdecode,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 

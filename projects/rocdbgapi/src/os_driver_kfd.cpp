@@ -234,13 +234,8 @@ kfd_to_os_exception_mask (__u64 kfd_mask)
 {
   os_exception_mask_t mask{};
 
-  if (kfd_mask == 0)
-    return mask;
-
-  while (kfd_mask != 0)
+  utils::for_each_flag (kfd_mask, [&] (__u64 one_bit)
     {
-      __u64 one_bit = kfd_mask ^ (kfd_mask & (kfd_mask - 1));
-
       auto code = os_exception_code (
         excp_mask_to_excp_code<kfd_dbg_trap_exception_code> (one_bit));
 
@@ -249,9 +244,7 @@ kfd_to_os_exception_mask (__u64 kfd_mask)
       else
         warning ("Unknown KFD exception code %" PRIx64,
                  static_cast<uint64_t> (one_bit));
-
-      kfd_mask ^= one_bit;
-    }
+    });
 
   return mask;
 }
@@ -262,18 +255,13 @@ static constexpr __u64
 kfd_exception_mask (os_exception_mask_t mask)
 {
   __u64 kfd_mask = 0;
-  if (mask == os_exception_mask_t::none)
-    return kfd_mask;
 
-  while (mask != os_exception_mask_t::none)
+  utils::for_each_flag (mask, [&] (os_exception_mask_t one_bit)
     {
-      os_exception_mask_t one_bit = mask ^ (mask & (mask - 1));
-
       kfd_mask |= KFD_EC_MASK (kfd_exception_code (
         excp_mask_to_excp_code<os_exception_code_t, os_exception_mask_t> (
           one_bit)));
-      mask ^= one_bit;
-    }
+    });
 
   return kfd_mask;
 }
@@ -350,14 +338,11 @@ kfd_wave_launch_trap_mask (os_wave_launch_trap_mask_t wave_launch_trap)
     dbgapi_assert_not_reached ();
   };
 
-  while (wave_launch_trap != os_wave_launch_trap_mask_t::none)
+  utils::for_each_flag (wave_launch_trap,
+                        [&] (os_wave_launch_trap_mask_t one_bit)
     {
-      os_wave_launch_trap_mask_t one_bit
-        = wave_launch_trap ^ (wave_launch_trap & (wave_launch_trap - 1));
-
       kfd_wave_launch_trap |= convert_one (one_bit);
-      wave_launch_trap ^= one_bit;
-    }
+    });
 
   return kfd_wave_launch_trap;
 }

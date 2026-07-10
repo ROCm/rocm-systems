@@ -563,11 +563,12 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     return fabricInitResult;
   }
   if (numDevs > (uint32_t)amdsmiFabricMaxDevices) {
-    WARN("%s fabric: device count %u exceeds max %d, truncating",
+    WARN("%s fabric: device count %u exceeds internal maximum (amdsmiFabricMaxDevices=%d)",
          useSysfs ? "ARSMI" : "AMD SMI", numDevs, amdsmiFabricMaxDevices);
-    numDevs = amdsmiFabricMaxDevices;
+    fabricInitResult = ncclInternalError;
+    return fabricInitResult;
   }
-  amdsmiFabricDeviceCount = numDevs;
+  amdsmiFabricDeviceCount = (int)numDevs;
 
   for (uint32_t d = 0; d < numDevs; d++) {
     struct amdsmiFabricDeviceInfo* devInfo = &amdsmiFabricDevices[d];

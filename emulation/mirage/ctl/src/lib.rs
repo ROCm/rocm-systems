@@ -377,12 +377,7 @@ pub enum SessionCmd {
     /// Start a new session and its host process.
     Start(StartArgs),
     /// Stop a session and remove its state.
-    Stop {
-        id: SessionId,
-        /// Don't prompt for confirmation.
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
+    Stop { id: SessionId },
     /// Show the per-session directory path.
     Dir { id: SessionId },
 }
@@ -921,10 +916,7 @@ async fn session_cmd<C: MirageCtl>(
             println!("{}", serde_json::to_string_pretty(&h)?);
         }
         SessionCmd::Start(args) => return session_start(ctl, args, json).await,
-        SessionCmd::Stop { id, force } => {
-            if !force && !confirm(&format!("stop session {id}?"))? {
-                return Ok(ExitCode::from(0));
-            }
+        SessionCmd::Stop { id } => {
             ctl.session_destroy(&id)?;
             println!("stopped {id}");
         }

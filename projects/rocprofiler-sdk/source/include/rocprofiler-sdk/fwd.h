@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -408,7 +408,8 @@ typedef enum rocprofiler_runtime_library_t
     ROCPROFILER_RCCL_LIBRARY      = (1 << 4),
     ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
     ROCPROFILER_ROCJPEG_LIBRARY   = (1 << 6),
-    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCJPEG_LIBRARY,
+    ROCPROFILER_OMPT_LIBRARY      = (1 << 7),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_OMPT_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -441,6 +442,7 @@ typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performan
     ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,       ///< Application loaded RCCL runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecoder runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG,    ///< Application loaded rocJPEG runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_OMPT,       ///< Application loaded OMPT runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 

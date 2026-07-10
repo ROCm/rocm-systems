@@ -121,19 +121,13 @@ class TestROCTx(RocprofsysTest):
 
     BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode",
         [
-            "baseline",
-            "binary_rewrite",
-            "sys_run",
-            pytest.param(
-                "runtime_instrument",
-                marks=[
-                    pytest.mark.timeout(180),
-                ],
-            ),
+            pytest.param("baseline", marks=pytest.mark.timeout(120)),
+            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+            pytest.param("sys_run", marks=pytest.mark.timeout(120)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(180)),
         ],
     )
     def test(self, mode, roctx_env):
@@ -147,9 +141,6 @@ class TestROCTx(RocprofsysTest):
         self.assert_regex(result)
 
     @pytest.mark.timeout(120)
-    @pytest.mark.ci_disable(
-        "assert_rocpd"
-    )  # TODO: Deprecate once TheRock switches to CTest
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,

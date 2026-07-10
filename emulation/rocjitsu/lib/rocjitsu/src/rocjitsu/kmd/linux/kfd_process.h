@@ -15,6 +15,8 @@
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
@@ -52,6 +54,23 @@ public:
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
+
+  pid_t client_pid() const { return client_pid_; }
+  void set_client_pid(pid_t pid) { client_pid_ = pid; }
+
+  uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_relaxed); }
+  void retain_open() { open_ref_count_.fetch_add(1, std::memory_order_relaxed); }
+
+  /// @brief Drop one open reference; returns true when the last one is released.
+  /// @details Asserts on underflow: every release must pair with a prior open or
+  /// retain. An unbalanced release means an fd reference (primary or dup) was
+  /// tracked without retaining, which would otherwise wrap the count and leak
+  /// the process forever.
+  bool release_open() {
+    uint32_t prev = open_ref_count_.fetch_sub(1, std::memory_order_acq_rel);
+    assert(prev > 0 && "KfdProcess open refcount underflow");
+    return prev == 1;
+  }
 
   /// @brief GPU memory allocation descriptor.
   struct GpuAllocation {
@@ -140,6 +159,8 @@ public:
   // -- Per-process state --
 
   uint32_t process_id_;
+  pid_t client_pid_ = 0;
+  std::atomic<uint32_t> open_ref_count_{1};
 
   mutable std::mutex alloc_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;

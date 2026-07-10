@@ -7,9 +7,25 @@
 
 """
 Check if the necessary AMD Infinity Storage (AIS) components are installed
+and whether at least one mounted volume can use hipFile's fast path.
 
-If all necessary components are installed the program exits with exit code 0.
-If components are missing the program exits with a non-zero exit code.
+If all required components are installed and at least one volume is
+hipFile-capable the program exits with exit code 0. Otherwise it exits with a
+non-zero exit code.
+
+A volume is reported as hipFile-capable when it mirrors the fast-path
+eligibility the hipFile library enforces for a regular file:
+
+  * filesystem is xfs, or ext4 mounted with data=ordered (the ext4 default), and
+  * direct I/O (O_DIRECT) opens succeed on the filesystem.
+
+See src/amd_detail/mountinfo.cpp (fstype/journaling classification) and
+src/amd_detail/backend/fastpath.cpp (the accept rule) for the authoritative
+logic the volume scan reproduces.
+
+The BACKING column (nvme, lvm, md, ...) is informational only: a local NVMe
+(non multipath) device is required by amdgpu/kfd, but that constraint is
+enforced by the driver, not by the library's fast-path scoring.
 """
 
 # pylint: enable=invalid-name
@@ -17,10 +33,37 @@ If components are missing the program exits with a non-zero exit code.
 import argparse
 import ctypes
 import ctypes.util
+import errno
 import glob
 import gzip
 import os
 import sys
+
+# Mounts backed by these (or any non-block source) can never use the fast path.
+PSEUDO_FSTYPES = {
+    "autofs",
+    "bpf",
+    "cgroup",
+    "cgroup2",
+    "configfs",
+    "debugfs",
+    "devpts",
+    "devtmpfs",
+    "efivarfs",
+    "fuse.gvfsd-fuse",
+    "fusectl",
+    "hugetlbfs",
+    "mqueue",
+    "overlay",
+    "proc",
+    "pstore",
+    "ramfs",
+    "securityfs",
+    "squashfs",
+    "sysfs",
+    "tmpfs",
+    "tracefs",
+}
 
 
 def kernel_supports_p2pdma():
@@ -234,14 +277,286 @@ def amdgpu_supports_ais():
     return False
 
 
+class Mount:  # pylint: disable=too-few-public-methods
+    """A single parsed /proc/self/mountinfo entry."""
+
+    def __init__(self, devno, mountpoint, fstype, source, options):
+        self.devno = devno  # "maj:min"
+        self.mountpoint = mountpoint
+        self.fstype = fstype
+        self.source = source
+        self.options = options  # combined mount + super options, comma-joined
+
+    def option(self, name):
+        """Return the value of mount option `name`, or None if unset/valueless."""
+        for opt in self.options.split(","):
+            if opt == name:
+                return ""
+            if opt.startswith(name + "="):
+                return opt.split("=", 1)[1]
+        return None
+
+
+def unescape(field):
+    """Decode the octal escapes (\\040 etc.) mountinfo uses for spaces/tabs."""
+    out = []
+    i = 0
+    while i < len(field):
+        if field[i] == "\\" and field[i + 1 : i + 4].isdigit():
+            out.append(chr(int(field[i + 1 : i + 4], 8)))
+            i += 4
+        else:
+            out.append(field[i])
+            i += 1
+    return "".join(out)
+
+
+def parse_mountinfo():
+    """Parse /proc/self/mountinfo into a list of Mount objects."""
+    mounts = []
+    with open("/proc/self/mountinfo", "r", encoding="utf-8") as f:
+        for line in f:
+            fields = line.split()
+            # Fields up to the "-" separator are fixed; optional fields vary.
+            try:
+                sep = fields.index("-")
+            except ValueError:
+                continue
+            devno = fields[2]
+            mountpoint = unescape(fields[4])
+            mount_opts = fields[5]
+            fstype = fields[sep + 1]
+            source = unescape(fields[sep + 2])
+            super_opts = fields[sep + 3] if len(fields) > sep + 3 else ""
+            options = ",".join(o for o in (mount_opts, super_opts) if o)
+            mounts.append(Mount(devno, mountpoint, fstype, source, options))
+    return mounts
+
+
+def fs_supported(mount):
+    """
+    Mirror mountinfo.cpp: True if the filesystem type/journaling qualifies.
+
+    ext4 qualifies only with data=ordered (the default when no data= option is
+    present); xfs always qualifies.
+    """
+    if mount.fstype == "xfs":
+        return True
+    if mount.fstype == "ext4":
+        data = mount.option("data")
+        # A missing data= is treated as ordered to match libmount/mountinfo.cpp,
+        # which defaults to ordered when the option is absent. The effective mode
+        # also lives in /proc/fs/ext4/<dev>/options, but we deliberately mirror
+        # the C reference so our verdict matches what hipFile decides at runtime.
+        return data is None or data == "ordered"
+    return False
+
+
+def fstype_label(mount):
+    """
+    Render the filesystem type, folding ext4's journal mode in parentheses.
+
+    ext4 always journals, so we surface the data= mode (defaulting to the
+    "ordered" ext4 default) as e.g. "ext4 (ordered)". Other filesystems are
+    shown bare since the journal mode either doesn't apply or isn't expressed
+    as a data= option.
+    """
+    if mount.fstype == "ext4":
+        return f"ext4 ({mount.option('data') or 'ordered'})"
+    return mount.fstype
+
+
+def probe_odirect(mountpoint):
+    """
+    Determine O_DIRECT support by opening a temp file with O_DIRECT.
+
+    Returns True (supported), False (rejected with EINVAL), or None when it
+    could not be verified (e.g. read-only or no write permission).
+    """
+    o_direct = getattr(os, "O_DIRECT", 0)
+    if o_direct == 0:
+        # os.O_DIRECT is only defined when the C library Python was built
+        # against defines O_DIRECT; its absence reflects that build, not
+        # whether the kernel/FS supports O_DIRECT. Without the flag we can't
+        # construct the test open, so we can't verify support either way.
+        return None
+
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | o_direct
+    path = os.path.join(mountpoint, f".ais-odirect-{os.getpid()}-{os.urandom(4).hex()}")
+    fd = None
+    try:
+        fd = os.open(path, flags, 0o600)
+        return True
+    except OSError as e:
+        if e.errno == errno.EINVAL:
+            return False
+        # EROFS / EACCES / EPERM / ENOSPC etc. -> can't tell
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def backing_storage(devno):
+    """
+    Resolve a maj:min to (backing_type, disk_name) via sysfs.
+
+    `backing_type` is a single short label describing what the filesystem
+    resides on: device-mapper targets are classified from their dm/uuid
+    (lvm, mpath, crypt, dm), software RAID as md, and raw block devices from
+    their kernel name (nvme, virtio, scsi, loop). Returns (None, None) when
+    sysfs cannot be read.
+    """
+    try:
+        real = os.path.realpath(f"/sys/dev/block/{devno}")
+    except OSError:
+        return None, None
+    name = os.path.basename(real)
+
+    # device-mapper targets (lvm, multipath, crypt, ...) carry a dm/uuid whose
+    # prefix names the target type.
+    try:
+        with open(os.path.join(real, "dm", "uuid"), "r", encoding="utf-8") as f:
+            uuid = f.read().strip()
+    except OSError:
+        uuid = None
+    if uuid is not None:
+        prefix = uuid.split("-", 1)[0].lower()
+        backing = {"lvm": "lvm", "mpath": "mpath", "crypt": "crypt"}.get(prefix, "dm")
+    elif name.startswith("md"):
+        backing = "md"
+    elif name.startswith("nvme"):
+        backing = "nvme"
+    elif name.startswith(("vd", "xvd")):
+        backing = "virtio"
+    elif name.startswith(("sd", "hd", "sr")):
+        backing = "scsi"
+    elif name.startswith("loop"):
+        backing = "loop"
+    else:
+        backing = name or None
+
+    return backing, name
+
+
+def backing_supported(backing):
+    """
+    Whether the backing storage allows hipFile's direct P2P-DMA path.
+
+    hipFile is limited to local NVMe (INSTALL.md), and even multipath NVMe is
+    unsupported. Any interposing layer (LVM/dm, multipath, dm-crypt, MD RAID,
+    loopback) breaks the direct path to the device, so the kernel rejects the IO
+    at runtime (pcie_p2pdma_distance < 0) even when the filesystem and O_DIRECT
+    checks pass. Returns None when the backing could not be determined.
+    """
+    if backing is None:
+        return None
+    return backing == "nvme"
+
+
+def tri(value, unknown="?"):
+    """Render an Optional[bool] as a short cell."""
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return unknown
+
+
+def collect(mounts):
+    """Build a list of result rows for the block-backed mounts."""
+    rows = []
+    for m in mounts:
+        if m.fstype in PSEUDO_FSTYPES:
+            continue
+        # Only consider local block devices. Network filesystems (NFS
+        # "server:/export", CIFS "//server/share", sshfs, ...) are not
+        # block-backed.
+        if not m.source.startswith("/dev/"):
+            continue
+
+        backing, disk = backing_storage(m.devno)
+        supported_fs = fs_supported(m)
+        backing_ok = backing_supported(backing)
+
+        # Only probe fs types that can qualify; unsupported fs is never capable.
+        odirect = probe_odirect(m.mountpoint) if supported_fs else None
+
+        # A volume is capable only when the filesystem qualifies, the backing is
+        # a direct local NVMe (interposing layers like LVM disqualify it), and
+        # O_DIRECT works. Unknown backing leaves the verdict unverified.
+        if not supported_fs or backing_ok is False:
+            capable = False
+        elif backing_ok is None:
+            capable = None
+        else:
+            capable = odirect
+
+        rows.append(
+            {
+                "mountpoint": m.mountpoint,
+                "fstype": fstype_label(m),
+                "device": disk or m.source,
+                "backing": backing,
+                "odirect": odirect,
+                "capable": capable,
+            }
+        )
+    return rows
+
+
+def print_volume_table(rows):
+    """Print the collected volume rows as an aligned table."""
+    headers = ["MOUNTPOINT", "FSTYPE", "DEVICE", "BACKING", "O_DIRECT", "HIPFILE"]
+    table = [headers]
+    for r in rows:
+        table.append(
+            [
+                r["mountpoint"],
+                r["fstype"],
+                r["device"],
+                r["backing"] or "?",
+                tri(r["odirect"], unknown="unverified"),
+                tri(r["capable"], unknown="unverified"),
+            ]
+        )
+
+    widths = [max(len(row[i]) for row in table) for i in range(len(headers))]
+    for row in table:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+
+
+def capable_volumes():
+    """
+    Enumerate block-backed mounts and score them for hipFile capability.
+
+    Returns (rows, any_capable) where rows is the list of per-volume result
+    dicts and any_capable is True if at least one volume is confidently capable.
+    """
+    rows = collect(parse_mountinfo())
+    return rows, any(r["capable"] is True for r in rows)
+
+
 def main():
     """
-    Parse command-line arguments, check AIS support in kernel/libraries,
-    optionally print the results, and return an exit code indicating
-    whether all required components support AIS.
+    Parse command-line arguments, check AIS support in kernel/libraries and
+    mounted volumes, optionally print the results, and return an exit code
+    indicating whether all required components support AIS.
     """
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "O_DIRECT/HIPFILE columns are probed by opening a temp file with "
+            "O_DIRECT on each volume.\nThis needs write access to the mountpoint "
+            "(typically root); without it the result is\nshown as 'unverified' "
+            "rather than supported/unsupported. Re-run as root to verify."
+        ),
+    )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
         "-q", "--quiet", action="store_true", help="Silence regular output"
@@ -255,11 +570,13 @@ def main():
     args = parser.parse_args()
 
     hip_libraries = hip_runtime_supports_ais()
+    volume_rows, volumes_ok = capable_volumes()
 
     component_support = [
         ("Kernel P2PDMA support", kernel_supports_p2pdma()),
         ("HIP runtime", any(hip_libraries.values())),
         ("amdgpu", amdgpu_supports_ais()),
+        ("hipFile-capable volume", volumes_ok),
     ]
 
     if not args.quiet:
@@ -276,6 +593,13 @@ def main():
                 else:
                     pretty_supported = "NOT supported"
                 print(f"\t{lib} (AIS {pretty_supported})")
+
+        print()
+        print("Mounted volumes:")
+        if volume_rows:
+            print_volume_table(volume_rows)
+        else:
+            print("No block-backed volumes found.")
 
         print()
         print("AIS support in:")

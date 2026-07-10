@@ -24,6 +24,16 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// gfx1250 cluster async-to-LDS uses the low M0 bits as a destination
+/// workgroup-rank mask. Dispatch validation keeps cluster size within this
+/// architectural mask width.
+constexpr uint32_t kClusterMulticastMaskBits = 16;
+constexpr uint32_t kClusterMulticastMask = (1u << kClusterMulticastMaskBits) - 1u;
+
+constexpr uint32_t cluster_multicast_rank_mask(uint32_t cluster_rank) {
+  return cluster_rank < kClusterMulticastMaskBits ? (1u << cluster_rank) : 0u;
+}
+
 /// @brief Pipeline routing tags for AMDGPU memory instructions.
 enum MemPipelineTag : uint8_t {
   SCALAR_MEM = 1,
@@ -91,18 +101,29 @@ struct VectorMemState : DynamicInstState {
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
   bool non_temporal = false;
+  // Keep this outside Mtype: cluster loads force only the request-side vector
+  // L1 lookup to miss, while mtype must still preserve the instruction/PTE
+  // cacheability and response policy used by the downstream memory path.
+  bool request_force_l1_bypass = false;
   bool sign_extend = false;
   bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
   bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
   bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
-  uint32_t lds_base = 0;               ///< M0 value for LDS-destination buffer loads.
-  bool lds_per_lane_addr = false;      ///< Use per_lane_lds_addr for LDS destination addresses.
+  /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
+  /// paths this may include the lane-0 destination offset. For cluster
+  /// multicast this must be exactly Wavefront::lds_base(), the source WG
+  /// allocation base; per-lane destination offsets are carried in
+  /// per_lane_lds_addr.
+  uint32_t lds_base = 0;
+  bool lds_per_lane_addr = false; ///< Use per_lane_lds_addr for LDS destination addresses.
   std::array<uint32_t, 64> per_lane_lds_addr = {};
-  uint64_t issue_pc = 0; ///< PC at which the instruction was issued (debug).
-  uint32_t wg_id = 0;    ///< Workgroup ID (for trace output).
-  uint32_t wf_id = 0;    ///< Wavefront ID within WG (for trace output).
-  std::string cu_path;   ///< CU full path (for trace output).
+  bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
+  uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
+  uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
+  uint32_t wg_id = 0;              ///< Workgroup ID (for trace output).
+  uint32_t wf_id = 0;              ///< Wavefront ID within WG (for trace output).
+  std::string cu_path;             ///< CU full path (for trace output).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).

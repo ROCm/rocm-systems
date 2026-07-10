@@ -213,7 +213,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_);
+  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
