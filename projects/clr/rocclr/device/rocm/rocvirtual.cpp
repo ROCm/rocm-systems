@@ -1575,13 +1575,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   profilingBegin(*vcmd);
   dispatchBlockingWait(nullptr);
 
-  // Resolve kernel names at dispatch time from KernelMap — one entry per kernel
-  // dispatch slot (base HSA_PACKET_TYPE_KERNEL_DISPATCH and AMD ext variants),
-  // parallel to timestamps_ populated at signal completion. Stable const char*
-  // into Kernel objects that live for the device lifetime. No copies, no
-  // GraphExec coupling. Non-dispatch slots (barriers, memcpy) are skipped so
-  // kernelNames_ and timestamps_ always have the same cardinality.
-  {
+  // Resolve kernel names only when profiling is active. Gated to preserve the
+  // fast path for non-profiled launches (no KernelMap lookup, no memcpy).
+  // One entry per kernel dispatch slot (base and AMD ext variants), parallel to
+  // timestamps_ populated at signal completion. Non-dispatch slots are skipped.
+  if (vcmd->profilingInfo().enabled_) {
     static constexpr size_t kPacketSize = 64;
     static constexpr size_t kBaseKernelObjectOffset =
         offsetof(hsa_kernel_dispatch_packet_t, kernel_object);
