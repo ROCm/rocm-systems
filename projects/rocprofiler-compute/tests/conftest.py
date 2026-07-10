@@ -15,6 +15,8 @@ from unittest.mock import patch
 import pytest
 from common import ROOT
 
+from utils.analysis_orm import Database
+
 # Determine script path
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
 if not rocprof_compute_script_path.exists():
@@ -212,6 +214,16 @@ def require_triton(*, gpu: bool = False) -> None:
         import triton  # noqa: F401
     except Exception as e:
         pytest.skip(f"Triton import failed: {type(e).__name__}: {e}")
+
+
+@pytest.fixture
+def db_session():
+    """An initialized in-memory analysis database, torn down after the test."""
+    Database.init(":memory:")
+    yield Database.get_session()
+    Database._session.close()
+    Database._session = None
+    Database._engine = None
 
 
 @pytest.fixture(autouse=True)

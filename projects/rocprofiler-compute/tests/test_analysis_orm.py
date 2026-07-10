@@ -49,16 +49,6 @@ def test_json_sanitize(value, expected):
     assert Database._json_sanitize(value) == expected
 
 
-@pytest.fixture
-def db_session():
-    """An initialized in-memory database, torn down after the test."""
-    Database.init(":memory:")
-    yield Database.get_session()
-    Database._session.close()
-    Database._session = None
-    Database._engine = None
-
-
 def add_kernel_with_durations(
     session, workload: Workload, name: str, durations: list[int]
 ) -> Kernel:
