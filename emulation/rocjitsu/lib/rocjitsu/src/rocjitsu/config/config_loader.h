@@ -7,8 +7,9 @@
 #ifndef ROCJITSU_CONFIG_CONFIG_LOADER_H_
 #define ROCJITSU_CONFIG_CONFIG_LOADER_H_
 
-#include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/soc.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/config/dbt_guest_config.h"
+#include "rocjitsu/config/kfd_device_config.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -20,6 +21,12 @@
 #include <vector>
 
 namespace rocjitsu {
+class SoC;
+namespace amdgpu {
+class GpuMemory;
+class Xcd;
+} // namespace amdgpu
+
 namespace config {
 
 /// @brief Result of building a declarative topology.
@@ -49,51 +56,6 @@ struct TopologyBuildResult {
 ///   loaded.wire_links(engine.topology());
 ///   engine.build();
 /// @endcode
-/// @brief KFD device identity extracted from vm.gpu.device in the config.
-/// All values use the same names as Sysfs::GpuInfo fields for easy mapping.
-struct KfdDeviceConfig {
-  uint32_t gpu_id = 0;
-  uint32_t gfx_target_version = 0;
-  uint32_t vendor_id = 0x1002;
-  uint32_t device_id = 0;
-  uint32_t family_id = 0;
-  uint64_t unique_id = 0;
-  std::string marketing_name;
-  uint32_t drm_render_minor = 128;
-  uint32_t revision_id = 0;
-  uint32_t pci_revision_id = 0;
-  uint32_t simd_count = 0;
-  uint32_t max_waves_per_simd = 10;
-  uint32_t num_shader_engines = 0; ///< KFD array_count: total shader arrays.
-  uint32_t num_shader_arrays_per_engine = 1;
-  uint32_t num_cu_per_sh = 0;
-  uint32_t simd_per_cu = 4;
-  uint32_t wave_front_size = 64;
-  uint32_t max_slots_scratch_cu = 32;
-  uint64_t local_mem_size = 0;
-  uint32_t vram_type = 6;
-  uint32_t lds_size_kb = 64;
-  uint32_t mem_width = 4096;
-  uint32_t mem_clk_max = 1200;
-  uint32_t l1_size_kb = 32;
-  uint32_t l1_line_size = 128;
-  uint32_t l1_assoc = 4;
-  uint32_t l2_size_kb = 4096;
-  uint32_t l2_line_size = 128;
-  uint32_t l2_assoc = 16;
-  uint32_t num_sdma_engines = 2;
-  uint32_t num_sdma_xgmi_engines = 0;
-  uint32_t num_cp_queues = 128;
-  uint32_t max_engine_clk_fcompute = 2100;
-  uint32_t location_id = 0x0300;
-  uint64_t hive_id = 0;
-  uint32_t domain = 0;
-  uint32_t capability = 0;
-  uint32_t capability2 = 0;
-  uint64_t debug_prop = 0;
-  bool present = false; ///< True if device section existed in config.
-};
-
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
   TopologyBuildResult build_result;
@@ -101,6 +63,7 @@ struct LoadedConfig {
       extra_gpu_builds; ///< Additional GPU SoC trees (for num_gpus > 1).
   simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL;
   KfdDeviceConfig device;               ///< KFD device identity from vm.gpu.device.
+  DbtGuestConfig dbt_guest;             ///< Optional DBT guest-GPU discovery config.
   uint32_t num_gpus = 1;                ///< Number of simulated GPU instances.
   std::vector<KfdDeviceConfig> devices; ///< Per-GPU configs (populated when num_gpus > 1).
 

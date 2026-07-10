@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file simulated_driver_test.cpp
-/// @brief Tests for SimulatedDriver creation, open/close, and topology generation.
+/// @file simulated_kfd_test.cpp
+/// @brief Tests for SimulatedKfd creation, open/close, and topology generation.
 
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
@@ -24,7 +24,7 @@ struct TestVM {
   rocjitsu::config::LoadedConfig loaded;
   std::unique_ptr<simdojo::SimulationEngine> engine;
 
-  rocjitsu::SimulatedDriver *driver() {
+  rocjitsu::SimulatedKfd *driver() {
     auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
     return vm ? vm->driver() : nullptr;
   }
@@ -53,17 +53,17 @@ TestVM create_test_vm() {
   return t;
 }
 
-class SimulatedDriverTest : public ::testing::Test {
+class SimulatedKfdTest : public ::testing::Test {
 protected:
   void SetUp() override { setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1); }
 };
 
-TEST_F(SimulatedDriverTest, CreateDefault) {
+TEST_F(SimulatedKfdTest, CreateDefault) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
 }
 
-TEST_F(SimulatedDriverTest, OpenAndClose) {
+TEST_F(SimulatedKfdTest, OpenAndClose) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
 
@@ -74,7 +74,7 @@ TEST_F(SimulatedDriverTest, OpenAndClose) {
   EXPECT_EQ(ret, 0);
 }
 
-TEST_F(SimulatedDriverTest, TopologyDirectoryExists) {
+TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
 
