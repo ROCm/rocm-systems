@@ -3,10 +3,9 @@
 
 """Code-object disassembly analysis utilities.
 
-Helpers for parsing the ``<pid>_code_obj_info.json`` artifact emitted by the
-native PC sampling collector into a normalized per-code-object instruction tree.
-The artifact holds the full disassembly of every loaded code object, including
-instructions that were never sampled.
+Parse the per-process code-object info artifact emitted by the native PC
+sampling collector into a per-code-object instruction tree. The artifact holds
+the full disassembly of every loaded code object, including un-sampled ones.
 """
 
 import json
@@ -34,11 +33,10 @@ class CodeObjectDisassembly(NamedTuple):
 
 
 def parse_code_object_info(data: dict[str, Any]) -> list[CodeObjectDisassembly]:
-    """Flatten a parsed ``code_obj_info.json`` dict into per-object instructions.
+    """Flatten a parsed code-object info dict into per-object instructions.
 
     Each code object owns several symbols; every symbol carries its own
-    instruction list. The instructions are flattened per code object and keyed
-    by ``virtual_address`` (the axis the analysis DB joins on).
+    instruction list, flattened here into one list per code object.
     """
     return [
         CodeObjectDisassembly(
@@ -56,9 +54,9 @@ def parse_code_object_info(data: dict[str, Any]) -> list[CodeObjectDisassembly]:
 def load_code_object_disassemblies(
     workload_path: str,
 ) -> dict[int, list[CodeObjectDisassembly]]:
-    """Discover and parse every ``<pid>_code_obj_info.json`` under a workload.
+    """Discover and parse every code-object info file under a workload.
 
-    Returns a ``{pid: disassemblies}`` map. A file whose name does not start with
+    Returns a pid to disassemblies map. A file whose name does not start with
     an integer pid, or that fails to parse, is skipped with a warning.
     """
     disassemblies_per_pid: dict[int, list[CodeObjectDisassembly]] = {}
@@ -76,7 +74,7 @@ def load_code_object_disassemblies(
 
 
 def _parse_pid(json_path: Path) -> Optional[int]:
-    """Extract the leading integer pid from a ``<pid>_code_obj_info.json`` name."""
+    """Extract the leading integer pid from a code-object info filename."""
     pid_text = json_path.name.split("_", 1)[0]
     if not pid_text.isdigit():
         console_warning(f"Code object info: no pid prefix in {json_path.name}")

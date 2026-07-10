@@ -4,9 +4,11 @@
 """Unit tests for analysis_db.py static methods."""
 
 import json
+from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+import common
 import numpy as np
 import pandas as pd
 import pytest
@@ -945,13 +947,6 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
 # =============================================================================
 
 
-def write_code_obj_info(workload_path, pid, code_objects):
-    """Write a <pid>_code_obj_info.json artifact into a workload directory."""
-    path = workload_path / f"{pid}_code_obj_info.json"
-    path.write_text(json.dumps({"code_objects": code_objects}), encoding="utf-8")
-    return path
-
-
 def make_disasm_code_object(code_object_id, instructions):
     """Build one code_obj_info code object with a single symbol."""
     return {
@@ -960,16 +955,15 @@ def make_disasm_code_object(code_object_id, instructions):
     }
 
 
-def test_add_code_object_isa_backfills_unsampled_lines(db_session, tmp_path):
+def test_add_code_object_isa_backfills_unsampled_lines(db_session):
     """Un-sampled instructions are inserted with kernel NULL; a disassembly
     offset that matches an already-sampled offset inserts no duplicate row."""
-    workload_path = str(tmp_path)
+    workload_path = common.get_output_dir()
+    Path(workload_path).mkdir(parents=True, exist_ok=True)
     load_base = 0x1000
-    # 0x1010 -> offset 0x10 is already sampled; 0x1030 -> offset 0x30 is new.
-    write_code_obj_info(
-        tmp_path,
-        42,
-        [
+    try:
+        # 0x1010 -> offset 0x10 is already sampled; 0x1030 -> offset 0x30 is new.
+        code_objects = [
             make_disasm_code_object(
                 5,
                 [
@@ -985,111 +979,118 @@ def test_add_code_object_isa_backfills_unsampled_lines(db_session, tmp_path):
                     },
                 ],
             )
-        ],
-    )
+        ]
+        (Path(workload_path) / "42_code_obj_info.json").write_text(
+            json.dumps({"code_objects": code_objects}), encoding="utf-8"
+        )
 
-    workload = orm.Workload(name="w", sub_name="s")
-    db_session.add(workload)
-    kernel_objs = {
-        "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
-        "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
-    }
-    for kernel in kernel_objs.values():
-        db_session.add(kernel)
+        workload = orm.Workload(name="w", sub_name="s")
+        db_session.add(workload)
+        kernel_objs = {
+            "vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload),
+            "vecAdd": orm.Kernel(kernel_name="vecAdd", workload=workload),
+        }
+        for kernel in kernel_objs.values():
+            db_session.add(kernel)
 
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pc_sampling_tool_data_per_workload = {
-        workload_path: make_pc_sampling_tool_data()
-    }
-    catalog = analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
-    analyzer.add_code_object_isa(workload_path, workload, catalog)
-    db_session.commit()
+        analyzer = db_analysis(MagicMock(), {})
+        analyzer._pc_sampling_tool_data_per_workload = {
+            workload_path: make_pc_sampling_tool_data()
+        }
+        analyzer.add_pc_sampling_data(workload_path, workload, kernel_objs)
+        analyzer.add_code_object_isa(workload_path, workload)
+        db_session.commit()
 
-    lines = db_session.query(orm.InstructionLine).all()
-    by_offset = {line.code_object_offset: line for line in lines}
-    # Two sampled offsets + one new un-sampled offset, no duplicate at 0x10.
-    assert set(by_offset) == {0x10, 0x20, 0x30}
-    # The backfilled line is un-attributed and has no sample state.
-    backfilled = by_offset[0x30]
-    assert backfilled.kernel is None
-    assert backfilled.pc_sample_state is None
-    assert backfilled.instruction == "s_nop"
-    # The sampled line at 0x10 kept its kernel attribution and sample state.
-    assert by_offset[0x10].kernel.kernel_name == "vecCopy"
-    assert by_offset[0x10].pc_sample_state is not None
-    # Both belong to the same (reused) code object store.
-    assert backfilled.code_object_store is by_offset[0x10].code_object_store
+        lines = db_session.query(orm.InstructionLine).all()
+        by_offset = {line.code_object_offset: line for line in lines}
+        # Two sampled offsets + one new un-sampled offset, no duplicate at 0x10.
+        assert set(by_offset) == {0x10, 0x20, 0x30}
+        # The backfilled line is un-attributed and has no sample state.
+        backfilled = by_offset[0x30]
+        assert backfilled.kernel is None
+        assert backfilled.pc_sample_state is None
+        assert backfilled.instruction == "s_nop"
+        # The sampled line at 0x10 kept its kernel attribution and sample state.
+        assert by_offset[0x10].kernel.kernel_name == "vecCopy"
+        assert by_offset[0x10].pc_sample_state is not None
+        # Both belong to the same (reused) code object store.
+        assert backfilled.code_object_store is by_offset[0x10].code_object_store
+    finally:
+        common.clean_output_dir(True, workload_path)
 
 
-def test_add_code_object_isa_creates_store_for_unsampled_code_object(
-    db_session, tmp_path
-):
+def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session):
     """A code object present only in code_obj_info gets a new store, using the
     load_base from the ps_file catalog."""
-    workload_path = str(tmp_path)
-    tool_data = make_pc_sampling_tool_data()
-    # Catalog knows code object 9 (load_base) but it was never sampled.
-    tool_data["code_objects"].append({"code_object_id": 9, "load_base": 0x2000})
-    write_code_obj_info(
-        tmp_path,
-        42,
-        [
+    workload_path = common.get_output_dir()
+    Path(workload_path).mkdir(parents=True, exist_ok=True)
+    try:
+        tool_data = make_pc_sampling_tool_data()
+        # Catalog knows code object 9 (load_base) but it was never sampled.
+        tool_data["code_objects"].append({"code_object_id": 9, "load_base": 0x2000})
+        code_objects = [
             make_disasm_code_object(
                 9,
-                [
-                    {
-                        "virtual_address": 0x2000 + 0x8,
-                        "name": "s_endpgm",
-                        "comment": "",
-                    }
-                ],
+                [{"virtual_address": 0x2000 + 0x8, "name": "s_endpgm", "comment": ""}],
             )
-        ],
-    )
+        ]
+        (Path(workload_path) / "42_code_obj_info.json").write_text(
+            json.dumps({"code_objects": code_objects}), encoding="utf-8"
+        )
 
-    workload = orm.Workload(name="w", sub_name="s")
-    db_session.add(workload)
+        workload = orm.Workload(name="w", sub_name="s")
+        db_session.add(workload)
 
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
-    catalog = analyzer.add_pc_sampling_data(workload_path, workload, {})
-    analyzer.add_code_object_isa(workload_path, workload, catalog)
-    db_session.commit()
+        analyzer = db_analysis(MagicMock(), {})
+        analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
+        analyzer.add_pc_sampling_data(workload_path, workload, {})
+        analyzer.add_code_object_isa(workload_path, workload)
+        db_session.commit()
 
-    store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
-    assert store.pid == 42
-    assert store.load_base == 0x2000
-    line = db_session.query(orm.InstructionLine).filter_by(code_object_offset=0x8).one()
-    assert line.code_object_store is store
-    assert line.kernel is None
+        store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
+        assert store.pid == 42
+        assert store.load_base == 0x2000
+        line = (
+            db_session
+            .query(orm.InstructionLine)
+            .filter_by(code_object_offset=0x8)
+            .one()
+        )
+        assert line.code_object_store is store
+        assert line.kernel is None
+    finally:
+        common.clean_output_dir(True, workload_path)
 
 
-def test_add_code_object_isa_skips_code_object_without_load_base(db_session, tmp_path):
+def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
     """A code object with no known load_base cannot be offset-mapped, so it is
     skipped rather than stored with an inconsistent offset."""
-    workload_path = str(tmp_path)
-    tool_data = make_pc_sampling_tool_data()
-    tool_data["code_objects"].append({"code_object_id": 9, "load_base": None})
-    write_code_obj_info(
-        tmp_path,
-        42,
-        [
+    workload_path = common.get_output_dir()
+    Path(workload_path).mkdir(parents=True, exist_ok=True)
+    try:
+        tool_data = make_pc_sampling_tool_data()
+        tool_data["code_objects"].append({"code_object_id": 9, "load_base": None})
+        code_objects = [
             make_disasm_code_object(
                 9,
                 [{"virtual_address": 0x500, "name": "s_endpgm", "comment": ""}],
             )
-        ],
-    )
+        ]
+        (Path(workload_path) / "42_code_obj_info.json").write_text(
+            json.dumps({"code_objects": code_objects}), encoding="utf-8"
+        )
 
-    workload = orm.Workload(name="w", sub_name="s")
-    db_session.add(workload)
+        workload = orm.Workload(name="w", sub_name="s")
+        db_session.add(workload)
 
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
-    catalog = analyzer.add_pc_sampling_data(workload_path, workload, {})
-    analyzer.add_code_object_isa(workload_path, workload, catalog)
-    db_session.commit()
+        analyzer = db_analysis(MagicMock(), {})
+        analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data}
+        analyzer.add_pc_sampling_data(workload_path, workload, {})
+        analyzer.add_code_object_isa(workload_path, workload)
+        db_session.commit()
 
-    # No instruction line was inserted for code object 9.
-    store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
-    assert store.instruction_lines == []
+        # No instruction line was inserted for code object 9.
+        store = db_session.query(orm.CodeObjectStore).filter_by(code_object_id=9).one()
+        assert store.instruction_lines == []
+    finally:
+        common.clean_output_dir(True, workload_path)

@@ -4,7 +4,6 @@
 import ast
 import re
 import warnings
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -85,21 +84,6 @@ class ExpressionRow(NamedTuple):
     metric_id: str
     value_name: str
     value: str
-
-
-@dataclass
-class CodeObjectStoreCatalog:
-    """Code-object stores and their inserted offsets, keyed by (pid, id).
-
-    Lets the sampled-rows pass hand its stores and offsets to the ISA-backfill
-    pass so the latter reuses rows and skips already-inserted offsets (the PK
-    uuids are unassigned until flush, so dedup is tracked in Python).
-    """
-
-    stores: dict[tuple[Optional[int], int], orm.CodeObjectStore] = field(
-        default_factory=dict
-    )
-    offsets: dict[tuple[Optional[int], int], set[int]] = field(default_factory=dict)
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -231,11 +215,9 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 )
 
-            # Add pc sampling data, then backfill the full code-object ISA
-            code_object_catalog = self.add_pc_sampling_data(
-                workload_path, workload_obj, kernel_objs
-            )
-            self.add_code_object_isa(workload_path, workload_obj, code_object_catalog)
+            # Add pc sampling data, then the full code-object ISA
+            self.add_pc_sampling_data(workload_path, workload_obj, kernel_objs)
+            self.add_code_object_isa(workload_path, workload_obj)
 
             # Add metrics and values - iterate on values, create metrics as needed
             self.run_analysis_metrics(workload_path, workload_obj, kernel_objs)
@@ -411,16 +393,11 @@ class db_analysis(OmniAnalyze_Base):
         workload_path: str,
         workload_obj: orm.Workload,
         kernel_objs: dict[str, orm.Kernel],
-    ) -> "CodeObjectStoreCatalog":
-        """Insert the normalized PC-sampling rows for one workload.
-
-        Returns the code-object stores and the offsets already inserted per store,
-        so ``add_code_object_isa`` can reuse the rows and skip sampled offsets.
-        """
-        catalog = CodeObjectStoreCatalog()
+    ) -> None:
+        """Insert the normalized PC-sampling rows for one workload."""
         tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
         if tool_data is None:
-            return catalog
+            return
 
         pid = tool_data.get("metadata", {}).get("pid")
 
@@ -432,36 +409,41 @@ class db_analysis(OmniAnalyze_Base):
                 workload=workload_obj,
             )
             Database.get_session().add(code_object_store)
-            key = (pid, code_object.code_object_id)
-            catalog.stores[key] = code_object_store
             for line in code_object.instruction_lines:
-                self._add_instruction_line(line, code_object_store, kernel_objs)
-                catalog.offsets.setdefault(key, set()).add(line.code_object_offset)
-        return catalog
+                instruction_line = orm.InstructionLine(
+                    code_object_offset=line.code_object_offset,
+                    comment=line.comment,
+                    instruction=line.instruction,
+                    code_object_store=code_object_store,
+                    kernel=kernel_objs.get(line.kernel_name),
+                )
+                Database.get_session().add(instruction_line)
+                self._add_sample_state(line, instruction_line)
 
     def add_code_object_isa(
         self,
         workload_path: str,
         workload_obj: orm.Workload,
-        catalog: "CodeObjectStoreCatalog",
     ) -> None:
-        """Backfill un-sampled instruction lines from the code-object disassembly.
+        """Add the full code-object disassembly as instruction lines.
 
-        Every disassembled instruction not already sampled is inserted with
-        ``kernel_uuid`` NULL (per-kernel attribution is the native mapping PR's
-        job). Offsets are in the same ps-space as the sampled rows
-        (``virtual_address - load_base``).
+        Instructions PC-sampling already inserted are left alone; the rest get
+        no kernel (kernel attribution of the disassembly is a separate concern).
         """
         tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
         load_base_by_id = {
             code_object["code_object_id"]: code_object.get("load_base")
             for code_object in (tool_data or {}).get("code_objects", [])
         }
+        # Reuse the stores PC-sampling made so we add to them, not duplicate.
+        stores = {
+            (store.pid, store.code_object_id): store
+            for store in workload_obj.code_object_stores
+        }
 
         for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
             for disassembly in disassemblies:
-                key = (pid, disassembly.code_object_id)
-                store = catalog.stores.get(key)
+                store = stores.get((pid, disassembly.code_object_id))
                 if store is None:
                     store = orm.CodeObjectStore(
                         pid=pid,
@@ -470,23 +452,14 @@ class db_analysis(OmniAnalyze_Base):
                         workload=workload_obj,
                     )
                     Database.get_session().add(store)
-                    catalog.stores[key] = store
-                self._add_disassembly_lines(
-                    disassembly, store, catalog.offsets.setdefault(key, set())
-                )
+                    stores[(pid, disassembly.code_object_id)] = store
+                self._add_disassembly_lines(disassembly, store)
 
     @staticmethod
     def _add_disassembly_lines(
         disassembly: CodeObjectDisassembly,
         code_object_store: orm.CodeObjectStore,
-        existing_offsets: set[int],
     ) -> None:
-        """Insert un-sampled instruction lines for one code object.
-
-        Skips the object when ``load_base`` is unknown (no ps-space offset can be
-        derived) and skips any offset already present (a sampled row exists, or a
-        duplicate disassembly entry).
-        """
         if code_object_store.load_base is None:
             console_debug(
                 "Code object info: skipping code object "
@@ -494,6 +467,10 @@ class db_analysis(OmniAnalyze_Base):
             )
             return
 
+        # Offsets PC-sampling already inserted for this code object.
+        existing_offsets = {
+            line.code_object_offset for line in code_object_store.instruction_lines
+        }
         for instruction in disassembly.instructions:
             code_object_offset = (
                 instruction.virtual_address - code_object_store.load_base
@@ -512,26 +489,11 @@ class db_analysis(OmniAnalyze_Base):
             )
 
     @staticmethod
-    def _add_instruction_line(
+    def _add_sample_state(
         line: InstructionLineRecord,
-        code_object_store: orm.CodeObjectStore,
-        kernel_objs: dict[str, orm.Kernel],
+        instruction_line: orm.InstructionLine,
     ) -> None:
-        """Insert one instruction line, its sample state, and child counts."""
-        kernel = kernel_objs.get(line.kernel_name)
-        if kernel is None:
-            # Drop lines whose kernel was filtered out or never mapped.
-            return
-
-        instruction_line = orm.InstructionLine(
-            code_object_offset=line.code_object_offset,
-            comment=line.comment,
-            instruction=line.instruction,
-            code_object_store=code_object_store,
-            kernel=kernel,
-        )
-        Database.get_session().add(instruction_line)
-
+        """Add the sample state and its stall-reason and inst-type counts."""
         sample_state = orm.PCSampleState(
             total_count=line.total_count,
             issue_count=line.issue_count,

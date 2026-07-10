@@ -2,6 +2,9 @@
 # SPDX-License-Identifier:  MIT
 
 import json
+from pathlib import Path
+
+import common
 
 from pc_sampling.code_object_analysis import (
     CodeObjectDisassembly,
@@ -104,29 +107,48 @@ def test_parse_code_object_without_symbols_yields_no_instructions():
     ]
 
 
-def _write(path, code_objects):
-    path.write_text(json.dumps(make_code_obj_info(code_objects)), encoding="utf-8")
+def test_load_discovers_files_and_parses_pid():
+    workload_dir = Path(common.get_output_dir())
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (workload_dir / "123_code_obj_info.json").write_text(
+            json.dumps(make_code_obj_info([make_code_object(1, [])])), encoding="utf-8"
+        )
+        (workload_dir / "sub").mkdir()
+        (workload_dir / "sub" / "456_code_obj_info.json").write_text(
+            json.dumps(make_code_obj_info([make_code_object(2, [])])), encoding="utf-8"
+        )
+
+        result = load_code_object_disassemblies(str(workload_dir))
+
+        assert set(result) == {123, 456}
+        assert result[123][0].code_object_id == 1
+        assert result[456][0].code_object_id == 2
+    finally:
+        common.clean_output_dir(True, str(workload_dir))
 
 
-def test_load_discovers_files_and_parses_pid(tmp_path):
-    _write(tmp_path / "123_code_obj_info.json", [make_code_object(1, [])])
-    (tmp_path / "sub").mkdir()
-    _write(tmp_path / "sub" / "456_code_obj_info.json", [make_code_object(2, [])])
+def test_load_skips_file_without_pid_prefix():
+    workload_dir = Path(common.get_output_dir())
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (workload_dir / "code_obj_info.json").write_text(
+            json.dumps(make_code_obj_info([make_code_object(1, [])])), encoding="utf-8"
+        )
 
-    result = load_code_object_disassemblies(str(tmp_path))
-
-    assert set(result) == {123, 456}
-    assert result[123][0].code_object_id == 1
-    assert result[456][0].code_object_id == 2
-
-
-def test_load_skips_file_without_pid_prefix(tmp_path):
-    _write(tmp_path / "code_obj_info.json", [make_code_object(1, [])])
-
-    assert load_code_object_disassemblies(str(tmp_path)) == {}
+        assert load_code_object_disassemblies(str(workload_dir)) == {}
+    finally:
+        common.clean_output_dir(True, str(workload_dir))
 
 
-def test_load_skips_malformed_json(tmp_path):
-    (tmp_path / "123_code_obj_info.json").write_text("{not json", encoding="utf-8")
+def test_load_skips_malformed_json():
+    workload_dir = Path(common.get_output_dir())
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        (workload_dir / "123_code_obj_info.json").write_text(
+            "{not json", encoding="utf-8"
+        )
 
-    assert load_code_object_disassemblies(str(tmp_path)) == {}
+        assert load_code_object_disassemblies(str(workload_dir)) == {}
+    finally:
+        common.clean_output_dir(True, str(workload_dir))
