@@ -383,13 +383,13 @@ TEST_F(KfdIoctlTest, DbgTrapEnablePopulatesRuntimeInfoThenDisable) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &dis), 0);
 }
 
-TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEINVAL) {
+TEST_F(KfdIoctlTest, DbgTrapDoubleEnableReturnsEALREADY) {
   kfd_ioctl_dbg_trap_args args{};
   args.pid = static_cast<uint32_t>(getpid());
   args.op = KFD_IOC_DBG_TRAP_ENABLE;
   args.enable.dbg_fd = KFD_INVALID_FD;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), 0);
-  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EINVAL);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &args), -EALREADY);
 }
 
 TEST_F(KfdIoctlTest, DbgTrapHwOpWithoutRuntimeReturnsEPERM) {
