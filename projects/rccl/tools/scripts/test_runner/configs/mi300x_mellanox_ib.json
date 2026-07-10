@@ -732,7 +732,8 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
-        "NCCL_DEBUG": "INFO"
+        "NCCL_DEBUG": "INFO",
+        "NCCL_CUMEM_ENABLE": "1"
       },
       "tests": [
         {
