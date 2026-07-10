@@ -51,7 +51,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
     uint32_t roi_width;
     uint32_t roi_height;
     uint8_t num_components;
-    uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
+    size_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
     std::string chroma_sub_sampling = "";
     uint32_t num_channels = 0;
     double image_size_in_mpixels_all = 0;
@@ -60,7 +60,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
     std::vector<std::vector<char>> batch_images(batch_size);
     std::vector<std::vector<uint32_t>> widths(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
     std::vector<std::vector<uint32_t>> heights(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
-    std::vector<std::vector<uint32_t>> allocated_channel_sizes(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+    std::vector<std::vector<size_t>> allocated_channel_sizes(batch_size, std::vector<size_t>(ROCJPEG_MAX_COMPONENT, 0));
     std::vector<RocJpegChromaSubsampling> subsamplings(batch_size);
     std::vector<RocJpegImage> output_images(batch_size);
     std::vector<RocJpegDecodeParams> decode_params_batch(batch_size, decode_params);

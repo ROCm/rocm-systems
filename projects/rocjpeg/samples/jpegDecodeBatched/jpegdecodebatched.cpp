@@ -26,10 +26,10 @@ int main(int argc, char **argv) {
     int device_id = 0;
     bool save_images = false;
     uint8_t num_components;
-    uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
+    size_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
     std::vector<std::vector<uint32_t>> widths;
     std::vector<std::vector<uint32_t>> heights;
-    std::vector<std::vector<uint32_t>> prior_channel_sizes;
+    std::vector<std::vector<size_t>> prior_channel_sizes;
     uint32_t num_channels = 0;
     int total_images = 0;
     int batch_size = 2;
@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     batch_images.resize(batch_size);
     output_images.resize(batch_size);
     decode_params_batch.resize(batch_size, decode_params);
-    prior_channel_sizes.resize(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
+    prior_channel_sizes.resize(batch_size, std::vector<size_t>(ROCJPEG_MAX_COMPONENT, 0));
     widths.resize(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
     heights.resize(batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
     subsamplings.resize(batch_size);

@@ -28,8 +28,8 @@ int main(int argc, char **argv) {
     uint8_t num_components;
     uint32_t widths[ROCJPEG_MAX_COMPONENT] = {};
     uint32_t heights[ROCJPEG_MAX_COMPONENT] = {};
-    uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
-    uint32_t prior_channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
+    size_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
+    size_t prior_channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
     uint32_t num_channels = 0;
     int total_images = 0;
     double time_per_image_all = 0;

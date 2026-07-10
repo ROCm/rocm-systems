@@ -11,7 +11,7 @@ Documentation for rocJPEG is available at
 
 ### Fixed
 
-* Fixed a potential 32-bit integer overflow in the sample `SaveImage()` host-buffer size calculation that could produce an undersized buffer for large images. Size arithmetic is now performed in `size_t`.
+* Fixed a potential 32-bit integer overflow in the sample `SaveImage()` and `GetChannelPitchAndSizes()` channel-size calculations that could produce an undersized buffer or device allocation for large images. Size arithmetic is now performed in `size_t`.
 
 ## rocJPEG 1.6.0 for ROCm 7.14
 
