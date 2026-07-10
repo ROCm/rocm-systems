@@ -1360,7 +1360,7 @@ class AMDSMILogger:
         # print process list of all GPUs last
         print(default_line_1)
         print("| Processes:                                                                   |")
-        print("|  GPU      PID  Process Name       GTT_MEM  VRAM_MEM  MEM_USAGE  CU %  SDMA   |")
+        print("|  GPU      PID  Process Name     GTT_MEM  VRAM_MEM  MEM_USAGE   CU %     SDMA |")
         print(default_line_5)
         elevated_permission_error = False
         if len(output["processes"]) != 0:
@@ -1368,9 +1368,9 @@ class AMDSMILogger:
                 gpu_id = str(process["gpu"]).rjust(4)
                 pid = str(process["pid"]).rjust(7)
                 if str(process["name"]) == "N/A":
-                    process_name = "N/A".ljust(16)
+                    process_name = "N/A".ljust(14)
                 else:
-                    process_name = str(process["name"]).split("/")[-1][:16].ljust(16)
+                    process_name = str(process["name"]).split("/")[-1][:14].ljust(14)
                 gtt_mem = str(process["gtt"]).rjust(8)
                 vram_mem = str(process["vram"]).rjust(8)
                 mem_usage = str(process["mem_usage"]).rjust(9)
@@ -1378,22 +1378,21 @@ class AMDSMILogger:
                     process["cu_occupancy"]["total_num_cu"] != "N/A"
                     and process["cu_occupancy"]["current_cu"] != "N/A"
                 ):
-                    cu_occupancy = (
-                        str(
-                            round(
-                                process["cu_occupancy"]["current_cu"]
-                                / process["cu_occupancy"]["total_num_cu"]
-                                * 100,
-                                1,
-                            )
+                    # Unit is conveyed by the "CU %" header; keep the value numeric so
+                    # it fits its column and stays aligned with the "N/A" case.
+                    cu_occupancy = str(
+                        round(
+                            process["cu_occupancy"]["current_cu"]
+                            / process["cu_occupancy"]["total_num_cu"]
+                            * 100,
+                            1,
                         )
-                        + " %"
                     ).rjust(5)
                 else:
                     cu_occupancy = "N/A".rjust(5)
-                sdma_usage = str(process["sdma_usage"]).rjust(5)
+                sdma_usage = str(process["sdma_usage"]).rjust(7)
                 print(
-                    "| {0:4.4s}  {1:7.7s}  {2:16.16s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:5.5s}  {7:5.5s} |".format(
+                    "| {0:4.4s}  {1:7.7s}  {2:14.14s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:5.5s}  {7:7.7s} |".format(
                         gpu_id,
                         pid,
                         process_name,
