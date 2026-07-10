@@ -1097,7 +1097,7 @@ const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
      expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
-    {cdna4::encoding::kDsOpHi3, cdna4::kDsReadB64TrB16, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx3_lds_cdna4_to_cdna3, nullptr, nullptr},
