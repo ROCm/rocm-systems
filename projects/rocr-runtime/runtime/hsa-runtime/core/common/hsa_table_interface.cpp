@@ -88,6 +88,74 @@
     return __rocm_rv;                                                                              \
   } while (0)
 
+/* ---------- HSA curated parameter-capture variants ----------
+ * Six macros: STATUS / PTR / VOID returns, each with a captured-args form
+ * and a _NOARGS form (used for curated APIs with zero captured args).
+ * Every typed helper takes (<captured-args...>, hsa_status_t status) --
+ * status comes from the call's return expression (STATUS), is synthesized
+ * from null-vs-non-null retval (PTR; rare on HSA), or is literal
+ * HSA_STATUS_SUCCESS (VOID).
+ *
+ * The typed _args event AUGMENTS the generic exit event
+ * (hsa_api_exit_status / _ptr / _void); it never replaces it.
+ */
+
+/* Captured-args variants. __VA_ARGS__ is non-empty by construction (the
+ * _NOARGS variants are used for zero-arg APIs). */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA(api, expr, ...)                                      \
+  do {                                                                                             \
+    const hsa_status_t __rocm_status = (expr);                                                     \
+    rocm_trace_emit_##api##_args(__VA_ARGS__, __rocm_status);                                      \
+    rocm_trace_emit_hsa_api_exit_status(__func__, static_cast<int32_t>(__rocm_status));            \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA(api, ptr_type, expr, ...)                               \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    const hsa_status_t __rocm_status =                                                             \
+        (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;          \
+    rocm_trace_emit_##api##_args(__VA_ARGS__, __rocm_status);                                      \
+    rocm_trace_emit_hsa_api_exit_ptr(__func__, __rocm_ptr);                                        \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA(api, expr, ...)                                        \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_args(__VA_ARGS__, HSA_STATUS_SUCCESS);                                 \
+    rocm_trace_emit_hsa_api_exit_void(__func__);                                                   \
+    return;                                                                                        \
+  } while (0)
+
+/* Zero-captured-args variants. Separate macros to avoid empty
+ * __VA_ARGS__ expansion in the captured-args macros above. */
+#define ROCR_TRACE_API_RET_STATUS_CURATED_HSA_NOARGS(api, expr)                                    \
+  do {                                                                                             \
+    const hsa_status_t __rocm_status = (expr);                                                     \
+    rocm_trace_emit_##api##_args(__rocm_status);                                                   \
+    rocm_trace_emit_hsa_api_exit_status(__func__, static_cast<int32_t>(__rocm_status));            \
+    return __rocm_status;                                                                          \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_PTR_CURATED_HSA_NOARGS(api, ptr_type, expr)                             \
+  do {                                                                                             \
+    ptr_type const __rocm_ptr = (expr);                                                            \
+    const hsa_status_t __rocm_status =                                                             \
+        (__rocm_ptr != nullptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;          \
+    rocm_trace_emit_##api##_args(__rocm_status);                                                   \
+    rocm_trace_emit_hsa_api_exit_ptr(__func__, __rocm_ptr);                                        \
+    return __rocm_ptr;                                                                             \
+  } while (0)
+
+#define ROCR_TRACE_API_RET_VOID_CURATED_HSA_NOARGS(api, expr)                                      \
+  do {                                                                                             \
+    (expr);                                                                                        \
+    rocm_trace_emit_##api##_args(HSA_STATUS_SUCCESS);                                              \
+    rocm_trace_emit_hsa_api_exit_void(__func__);                                                   \
+    return;                                                                                        \
+  } while (0)
+
 static const HsaApiTable* hsaApiTable;
 static const CoreApiTable* coreApiTable;
 static const AmdExtTable* amdExtTable;
@@ -217,9 +285,21 @@ hsa_status_t HSA_API hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_queu
                                                        void* data),
                                       void* data, uint32_t private_segment_size,
                                       uint32_t group_segment_size, hsa_queue_t** queue) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_create_fn(
-      agent, size, type, callback, data, private_segment_size, group_segment_size, queue));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_queue_create */
+  auto const __rocm_in_agent = agent;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_private_segment_size = private_segment_size;
+  auto const __rocm_in_group_segment_size = group_segment_size;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_queue_create,
+      coreApiTable->hsa_queue_create_fn(agent, size, type, callback, data, private_segment_size,
+                                        group_segment_size, queue),
+      (uint64_t)((__rocm_in_agent).handle), (__rocm_in_size), (__rocm_in_type),
+      (const void*)(uintptr_t)(__rocm_in_callback), (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_private_segment_size), (__rocm_in_group_segment_size), queue);
 }
 
 hsa_status_t HSA_API hsa_soft_queue_create(hsa_region_t region, uint32_t size,
@@ -231,8 +311,11 @@ hsa_status_t HSA_API hsa_soft_queue_create(hsa_region_t region, uint32_t size,
 }
 
 hsa_status_t HSA_API hsa_queue_destroy(hsa_queue_t* queue) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_queue_destroy_fn(queue));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_queue_destroy */
+  auto const __rocm_in_queue = queue;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(hsa_queue_destroy,
+                                        coreApiTable->hsa_queue_destroy_fn(queue),
+                                        (uint64_t)(uintptr_t)(__rocm_in_queue));
 }
 
 hsa_status_t HSA_API hsa_queue_inactivate(hsa_queue_t* queue) {
@@ -373,14 +456,23 @@ hsa_status_t HSA_API hsa_memory_assign_agent(void* ptr, hsa_agent_t agent,
 
 hsa_status_t HSA_API hsa_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                                        const hsa_agent_t* consumers, hsa_signal_t* signal) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(
-      coreApiTable->hsa_signal_create_fn(initial_value, num_consumers, consumers, signal));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_signal_create */
+  auto const __rocm_in_initial_value = initial_value;
+  auto const __rocm_in_num_consumers = num_consumers;
+  auto const __rocm_in_consumers = consumers;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_signal_create,
+      coreApiTable->hsa_signal_create_fn(initial_value, num_consumers, consumers, signal),
+      (__rocm_in_initial_value), (__rocm_in_num_consumers),
+      (const void*)(uintptr_t)(__rocm_in_consumers), signal);
 }
 
 hsa_status_t HSA_API hsa_signal_destroy(hsa_signal_t signal) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(coreApiTable->hsa_signal_destroy_fn(signal));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_signal_destroy */
+  auto const __rocm_in_signal = signal;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(hsa_signal_destroy,
+                                        coreApiTable->hsa_signal_destroy_fn(signal),
+                                        (uint64_t)((__rocm_in_signal).handle));
 }
 
 hsa_signal_value_t HSA_API hsa_signal_load_relaxed(hsa_signal_t signal) {
@@ -1050,15 +1142,23 @@ hsa_status_t HSA_API hsa_amd_agent_iterate_memory_pools(
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, size_t size,
                                                   uint32_t flags, void** ptr) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(
-      amdExtTable->hsa_amd_memory_pool_allocate_fn(memory_pool, size, flags, ptr));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_amd_memory_pool_allocate */
+  auto const __rocm_in_memory_pool = memory_pool;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_flags = flags;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_amd_memory_pool_allocate,
+      amdExtTable->hsa_amd_memory_pool_allocate_fn(memory_pool, size, flags, ptr),
+      (uint64_t)((__rocm_in_memory_pool).handle), (__rocm_in_size), (__rocm_in_flags), ptr);
 }
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_memory_pool_free(void* ptr) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_memory_pool_free_fn(ptr));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_amd_memory_pool_free */
+  auto const __rocm_in_ptr = ptr;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(hsa_amd_memory_pool_free,
+                                        amdExtTable->hsa_amd_memory_pool_free_fn(ptr),
+                                        (const void*)(uintptr_t)(__rocm_in_ptr));
 }
 
 // Mirrors Amd Extension Apis
@@ -1067,9 +1167,24 @@ hsa_status_t HSA_API hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent,
                                                uint32_t num_dep_signals,
                                                const hsa_signal_t* dep_signals,
                                                hsa_signal_t completion_signal) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_memory_async_copy_fn(
-      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_amd_memory_async_copy */
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_dst_agent = dst_agent;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_src_agent = src_agent;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_num_dep_signals = num_dep_signals;
+  auto const __rocm_in_dep_signals = dep_signals;
+  auto const __rocm_in_completion_signal = completion_signal;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_amd_memory_async_copy,
+      amdExtTable->hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size,
+                                                num_dep_signals, dep_signals, completion_signal),
+      (const void*)(uintptr_t)(__rocm_in_dst), (uint64_t)((__rocm_in_dst_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_src), (uint64_t)((__rocm_in_src_agent).handle),
+      (__rocm_in_size), (__rocm_in_num_dep_signals),
+      (const void*)(uintptr_t)(__rocm_in_dep_signals),
+      (uint64_t)((__rocm_in_completion_signal).handle));
 }
 
 // Mirrors Amd Extension Apis
@@ -1077,10 +1192,27 @@ hsa_status_t HSA_API hsa_amd_memory_async_copy_on_engine(
     void* dst, hsa_agent_t dst_agent, const void* src, hsa_agent_t src_agent, size_t size,
     uint32_t num_dep_signals, const hsa_signal_t* dep_signals, hsa_signal_t completion_signal,
     hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_memory_async_copy_on_engine_fn(
-      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal,
-      engine_id, force_copy_on_sdma));
+  rocm_trace_emit_hsa_api_enter(
+      __func__); /* __ROCM_CURATED__: hsa_amd_memory_async_copy_on_engine */
+  auto const __rocm_in_dst = dst;
+  auto const __rocm_in_dst_agent = dst_agent;
+  auto const __rocm_in_src = src;
+  auto const __rocm_in_src_agent = src_agent;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_num_dep_signals = num_dep_signals;
+  auto const __rocm_in_completion_signal = completion_signal;
+  auto const __rocm_in_engine_id = engine_id;
+  auto const __rocm_in_force_copy_on_sdma = force_copy_on_sdma;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_amd_memory_async_copy_on_engine,
+      amdExtTable->hsa_amd_memory_async_copy_on_engine_fn(
+          dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal,
+          engine_id, force_copy_on_sdma),
+      (const void*)(uintptr_t)(__rocm_in_dst), (uint64_t)((__rocm_in_dst_agent).handle),
+      (const void*)(uintptr_t)(__rocm_in_src), (uint64_t)((__rocm_in_src_agent).handle),
+      (__rocm_in_size), (__rocm_in_num_dep_signals),
+      (uint64_t)((__rocm_in_completion_signal).handle), (int32_t)(__rocm_in_engine_id),
+      (__rocm_in_force_copy_on_sdma));
 }
 
 // Mirrors Amd Extension Apis
@@ -1273,9 +1405,17 @@ hsa_status_t hsa_amd_ipc_memory_detach(void* mapped_ptr) {
 hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                                    const hsa_agent_t* consumers, uint64_t attributes,
                                    hsa_signal_t* signal) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_signal_create_fn(initial_value, num_consumers,
-                                                                  consumers, attributes, signal));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_amd_signal_create */
+  auto const __rocm_in_initial_value = initial_value;
+  auto const __rocm_in_num_consumers = num_consumers;
+  auto const __rocm_in_consumers = consumers;
+  auto const __rocm_in_attributes = attributes;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_amd_signal_create,
+      amdExtTable->hsa_amd_signal_create_fn(initial_value, num_consumers, consumers, attributes,
+                                            signal),
+      (__rocm_in_initial_value), (__rocm_in_num_consumers),
+      (const void*)(uintptr_t)(__rocm_in_consumers), (__rocm_in_attributes), signal);
 }
 
 // Mirrors Amd Extension Apis
@@ -1608,9 +1748,22 @@ hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue) {
-  rocm_trace_emit_hsa_api_enter(__func__);
-  ROCR_TRACE_API_RET_STATUS(amdExtTable->hsa_amd_queue_intercept_create_fn(
-      agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue));
+  rocm_trace_emit_hsa_api_enter(__func__); /* __ROCM_CURATED__: hsa_amd_queue_intercept_create */
+  auto const __rocm_in_agent_handle = agent_handle;
+  auto const __rocm_in_size = size;
+  auto const __rocm_in_type = type;
+  auto const __rocm_in_callback = callback;
+  auto const __rocm_in_data = data;
+  auto const __rocm_in_private_segment_size = private_segment_size;
+  auto const __rocm_in_group_segment_size = group_segment_size;
+  ROCR_TRACE_API_RET_STATUS_CURATED_HSA(
+      hsa_amd_queue_intercept_create,
+      amdExtTable->hsa_amd_queue_intercept_create_fn(agent_handle, size, type, callback, data,
+                                                     private_segment_size, group_segment_size,
+                                                     queue),
+      (uint64_t)((__rocm_in_agent_handle).handle), (__rocm_in_size), (__rocm_in_type),
+      (const void*)(uintptr_t)(__rocm_in_callback), (const void*)(uintptr_t)(__rocm_in_data),
+      (__rocm_in_private_segment_size), (__rocm_in_group_segment_size), queue);
 }
 
 // Mirrors Amd Extension Apis

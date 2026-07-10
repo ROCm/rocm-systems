@@ -1,0 +1,46 @@
+# HSA curated APIs for typed parameter capture.
+# Schema is the same as the HIP equivalent (projects/clr/hipamd/scripts/curated_apis.yaml).
+
+# --- hsa_queues ---
+- api: hsa_queue_create
+  args: [agent, size, type, callback, data, private_segment_size, group_segment_size, queue]
+  out: [queue]
+
+- api: hsa_queue_destroy
+  args: [queue]
+
+- api: hsa_amd_queue_intercept_create
+  args: [agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue]
+  out: [queue]
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_api_trace.h.
+    Same shape as hsa_queue_create with first param renamed agent_handle.
+
+# --- hsa_signals ---
+- api: hsa_signal_create
+  args: [initial_value, num_consumers, consumers, signal]
+  out: [signal]
+
+- api: hsa_signal_destroy
+  args: [signal]
+
+- api: hsa_amd_signal_create
+  args: [initial_value, num_consumers, consumers, attributes, signal]
+  out: [signal]
+  notes: |
+    Verified against /opt/rocm/include/hsa/hsa_ext_amd.h. Same as
+    hsa_signal_create with one extra IN attributes:uint64.
+
+# --- hsa_memory ---
+- api: hsa_amd_memory_pool_allocate
+  args: [memory_pool, size, flags, ptr]
+  out: [ptr]
+
+- api: hsa_amd_memory_pool_free
+  args: [ptr]
+
+- api: hsa_amd_memory_async_copy
+  args: [dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal]
+
+- api: hsa_amd_memory_async_copy_on_engine
+  args: [dst, dst_agent, src, src_agent, size, num_dep_signals, completion_signal, engine_id, force_copy_on_sdma]

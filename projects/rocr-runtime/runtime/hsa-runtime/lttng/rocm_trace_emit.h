@@ -185,4 +185,10 @@ static inline void rocm_trace_emit_hsa_intercept_packets(uint32_t a, uint64_t b,
 
 #endif
 
+/* Curated per-API typed emit helpers (generated header). Self-contained:
+ * makes its own HSA_ENABLE_LTTNG_UST decision and provides no-op stubs
+ * when LTTng is disabled (e.g. on Windows), so this include lives
+ * OUTSIDE the LTTng guard. */
+#include "rocm_trace_emit_curated.h"
+
 #endif /* ROCM_HSA_TRACE_EMIT_H_ */
