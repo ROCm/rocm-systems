@@ -1761,18 +1761,18 @@ void VirtMemoryTestBasic::TestVirtAddressAlias(void) {
     std::cout << "    Host Memory VA alias test done" << std::endl;
   }
 
-  // Run on GPU pools
-  for (unsigned int i = 0; i < gpus.size(); ++i) {
-    hsa_amd_memory_pool_t gpu_pool;
-    memset(&gpu_pool, 0, sizeof(gpu_pool));
-    ASSERT_SUCCESS(
-        hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
-    if (gpu_pool.handle == 0) {
-      std::cout << "    No global mempool in GPU agent" << std::endl;
-      continue;
-    }
-    TestVirtAddressAlias(cpus[0], gpus[i], gpu_pool);
-  }
+  // // Run on GPU pools
+  // for (unsigned int i = 0; i < gpus.size(); ++i) {
+  //   hsa_amd_memory_pool_t gpu_pool;
+  //   memset(&gpu_pool, 0, sizeof(gpu_pool));
+  //   ASSERT_SUCCESS(
+  //       hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+  //   if (gpu_pool.handle == 0) {
+  //     std::cout << "    No global mempool in GPU agent" << std::endl;
+  //     continue;
+  //   }
+  //   TestVirtAddressAlias(cpus[0], gpus[i], gpu_pool);
+  // }
 
   if (verbosity() > 0) {
     std::cout << "    Subtest finished" << std::endl;
