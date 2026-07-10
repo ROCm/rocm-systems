@@ -4410,14 +4410,19 @@ DsLoadU8D16Ds::DsLoadU8D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4440,14 +4445,19 @@ DsLoadU8D16HiDs::DsLoadU8D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -4470,14 +4480,19 @@ DsLoadI8D16Ds::DsLoadI8D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadI8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4501,14 +4516,19 @@ DsLoadI8D16HiDs::DsLoadI8D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -4532,14 +4552,19 @@ DsLoadU16D16Ds::DsLoadU16D16Ds(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU16D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -4562,14 +4587,19 @@ DsLoadU16D16HiDs::DsLoadU16D16HiDs(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsLoadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {

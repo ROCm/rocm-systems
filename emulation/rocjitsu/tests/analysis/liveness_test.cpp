@@ -3843,9 +3843,10 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
 //
 // A D16(_HI) load writes one 16-bit half of the destination VGPR and preserves
 // the other, so it reads the old vdst -- a read-modify-write. The generator
-// marks these as dst-is-also-source (see _dst_is_also_source), so the decoded
-// instruction reports vdst in both defs and uses. A regular (non-D16) load
-// fully overwrites vdst and must not report it as a use.
+// emits an implicit_uses override for these (see _d16_load_reads_dst), so the
+// decoded instruction reports vdst in both defs and uses while keeping it out
+// of the printed operand list. A regular (non-D16) load fully overwrites vdst
+// and must not report it as a use.
 //
 // Encodings are the canonical forms from rdna4/test_encodings.h with word1's
 // low byte set to vdst=5 (FLAT VDST is word1[7:0]); vaddr stays v0 (word2=0),
@@ -3878,6 +3879,55 @@ TEST(GeneratedInstDefUse, RegularLoadDoesNotReadDestination) {
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// The remaining non-FLAT D16 load classes exercise the other paths of
+// _d16_load_reads_dst. MUBUF (buffer) names the destination 'vdata' at
+// word1[7:0]; DS names it 'vdst' at word1[31:24]. vaddr/addr stay 0 (v0), so v5
+// is distinct from the address source.
+
+TEST(GeneratedInstDefUse, D16BufferLoadReadsDestination) {
+  auto inst = decode_rdna4({0xC4078000U, 0x00000005U}); // buffer_load_d16_u8, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "buffer_load_d16_u8");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, D16DsLoadReadsDestination) {
+  auto inst = decode_rdna4({0xDA880000U, 0x05000000U}); // ds_load_u8_d16, vdst=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "ds_load_u8_d16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+// tbuffer (MTBUF) is a separate encoding only on ISAs before the unified
+// VBUFFER (RDNA4 folds MUBUF/MTBUF into VBUFFER and routes typed-buffer ops
+// through the untyped path, leaving them unclassified). Exercise the
+// 'tbuffer_load' path on CDNA3, where MTBUF is distinct and its 4-bit opcode
+// distinguishes the D16 variant (RDNA2's 3-bit opcode cannot, aliasing D16 back
+// to the non-D16 form). Its dest 'vdata' is at word1[8:15]; vaddr at word1[7:0]
+// stays 0 (v0).
+std::unique_ptr<Instruction> decode_cdna3(std::initializer_list<uint32_t> words) {
+  std::array<uint32_t, 4> buf{};
+  std::copy(words.begin(), words.end(), buf.begin());
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  return std::unique_ptr<Instruction>(decoder ? decoder->decode(buf.data()) : nullptr);
+}
+
+TEST(GeneratedInstDefUse, D16TbufferLoadReadsDestination) {
+  auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "tbuffer_load_format_d16_x");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 } // namespace

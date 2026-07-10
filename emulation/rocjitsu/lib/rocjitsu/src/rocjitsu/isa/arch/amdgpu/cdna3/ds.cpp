@@ -3738,14 +3738,19 @@ DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3772,14 +3777,19 @@ DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3806,14 +3816,19 @@ DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3841,14 +3856,19 @@ DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
@@ -3876,14 +3896,19 @@ DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -3910,14 +3935,19 @@ DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
                  : 0))),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &addr;
-  src_operands_[2] = &dsmem;
-  num_src_ = 3;
+  src_operands_[0] = &addr;
+  src_operands_[1] = &dsmem;
+  num_src_ = 2;
   num_dst_ = 1;
   dsmem.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_OP;
+}
+
+void DsReadU16D16HiDs::implicit_uses(RegisterSet &uses) const {
+  Ds::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void DsReadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {

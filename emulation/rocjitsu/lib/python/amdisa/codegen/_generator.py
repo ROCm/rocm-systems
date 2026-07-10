@@ -2742,11 +2742,6 @@ class CodeGenerator:
         accumulate, dot product accumulate, swap, bitset).  This method
         identifies such instructions via their semantics so the constructor
         can register the destination in both src_operands_ and dst_operands_.
-
-        D16(_HI) loads are also read-modify-writes: they write one 16-bit half
-        of vdst and preserve the other, so they read the old value.  This is a
-        partial def only for a single 16-bit element (num_elems == 1); multi-
-        component FORMAT loads fill whole registers and preserve nothing.
         """
         sem = self.semantics.instructions.get(inst.name) if self.semantics else None
         return self._instruction_reads_primary_dst(inst, sem)
@@ -2765,14 +2760,26 @@ class CodeGenerator:
             or name in self._READS_DST_MNEMONICS
             or name.startswith(self._READS_DST_PREFIXES)
             or name.startswith(self._READS_DST_DOT_PREFIXES)
-            # D16(_HI) loads write one 16-bit half of vdst and preserve the
-            # other, so they read the old value for a single 16-bit element.
-            or (
-                sem is not None
-                and (sem.d16_hi or sem.d16_lo)
-                and sem.num_elems == 1
-                and sem.semantic_class in self._D16_LOAD_CLASSES
-            )
+        )
+
+    def _d16_load_reads_dst(self, inst: Instruction) -> bool:
+        """Return True for a D16(_HI) load that preserves half of vdst.
+
+        These write one 16-bit half of vdst and keep the other, so they read
+        the old value -- a partial def for a single element (num_elems == 1);
+        multi-component FORMAT loads fill whole registers and preserve nothing.
+        The read is modelled as an implicit use (via implicit_uses) instead of a
+        source operand, keeping vdst out of the printed operand list.
+        """
+        if not self.semantics:
+            return False
+        sem = self.semantics.instructions.get(inst.name)
+        if not sem:
+            return False
+        return (
+            (sem.d16_hi or sem.d16_lo)
+            and sem.num_elems == 1
+            and sem.semantic_class in self._D16_LOAD_CLASSES
         )
 
     def _operand_size_override(
@@ -6636,6 +6643,25 @@ class CodeGenerator:
                     dst_idx = 0
                     vgpr_msb_src_role_idx = 0
                     reads_dst = self._dst_is_also_source(inst)
+                    # D16(_HI) loads read the destination they partially write.
+                    # Model it as an implicit use so vdst stays out of the
+                    # printed operand list (see _d16_load_reads_dst). The
+                    # override declaration/definition is emitted below, sharing
+                    # the path with generic partial defs (buffer/tbuffer loads
+                    # name the dest 'vdata' and are sized as a full 32-bit
+                    # register, so _partial_def_outputs does not catch them).
+                    d16_implicit_use_opnd = None
+                    if self._d16_load_reads_dst(inst):
+                        # FLAT/GLOBAL/SCRATCH/DS name the dest 'vdst'; MUBUF/MTBUF
+                        # (buffer/tbuffer) name it 'vdata'.
+                        d16_implicit_use_opnd = next(
+                            (
+                                o.name
+                                for o in inst.operands
+                                if o.is_output and o.name in ('vdst', 'sdst', 'vdata')
+                            ),
+                            None,
+                        )
                     # These gfx1250-only WMMA source-format fields derive the
                     # src0/src1 operand sizes from the instruction shape.
                     gfx1250_f8f6f4_shape = self._gfx1250_f8f6f4_wmma_shape(inst)
@@ -6936,6 +6962,12 @@ class CodeGenerator:
                                     'override'
                                 )
                             )
+                    elif d16_implicit_use_opnd:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
                     if gfx1250_f8f6f4_shape is not None or gfx1250_swmmac_has_modifiers:
                         public_members.append(
                             cgen.Statement(
@@ -8073,6 +8105,17 @@ class CodeGenerator:
                                     f'}}'
                                 )
                             )
+                    elif d16_implicit_use_opnd:
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'  if (auto r = {d16_implicit_use_opnd}.to_register_ref())\n'
+                                f'    uses.expand(*r);\n'
+                                f'}}'
+                            )
+                        )
                     execution_impls = [exec_impl]
                     if not profile.split_execution_sources:
                         inst_impls.extend(execution_impls)

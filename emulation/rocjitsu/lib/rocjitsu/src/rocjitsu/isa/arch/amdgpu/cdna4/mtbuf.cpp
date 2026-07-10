@@ -402,6 +402,12 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
+  Mtbuf::implicit_uses(uses);
+  if (auto r = vdata.to_register_ref())
+    uses.expand(*r);
+}
+
 void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
