@@ -1084,14 +1084,18 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       0xBFC60000u,
   };
   const auto mov_low = build_v_mov_b32_e64_literal(10, low_literal, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto owner_mask = build_v_and_b32_e32_literal(12, consan_moi_exact_shadow::max_owner, 20,
+                                                      ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_shift =
       build_v_lshlrev_b32_e32(12, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift),
-                              20, ROCJITSU_CODE_ARCH_RDNA4);
+                              12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_add =
       build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 12, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto epoch_mask = build_v_and_b32_e32_literal(12, consan_moi_exact_shadow::max_epoch, 21,
+                                                      ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_shift =
       build_v_lshlrev_b32_e32(12, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
-                              21, ROCJITSU_CODE_ARCH_RDNA4);
+                              12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_add =
       build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto mov_high = build_v_mov_b32_e64_literal(11, 0, ROCJITSU_CODE_ARCH_RDNA4);
@@ -1109,8 +1113,10 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       8, 10, 13, /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mov_low);
+  ASSERT_TRUE(owner_mask);
   ASSERT_TRUE(owner_shift);
   ASSERT_TRUE(owner_add);
+  ASSERT_TRUE(epoch_mask);
   ASSERT_TRUE(epoch_shift);
   ASSERT_TRUE(epoch_add);
   ASSERT_TRUE(mov_high);
@@ -1121,8 +1127,12 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   ASSERT_TRUE(address_add);
   ASSERT_TRUE(atomic_swap);
   expected_publish_prefix.insert(expected_publish_prefix.end(), mov_low->begin(), mov_low->end());
+  expected_publish_prefix.insert(expected_publish_prefix.end(), owner_mask->begin(),
+                                 owner_mask->end());
   expected_publish_prefix.push_back(*owner_shift);
   expected_publish_prefix.push_back(*owner_add);
+  expected_publish_prefix.insert(expected_publish_prefix.end(), epoch_mask->begin(),
+                                 epoch_mask->end());
   expected_publish_prefix.push_back(*epoch_shift);
   expected_publish_prefix.push_back(*epoch_add);
   expected_publish_prefix.insert(expected_publish_prefix.end(), mov_high->begin(), mov_high->end());

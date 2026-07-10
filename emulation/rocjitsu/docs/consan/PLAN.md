@@ -139,8 +139,8 @@ flowchart LR
   subgraph BEHAVIOR["Engine behavior"]
     direction LR
     I2["I2: Inline Diagnostics"]:::done
-    I3["I3: Barrier And<br/>Atomic Semantics"]:::active
-    S1["S1: Sampling Policy"]:::todo
+    I3["I3: Barrier And<br/>Atomic Semantics"]:::done
+    S1["S1: Sampling Policy"]:::active
     S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
 
     S1 --> S2
@@ -181,7 +181,7 @@ flowchart LR
   B0["B0: Baseline"]:::done
   O1{"O1: Operational<br/>Defaults Ready"}:::todo
   I2["I2: Inline Diagnostics"]:::done
-  I3["I3: Barrier And<br/>Atomic Semantics"]:::active
+  I3["I3: Barrier And<br/>Atomic Semantics"]:::done
   S2["S2: In-Kernel<br/>Sampled Checking"]:::todo
   T1A["T1A: Test Tiers<br/>And Harness"]:::partial
   T1B["T1B: MOI Parity<br/>Qualification Runs"]:::todo
@@ -1203,7 +1203,7 @@ Landed evidence:
 - The 99-test `ConSanMoi` suite, 25-test live resource/behavior tier, and
   209-test inline-shadow IREE compatibility sweep pass.
 
-## I3: Inline Barrier And Atomic Semantics - TODO
+## I3: Inline Barrier And Atomic Semantics - DONE
 
 Goal: make inline-shadow ordering semantics match the record/replay oracle well
 enough for LDS MVP use.
@@ -1211,22 +1211,15 @@ enough for LDS MVP use.
 Position in the DAG: wait for `R1`, which owns the persistent epoch and scalar
 special-state resources that these probes must stop selecting manually.
 
-Current state:
+Landed state:
 
-- Barrier patching can increment a configured epoch VGPR after supported
-  RDNA4 32-bit barriers.
+- Barrier patching increments an automatically assigned persistent epoch after
+  supported RDNA4 32-bit barriers. Exact-shadow packing masks owner and epoch
+  to their 10-bit ABI fields, making repeated barriers a defined modulo-1024
+  operation instead of allowing epoch overflow to corrupt adjacent fields.
 - Inline atomic ordering has a one-slot address-scoped release/acquire
   prototype for a narrow no-SADDR `flat_atomic*` subset.
-- Record/replay host semantics are still the reference model.
-
-Work:
-
-- Compare inline barrier epochs against host replay on more than one barrier in
-  one kernel.
-- Handle repeated barriers without epoch overflow surprising the predicate.
-- Expand atomic tests before expanding atomic instruction coverage.
-- Keep global memory out of scope for this MVP; atomics matter only as ordering
-  events for LDS.
+- Record/replay host semantics remain the reference model.
 
 Done criteria:
 
@@ -1234,6 +1227,16 @@ Done criteria:
 - Same-address atomic handoff controls are clean; wrong-address controls still
   report.
 - Behavior is documented as LDS ordering support, not global-memory checking.
+
+Landed evidence:
+
+- Machine-code patch tests verify field masks, the post-barrier increment, and
+  one-slot release/acquire publication and import.
+- The live barrier control crosses multiple barriers and remains clean with
+  both descriptor-backed and private epoch state. Same-address atomic controls
+  are clean while wrong-address controls report, for both work-item and
+  `hw_id` owner sources.
+- The focused `ConSanMoi` suite and live resource/behavior tier pass.
 
 ## S1: Sampling Policy - TODO
 

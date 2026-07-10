@@ -3042,14 +3042,16 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 
 [[nodiscard]] bool append_add_shifted_vgpr_field(std::vector<uint32_t> &words,
                                                  uint16_t destination_vgpr, uint16_t field_vgpr,
-                                                 uint16_t shift, uint16_t tmp_vgpr,
+                                                 uint16_t shift, uint32_t mask, uint16_t tmp_vgpr,
                                                  rj_code_arch_t arch) {
+  const auto mask_words = build_v_and_b32_e32_literal(tmp_vgpr, mask, field_vgpr, arch);
   const auto shift_word =
-      build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(shift), field_vgpr, arch);
+      build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(shift), tmp_vgpr, arch);
   const auto add_word = build_v_add_nc_u32_e32(
       destination_vgpr, vector_source_vgpr(destination_vgpr), tmp_vgpr, arch);
-  if (!shift_word || !add_word)
+  if (!mask_words || !shift_word || !add_word)
     return false;
+  words.insert(words.end(), mask_words->begin(), mask_words->end());
   words.push_back(*shift_word);
   words.push_back(*add_word);
   return true;
@@ -3077,7 +3079,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
                                                     std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
-                                         consan_moi_exact_shadow::owner_shift, tmp_vgpr, arch);
+                                         consan_moi_exact_shadow::owner_shift,
+                                         consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
   }
   if (!options.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no persistent owner representation");
@@ -3120,7 +3123,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   }
 
   return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
-                                       consan_moi_exact_shadow::owner_shift, tmp_vgpr, arch);
+                                       consan_moi_exact_shadow::owner_shift,
+                                       consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
 }
 
 [[nodiscard]] bool append_inline_shadow_epoch_field(std::vector<uint32_t> &words,
@@ -3131,7 +3135,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
                                                     std::vector<std::string> &errors) {
   if (options.moi_epoch_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_epoch_vgpr,
-                                         consan_moi_exact_shadow::epoch_shift, tmp_vgpr, arch);
+                                         consan_moi_exact_shadow::epoch_shift,
+                                         consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
   }
   if (!options.automatic_moi_private_epoch || !private_epoch_offset) {
     errors.emplace_back("ConSan MOI inline-shadow probe has no persistent epoch representation");
@@ -3146,7 +3151,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   words.insert(words.end(), load->begin(), load->end());
   words.push_back(*wait);
   return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
-                                       consan_moi_exact_shadow::epoch_shift, tmp_vgpr, arch);
+                                       consan_moi_exact_shadow::epoch_shift,
+                                       consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
 }
 
 [[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate,
@@ -4011,13 +4017,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   words.insert(words.end(), mov_low->begin(), mov_low->end());
   if ((options.moi_owner_vgpr || derived_owner_vgpr) &&
       !append_add_shifted_vgpr_field(words, low_vgpr, owner_vgpr,
-                                     consan_moi_sampled_watchpoint::owner_shift, tmp_vgpr, arch)) {
+                                     consan_moi_sampled_watchpoint::owner_shift,
+                                     consan_moi_sampled_watchpoint::max_owner, tmp_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not encode owner field");
     return std::nullopt;
   }
   if (options.moi_epoch_vgpr &&
       !append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_epoch_vgpr,
-                                     consan_moi_sampled_watchpoint::epoch_shift, tmp_vgpr, arch)) {
+                                     consan_moi_sampled_watchpoint::epoch_shift,
+                                     consan_moi_sampled_watchpoint::max_epoch, tmp_vgpr, arch)) {
     errors.emplace_back("ConSan MOI sampled probe could not encode epoch field");
     return std::nullopt;
   }

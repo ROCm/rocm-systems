@@ -309,8 +309,8 @@ them.
   With `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`, the kernel-entry prologue initializes
   this VGPR to zero. The newer barrier-record path does not require this VGPR;
   host replay advances epochs from emitted barrier records. In direct sampled
-  mode, an explicit epoch VGPR value is packed into a 10-bit sampled field
-  without additional in-kernel masking.
+  mode, an explicit epoch VGPR value is masked and packed into a 10-bit sampled
+  field.
 - `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`: explicit experimental MOI entry-prologue
   override. Requires `RJ_CONSAN_MOI_OWNER_VGPR` and
   `RJ_CONSAN_MOI_EPOCH_VGPR`. The patch
@@ -329,6 +329,11 @@ them.
   original barrier, and branches back. Raw records represent barrier arrivals;
   host replay coalesces a contiguous same-workgroup run of arrivals into one
   logical epoch advance.
+  Inline shadow instead increments its persistent epoch after each supported
+  barrier. Owner and epoch values are masked to their 10-bit exact-shadow
+  fields while packing; epochs therefore wrap modulo 1024 without spilling
+  into adjacent metadata. A kernel spanning exactly 1024 barrier epochs may
+  conservatively report a conflict across that wrap.
 - `RJ_CONSAN_MOI_TRACK_ATOMICS=1`: experimental MOI atomic patching.
   Uses the per-engine auto report buffer unless a caller buffer or explicit
   size override is supplied. Scratch, persistent owner/epoch,

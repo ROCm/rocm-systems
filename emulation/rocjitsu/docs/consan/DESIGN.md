@@ -628,8 +628,7 @@ Important current simplifications:
 - Static-site selection is not runtime probabilistic sampling.
 - There is no in-kernel sampled conflict checker.
 - Clean sampled output is inconclusive.
-- Owner/epoch values are not masked before packing; current tests rely on
-  values fitting the prototype 10-bit fields.
+- Owner/epoch values are masked to the prototype 10-bit fields before packing.
 
 Intended role:
 
@@ -682,7 +681,12 @@ Barriers:
 - `record_replay` appends barrier-arrival records and host replay coalesces
   contiguous same-workgroup arrivals into logical epoch advances.
 - `inline_shadow` can trampoline supported barriers, execute the original
-  barrier, and increment an epoch VGPR after the barrier.
+- `inline_shadow` can trampoline supported barriers, execute the original
+  barrier, and increment an epoch VGPR after the barrier. Exact-shadow packing
+  masks that monotonically incremented value to 10 bits, so long-running
+  kernels use epochs modulo 1024 without corrupting neighboring metadata
+  fields. A conflict separated by exactly 1024 barrier epochs can therefore be
+  conservatively reported as unordered.
 - `sampled` currently does not use barrier records in direct sampled checking.
 
 Atomics:
