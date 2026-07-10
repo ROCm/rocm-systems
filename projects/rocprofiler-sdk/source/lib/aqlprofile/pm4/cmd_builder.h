@@ -317,9 +317,12 @@ public:
     /// the GPU before the COPY_DATA reads of every collection.
     ///
     /// Default is a no-op so architectures that do not need (or implement) this keep
-    /// their existing behavior. It is currently implemented for GFX11 to fix WSL/dxg
-    /// where the result buffer is not zero-initialized by the allocator and is reused
-    /// across collections (see GpuPmcBuilder::ZeroOutput / pmc create path).
+    /// their existing behavior; it is scoped to GFX11 via the override in
+    /// Gfx11CmdBuilder. This is a general correctness hardening (a reused result buffer
+    /// whose per-instance slots may not all be written should still read back defined
+    /// zeros), primarily motivated by WSL/dxg where the result buffer is not
+    /// zero-initialized by the allocator and is reused across collections (see
+    /// GpuPmcBuilder::ZeroOutput / pmc create path).
     virtual void BuildZeroMemoryPacket(CmdBuffer* /*cmdbuf*/,
                                        const void* /*dst_addr*/,
                                        uint32_t /*num_dwords*/)

@@ -346,13 +346,16 @@ public:
         }
     }
 
-    // WSL/dxg fix: the PMC result buffer is allocated once and reused for every
-    // collection, but dxg-backed device memory is not zero-initialized (unlike KFD's
-    // kernel-zeroed mmap pages). Any per-instance (e.g. per-WGP) result slot whose
-    // COPY_DATA does not land would otherwise return stale/garbage. This emits an
-    // on-device WRITE_DATA that zeros the whole result region; because it is baked into
-    // the (replayed) read command buffer, the zeroing runs on the GPU, ordered before
-    // the COPY_DATA reads, on every collection -- coherence-proof unlike a host memset.
+    // General correctness hardening (primarily motivated by WSL/dxg, but not WSL-specific):
+    // the PMC result buffer is allocated once and reused for every collection, so any
+    // per-instance (e.g. per-WGP) result slot whose COPY_DATA does not land would otherwise
+    // return stale/garbage rather than a defined zero. dxg-backed device memory is not
+    // zero-initialized (unlike KFD's kernel-zeroed mmap pages), which is what first exposed
+    // it. This emits an on-device WRITE_DATA that zeros the whole result region; because it
+    // is baked into the (replayed) read command buffer, the zeroing runs on the GPU, ordered
+    // before the COPY_DATA reads, on every collection -- coherence-proof unlike a host
+    // memset. This is the gfx11 implementation of the builder override; other arches keep
+    // the default no-op.
     void BuildZeroMemoryPacket(CmdBuffer*  cmdbuf,
                                const void* dst_addr,
                                uint32_t    num_dwords) override

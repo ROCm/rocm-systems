@@ -301,13 +301,17 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
     for(auto& event : memorymgr->GetEvents())
         output_bytes += pm4_factory->GetBytesNeeded(event.block_name);
     memorymgr->CreateOutputBuf(output_bytes);
-    // WSL/dxg fix: the result buffer is allocated once here and reused for every
-    // collection, but dxg-backed device memory is not zero-initialized (unlike KFD's
-    // kernel-zeroed pages) and the create-time host fill only happens once. Prepend
-    // on-device zeroing of the whole result region into the read command buffer. Since
-    // that buffer is replayed before each collection, every (e.g. per-WGP) result slot
-    // is deterministically 0 before the COPY_DATA reads -- even when an instance's
-    // COPY_DATA does not land. No-op on architectures without a zeroing implementation.
+    // General correctness hardening (primarily motivated by WSL/dxg, but not WSL-specific):
+    // the result buffer is allocated once here and reused for every collection, so any
+    // per-instance (e.g. per-WGP) result slot whose COPY_DATA does not land would otherwise
+    // return whatever was left in that slot. This is only guaranteed to be zero when the
+    // allocator zero-initializes the memory and the create-time host fill is sufficient;
+    // dxg-backed device memory is not zero-initialized (unlike KFD's kernel-zeroed pages),
+    // which is what first exposed it. Prepend on-device zeroing of the whole result region
+    // into the read command buffer. Since that buffer is replayed before each collection,
+    // every result slot is deterministically 0 before the COPY_DATA reads. This is scoped to
+    // gfx11 via the builder override (BuildZeroMemoryPacket) and is a no-op on architectures
+    // without a zeroing implementation.
     pmc_builder->ZeroOutput(&read_cmd, memorymgr->GetOutputBuf(), output_bytes / sizeof(uint32_t));
     // Generate read commands
     size_t data_size = pmc_builder->Read(&read_cmd, countersVec, memorymgr->GetOutputBuf());
