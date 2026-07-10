@@ -25,7 +25,7 @@ else()
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp
                   COMMENT "Compiling memcpyInt.hsaco")
 endif()
-add_custom_target(memcpyInt.hsaco DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
+add_custom_target(memcpyInt_hsaco DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/memcpyInt.hsaco)
 # only for AMD
 if(HIP_PLATFORM MATCHES "amd")
@@ -44,4 +44,4 @@ hip_add_exe_to_target(NAME synchronizationTests
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++14)
 
-add_dependencies(synchronizationTests memcpyInt.hsaco)
+add_dependencies(synchronizationTests memcpyInt_hsaco)

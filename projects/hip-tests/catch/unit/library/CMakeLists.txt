@@ -44,8 +44,8 @@ else()
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
     COMMENT "Compiling reverse_kernel.code")
 endif()
-add_custom_target(library_code_load.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/library_code_load.code)
-add_custom_target(reverse_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/reverse_kernel.code)
+add_custom_target(library_code_load_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/library_code_load.code)
+add_custom_target(reverse_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/reverse_kernel.code)
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/library_code_load.code)
 
@@ -64,5 +64,5 @@ else()
                           LINKER_LIBS nvrtc)
 endif()
 
-add_dependencies(LibraryTests library_code_load.code)
-add_dependencies(LibraryTests reverse_kernel.code)
+add_dependencies(LibraryTests library_code_load_code)
+add_dependencies(LibraryTests reverse_kernel_code)

@@ -72,7 +72,7 @@ if (NOT WIN32)
                     COMMENT "Compiling coopKernel.code")
   endif()
   add_custom_target(launch_kernel_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
-  add_custom_target(coopKernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+  add_custom_target(coopKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
@@ -188,7 +188,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernel.code")
-  add_custom_target(copyKernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
+  add_custom_target(copyKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=5 -S -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
@@ -197,7 +197,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernel.s")
-  add_custom_target(copyKernel.s DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s)
+  add_custom_target(copyKernel_s DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -mcode-object-version=5 --cuda-device-only -x hip
@@ -207,7 +207,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                   COMMENT "Compiling addKernel.code")
-  add_custom_target(addKernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code)
+  add_custom_target(addKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code)
 
   # TODO - Rock build failure from clang
   if(NOT WIN32)
@@ -220,7 +220,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     COMMENT "Compiling addKernel.spv")
-    add_custom_target(addKernel.spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
+    add_custom_target(addKernel_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
@@ -230,7 +230,7 @@ if(HIP_PLATFORM MATCHES "amd")
                     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     COMMENT "Compiling addKernel-bundle.spv")
-    add_custom_target(addKernel-bundle.spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
+    add_custom_target(addKernel-bundle_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
     ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv)
@@ -245,7 +245,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernelCompressed.code")
-  add_custom_target(copyKernelCompressed.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
+  add_custom_target(copyKernelCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code)
 
   set(OFFLOAD_ARCH_GENERIC_STR
   --offload-arch=gfx9-generic
@@ -265,7 +265,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernelGenericTarget.code")
-  add_custom_target(copyKernelGenericTarget.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code)
+  add_custom_target(copyKernelGenericTarget_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --offload-compress --cuda-device-only
@@ -276,7 +276,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   COMMENT "Compiling copyKernelGenericTargetCompressed.code")
-  add_custom_target(copyKernelGenericTargetCompressed.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code)
+  add_custom_target(copyKernelGenericTargetCompressed_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
@@ -298,7 +298,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel.code")
-    add_custom_target(copiousArgKernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code)
+    add_custom_target(copiousArgKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -308,7 +308,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel0.code")
-    add_custom_target(copiousArgKernel0.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code)
+    add_custom_target(copiousArgKernel0_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel0.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -318,7 +318,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel1.code")
-    add_custom_target(copiousArgKernel1.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code)
+    add_custom_target(copiousArgKernel1_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel1.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -328,7 +328,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel2.code")
-    add_custom_target(copiousArgKernel2.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code)
+    add_custom_target(copiousArgKernel2_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel2.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -338,7 +338,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel3.code")
-    add_custom_target(copiousArgKernel3.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code)
+    add_custom_target(copiousArgKernel3_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel3.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -348,7 +348,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel16.code")
-    add_custom_target(copiousArgKernel16.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code)
+    add_custom_target(copiousArgKernel16_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel16.code)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -358,7 +358,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/copiousArgKernel.cc
                   COMMENT "Compiling copiousArgKernel17.code")
-    add_custom_target(copiousArgKernel17.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code)
+    add_custom_target(copiousArgKernel17_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel17.code)
 
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/copiousArgKernel.code
@@ -385,7 +385,7 @@ hip_add_exe_to_target(NAME ModuleTest
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(NOT WIN32)
-  add_dependencies(ModuleTest coopKernel.code)
+  add_dependencies(ModuleTest coopKernel_code)
   add_dependencies(ModuleTest launch_kernel_module)
 endif()
 
@@ -399,20 +399,20 @@ add_dependencies(ModuleTest empty_module)
 if(HIP_PLATFORM MATCHES "amd")
   # Wire kernel artifacts to ModuleTest so `make ModuleTest` builds them.
   # These are loaded at runtime by tests in the ModuleTest binary.
-  add_dependencies(ModuleTest copyKernel.code copyKernel.s)
-  add_dependencies(ModuleTest addKernel.code)
+  add_dependencies(ModuleTest copyKernel_code copyKernel_s)
+  add_dependencies(ModuleTest addKernel_code)
   # TODO - Rock build failure from clang
   if(NOT WIN32)
-    add_dependencies(ModuleTest addKernel.spv)
-    add_dependencies(ModuleTest addKernel-bundle.spv)
+    add_dependencies(ModuleTest addKernel_spv)
+    add_dependencies(ModuleTest addKernel-bundle_spv)
   endif()
-  add_dependencies(ModuleTest copyKernelCompressed.code)
-  add_dependencies(ModuleTest copyKernelGenericTarget.code)
-  add_dependencies(ModuleTest copyKernelGenericTargetCompressed.code)
+  add_dependencies(ModuleTest copyKernelCompressed_code)
+  add_dependencies(ModuleTest copyKernelGenericTarget_code)
+  add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
 
   if(UNIX)
-    add_dependencies(ModuleTest copiousArgKernel.code copiousArgKernel0.code copiousArgKernel1.code copiousArgKernel2.code
-copiousArgKernel3.code copiousArgKernel16.code copiousArgKernel17.code)
+    add_dependencies(ModuleTest copiousArgKernel_code copiousArgKernel0_code copiousArgKernel1_code copiousArgKernel2_code
+copiousArgKernel3_code copiousArgKernel16_code copiousArgKernel17_code)
   endif()
 endif()
 
@@ -452,7 +452,7 @@ if (HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
     COMMENT "Compiling managed_kernel.code")
-  add_custom_target(managed_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
+  add_custom_target(managed_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -461,7 +461,7 @@ if (HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
     COMMENT "Compiling vcpy_kernel.code")
-  add_custom_target(vcpy_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
+  add_custom_target(vcpy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -470,7 +470,7 @@ if (HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
     COMMENT "Compiling matmul.code")
-  add_custom_target(matmul.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
+  add_custom_target(matmul_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -479,7 +479,7 @@ if (HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
     COMMENT "Compiling kernel_count.code")
-  add_custom_target(kernel_count.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
+  add_custom_target(kernel_count_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -488,7 +488,7 @@ if (HIP_PLATFORM MATCHES "amd")
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
     COMMENT "Compiling emptyModuleCount.code")
-  add_custom_target(emptyModuleCount.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
+  add_custom_target(emptyModuleCount_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
 else()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin
@@ -497,7 +497,7 @@ else()
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/managed_kernel.cpp
     COMMENT "Compiling managed_kernel.code")
-  add_custom_target(managed_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
+  add_custom_target(managed_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin
@@ -506,7 +506,7 @@ else()
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vcpy_kernel.cpp
     COMMENT "Compiling vcpy_kernel.code")
-  add_custom_target(vcpy_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
+  add_custom_target(vcpy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin
@@ -515,7 +515,7 @@ else()
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/matmul.cpp
     COMMENT "Compiling matmul.code")
-  add_custom_target(matmul.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
+  add_custom_target(matmul_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/matmul.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin
@@ -524,7 +524,7 @@ else()
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_count.cpp
     COMMENT "Compiling kernel_count.code")
-  add_custom_target(kernel_count.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
+  add_custom_target(kernel_count_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin
@@ -533,14 +533,14 @@ else()
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include -I${HIP_INCLUDE_DIR}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/emptyModuleCount.cpp
     COMMENT "Compiling emptyModuleCount.code")
-  add_custom_target(emptyModuleCount.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
+  add_custom_target(emptyModuleCount_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code)
 endif()
 
-add_dependencies(ModuleTest managed_kernel.code)
-add_dependencies(ModuleTest vcpy_kernel.code)
-add_dependencies(ModuleTest matmul.code)
-add_dependencies(ModuleTest kernel_count.code)
-add_dependencies(ModuleTest emptyModuleCount.code)
+add_dependencies(ModuleTest managed_kernel_code)
+add_dependencies(ModuleTest vcpy_kernel_code)
+add_dependencies(ModuleTest matmul_code)
+add_dependencies(ModuleTest kernel_count_code)
+add_dependencies(ModuleTest emptyModuleCount_code)
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
@@ -559,7 +559,7 @@ else()
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernel_composite_test.cpp
     COMMENT "Compiling kernel_composite_test.code")
 endif()
-add_custom_target(kernel_composite_test.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code)
+add_custom_target(kernel_composite_test_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/kernel_composite_test.code
   ${CMAKE_CURRENT_BINARY_DIR}/matmul.code
@@ -573,5 +573,5 @@ set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUA
 target_link_libraries(testhipModuleLoadUnloadFunc_exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
 
-add_dependencies(module managed_kernel.code vcpy_kernel.code matmul.code kernel_composite_test.code
+add_dependencies(module managed_kernel_code vcpy_kernel_code matmul_code kernel_composite_test_code
 testhipModuleLoadUnloadFunc_exe)

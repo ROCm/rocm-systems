@@ -45,14 +45,14 @@ if(UNIX AND BUILD_SHARED_LIBS)
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp
       COMMENT "Compiling bit_extract_kernel.code")
   endif()
-  add_custom_target(libLazyLoad.so DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so)
-  add_custom_target(bit_extract_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code)
+  add_custom_target(libLazyLoad_so DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so)
+  add_custom_target(bit_extract_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
     COMMAND ${CMAKE_COMMAND} -E copy
     ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/vecadd.cc)
-  add_custom_target(vecadd.cc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc)
+  add_custom_target(vecadd_cc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc)
 
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
     ${CMAKE_CURRENT_BINARY_DIR}/vecadd.cc
@@ -65,5 +65,5 @@ if(UNIX AND BUILD_SHARED_LIBS)
   endif()
 
   # Wire artifacts to the consuming exe so `make dynamicLoading` builds them.
-  add_dependencies(dynamicLoading bit_extract_kernel.code libLazyLoad.so vecadd.cc)
+  add_dependencies(dynamicLoading bit_extract_kernel_code libLazyLoad_so vecadd_cc)
 endif()

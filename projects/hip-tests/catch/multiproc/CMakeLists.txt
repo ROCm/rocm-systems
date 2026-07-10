@@ -41,7 +41,7 @@ if(UNIX)
                       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       COMMENT "Compiling dummy_kernel.code")
   endif()
-  add_custom_target(dummy_kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
+  add_custom_target(dummy_kernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
 endif()
 set_property(GLOBAL APPEND PROPERTY
               G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
@@ -61,7 +61,7 @@ elseif(HIP_PLATFORM MATCHES "amd")
 endif()
 
 if(UNIX)
-  # Wire dummy_kernel.code to MultiProc directly so `make MultiProc` builds it,
+  # Wire dummy_kernel_code to MultiProc directly so `make MultiProc` builds it,
   # not just `make build_tests`.
-  add_dependencies(MultiProc dummy_kernel.code)
+  add_dependencies(MultiProc dummy_kernel_code)
 endif()

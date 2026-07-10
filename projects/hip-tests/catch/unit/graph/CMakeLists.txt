@@ -195,7 +195,7 @@ else()
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
     COMMENT "Compiling add_Kernel.code")
 endif()
-add_custom_target(add_Kernel.code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
+add_custom_target(add_Kernel DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
 
 set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
@@ -208,12 +208,12 @@ hip_add_exe_to_target(NAME GraphsTest2
 # Wire kernel artifacts to the consuming test exes so `make GraphsTest1` /
 # `make GraphsTest2` builds all their dependencies. The kernels are loaded at
 # runtime by tests in either binary, so wire to both.
-add_dependencies(GraphsTest1 add_Kernel.code)
-add_dependencies(GraphsTest2 add_Kernel.code)
+add_dependencies(GraphsTest1 add_Kernel)
+add_dependencies(GraphsTest2 add_Kernel)
 if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(GraphsTest1 hipMatMul)
   add_dependencies(GraphsTest2 hipMatMul)
   if(UNIX)
-    add_dependencies(GraphsKernelArgPrefetchTest add_Kernel.code)
+    add_dependencies(GraphsKernelArgPrefetchTest add_Kernel)
   endif()
 endif()
