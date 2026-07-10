@@ -8,8 +8,12 @@
 
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -50,11 +54,11 @@ build_cdna3_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, ui
 /// the emitted narrow MFMA clears the source ACC selector while preserving the
 /// destination AccVGPR selector from the CDNA4 instruction.
 [[nodiscard]] std::pair<uint32_t, uint32_t>
-build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8_t vdst,
+build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8_t vdst,
                        uint8_t acc_cd, uint16_t src0, uint16_t src1, uint16_t src2) {
   cdna3::Vop3pMfmaMachineInst dst{};
-  dst.encoding = 0x1A7;
-  dst.op = op;
+  dst.encoding = cdna3::encoding::kVop3pMfma;
+  dst.op = op & 0x7F;
   dst.vdst = vdst;
   dst.cbsz = src.cbsz;
   dst.abid = src.abid;
@@ -70,13 +74,13 @@ build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8
   return {words[0], words[1]};
 }
 
-[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_ds(uint8_t op, uint8_t vdst, uint8_t addr,
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_ds(uint16_t op, uint8_t vdst, uint8_t addr,
                                                            uint8_t data0 = 0, uint8_t data1 = 0,
                                                            uint8_t offset0 = 0,
                                                            uint8_t offset1 = 0) {
   cdna3::DsMachineInst dst{};
   dst.encoding = 0x36;
-  dst.op = op;
+  dst.op = op & 0xFF;
   dst.offset0 = offset0;
   dst.offset1 = offset1;
   dst.addr = addr;
@@ -90,10 +94,10 @@ build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8
 }
 
 [[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_mubuf(const cdna4::MubufMachineInst &src,
-                                                              uint8_t op, uint8_t vdata) {
+                                                              uint16_t op, uint8_t vdata) {
   cdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
-  dst.op = op;
+  dst.op = op & 0x7F;
   dst.offset = src.offset;
   dst.offen = src.offen;
   dst.idxen = src.idxen;
@@ -114,11 +118,11 @@ build_cdna3_vop3p_mfma(uint8_t op, const cdna4::Vop3pMfmaMachineInst &src, uint8
 
 [[nodiscard]] constexpr std::pair<uint32_t, uint32_t> build_s_mov_b32_lit(uint8_t sdst,
                                                                           uint32_t literal) {
-  return {pack_sop1(0, sdst, 0xFF), literal};
+  return {pack_sop1(cdna3::kSMovB32, sdst, 0xFF), literal};
 }
 
 [[nodiscard]] constexpr uint32_t build_s_mov_b64(uint8_t sdst, uint16_t ssrc0) {
-  return pack_sop1(1, sdst, ssrc0);
+  return pack_sop1(cdna3::kSMovB64, sdst, ssrc0);
 }
 
 constexpr uint8_t kExecLo = 126;
@@ -126,31 +130,6 @@ constexpr uint16_t kInlineConst0 = 128;
 constexpr uint16_t kInlineConstNeg1 = 193;
 constexpr uint16_t kM0 = 124;
 
-// CDNA3 VOP3 opcodes used by the bitop3, wide-K, and DS transpose expansions.
-constexpr uint16_t kCdna3OpCvtF16F32 = 330;
-constexpr uint16_t kCdna3OpMovB32 = 321;
-constexpr uint16_t kCdna3OpLshrrevB32 = 272;
-constexpr uint16_t kCdna3OpLshlrevB32 = 274;
-constexpr uint16_t kCdna3OpAndB32 = 275;
-constexpr uint16_t kCdna3OpOrB32 = 276;
-constexpr uint16_t kCdna3OpXorB32 = 277;
-constexpr uint16_t kCdna3OpAddU32 = 308;
-constexpr uint16_t kCdna3OpPermB32 = 493;
-constexpr uint16_t kCdna3OpMbcntLoU32B32 = 652;
-constexpr uint16_t kCdna3OpMbcntHiU32B32 = 653;
-
-// CDNA3 VOP3P-MFMA opcodes used by CDNA4 wide-K MFMA expansion.
-constexpr uint8_t kCdna3OpMfmaF32_32x32x8F16 = 76;
-constexpr uint8_t kCdna3OpMfmaF32_16x16x16F16 = 77;
-
-// CDNA3 DS opcodes used to synthesize CDNA4 transposed LDS reads.
-constexpr uint8_t kCdna3DsOpBpermuteB32 = 63;
-constexpr uint8_t kCdna3DsOpReadB64 = 118;
-constexpr uint8_t kCdna3DsOpWriteB32 = 13;
-constexpr uint8_t kCdna3DsOpWriteB96 = 222;
-constexpr uint8_t kCdna3DsOpWriteB128 = 223;
-
-constexpr uint8_t kCdna3SoppOpWaitcnt = 12;
 constexpr uint16_t kCdnaWaitcntLgkmcnt0 = 0xC07F;
 constexpr uint16_t kCdnaWaitcntAll0 = 0x0000;
 
@@ -161,7 +140,7 @@ void emit_cdna3_vop3(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, ui
   words.push_back(w1);
 }
 
-void emit_cdna3_ds(std::vector<uint32_t> &words, uint8_t op, uint8_t vdst, uint8_t addr,
+void emit_cdna3_ds(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint8_t addr,
                    uint8_t data0 = 0, uint8_t data1 = 0, uint8_t offset0 = 0, uint8_t offset1 = 0) {
   auto [w0, w1] = build_cdna3_ds(op, vdst, addr, data0, data1, offset0, offset1);
   words.push_back(w0);
@@ -172,7 +151,7 @@ void emit_cdna3_lgkm_wait(std::vector<uint32_t> &words) {
   // GFX9/CDNA s_waitcnt encodes "lgkmcnt(0)" as lgkm=0 while leaving VM/EXP at
   // their no-wait maxima. The DS read/bpermute sequences below require the
   // loaded/permuted data before issuing dependent VALU instructions.
-  words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntLgkmcnt0));
+  words.push_back(pack_sopp(cdna3::kSWaitcntSopp, kCdnaWaitcntLgkmcnt0));
 }
 
 void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
@@ -180,12 +159,12 @@ void emit_cdna3_wait_all(std::vector<uint32_t> &words) {
   // following DS write.  Waiting all counters is stronger than the hardware
   // `vmcnt(0)` dependency we strictly need, but it keeps this first lowering
   // conservative and matches the monolithic CDNA waitcnt encoding.
-  words.push_back(pack_sopp(kCdna3SoppOpWaitcnt, kCdnaWaitcntAll0));
+  words.push_back(pack_sopp(cdna3::kSWaitcntSopp, kCdnaWaitcntAll0));
 }
 
 [[nodiscard]] constexpr uint16_t vgpr_src(uint8_t reg) { return static_cast<uint16_t>(256 + reg); }
 
-void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineInst &src, uint8_t op,
+void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineInst &src, uint16_t op,
                       uint8_t vdata) {
   auto [w0, w1] = build_cdna3_mubuf(src, op, vdata);
   words.push_back(w0);
@@ -209,7 +188,7 @@ void emit_cdna3_exec_mask(std::vector<uint32_t> &words, uint64_t mask) {
   emit_s_mov_b32_lit(words, kExecLo + 1, static_cast<uint32_t>(mask >> 32));
 }
 
-void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
+void emit_cdna3_mfma(std::vector<uint32_t> &words, uint16_t op,
                      const cdna4::Vop3pMfmaMachineInst &src, uint16_t src0, uint16_t src1,
                      uint16_t src2) {
   auto [w0, w1] = build_cdna3_vop3p_mfma(op, src, static_cast<uint8_t>(src.vdst),
@@ -218,7 +197,7 @@ void emit_cdna3_mfma(std::vector<uint32_t> &words, uint8_t op,
   words.push_back(w1);
 }
 
-void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint8_t op,
+void emit_cdna3_mfma_to_vgpr(std::vector<uint32_t> &words, uint16_t op,
                              const cdna4::Vop3pMfmaMachineInst &src, uint8_t vdst, uint16_t src0,
                              uint16_t src1, uint16_t src2) {
   auto [w0, w1] = build_cdna3_vop3p_mfma(op, src, vdst, 0, src0, src1, src2);
@@ -365,13 +344,13 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
   };
 
   auto emit_mov = [&](uint8_t dst, uint16_t src0) {
-    emit_cdna3_vop3(words, kCdna3OpMovB32, dst, src0);
+    emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, dst, src0);
   };
   auto emit_and = [&](uint8_t dst, uint16_t src0, uint16_t src1) {
-    emit_cdna3_vop3(words, kCdna3OpAndB32, dst, src0, src1);
+    emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, dst, src0, src1);
   };
   auto emit_xor = [&](uint8_t dst, uint16_t src0, uint16_t src1) {
-    emit_cdna3_vop3(words, kCdna3OpXorB32, dst, src0, src1);
+    emit_cdna3_vop3(words, cdna3::kVXorB32Vop3, dst, src0, src1);
   };
 
   bool acc_initialized = false;
@@ -415,8 +394,8 @@ ExpandResult lower_cdna4_bitop3_to_cdna3(const Bitop3Inst &inst, const LivenessA
     // shift right to clear bits 31:16 without needing a separate 0xffff mask,
     // which CDNA3 cannot encode as an inline VALU operand.
     const uint16_t shift16 = scalar_positive_inline_u32(16);
-    emit_cdna3_vop3(words, kCdna3OpLshlrevB32, acc, shift16, vgpr_src(acc));
-    emit_cdna3_vop3(words, kCdna3OpLshrrevB32, acc, shift16, vgpr_src(acc));
+    emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, acc, shift16, vgpr_src(acc));
+    emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, acc, shift16, vgpr_src(acc));
   }
 
   if (acc != vdst)
@@ -493,22 +472,22 @@ ExpandResult lower_permlane32_swap_b32_cdna4_to_cdna3(const Instruction &inst,
   emit_s_mov_b64(words, saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
 
-  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, lane, kInlineConstNeg1, kInlineConst0);
-  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, lane, kInlineConstNeg1, vgpr_src(lane));
-  emit_cdna3_vop3(words, kCdna3OpXorB32, partner_addr, scalar_positive_inline_u32(32),
+  emit_cdna3_vop3(words, cdna3::kVMbcntLoU32B32Vop3, lane, kInlineConstNeg1, kInlineConst0);
+  emit_cdna3_vop3(words, cdna3::kVMbcntHiU32B32Vop3, lane, kInlineConstNeg1, vgpr_src(lane));
+  emit_cdna3_vop3(words, cdna3::kVXorB32Vop3, partner_addr, scalar_positive_inline_u32(32),
                   vgpr_src(lane));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, partner_addr, scalar_positive_inline_u32(2),
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, partner_addr, scalar_positive_inline_u32(2),
                   vgpr_src(partner_addr));
 
-  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, from_dst_high, partner_addr, vdst);
-  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, from_src_low, partner_addr, vsrc);
+  emit_cdna3_ds(words, cdna3::kDsBpermuteB32Ds, from_dst_high, partner_addr, vdst);
+  emit_cdna3_ds(words, cdna3::kDsBpermuteB32Ds, from_src_low, partner_addr, vsrc);
   emit_cdna3_lgkm_wait(words);
 
   emit_cdna3_exec_mask(words, 0x00000000FFFFFFFFull);
-  emit_cdna3_vop3(words, kCdna3OpMovB32, vsrc, vgpr_src(from_dst_high));
+  emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, vsrc, vgpr_src(from_dst_high));
 
   emit_cdna3_exec_mask(words, 0xFFFFFFFF00000000ull);
-  emit_cdna3_vop3(words, kCdna3OpMovB32, vdst, vgpr_src(from_src_low));
+  emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, vdst, vgpr_src(from_src_low));
 
   emit_s_mov_b64(words, kExecLo, saved_exec);
   return ExpandResult::success(std::move(words));
@@ -563,10 +542,10 @@ ExpandResult lower_cvt_pk_f16_f32_cdna4_to_cdna3(const Instruction &inst,
   // v_cvt_f16_f32 with the same conversion helper used by the generated VM
   // model. Convert both sources before writing VDST so forms such as
   // `v_cvt_pk_f16_f32 v31, v31, v32` do not clobber a still-needed source.
-  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, lo, static_cast<uint16_t>(src.src0));
-  emit_cdna3_vop3(words, kCdna3OpCvtF16F32, hi, static_cast<uint16_t>(src.src1));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, hi, scalar_positive_inline_u32(16), vgpr_src(hi));
-  emit_cdna3_vop3(words, kCdna3OpOrB32, vdst, vgpr_src(lo), vgpr_src(hi));
+  emit_cdna3_vop3(words, cdna3::kVCvtF16F32Vop3, lo, static_cast<uint16_t>(src.src0));
+  emit_cdna3_vop3(words, cdna3::kVCvtF16F32Vop3, hi, static_cast<uint16_t>(src.src1));
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, hi, scalar_positive_inline_u32(16), vgpr_src(hi));
+  emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, vdst, vgpr_src(lo), vgpr_src(hi));
   return ExpandResult::success(std::move(words));
 }
 
@@ -590,9 +569,9 @@ struct WideKMfmaLowering {
 [[nodiscard]] constexpr WideKMfmaLowering lowering_for_shape(WideKMfmaShape shape) {
   switch (shape) {
   case WideKMfmaShape::F32_16x16x32_F16:
-    return {shape, kCdna3OpMfmaF32_16x16x16F16, 4, 4, 2};
+    return {shape, cdna3::kVMfmaF3216x16x16F16Vop3pMfma, 4, 4, 2};
   case WideKMfmaShape::F32_32x32x16_F16:
-    return {shape, kCdna3OpMfmaF32_32x32x8F16, 16, 4, 2};
+    return {shape, cdna3::kVMfmaF3232x32x8F16Vop3pMfma, 16, 4, 2};
   }
   return {shape, 0, 0, 0, 0};
 }
@@ -714,10 +693,10 @@ ExpandResult lower_wide_k_mfma_f16_cdna4_to_cdna3(const Instruction &inst,
 void emit_cdna3_b16_transpose_halfword(std::vector<uint32_t> &words, uint8_t halfword_dst,
                                        uint8_t gather_tmp, uint8_t lane_byte_addr, uint8_t raw_lo,
                                        uint8_t raw_hi, uint8_t halfword_selector) {
-  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, halfword_dst, lane_byte_addr, raw_lo);
-  emit_cdna3_ds(words, kCdna3DsOpBpermuteB32, gather_tmp, lane_byte_addr, raw_hi);
+  emit_cdna3_ds(words, cdna3::kDsBpermuteB32Ds, halfword_dst, lane_byte_addr, raw_lo);
+  emit_cdna3_ds(words, cdna3::kDsBpermuteB32Ds, gather_tmp, lane_byte_addr, raw_hi);
   emit_cdna3_lgkm_wait(words);
-  emit_cdna3_vop3(words, kCdna3OpPermB32, halfword_dst, vgpr_src(gather_tmp),
+  emit_cdna3_vop3(words, cdna3::kVPermB32Vop3, halfword_dst, vgpr_src(gather_tmp),
                   vgpr_src(halfword_dst), vgpr_src(halfword_selector));
 }
 
@@ -731,14 +710,16 @@ void emit_cdna3_pack_low_b16_pair(std::vector<uint32_t> &words, uint8_t dst, uin
   //
   // CDNA3 cannot inline 0xffff as a VALU source, so synthesize the mask from
   // -1 >> 16. The helper may clobber halfword_lo, shifted_hi_tmp, and mask_tmp.
-  emit_cdna3_vop3(words, kCdna3OpMovB32, mask_tmp, kInlineConstNeg1);
-  emit_cdna3_vop3(words, kCdna3OpLshrrevB32, mask_tmp, scalar_positive_inline_u32(16),
+  emit_cdna3_vop3(words, cdna3::kVMovB32Vop3, mask_tmp, kInlineConstNeg1);
+  emit_cdna3_vop3(words, cdna3::kVLshrrevB32Vop3, mask_tmp, scalar_positive_inline_u32(16),
                   vgpr_src(mask_tmp));
-  emit_cdna3_vop3(words, kCdna3OpAndB32, halfword_lo, vgpr_src(mask_tmp), vgpr_src(halfword_lo));
-  emit_cdna3_vop3(words, kCdna3OpAndB32, shifted_hi_tmp, vgpr_src(mask_tmp), vgpr_src(halfword_hi));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, shifted_hi_tmp, scalar_positive_inline_u32(16),
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, halfword_lo, vgpr_src(mask_tmp),
+                  vgpr_src(halfword_lo));
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, shifted_hi_tmp, vgpr_src(mask_tmp),
+                  vgpr_src(halfword_hi));
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, shifted_hi_tmp, scalar_positive_inline_u32(16),
                   vgpr_src(shifted_hi_tmp));
-  emit_cdna3_vop3(words, kCdna3OpOrB32, dst, vgpr_src(halfword_lo), vgpr_src(shifted_hi_tmp));
+  emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, dst, vgpr_src(halfword_lo), vgpr_src(shifted_hi_tmp));
 }
 
 ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
@@ -835,31 +816,32 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // 32-bit half of the original b64 read. pack_u16_pair() is deliberately
   // integer mask/shift/or instead of v_pack_b32_f16 because this DS op moves
   // raw 16-bit payloads, not FP16 values.
-  emit_cdna3_ds(words, kCdna3DsOpReadB64, raw_lo, addr, 0, 0, src.offset0, src.offset1);
+  emit_cdna3_ds(words, cdna3::kDsReadB64Ds, raw_lo, addr, 0, 0, src.offset0, src.offset1);
   emit_cdna3_lgkm_wait(words);
 
-  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, tmp, kInlineConstNeg1, kInlineConst0);
-  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, tmp, kInlineConstNeg1, vgpr_src(tmp));
+  emit_cdna3_vop3(words, cdna3::kVMbcntLoU32B32Vop3, tmp, kInlineConstNeg1, kInlineConst0);
+  emit_cdna3_vop3(words, cdna3::kVMbcntHiU32B32Vop3, tmp, kInlineConstNeg1, vgpr_src(tmp));
 
   // Build the ds_bpermute byte addresses that recover each halfword in the
   // transposed 4x16-lane pattern, then pack pairs of halfwords back into the
   // two 32-bit destination registers produced by ds_read_b64_tr_b16.
-  emit_cdna3_vop3(words, kCdna3OpAndB32, halfword_selector, scalar_positive_inline_u32(3),
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, halfword_selector, scalar_positive_inline_u32(3),
                   vgpr_src(tmp));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, halfword_selector, scalar_positive_inline_u32(1),
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, halfword_selector, scalar_positive_inline_u32(1),
                   vgpr_src(halfword_selector));
 
-  emit_cdna3_vop3(words, kCdna3OpAndB32, lane_base, scalar_positive_inline_u32(0x30),
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, lane_base, scalar_positive_inline_u32(0x30),
                   vgpr_src(tmp));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, lane_base, scalar_positive_inline_u32(2),
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, lane_base, scalar_positive_inline_u32(2),
                   vgpr_src(lane_base));
-  emit_cdna3_vop3(words, kCdna3OpAndB32, tmp, scalar_positive_inline_u32(0x0c), vgpr_src(tmp));
-  emit_cdna3_vop3(words, kCdna3OpOrB32, lane_base, vgpr_src(lane_base), vgpr_src(tmp));
+  emit_cdna3_vop3(words, cdna3::kVAndB32Vop3, tmp, scalar_positive_inline_u32(0x0c), vgpr_src(tmp));
+  emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, lane_base, vgpr_src(lane_base), vgpr_src(tmp));
 
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(1),
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, tmp, scalar_positive_inline_u32(1),
                   vgpr_src(halfword_selector));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, tmp, scalar_positive_inline_u32(8), vgpr_src(tmp));
-  emit_cdna3_vop3(words, kCdna3OpOrB32, halfword_selector, vgpr_src(halfword_selector),
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, tmp, scalar_positive_inline_u32(8),
+                  vgpr_src(tmp));
+  emit_cdna3_vop3(words, cdna3::kVOrB32Vop3, halfword_selector, vgpr_src(halfword_selector),
                   vgpr_src(tmp));
 
   // TODO: Gather both destination halfword pairs in one pass to reduce the
@@ -867,15 +849,18 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // lowering.
   emit_cdna3_b16_transpose_halfword(words, halfword_lo, gather_tmp, lane_base, raw_lo, raw_hi,
                                     halfword_selector);
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(16), vgpr_src(lane_base));
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, tmp, scalar_positive_inline_u32(16),
+                  vgpr_src(lane_base));
   emit_cdna3_b16_transpose_halfword(words, halfword_hi, gather_tmp, tmp, raw_lo, raw_hi,
                                     halfword_selector);
   emit_cdna3_pack_low_b16_pair(words, vdst, halfword_lo, halfword_hi, tmp, gather_tmp);
 
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(32), vgpr_src(lane_base));
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, tmp, scalar_positive_inline_u32(32),
+                  vgpr_src(lane_base));
   emit_cdna3_b16_transpose_halfword(words, halfword_lo, gather_tmp, tmp, raw_lo, raw_hi,
                                     halfword_selector);
-  emit_cdna3_vop3(words, kCdna3OpAddU32, tmp, scalar_positive_inline_u32(48), vgpr_src(lane_base));
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, tmp, scalar_positive_inline_u32(48),
+                  vgpr_src(lane_base));
   emit_cdna3_b16_transpose_halfword(words, halfword_hi, gather_tmp, tmp, raw_lo, raw_hi,
                                     halfword_selector);
   emit_cdna3_pack_low_b16_pair(words, static_cast<uint8_t>(vdst + 1), halfword_lo, halfword_hi, tmp,
@@ -964,20 +949,23 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // a temporary save can redirect later global loads.
   const uint8_t saved_exec = static_cast<uint8_t>((context.num_sgprs + 1u) & ~1u);
 
-  const uint8_t load_op = static_cast<uint8_t>(19 + num_dwords);
-  uint8_t ds_op = kCdna3DsOpWriteB32;
+  uint16_t load_op = 0;
+  uint16_t ds_op = cdna3::kDsWriteB32Ds;
   uint16_t lane_stride_shift = 2;
   switch (num_dwords) {
   case 1:
-    ds_op = kCdna3DsOpWriteB32;
+    load_op = cdna3::kBufferLoadDwordMubuf;
+    ds_op = cdna3::kDsWriteB32Ds;
     lane_stride_shift = 2;
     break;
   case 3:
-    ds_op = kCdna3DsOpWriteB96;
+    load_op = cdna3::kBufferLoadDwordx3Mubuf;
+    ds_op = cdna3::kDsWriteB96Ds;
     lane_stride_shift = 4;
     break;
   case 4:
-    ds_op = kCdna3DsOpWriteB128;
+    load_op = cdna3::kBufferLoadDwordx4Mubuf;
+    ds_op = cdna3::kDsWriteB128Ds;
     lane_stride_shift = 4;
     break;
   default:
@@ -996,11 +984,12 @@ ExpandResult lower_ds_read_b64_tr_b16_cdna4_to_cdna3(const Instruction &inst,
   // instruction.
   emit_s_mov_b64(words, saved_exec, kExecLo);
   emit_cdna3_exec_mask(words, UINT64_MAX);
-  emit_cdna3_vop3(words, kCdna3OpMbcntLoU32B32, lds_addr, kInlineConstNeg1, kInlineConst0);
-  emit_cdna3_vop3(words, kCdna3OpMbcntHiU32B32, lds_addr, kInlineConstNeg1, vgpr_src(lds_addr));
-  emit_cdna3_vop3(words, kCdna3OpLshlrevB32, lds_addr,
+  emit_cdna3_vop3(words, cdna3::kVMbcntLoU32B32Vop3, lds_addr, kInlineConstNeg1, kInlineConst0);
+  emit_cdna3_vop3(words, cdna3::kVMbcntHiU32B32Vop3, lds_addr, kInlineConstNeg1,
+                  vgpr_src(lds_addr));
+  emit_cdna3_vop3(words, cdna3::kVLshlrevB32Vop3, lds_addr,
                   scalar_positive_inline_u32(lane_stride_shift), vgpr_src(lds_addr));
-  emit_cdna3_vop3(words, kCdna3OpAddU32, lds_addr, kM0, vgpr_src(lds_addr));
+  emit_cdna3_vop3(words, cdna3::kVAddU32Vop3, lds_addr, kM0, vgpr_src(lds_addr));
   emit_s_mov_b64(words, kExecLo, saved_exec);
 
   emit_cdna3_mubuf(words, src, load_op, data);
@@ -1088,50 +1077,31 @@ ExpandResult expand_buffer_load_dwordx4_lds_cdna4_to_cdna3(const Instruction &in
   return expand_mubuf_load_to_lds_cdna4_to_cdna3(inst, liveness, context, 4);
 }
 
-constexpr uint16_t kEncVop3 = 0x1A4;
-constexpr uint16_t kEncVop3pMfma = 0x1A7;
-constexpr uint16_t kEncVop1 = 0xFC;
-constexpr uint16_t kEncVop1Hi1 = 0xFD;
-constexpr uint16_t kEncVop1Hi2 = 0xFE;
-constexpr uint16_t kEncVop1Hi3 = 0xFF;
-constexpr uint16_t kEncDsReadB64TrB16 = 0x1B3;
-constexpr uint16_t kEncMubuf = 0x1C0;
-
-constexpr uint16_t kCdna4Op_v_mfma_f32_16x16x32_f16 = 84;
-constexpr uint16_t kCdna4Op_v_mfma_f32_32x32x16_f16 = 85;
-constexpr uint16_t kCdna4Op_v_permlane32_swap_b32 = 90;
-constexpr uint16_t kCdna4Op_v_bitop3_b16 = 563;
-constexpr uint16_t kCdna4Op_v_bitop3_b32 = 564;
-constexpr uint16_t kCdna4Op_v_cvt_pk_f16_f32 = 615;
-constexpr uint16_t kCdna4Op_ds_read_b64_tr_b16 = 227;
-constexpr uint16_t kCdna4Op_buffer_load_dwordx3 = 22;
-constexpr uint16_t kCdna4Op_buffer_load_dwordx4 = 23;
-
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
 const TranslationRule kExpandRules_cdna4_to_cdna3[] = {
-    {kEncVop1, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop1Hi1, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop1Hi1, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop1Hi2, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop1Hi2, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop1Hi3, kCdna4Op_v_permlane32_swap_b32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop1Hi3, cdna4::kVPermlane32SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
      expand_permlane32_swap_b32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop3, kCdna4Op_v_bitop3_b16, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16, RuleAction::Expand, 0, 0, nullptr,
      expand_v_bitop3_b16_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop3, kCdna4Op_v_bitop3_b32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B32, RuleAction::Expand, 0, 0, nullptr,
      expand_v_bitop3_b32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop3, kCdna4Op_v_cvt_pk_f16_f32, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkF16F32, RuleAction::Expand, 0, 0, nullptr,
      expand_cvt_pk_f16_f32_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop3pMfma, kCdna4Op_v_mfma_f32_16x16x32_f16, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32F16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncVop3pMfma, kCdna4Op_v_mfma_f32_32x32x16_f16, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16, RuleAction::Expand, 0, 0, nullptr,
      expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncDsReadB64TrB16, kCdna4Op_ds_read_b64_tr_b16, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kDsOpHi3, cdna4::kDsReadB64TrB16, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncMubuf, kCdna4Op_buffer_load_dwordx3, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx3_lds_cdna4_to_cdna3, nullptr, nullptr},
-    {kEncMubuf, kCdna4Op_buffer_load_dwordx4, RuleAction::Expand, 0, 0, nullptr,
+    {cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4, RuleAction::Expand, 0, 0, nullptr,
      expand_buffer_load_dwordx4_lds_cdna4_to_cdna3, nullptr, nullptr},
 };
 

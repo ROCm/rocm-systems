@@ -5,7 +5,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -225,7 +225,7 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
 
 namespace {
 
-rj_status_t execute_impl(SimulatedDriver *driver, uint32_t process_id, rj_vm_cmd_t *cmd) {
+rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t *cmd) {
   auto arg_size = _IOC_SIZE(cmd->cmd);
   reconstruct_embedded_pointers(cmd->cmd, cmd->buf, arg_size, cmd->buf_size);
 
@@ -263,10 +263,10 @@ rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd)
 rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_pid, uint32_t *process_id) {
   if (!vm || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  auto *drv = dynamic_cast<SimulatedDriver *>(vm->vm->driver());
+  auto *drv = dynamic_cast<SimulatedKfd *>(vm->vm->driver());
   if (!drv)
     return ROCJITSU_STATUS_ERROR;
-  // client_pid == 0 (local mode) maps to SimulatedDriver::open_process()'s
+  // client_pid == 0 (local mode) maps to SimulatedKfd::open_process()'s
   // default; a nonzero client_pid enables daemon-mode process reuse and
   // cross-process memory access. Narrow the fixed-width public type to the
   // platform pid_t at the Linux daemon boundary.

@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
+#include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -938,6 +939,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   DispatchEntry dp{};
   dp.dispatch_id = next_dispatch_id_++;
+  dp.profiling_start_timestamp = hsa_system_timestamp();
   dp.queue_id = queue.queue_id;
   dp.process_id = queue.process_id;
   dp.kernel_entry_pc = entry_pc;
