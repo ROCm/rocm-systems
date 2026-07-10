@@ -2067,6 +2067,9 @@ memory:
   Unit_hipMemAdvise_Negative_Parameters:
     <<: *level_2
     tags: [query]
+  Unit_hipMemAdvise_SplitVramRestoreBoundary:
+    <<: *level_2
+    tags: [query]
   Unit_hipMemRangeGetAttributes_Positive_Basic:
     <<: *level_2
     tags: [query]

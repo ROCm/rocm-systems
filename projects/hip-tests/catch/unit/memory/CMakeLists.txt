@@ -178,7 +178,7 @@ set(TEST_SRC
     hipPointerGetAttribute.cc
     hipDrvPtrGetAttributes.cc
     hipMemPrefetchAsync.cc
-    hipMemPrefetchBatchAsync.cc
+    # hipMemPrefetchBatchAsync.cc  # temporarily disabled: hipMemPrefetchBatchAsync API not present in this ROCm build
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
@@ -188,6 +188,7 @@ set(TEST_SRC
     hipMemsetAsync.cc
     hipMemAdvise_old.cc
     hipMemAdvise.cc
+    hipMemAdviseSplitVramRestore.cc
     hipMemRangeGetAttributes.cc
     hipFreeAsync.cc
     hipFreeHost.cc
