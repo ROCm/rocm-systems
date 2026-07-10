@@ -245,13 +245,17 @@ release(uint, DEBUG_HIP_FORCE_GRAPH_QUEUES, 4,                                \
         "Forces the number of streams for the graph parallel execution")      \
 release(uint, DEBUG_HIP_GRAPH_BATCH_SIZE, 256,                                \
         "Number of graph nodes to batch at a time")                           \
-release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 1,                          \
-        "0 = Disable, 1 = Enable, 2 = Force")                                 \
+release(uint, DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING, 0,                          \
+        "Segment scheduling mode (segmented path only): "                      \
+        "0=Hybrid/auto, 1=Round-robin, 2=DFS")                                \
 release(uint, DEBUG_HIP_GRAPH_MIN_OVERLAP, 2,                                 \
         "Min overlappable work (in occupancy passes) per unit of cross-stream "\
         "sync (barrier packets + completion signals) to keep a graph "         \
         "multi-stream; below this ratio it collapses to a single stream. "     \
         "0 = off.")                                                            \
+release(bool, DEBUG_HIP_GRAPH_CLASSIC_PATH, false,                            \
+        "Force GraphExecClassic (classic topological path) regardless of "    \
+        "GPU_ENABLE_PAL, for testing on Linux")                                \
 release(uint, DEBUG_HIP_BLOCK_SYNC, 50,                                       \
         "Blocks synchronization on CPU until the callback processing is done")\
 release(uint, DEBUG_CLR_MAX_BATCH_SIZE, 1000,                                 \

@@ -142,6 +142,55 @@ Examples:
             default=False,
             help="Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun"
         )
+        self.parser.add_argument(
+            '--emit-results',
+            action='store_true',
+            default=False,
+            help="Emit structured, machine-readable results (JSON/JSONL + a .tar.gz "
+                 "snapshot) for the results dashboard. Enables per-test log "
+                 "capture so perf (busbw/algbw) numbers can be parsed."
+        )
+        self.parser.add_argument(
+            '--results-dir',
+            type=str,
+            default='',
+            help="Directory for emitted results + tarballs (default: <workspace>/results). "
+                 "The hourly dashboard scrape pulls <results-dir>/latest.tar.gz."
+        )
+        self.parser.add_argument(
+            '--run-label',
+            type=str,
+            default='',
+            help="Optional label/tag stored with the emitted run (e.g. 'nightly', a PR number)."
+        )
+        self.parser.add_argument(
+            '--tag',
+            action='append',
+            default=[],
+            metavar='TAG',
+            help="Tag to attach to the emitted run for filtering in the dashboard "
+                 "(repeatable, e.g. --tag nightly --tag mi300x). Merged with --tags."
+        )
+        self.parser.add_argument(
+            '--tags',
+            type=str,
+            default='',
+            help="Comma-separated tags to attach to the emitted run (merged with --tag)."
+        )
+        self.parser.add_argument(
+            '--db-push',
+            action='store_true',
+            default=False,
+            help="Also push results to PostgreSQL (DSN from RCCL_RESULTS_DSN). Best "
+                 "effort: on failure/timeout the run continues and the local tarball "
+                 "remains the source of truth. Implies --emit-results."
+        )
+        self.parser.add_argument(
+            '--db-timeout',
+            type=int,
+            default=10,
+            help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
