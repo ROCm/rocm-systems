@@ -251,6 +251,44 @@ metadata::metadata(inprocess)
     add_kernel_symbol(std::move(info));
 }
 
+void
+metadata::refresh_agent_info()
+{
+    // Re-query the canonical SDK agent records. On WSL these are refined from the HSA
+    // runtime in agent::construct_agent_cache() after this metadata's constructor took its
+    // snapshot at tool load; re-querying here picks up the refined topology.
+    auto _fresh_agents = std::vector<rocprofiler_agent_v0_t>{};
+    rocprofiler_query_available_agents(
+        ROCPROFILER_AGENT_INFO_VERSION_0,
+        [](rocprofiler_agent_version_t, const void** _agents, size_t _num_agents, void* _data) {
+            auto* _out = static_cast<std::vector<rocprofiler_agent_v0_t>*>(_data);
+            _out->reserve(_num_agents);
+            for(size_t i = 0; i < _num_agents; ++i)
+                _out->emplace_back(*static_cast<const rocprofiler_agent_v0_t*>(_agents[i]));
+            return ROCPROFILER_STATUS_SUCCESS;
+        },
+        sizeof(rocprofiler_agent_v0_t),
+        &_fresh_agents);
+
+    // Copy only the rocprofiler_agent_v0_t base into each stored agent_info so the
+    // tool-assigned agent_info::gpu_index (set in the constructor) is preserved.
+    auto _apply_refresh = [&_fresh_agents](agent_info& _stored) {
+        for(const auto& _f : _fresh_agents)
+        {
+            if(_f.id.handle == _stored.id.handle)
+            {
+                static_cast<rocprofiler_agent_v0_t&>(_stored) = _f;
+                break;
+            }
+        }
+    };
+
+    for(auto& _agent : agents)
+        _apply_refresh(_agent);
+    for(auto& [_id, _agent] : agents_map)
+        _apply_refresh(_agent);
+}
+
 /**
  * @brief Initializes the metadata by loading all counters supported on GPU agents.
  *

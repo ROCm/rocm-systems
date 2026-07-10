@@ -809,6 +809,20 @@ runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
     {
         tool_metadata->add_runtime_initialization(
             static_cast<rocprofiler_runtime_initialization_operation_t>(record.operation));
+
+        // Refresh the agent-topology snapshot once, right after the HSA runtime is up.
+        // agent::construct_agent_cache() -- which refines the WSL GPU topology (cu_count,
+        // wave_front_size, simd_count, name, ...) from the HSA runtime -- runs immediately
+        // before the HSA runtime-initialization record is emitted, so re-querying here
+        // gives every downstream consumer (Perfetto/OTF2/correlation/out_agent_info.csv)
+        // the refined records. Gated to the HSA operation because HIP initialization is
+        // reported earlier, before construct_agent_cache() has run.
+        if(record.operation == ROCPROFILER_RUNTIME_INITIALIZATION_HSA)
+        {
+            static std::once_flag _agent_topology_refresh_once{};
+            std::call_once(_agent_topology_refresh_once,
+                           []() { CHECK_NOTNULL(tool_metadata)->refresh_agent_info(); });
+        }
     }
     common::consume_args(user_data, data);
 }
@@ -3293,47 +3307,6 @@ generate_output(cleanup_mode _cleanup_mode)
     auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
     auto pc_sampling_stochastic_output =
         tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
-
-    // Refresh the agent topology from the canonical SDK records before emitting
-    // output. tool_metadata snapshots the agents when it is constructed (at tool
-    // library load, before the HSA runtime is up). On WSL the GPU topology
-    // (cu_count, wave_front_size, simd_count, ...) is seeded with placeholders at
-    // enumerate time and only refined from the HSA runtime in
-    // construct_agent_cache(), which runs after that snapshot. Re-query here so
-    // the refined values reach out_agent_info.csv (and the other output formats).
-    // The gpu_index assigned during metadata construction is preserved. On the
-    // bare-metal KFD path the canonical records already match the snapshot, so
-    // this assignment is a no-op.
-    {
-        auto _fresh_agents = std::vector<rocprofiler_agent_v0_t>{};
-        rocprofiler_query_available_agents(
-            ROCPROFILER_AGENT_INFO_VERSION_0,
-            [](rocprofiler_agent_version_t, const void** _agents, size_t _num, void* _data) {
-                auto* _out = static_cast<std::vector<rocprofiler_agent_v0_t>*>(_data);
-                _out->reserve(_num);
-                for(size_t i = 0; i < _num; ++i)
-                    _out->emplace_back(*static_cast<const rocprofiler_agent_v0_t*>(_agents[i]));
-                return ROCPROFILER_STATUS_SUCCESS;
-            },
-            sizeof(rocprofiler_agent_v0_t),
-            &_fresh_agents);
-
-        auto _apply_refresh = [&_fresh_agents](auto& _stored) {
-            for(const auto& _f : _fresh_agents)
-            {
-                if(_f.id.handle == _stored.id.handle)
-                {
-                    static_cast<rocprofiler_agent_v0_t&>(_stored) = _f;
-                    break;
-                }
-            }
-        };
-
-        for(auto& _agent : CHECK_NOTNULL(tool_metadata)->agents)
-            _apply_refresh(_agent);
-        for(auto& [_id, _agent] : tool_metadata->agents_map)
-            _apply_refresh(_agent);
-    }
 
     auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
     auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
