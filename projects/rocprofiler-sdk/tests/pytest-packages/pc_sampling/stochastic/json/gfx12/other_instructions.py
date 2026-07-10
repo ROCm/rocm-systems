@@ -71,11 +71,17 @@ def validate_vmem_instructions(sample_records):
         ]
     )
     for record in sample_records:
-        assert record["inst"].startswith("global_") or record["inst"].startswith(
+        inst = record["inst"]
+        assert inst.startswith("global_") or inst.startswith(
             "buffer_"
         ), "TEX/VMEM instruction must start with 'global_' or 'buffer_'"
 
         snapshot = record["snapshot"]
+        is_load = "load" in inst
+        is_store = "store" in inst
+
+        mem = record["memory_counters"]
+
         if record["wave_issued"] == 1:
             assert (
                 record["inst_type"]
@@ -87,6 +93,15 @@ def validate_vmem_instructions(sample_records):
             assert (
                 snapshot["arb_state_stall_vmem_tex"] == 0
             ), "Arbiter should not have stalled vmem_tex"
+
+            if is_load:
+                assert mem["load_cnt"] >= 1, (
+                    f"load_cnt must be >= 1 for issued VMEM load '{inst}'"
+                )
+            if is_store:
+                assert mem["store_cnt"] >= 1, (
+                    f"store_cnt must be >= 1 for issued VMEM store '{inst}'"
+                )
         else:
             stall_reason = snapshot["stall_reason"]
             assert (
@@ -101,6 +116,15 @@ def validate_vmem_instructions(sample_records):
                     snapshot["arb_state_issue_vmem_tex"] == 1
                     or snapshot["arb_state_stall_vmem_tex"] == 1
                 ), "VMEM_TEX pipe must have issued or stalled (at least one must be 1)"
+
+                if is_load:
+                    assert mem["load_cnt"] >= 1, (
+                        f"load_cnt must be >= 1 for ARBITER_NOT_WIN VMEM load '{inst}'"
+                    )
+                if is_store:
+                    assert mem["store_cnt"] >= 1, (
+                        f"store_cnt must be >= 1 for ARBITER_NOT_WIN VMEM store '{inst}'"
+                    )
 
 
 def validate_matrix_instructions(sample_records):
@@ -203,11 +227,15 @@ def validate_flat_instructions(sample_records):
         ]
     )
     for record in sample_records:
-        assert record["inst"].startswith(
-            "flat_"
-        ), "FLAT instruction must start with 'flat_'"
+        inst = record["inst"]
+        assert inst.startswith("flat_"), "FLAT instruction must start with 'flat_'"
 
         snapshot = record["snapshot"]
+        is_load = "load" in inst
+        is_store = "store" in inst
+
+        mem = record["memory_counters"]
+
         if record["wave_issued"] == 1:
             # wave issued a flat memory instruction
             # flat pipe doesn't exist on GFX12; both lds and vmem_tex pipes are used
@@ -218,6 +246,18 @@ def validate_flat_instructions(sample_records):
             assert snapshot["arb_state_stall_lds"] == 0, "Arbiter should not have stalled lds"
             assert snapshot["arb_state_issue_vmem_tex"] == 1, "Arbiter must have issued vmem_tex"
             assert snapshot["arb_state_stall_vmem_tex"] == 0, "Arbiter should not have stalled vmem_tex"
+
+            assert mem["ds_cnt"] >= 1, (
+                f"ds_cnt must be >= 1 for issued flat instruction '{inst}'"
+            )
+            if is_load:
+                assert mem["load_cnt"] >= 1, (
+                    f"load_cnt must be >= 1 for issued flat load '{inst}'"
+                )
+            if is_store:
+                assert mem["store_cnt"] >= 1, (
+                    f"store_cnt must be >= 1 for issued flat store '{inst}'"
+                )
         else:
             stall_reason = snapshot["stall_reason"]
             assert (
@@ -235,6 +275,18 @@ def validate_flat_instructions(sample_records):
                     or snapshot["arb_state_stall_lds"] == 1
                 ), "LDS or VMEM_TEX pipe must have issued or stalled for flat ARBITER_NOT_WIN"
 
+                assert mem["ds_cnt"] >= 1, (
+                    f"ds_cnt must be >= 1 for ARBITER_NOT_WIN flat instruction '{inst}'"
+                )
+                if is_load:
+                    assert mem["load_cnt"] >= 1, (
+                        f"load_cnt must be >= 1 for ARBITER_NOT_WIN flat load '{inst}'"
+                    )
+                if is_store:
+                    assert mem["store_cnt"] >= 1, (
+                        f"store_cnt must be >= 1 for ARBITER_NOT_WIN flat store '{inst}'"
+                    )
+
 
 def validate_lds_instructions(sample_records):
     allowed_stall_reasons = set(
@@ -246,8 +298,10 @@ def validate_lds_instructions(sample_records):
         ]
     )
     for record in sample_records:
-        assert record["inst"].startswith("ds_"), "Invalid name of LDS instruction"
+        inst = record["inst"]
+        assert inst.startswith("ds_"), "Invalid name of LDS instruction"
 
+        mem = record["memory_counters"]
         snapshot = record["snapshot"]
         if record["wave_issued"] == 1:
             # wave issued an LDS memory instruction
@@ -259,6 +313,10 @@ def validate_lds_instructions(sample_records):
 
             # TODO: add checks when LDS stalls flat, and vice versa
             # ISSUE_LDS=1, STALL_LDS=0, ISSUE_FLAT=1 -> STALL_FLAT = 1
+
+            assert mem["ds_cnt"] >= 1, (
+                f"ds_cnt must be >= 1 for issued LDS instruction '{inst}'"
+            )
         else:
             # wave did not issue an LDS instruction
             # inst_type is not relevant
@@ -275,3 +333,7 @@ def validate_lds_instructions(sample_records):
                     snapshot["arb_state_issue_lds"] == 1
                     or snapshot["arb_state_stall_lds"] == 1
                 ), "Arbiter must have issued or stalled LDS"
+
+                assert mem["ds_cnt"] >= 1, (
+                    f"ds_cnt must be >= 1 for ARBITER_NOT_WIN LDS instruction '{inst}'"
+                )

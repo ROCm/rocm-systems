@@ -153,6 +153,8 @@ def validate_stochastic_samples_json(data_json):
     comments = data_json["strings"]["pc_sample_comments"]
 
     insts_per_prefix_type = defaultdict(list)
+    lck_err_count = 0
+    total_count = 0
 
     for sample in data_json["buffer_records"]["pc_sample_stochastic"]:
         inst_index = sample["inst_index"]
@@ -178,6 +180,24 @@ def validate_stochastic_samples_json(data_json):
         # arbiter state check
         snapshot = record["snapshot"]
         validate_arbiter_state(snapshot)
+
+        # memory counters must always be present on GFX1250
+        assert record["flags"]["has_mem_cnt"] == 1, (
+            "memory_counters must always be present on GFX1250"
+        )
+
+        # sampling_lock_error: GFX12 hardware may set this when sampling frequency is too high
+        # (hardware generates samples faster than trap handler reads them).
+        # We expect the rate to stay below 30% across all samples.
+        total_count += 1
+        lck_err_count += snapshot["lck_err"]
+
+    if total_count > 0:
+        lck_err_rate = lck_err_count / total_count
+        assert lck_err_rate <= 0.30, (
+            f"sampling_lock_error rate {lck_err_rate:.1%} exceeds 30% "
+            f"({lck_err_count}/{total_count} samples) — sampling frequency is too high"
+        )
 
     # Check now the instruction type and arb state correlation.
     # We do that for all samples of a single instruction type all at once
