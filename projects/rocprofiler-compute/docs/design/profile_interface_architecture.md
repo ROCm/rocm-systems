@@ -270,13 +270,13 @@ sequenceDiagram
         Boundary->>Hub: read per-process, write per-pass (via Hub interface)
         Hub->>Store: per-pass native storage
     end
-    Profile->>Store: merge per-process to per-pass SDK rocpd (compute; raw, no boundary)
+    Profile->>Store: merge per-process to per-pass SDK rocpd (compute, raw, no boundary)
         Profile->>Store: delete per-process intermediates
     end
 
     note over Analyze, Store: Analyze (read side)
     Analyze->>Boundary: get_reader(profiling_config).read_pmc_frame(dir, filters)
-    Boundary->>Store: read per-pass SDK rocpd (raw; always)
+    Boundary->>Store: read per-pass SDK rocpd (raw, always)
     alt rocpd_data.py implementation
         Boundary->>Store: read per-pass native rocpd (.db)
     else profiler_hub_data.py implementation
