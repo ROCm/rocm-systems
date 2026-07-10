@@ -14,11 +14,9 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from pc_sampling.code_object_analysis import (
-    CodeObjectDisassembly,
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
-    InstructionLineRecord,
     load_aggregated_pc_sampling,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
@@ -410,118 +408,115 @@ class db_analysis(OmniAnalyze_Base):
             )
             Database.get_session().add(code_object_store)
             for line in code_object.instruction_lines:
+                kernel = kernel_objs.get(line.kernel_name)
+                if kernel is None:
+                    # Drop lines whose kernel was filtered out or never mapped.
+                    continue
                 instruction_line = orm.InstructionLine(
                     code_object_offset=line.code_object_offset,
                     comment=line.comment,
                     instruction=line.instruction,
                     code_object_store=code_object_store,
-                    kernel=kernel_objs.get(line.kernel_name),
+                    kernel=kernel,
                 )
                 Database.get_session().add(instruction_line)
-                self._add_sample_state(line, instruction_line)
+
+                sample_state = orm.PCSampleState(
+                    total_count=line.total_count,
+                    issue_count=line.issue_count,
+                    stall_count=line.stall_count,
+                    instruction_line=instruction_line,
+                )
+                Database.get_session().add(sample_state)
+
+                for text, count in line.stall_reasons.items():
+                    Database.get_session().add(
+                        orm.PCSampleStallReason(
+                            pc_sample_state=sample_state,
+                            stall_reason_lookup=Database.get_or_create_type(
+                                orm.PCSampleStallReasonLookup, text
+                            ),
+                            count=count,
+                        )
+                    )
+                for text, count in line.inst_types.items():
+                    Database.get_session().add(
+                        orm.InstructionSample(
+                            pc_sample_state=sample_state,
+                            instruction_sample_lookup=Database.get_or_create_type(
+                                orm.InstructionSampleLookup, text
+                            ),
+                            count=count,
+                        )
+                    )
 
     def add_code_object_isa(
         self,
         workload_path: str,
         workload_obj: orm.Workload,
     ) -> None:
-        """Add the full code-object disassembly as instruction lines.
-
-        Instructions PC-sampling already inserted are left alone; the rest get
-        no kernel (kernel attribution of the disassembly is a separate concern).
-        """
+        """Add the full code-object disassembly as instruction lines,
+        skipping any offset already present."""
         tool_data = self._pc_sampling_tool_data_per_workload.get(workload_path)
         load_base_by_id = {
             code_object["code_object_id"]: code_object.get("load_base")
             for code_object in (tool_data or {}).get("code_objects", [])
         }
-        # Reuse the stores PC-sampling made so we add to them, not duplicate.
-        stores = {
+        # Reuse an existing code object instead of creating a duplicate.
+        existing_code_objects = {
             (store.pid, store.code_object_id): store
             for store in workload_obj.code_object_stores
         }
 
         for pid, disassemblies in load_code_object_disassemblies(workload_path).items():
             for disassembly in disassemblies:
-                store = stores.get((pid, disassembly.code_object_id))
-                if store is None:
-                    store = orm.CodeObjectStore(
+                code_object_store = existing_code_objects.get((
+                    pid,
+                    disassembly.code_object_id,
+                ))
+                if code_object_store is None:
+                    code_object_store = orm.CodeObjectStore(
                         pid=pid,
                         code_object_id=disassembly.code_object_id,
                         load_base=load_base_by_id.get(disassembly.code_object_id),
                         workload=workload_obj,
                     )
-                    Database.get_session().add(store)
-                    stores[(pid, disassembly.code_object_id)] = store
-                self._add_disassembly_lines(disassembly, store)
+                    Database.get_session().add(code_object_store)
+                    existing_code_objects[(pid, disassembly.code_object_id)] = (
+                        code_object_store
+                    )
 
-    @staticmethod
-    def _add_disassembly_lines(
-        disassembly: CodeObjectDisassembly,
-        code_object_store: orm.CodeObjectStore,
-    ) -> None:
-        if code_object_store.load_base is None:
-            console_debug(
-                "Code object info: skipping code object "
-                f"{code_object_store.code_object_id} with no load_base"
-            )
-            return
+                # The disassembly's own offset is into the ELF file, not the
+                # offset the PC-sampling rows use (measured from the code
+                # object's load address). Without that load address we can't
+                # derive it, so skip this ISA.
+                if code_object_store.load_base is None:
+                    console_debug(
+                        "Code object info: skipped adding ISA for code object "
+                        f"{disassembly.code_object_id} with no load_base"
+                    )
+                    continue
 
-        # Offsets PC-sampling already inserted for this code object.
-        existing_offsets = {
-            line.code_object_offset for line in code_object_store.instruction_lines
-        }
-        for instruction in disassembly.instructions:
-            code_object_offset = (
-                instruction.virtual_address - code_object_store.load_base
-            )
-            if code_object_offset in existing_offsets:
-                continue
-            existing_offsets.add(code_object_offset)
-            Database.get_session().add(
-                orm.InstructionLine(
-                    code_object_offset=code_object_offset,
-                    comment=instruction.comment,
-                    instruction=instruction.instruction,
-                    code_object_store=code_object_store,
-                    kernel=None,
-                )
-            )
-
-    @staticmethod
-    def _add_sample_state(
-        line: InstructionLineRecord,
-        instruction_line: orm.InstructionLine,
-    ) -> None:
-        """Add the sample state and its stall-reason and inst-type counts."""
-        sample_state = orm.PCSampleState(
-            total_count=line.total_count,
-            issue_count=line.issue_count,
-            stall_count=line.stall_count,
-            instruction_line=instruction_line,
-        )
-        Database.get_session().add(sample_state)
-
-        for text, count in line.stall_reasons.items():
-            Database.get_session().add(
-                orm.PCSampleStallReason(
-                    pc_sample_state=sample_state,
-                    stall_reason_lookup=Database.get_or_create_type(
-                        orm.PCSampleStallReasonLookup, text
-                    ),
-                    count=count,
-                )
-            )
-        for text, count in line.inst_types.items():
-            Database.get_session().add(
-                orm.InstructionSample(
-                    pc_sample_state=sample_state,
-                    instruction_sample_lookup=Database.get_or_create_type(
-                        orm.InstructionSampleLookup, text
-                    ),
-                    count=count,
-                )
-            )
+                existing_offsets = {
+                    line.code_object_offset
+                    for line in code_object_store.instruction_lines
+                }
+                for instruction in disassembly.instructions:
+                    code_object_offset = (
+                        instruction.virtual_address - code_object_store.load_base
+                    )
+                    if code_object_offset in existing_offsets:
+                        continue
+                    existing_offsets.add(code_object_offset)
+                    Database.get_session().add(
+                        orm.InstructionLine(
+                            code_object_offset=code_object_offset,
+                            comment=instruction.comment,
+                            instruction=instruction.instruction,
+                            code_object_store=code_object_store,
+                            kernel=None,
+                        )
+                    )
 
     @staticmethod
     def evaluate(

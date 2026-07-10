@@ -955,7 +955,7 @@ def make_disasm_code_object(code_object_id, instructions):
     }
 
 
-def test_add_code_object_isa_backfills_unsampled_lines(db_session):
+def test_add_code_object_isa_adds_unsampled_lines(db_session):
     """Un-sampled instructions are inserted with kernel NULL; a disassembly
     offset that matches an already-sampled offset inserts no duplicate row."""
     workload_path = common.get_output_dir()
@@ -1005,28 +1005,28 @@ def test_add_code_object_isa_backfills_unsampled_lines(db_session):
         by_offset = {line.code_object_offset: line for line in lines}
         # Two sampled offsets + one new un-sampled offset, no duplicate at 0x10.
         assert set(by_offset) == {0x10, 0x20, 0x30}
-        # The backfilled line is un-attributed and has no sample state.
-        backfilled = by_offset[0x30]
-        assert backfilled.kernel is None
-        assert backfilled.pc_sample_state is None
-        assert backfilled.instruction == "s_nop"
+        # The disassembly-only line is un-attributed and has no sample state.
+        isa_line = by_offset[0x30]
+        assert isa_line.kernel is None
+        assert isa_line.pc_sample_state is None
+        assert isa_line.instruction == "s_nop"
         # The sampled line at 0x10 kept its kernel attribution and sample state.
         assert by_offset[0x10].kernel.kernel_name == "vecCopy"
         assert by_offset[0x10].pc_sample_state is not None
         # Both belong to the same (reused) code object store.
-        assert backfilled.code_object_store is by_offset[0x10].code_object_store
+        assert isa_line.code_object_store is by_offset[0x10].code_object_store
     finally:
         common.clean_output_dir(True, workload_path)
 
 
 def test_add_code_object_isa_creates_store_for_unsampled_code_object(db_session):
     """A code object present only in code_obj_info gets a new store, using the
-    load_base from the ps_file catalog."""
+    load_base from the PC-sampling results' code_objects list."""
     workload_path = common.get_output_dir()
     Path(workload_path).mkdir(parents=True, exist_ok=True)
     try:
         tool_data = make_pc_sampling_tool_data()
-        # Catalog knows code object 9 (load_base) but it was never sampled.
+        # code object 9 has a load_base in the results but was never sampled.
         tool_data["code_objects"].append({"code_object_id": 9, "load_base": 0x2000})
         code_objects = [
             make_disasm_code_object(
