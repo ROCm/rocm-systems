@@ -6,6 +6,59 @@
 //
 // Tests for enqueue.cc that don't depend on GPUs
 //
+// ---------------------------------------------------------------------------
+// Test list
+// ---------------------------------------------------------------------------
+// These tests target the single-node asymmetric P2P channel-scaling fix in
+// addP2pToPlan (ROCM-26926). The changed code is:
+//
+//     bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+//     int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax
+//                                                       : nChannelsMin;
+//     nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
+//
+// To reach that else-branch a direction must have bytes[dir] > 0 (bytes == -1
+// or 0 short-circuit earlier). To make the nChStart choice observable we set
+// nChannelsMin < nChannelsMax and a large enough message that the std::min
+// does not clamp back below nChStart. The resulting channel count is read back
+// via p2pTasks[dir]->nChannels, which the function writes.
+//
+//   [existing]
+//   * SelfSendZeroBytes
+//       Minimal smoke test. selfSend + zero bytes: never reaches the changed
+//       code (nChannels[dir] = 1 short-circuit). Confirms the harness/stubs
+//       link and the function returns ncclSuccess.
+//
+//   [asymmetric -> expect nChannelsMax]
+//   * Gather_RecvHeavy_UsesNChannelsMax
+//       planTotalTasks = {N, 0} (root receives only). nNodes == 1.
+//       Expect nChStart == nChannelsMax on the recv direction.
+//   * Scatter_SendHeavy_UsesNChannelsMax
+//       planTotalTasks = {0, N} (root sends only). nNodes == 1.
+//       Expect nChStart == nChannelsMax on the send direction.
+//
+//   [symmetric -> expect nChannelsMin]
+//   * AllToAll_Symmetric_UsesNChannelsMin
+//       planTotalTasks = {N, N} (all ranks send and receive). nNodes == 1.
+//       Expect nChStart == nChannelsMin (asymmetric == false).
+//   * TwoRankExchange_UsesNChannelsMin
+//       planTotalTasks = {1, 1}. Regression guard for the == 0 vs <= 1
+//       tightening: a 2-rank symmetric exchange must NOT be treated as
+//       asymmetric. Expect nChannelsMin.
+//
+//   [multi-node -> always nChannelsMin]
+//   * MultiNode_Asymmetric_UsesNChannelsMin
+//       planTotalTasks = {N, 0} but nNodes > 1. The single-node guard
+//       (comm->nNodes <= 1) must keep nChStart == nChannelsMin even though
+//       the traffic is asymmetric.
+//
+//   [boundary]
+//   * SmallMessage_ClampsBelowNChannelsMax
+//       Asymmetric + single-node, but bytes small enough that
+//       divUp(bytes, minPartSize) < nChannelsMax, so std::min clamps the
+//       result below nChannelsMax. Confirms nChStart alone does not force a
+//       high channel count for small messages.
+// ---------------------------------------------------------------------------
 #include "nccl.h"
 #include <gtest/gtest.h>
 #include <hip/amd_detail/amd_hip_runtime.h>
