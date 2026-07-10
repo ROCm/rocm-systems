@@ -22,7 +22,8 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 # WSL/no-KFD (same CMake-level pattern used for the multi-counter integration tests);
 # real-KFD CI still runs it normally.
 set(IS_WSL_DXG_NO_KFD OFF)
-if(NOT EXISTS "/dev/kfd")
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
     set(IS_WSL_DXG_NO_KFD ON)
 endif()
 

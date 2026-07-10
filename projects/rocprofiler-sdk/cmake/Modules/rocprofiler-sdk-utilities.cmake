@@ -60,6 +60,27 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
     endif()
 endfunction()
 
+# Reports whether the KFD device node (/dev/kfd) is present. Absence typically indicates a
+# WSL2/DXG environment (or a container without KFD passthrough), where GPU work is
+# scheduled through the dxg path instead of the native KFD driver. The result is cached so
+# the filesystem check runs only once per configure.
+function(rocprofiler_sdk_kfd_available _VAR)
+    if(NOT DEFINED ROCPROFILER_SDK_KFD_AVAILABLE)
+        if(EXISTS "/dev/kfd")
+            set(ROCPROFILER_SDK_KFD_AVAILABLE
+                ON
+                CACHE INTERNAL "KFD device node present")
+        else()
+            set(ROCPROFILER_SDK_KFD_AVAILABLE
+                OFF
+                CACHE INTERNAL "KFD device node present")
+        endif()
+    endif()
+    set(${_VAR}
+        "${ROCPROFILER_SDK_KFD_AVAILABLE}"
+        PARENT_SCOPE)
+endfunction()
+
 # In case the underlying architecture does not support PC sampling, this function will
 # tell us whether the PC sampling is disabled
 function(rocprofiler_sdk_pc_sampling_disabled _VAR)

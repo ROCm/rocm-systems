@@ -11,6 +11,10 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
+# Absence of /dev/kfd indicates a WSL2/DXG (or no-KFD) environment; several tests below
+# gate on it. See rocprofiler_sdk_kfd_available in the rocprofiler-sdk-utilities module.
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+
 set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # disable when GPU-0 is navi2, navi3, and navi4
@@ -23,7 +27,7 @@ list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
    OR ROCPROFILER_MEMCHECK
-   OR NOT EXISTS "/dev/kfd")
+   OR NOT _KFD_AVAILABLE)
     set(IS_DISABLED ON)
 endif()
 
@@ -49,7 +53,7 @@ endif()
 set(IS_RDNA_COUNTER_CHECK_DISABLED ON)
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    AND NOT ROCPROFILER_MEMCHECK
-   AND EXISTS "/dev/kfd")
+   AND _KFD_AVAILABLE)
     set(IS_RDNA_COUNTER_CHECK_DISABLED OFF)
 endif()
 
@@ -63,7 +67,7 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL ""
    OR "${pc-sampling-gpu-0-gfx-info}" STREQUAL "pc-sampling-gpu-0-gfx-info-NOTFOUND"
    OR ROCPROFILER_MEMCHECK
-   OR NOT EXISTS "/dev/kfd")
+   OR NOT _KFD_AVAILABLE)
     set(IS_PC_SAMPLING_DISABLED ON)
 endif()
 

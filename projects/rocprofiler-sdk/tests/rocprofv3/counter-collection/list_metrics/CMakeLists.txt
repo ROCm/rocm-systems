@@ -18,12 +18,14 @@ rocprofiler_configure_pytest_files(
     CONFIG pytest.ini
     COPY input.json)
 
-# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
-# traced list-avail workload needs more headroom than real-KFD hardware; scale only there.
-if(EXISTS "/dev/kfd")
-    set(_WSL_TIMEOUT_SCALE 1)
-else()
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale only there for the traced list-avail workload.
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
     set(_WSL_TIMEOUT_SCALE 4)
+else()
+    set(_WSL_TIMEOUT_SCALE 1)
 endif()
 math(EXPR _LIST_AVAIL_TRACE_TIMEOUT "60 * ${_WSL_TIMEOUT_SCALE}")
 

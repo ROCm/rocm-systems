@@ -22,13 +22,14 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
                ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml @ONLY)
 
-# WSL2/DXG has no /dev/kfd and schedules GPU work through the slower dxg path, so the
-# yaml-input kernel-rename workload needs more headroom than real-KFD hardware; scale the
-# timeout only there.
-if(EXISTS "/dev/kfd")
-    set(_WSL_TIMEOUT_SCALE 1)
-else()
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there for the kernel-rename workloads.
+rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+if(NOT _KFD_AVAILABLE)
     set(_WSL_TIMEOUT_SCALE 4)
+else()
+    set(_WSL_TIMEOUT_SCALE 1)
 endif()
 math(EXPR _KERNEL_RENAME_YAML_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
 math(EXPR _KERNEL_RENAME_CMD_TIMEOUT "45 * ${_WSL_TIMEOUT_SCALE}")
