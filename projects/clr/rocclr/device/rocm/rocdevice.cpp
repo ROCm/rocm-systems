@@ -51,7 +51,6 @@
 #include <cinttypes>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -637,6 +636,10 @@ bool Device::create() {
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
   bool hasValidHDPFlush = (info_.hdpMemFlushCntl != nullptr) && (info_.hdpRegFlushCntl != nullptr);
 
+  uint32_t ucodeVersion = 0;
+  const hsa_status_t ucodeStatus = Hsa::agent_get_info(
+      bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UCODE_VERSION), &ucodeVersion);
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
@@ -648,6 +651,10 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
+
+  static constexpr uint32_t kMinUcodeForFormat4 = 255;
+  hsaSettings->launch_desc_supported_ =
+      (ucodeStatus == HSA_STATUS_SUCCESS) && (ucodeVersion >= kMinUcodeForFormat4);
 
   if (!ValidateComgr()) {
     LogPrintfError("Code object manager initialization failed for HSA device %s (PCI ID %x)",
@@ -4042,7 +4049,8 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
       ps->flags_.isPacketDispatch_ =
           (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) ||
           (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-           amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+           (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+            amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
