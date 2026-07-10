@@ -110,6 +110,8 @@ struct CachedRetargetResult {
   std::shared_ptr<std::vector<uint8_t>> elf_bytes;
 };
 
+constexpr size_t kMaxRetargetCacheEntries = 256;
+
 std::mutex g_retarget_cache_mutex;
 std::unordered_map<uint64_t, CachedRetargetResult> g_retarget_cache;
 
@@ -551,15 +553,20 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   // Cache the result. Only deterministic COMGR failures are cached;
   // transient allocation failures in this function are not, so a
   // later attempt with the same code object can still succeed.
-  {
+  try {
     std::scoped_lock lock(g_retarget_cache_mutex);
-    CachedRetargetResult entry;
-    entry.succeeded = rewritten;
-    if (rewritten) {
-      const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
-      entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
+    if (g_retarget_cache.size() < kMaxRetargetCacheEntries) {
+      CachedRetargetResult entry;
+      entry.succeeded = rewritten;
+      if (rewritten) {
+        const auto* data = static_cast<const uint8_t*>((*out_elf_buffer).get());
+        entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
+      }
+      g_retarget_cache.emplace(cache_key, std::move(entry));
     }
-    g_retarget_cache.emplace(cache_key, std::move(entry));
+  } catch (const std::bad_alloc&) {
+    // OOM during caching — the retarget result in out_elf_buffer is
+    // still valid, we just can't cache it for future loads.
   }
 
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
