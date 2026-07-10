@@ -180,6 +180,8 @@ if(BUILD_TESTS)
     AllToAllTests.cpp
     AllToAllVTests.cpp
     BroadcastTests.cpp
+    EnqueueTests2.cpp
+    EnqueueTests2Stubs.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -210,6 +212,18 @@ if(BUILD_TESTS)
     latency_profiler/LatencyProfilerUnitTest.cpp
     ../src/misc/latency_profiler/CollTraceUtils.cc
     )
+
+  set_source_files_properties(EnqueueTests2.cpp PROPERTIES
+    COMPILE_DEFINITIONS
+      "ENQUEUE_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc\""
+    INCLUDE_DIRECTORIES
+      "${PROJECT_BINARY_DIR}/hipify/src/device")
+
+  # No-op stub definitions so EnqueueTests2.cpp (which #includes the whole
+  # hipified enqueue.cc) links without pulling in librccl.
+  set_source_files_properties(EnqueueTests2Stubs.cpp PROPERTIES
+    INCLUDE_DIRECTORIES
+      "${PROJECT_BINARY_DIR}/hipify/src;${PROJECT_BINARY_DIR}/hipify/src/include;${PROJECT_BINARY_DIR}/hipify/src/device")
 
   # Due to default hidden symbol visibility, append source file if build type is not Debug.
   # It requires explicit addition of the following source file(s)
