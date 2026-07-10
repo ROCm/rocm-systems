@@ -85,8 +85,8 @@ defined below.
 ```mermaid
 flowchart LR
   B0["B0: Current ConSan Baseline"]:::done
-  R1A["R1A: Kernel Scope And Resource Model"]:::active
-  R1B["R1B: Automatic Non-Spill Allocation"]:::todo
+  R1A["R1A: Kernel Scope And Resource Model"]:::done
+  R1B["R1B: Automatic Non-Spill Allocation"]:::active
   R1C["R1C: gfx1201 VGPR Spill Backend"]:::todo
   R1D["R1D: Spill-Backed Access Probes"]:::todo
   R1E["R1E: Persistent Owner And Epoch State"]:::todo
@@ -568,7 +568,7 @@ emulation/rocjitsu/build/tests/rocjitsu_tests \
   '--gtest_filter=ConSan.*:ConSanMoi.*:InstructionBuilder.*:SpillManager.*:LivenessAnalysis.*'
 ```
 
-## R1A: Kernel Scope And Resource Model - ACTIVE
+## R1A: Kernel Scope And Resource Model - DONE
 
 Goal: give ConSan a read-only, per-kernel analysis model that can answer which
 descriptor owns a site, which registers are live there, and which resource
@@ -603,7 +603,7 @@ Done criteria:
 - An ambiguous or unreachable function candidate is reported explicitly.
 - Existing DBT liveness and relocation tests remain unchanged in behavior.
 
-## R1B: Automatic Non-Spill Allocation - TODO
+## R1B: Automatic Non-Spill Allocation - ACTIVE
 
 Goal: eliminate manual scratch-register choices whenever a probe can use dead
 or genuinely new descriptor-backed registers.

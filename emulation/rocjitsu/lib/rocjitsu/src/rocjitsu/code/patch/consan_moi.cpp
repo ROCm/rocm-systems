@@ -3,9 +3,16 @@
 
 #include "rocjitsu/code/patch/consan_moi.h"
 
+#include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/kernel_scope.h"
+#include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -18,9 +25,12 @@ RJ_DIAGNOSTIC_POP
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1761,6 +1771,211 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
     return true;
   }
   return false;
+}
+
+struct MoiKernelResourceContext {
+  const ConSanKernelInfo *kernel = nullptr;
+  KernelCfgScope scope;
+  std::unique_ptr<LivenessAnalysis> liveness;
+  uint16_t current_vgpr_count = 0;
+  uint16_t max_referenced_vgpr_count = 0;
+  uint32_t original_private_segment_size = 0;
+  bool descriptor_valid = false;
+};
+
+[[nodiscard]] uint16_t max_referenced_vgpr_count(const KernelCfgScope &scope) {
+  uint32_t max_count = 0;
+  for (BasicBlock *block : scope.blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      const InstDefUse du(inst);
+      const RegisterSet referenced = du.defs | du.uses;
+      referenced.for_each([&](RegisterRef ref) {
+        if (ref.cls == RegClass::VGPR)
+          max_count = std::max<uint32_t>(max_count, static_cast<uint32_t>(ref.index) + 1u);
+      });
+    }
+  }
+  return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxVgprs));
+}
+
+[[nodiscard]] const Instruction *instruction_at(BasicBlock *block, uint64_t text_offset) {
+  if (block == nullptr)
+    return nullptr;
+  const auto it =
+      std::ranges::find_if(block->instructions(), [text_offset](const Instruction &inst) {
+        return inst.src_loc() == text_offset;
+      });
+  return it == block->instructions().end() ? nullptr : &*it;
+}
+
+[[nodiscard]] uint16_t moi_access_scratch_vgpr_count(const ConSanOptions &options) {
+  switch (options.moi_engine) {
+  case ConSanMoiEngine::RecordReplay:
+    return options.moi_dynamic_access_records ? 8u : 3u;
+  case ConSanMoiEngine::InlineShadow:
+    return inline_shadow_scratch_count(options);
+  case ConSanMoiEngine::Sampled:
+    return 5u;
+  }
+  return 0;
+}
+
+void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptions &options,
+                               rj_code_arch_t arch, ConSanResult &result) {
+  result.resource_plans.clear();
+  result.resource_plans.reserve(result.moi_candidates.size());
+  if (result.moi_candidates.empty())
+    return;
+
+  auto append_unavailable = [&](size_t candidate_index, ConSanRegisterPlanReason reason) {
+    const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
+    ConSanCandidateResourcePlan plan;
+    plan.candidate_index = candidate_index;
+    plan.text_offset = candidate.text_offset;
+    plan.reason = reason;
+    result.resource_plans.push_back(std::move(plan));
+  };
+
+  AmdGpuCodeObject code_object(bytes.data(), bytes.size());
+  std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+  if (!code_object.is_valid() || !decoder) {
+    for (size_t i = 0; i < result.moi_candidates.size(); ++i)
+      append_unavailable(i, ConSanRegisterPlanReason::MissingInstruction);
+    return;
+  }
+
+  std::vector<uint64_t> leaders;
+  leaders.reserve(result.kernels.size() + result.functions.size());
+  std::vector<uint64_t> kernel_entries;
+  kernel_entries.reserve(result.kernels.size());
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (!kernel.has_text_range)
+      continue;
+    leaders.push_back(kernel.entry_text_offset);
+    kernel_entries.push_back(kernel.entry_text_offset);
+  }
+  for (const ConSanFunctionInfo &function : result.functions)
+    leaders.push_back(function.entry_text_offset);
+  std::ranges::sort(leaders);
+  leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
+  std::ranges::sort(kernel_entries);
+  kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
+
+  auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders);
+  const BlockOffsetIndex block_index = build_block_offset_index(blocks);
+  CodeObjectPatcher patcher(code_object);
+  const std::span<const uint8_t> text = patcher.text_bytes();
+
+  std::vector<MoiKernelResourceContext> contexts;
+  contexts.reserve(result.kernels.size());
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (!kernel.has_text_range)
+      continue;
+    auto scope = build_kernel_cfg_scope(blocks, block_index,
+                                        KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
+                                                           .additional_entry_offsets = {}},
+                                        kernel_entries, text);
+    if (!scope)
+      continue;
+
+    MoiKernelResourceContext new_context;
+    new_context.kernel = &kernel;
+    new_context.scope = std::move(*scope);
+    contexts.push_back(std::move(new_context));
+    MoiKernelResourceContext &context = contexts.back();
+    context.liveness =
+        std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
+                                           LivenessAnalysisOptions{}, context.scope.liveness_edges);
+    context.max_referenced_vgpr_count = max_referenced_vgpr_count(context.scope);
+
+    if (kernel.descriptor_file_offset > bytes.size() ||
+        sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
+      continue;
+    }
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
+    context.current_vgpr_count =
+        static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor));
+    context.original_private_segment_size = descriptor.private_segment_fixed_size;
+    context.descriptor_valid = true;
+  }
+
+  const uint16_t scratch_count = moi_access_scratch_vgpr_count(options);
+  for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
+       ++candidate_index) {
+    const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
+    ConSanCandidateResourcePlan candidate_plan;
+    candidate_plan.candidate_index = candidate_index;
+    candidate_plan.text_offset = candidate.text_offset;
+    candidate_plan.scratch_vgpr_count = scratch_count;
+
+    BasicBlock *anchor_block = block_for_offset(block_index, candidate.text_offset);
+    const Instruction *anchor = instruction_at(anchor_block, candidate.text_offset);
+    if (anchor == nullptr) {
+      candidate_plan.reason = ConSanRegisterPlanReason::MissingInstruction;
+      result.resource_plans.push_back(std::move(candidate_plan));
+      continue;
+    }
+
+    std::vector<MoiKernelResourceContext *> owners;
+    for (MoiKernelResourceContext &context : contexts) {
+      if (candidate.kernel_descriptor_file_offset &&
+          context.kernel->descriptor_file_offset != *candidate.kernel_descriptor_file_offset) {
+        continue;
+      }
+      if (std::ranges::find(context.scope.blocks, anchor_block) == context.scope.blocks.end())
+        continue;
+      owners.push_back(&context);
+      candidate_plan.owner_descriptor_file_offsets.push_back(
+          context.kernel->descriptor_file_offset);
+    }
+
+    if (owners.empty()) {
+      candidate_plan.reason = ConSanRegisterPlanReason::MissingOwner;
+      result.resource_plans.push_back(std::move(candidate_plan));
+      continue;
+    }
+    if (owners.size() != 1) {
+      candidate_plan.reason = ConSanRegisterPlanReason::AmbiguousOwners;
+      result.resource_plans.push_back(std::move(candidate_plan));
+      continue;
+    }
+
+    MoiKernelResourceContext &owner = *owners.front();
+    candidate_plan.current_vgpr_count = owner.current_vgpr_count;
+    candidate_plan.max_referenced_vgpr_count = owner.max_referenced_vgpr_count;
+    candidate_plan.required_vgpr_count = owner.current_vgpr_count;
+    candidate_plan.original_private_segment_size = owner.original_private_segment_size;
+    if (!owner.descriptor_valid) {
+      candidate_plan.reason = ConSanRegisterPlanReason::InvalidDescriptor;
+      result.resource_plans.push_back(std::move(candidate_plan));
+      continue;
+    }
+
+    const InstDefUse anchor_def_use(*anchor);
+    ConSanRegisterRequest request;
+    request.reg_class = RegClass::VGPR;
+    request.count = scratch_count;
+    request.current_allocation_count = owner.current_vgpr_count;
+    request.max_referenced_count = owner.max_referenced_vgpr_count;
+    request.architecture_limit = kMaxVgprs;
+    request.explicit_base = options.scratch_vgpr;
+    request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
+    if (options.moi_owner_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *options.moi_owner_vgpr, 1});
+    if (options.moi_epoch_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *options.moi_epoch_vgpr, 1});
+
+    const ConSanRegisterPlan register_plan =
+        plan_consan_registers(request, owner.liveness->live_before(*anchor));
+    candidate_plan.source = register_plan.source;
+    candidate_plan.reason = register_plan.reason;
+    candidate_plan.scratch_vgpr = register_plan.base;
+    candidate_plan.required_vgpr_count = register_plan.required_descriptor_count;
+    result.resource_plans.push_back(std::move(candidate_plan));
+  }
 }
 
 [[nodiscard]] bool append_store_start_cell_from_lds_byte_offset(std::vector<uint32_t> &words,
@@ -4864,6 +5079,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     append_moi_candidates(kernel, result);
   for (const ConSanFunctionInfo &function : result.functions)
     append_moi_candidates(function, result);
+  append_moi_resource_plans(code_object_bytes, options, arch, result);
   if (options.moi_report_buffer_address &&
       options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");

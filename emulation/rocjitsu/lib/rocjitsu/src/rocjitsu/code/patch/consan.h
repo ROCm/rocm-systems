@@ -39,6 +39,28 @@ enum class ConSanMoiOwnerSource : uint8_t {
   HwId,
 };
 
+enum class ConSanRegisterAllocationSource : uint8_t {
+  Unsupported,
+  Explicit,
+  LivenessDead,
+  DescriptorGrowth,
+  SpillRequired,
+};
+
+enum class ConSanRegisterPlanReason : uint8_t {
+  None,
+  InvalidRequest,
+  ExplicitMisaligned,
+  ExplicitOutOfRange,
+  ExplicitLive,
+  ForbiddenOverlap,
+  MissingInstruction,
+  MissingOwner,
+  AmbiguousOwners,
+  InvalidDescriptor,
+  NoLegalWindow,
+};
+
 struct ConSanOptions {
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
@@ -316,6 +338,20 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> scratch_vgpr;
 };
 
+struct ConSanCandidateResourcePlan {
+  size_t candidate_index = 0;
+  uint64_t text_offset = 0;
+  std::vector<uint64_t> owner_descriptor_file_offsets;
+  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
+  ConSanRegisterPlanReason reason = ConSanRegisterPlanReason::None;
+  std::optional<uint16_t> scratch_vgpr;
+  uint16_t scratch_vgpr_count = 0;
+  uint16_t current_vgpr_count = 0;
+  uint16_t max_referenced_vgpr_count = 0;
+  uint16_t required_vgpr_count = 0;
+  uint32_t original_private_segment_size = 0;
+};
+
 struct ConSanResult {
   bool visited_code_object = false;
   bool modified = false;
@@ -328,6 +364,7 @@ struct ConSanResult {
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanMoiCandidate> moi_candidates;
+  std::vector<ConSanCandidateResourcePlan> resource_plans;
   std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;

@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/patch/consan_moi.h"
+#include "rocjitsu/code/patch/consan_resource.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "util/bit.h"
 
@@ -41,6 +42,90 @@ inline constexpr uint32_t kRdna4Wave64AllVgprsGranulated = 63;
 
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
+
+ConSanRegisterRequest vgpr_request(uint16_t count, uint16_t current_allocation_count,
+                                   uint16_t max_referenced_count) {
+  ConSanRegisterRequest request;
+  request.reg_class = RegClass::VGPR;
+  request.count = count;
+  request.current_allocation_count = current_allocation_count;
+  request.max_referenced_count = max_referenced_count;
+  request.architecture_limit = 256;
+  return request;
+}
+
+void expand_all_vgprs(RegisterSet &set) {
+  set.expand({RegClass::VGPR, 0, 255});
+  set.expand({RegClass::VGPR, 255, 1});
+}
+
+TEST(ConSanResourcePlan, PrefersDeadWindowInsideCurrentAllocation) {
+  RegisterSet live;
+  live.expand({RegClass::VGPR, 0, 4});
+  const ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(plan.base, 4);
+  EXPECT_EQ(plan.required_descriptor_count, 8);
+}
+
+TEST(ConSanResourcePlan, GrowsAboveGuestReferencesAfterDeadSearchFails) {
+  RegisterSet live;
+  live.expand({RegClass::VGPR, 0, 8});
+  const ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  EXPECT_EQ(plan.base, 8);
+  EXPECT_EQ(plan.required_descriptor_count, 11);
+}
+
+TEST(ConSanResourcePlan, FullRegisterFileSelectsAllowedLiveVictim) {
+  RegisterSet live;
+  expand_all_vgprs(live);
+  ConSanRegisterRequest request = vgpr_request(3, 256, 256);
+  request.forbidden.expand({RegClass::VGPR, 0, 2});
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.base, 2);
+  EXPECT_EQ(plan.required_descriptor_count, 256);
+}
+
+TEST(ConSanResourcePlan, ExplicitOverrideCannotClobberLiveGuestValue) {
+  RegisterSet live;
+  live.expand({RegClass::VGPR, 4, 1});
+  ConSanRegisterRequest request = vgpr_request(1, 8, 8);
+  request.explicit_base = 4;
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::ExplicitLive);
+}
+
+TEST(ConSanResourcePlan, ExplicitFreshOverrideCarriesDescriptorRequirement) {
+  RegisterSet live;
+  ConSanRegisterRequest request = vgpr_request(3, 8, 8);
+  request.alignment = 2;
+  request.explicit_base = 10;
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Explicit);
+  EXPECT_EQ(plan.base, 10);
+  EXPECT_EQ(plan.required_descriptor_count, 13);
+}
+
+TEST(ConSanResourcePlan, ForbiddenFullFileHasTypedFailure) {
+  RegisterSet live;
+  expand_all_vgprs(live);
+  ConSanRegisterRequest request = vgpr_request(3, 256, 256);
+  expand_all_vgprs(request.forbidden);
+
+  const ConSanRegisterPlan plan = plan_consan_registers(request, live);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
+}
 
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
@@ -630,6 +715,19 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
   ASSERT_TRUE(result.moi_candidates[1].dst_vgpr);
   EXPECT_EQ(*result.moi_candidates[1].dst_vgpr, 0u);
+  ASSERT_EQ(result.resource_plans.size(), 2u);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 1u);
+    EXPECT_EQ(plan.owner_descriptor_file_offsets.front(), kernel.descriptor_file_offset);
+    EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+    EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
+    EXPECT_EQ(plan.scratch_vgpr, 1);
+    EXPECT_EQ(plan.scratch_vgpr_count, 3);
+    EXPECT_EQ(plan.current_vgpr_count, 256);
+    EXPECT_EQ(plan.max_referenced_vgpr_count, 1);
+    EXPECT_EQ(plan.required_vgpr_count, 256);
+    EXPECT_EQ(plan.original_private_segment_size, 0u);
+  }
   EXPECT_FALSE(result.warnings.empty());
 }
 
@@ -648,6 +746,12 @@ TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
   EXPECT_TRUE(result.kernels.front().decoded);
+  ASSERT_EQ(result.resource_plans.size(), 2u);
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+    EXPECT_EQ(plan.scratch_vgpr, 1);
+    EXPECT_EQ(plan.scratch_vgpr_count, 5);
+  }
   EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::NotRun);
   bool saw_stub_warning = false;
   for (const std::string &warning : result.warnings)
@@ -1103,6 +1207,10 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(*candidate.raw_vaddr, 0u);
   ASSERT_TRUE(candidate.raw_vdst);
   EXPECT_EQ(*candidate.raw_vdst, 2u);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_TRUE(result.resource_plans.front().owner_descriptor_file_offsets.empty());
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {

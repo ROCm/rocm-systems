@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/analysis/def_use_chain.h"
+#include "rocjitsu/analysis/kernel_scope.h"
 #include "rocjitsu/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -440,6 +441,106 @@ TEST(CfgAnalysis, DirectCallKillsCarriedPcBuilderFacts) {
 
   EXPECT_TRUE(continuation->static_indirect_call_fixups().empty());
   EXPECT_FALSE(has_successor_start(*continuation, stale_target->start_offset()));
+}
+
+TEST(KernelScopeAnalysis, SeparatesAdjacentKernelEntries) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> entries{0, 4};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, entries);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  const auto first = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 0, .additional_entry_offsets = {}}, entries,
+      text);
+  const auto second = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 4, .additional_entry_offsets = {}}, entries,
+      text);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  ASSERT_EQ(first->blocks.size(), 1u);
+  ASSERT_EQ(second->blocks.size(), 1u);
+  EXPECT_EQ(first->blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(second->blocks[0]->start_offset(), 4u);
+  EXPECT_EQ(first->entry, block_for_offset(index, 0));
+  EXPECT_EQ(second->entry, block_for_offset(index, 4));
+}
+
+TEST(KernelScopeAnalysis, SeedsAdditionalDescriptorEntryWithoutClaimingNextKernel) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 3> leaders{0, 4, 8};
+  constexpr std::array<uint64_t, 2> kernel_entries{0, 8};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, leaders);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  KernelScopeRequest request{.entry_offset = 0, .additional_entry_offsets = {4}};
+  const auto scope = build_kernel_cfg_scope(blocks, index, request, kernel_entries, text);
+  ASSERT_TRUE(scope.has_value());
+  ASSERT_EQ(scope->blocks.size(), 2u);
+  EXPECT_EQ(scope->blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(scope->blocks[1]->start_offset(), 4u);
+
+  request.additional_entry_offsets = {12};
+  EXPECT_FALSE(build_kernel_cfg_scope(blocks, index, request, kernel_entries, text).has_value());
+}
+
+TEST(KernelScopeAnalysis, SharedHelperGetsContextSpecificReturnEdges) {
+  constexpr uint16_t kReturnSreg = 30;
+  std::vector<uint32_t> words = {
+      build_s_call_b64(kReturnSreg, 3),         // 0x00 -> helper at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x04 kernel 0 continuation.
+      build_s_call_b64(kReturnSreg, 1),         // 0x08 -> helper at 0x10.
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), // 0x0c kernel 1 continuation.
+      pack_sop1(0x1d, 0, kReturnSreg),          // 0x10 shared helper return.
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> kernel_entries{0, 8};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, kernel_entries);
+  const auto index = build_block_offset_index(blocks);
+  const auto text = std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(words.data()),
+                                             words.size() * sizeof(uint32_t));
+
+  const auto first = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 0, .additional_entry_offsets = {}},
+      kernel_entries, text);
+  const auto second = build_kernel_cfg_scope(
+      blocks, index, KernelScopeRequest{.entry_offset = 8, .additional_entry_offsets = {}},
+      kernel_entries, text);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(first->blocks.size(), 3u);
+  EXPECT_EQ(second->blocks.size(), 3u);
+  EXPECT_TRUE(first->call_return_offsets.contains(16));
+  EXPECT_TRUE(second->call_return_offsets.contains(16));
+  ASSERT_EQ(first->liveness_edges.size(), 2u);
+  ASSERT_EQ(second->liveness_edges.size(), 2u);
+
+  BasicBlock *helper = block_for_offset(index, 16);
+  BasicBlock *first_continuation = block_for_offset(index, 4);
+  BasicBlock *second_continuation = block_for_offset(index, 12);
+  ASSERT_NE(helper, nullptr);
+  EXPECT_EQ(first->liveness_edges[1].from, helper);
+  EXPECT_EQ(first->liveness_edges[1].to, first_continuation);
+  EXPECT_EQ(second->liveness_edges[1].from, helper);
+  EXPECT_EQ(second->liveness_edges[1].to, second_continuation);
 }
 
 TEST(CfgAnalysis, KillPredecessorPreventsRecoveredConsumer) {

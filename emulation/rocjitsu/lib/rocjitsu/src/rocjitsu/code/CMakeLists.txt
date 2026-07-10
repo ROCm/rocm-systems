@@ -26,5 +26,6 @@ rj_add_object_library(rocjitsu_code
     patch/spill_manager.cpp
     patch/consan.cpp
     patch/consan_moi.cpp
+    patch/consan_resource.cpp
     patch/trampoline_builder.cpp
 )
