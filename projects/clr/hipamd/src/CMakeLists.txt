@@ -456,14 +456,27 @@ if(HIP_ENABLE_LTTNG_UST)
     # write site (rocclr/device/rocm/rocvirtual.cpp). rocclr is built as a
     # static archive and linked into amdhip64; the tracepoint emit symbols
     # live in amdhip64 (via lttng/rocm_hip_tp.cpp), but rocvirtual.cpp needs
-    # the include path and the HIP_ENABLE_LTTNG_UST macro to compile the
-    # call sites. Apply both to the rocclr target here.
+    # the include path, the HIP_ENABLE_LTTNG_UST macro, and the LTTng-UST
+    # headers to compile the call sites. Apply all to the rocclr target here.
+    #
+    # rocm_trace_emit_curated.h transitively #include <hip/hip_runtime_api.h>
+    # for the HIP types in the per-API typed-emit signatures, which in turn
+    # pulls in <hip/hip_version.h> (generated at configure time into
+    # ${PROJECT_BINARY_DIR}/include/hip/) and other headers from
+    # ${PROJECT_SOURCE_DIR}/include. Mirror the three include directories
+    # amdhip64 itself uses (see the target_include_directories above), so
+    # rocclr — which is built as a static archive and linked into amdhip64
+    # but does not normally inherit the HIP include wiring — can compile the
+    # call sites in device/rocm/rocvirtual.cpp.
     if(TARGET rocclr)
         target_compile_definitions(rocclr PRIVATE HIP_ENABLE_LTTNG_UST=1)
         target_include_directories(rocclr PRIVATE
             ${CMAKE_CURRENT_LIST_DIR}/lttng
             ${LTTNG_VENDORED_INCLUDE_DIR}
-            ${LTTNG_UST_INCLUDE_DIRS})
+            ${LTTNG_UST_INCLUDE_DIRS}
+            ${HIP_COMMON_INCLUDE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${PROJECT_BINARY_DIR}/include)
         add_dependencies(rocclr lttng_ust_vendored)
     endif()
 

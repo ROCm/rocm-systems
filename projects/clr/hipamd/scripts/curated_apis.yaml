@@ -1,0 +1,273 @@
+# Curated HIP APIs for typed parameter capture.
+#
+# Schema (see shared/lttng/scripts/lttng_curated_lib.py for full details):
+#   - api: <name>                  # must match the real HIP header function name
+#     args: [<name>, ...]          # allowlist of captured params, in header order
+#     out: [<name>, ...]           # optional; subset of args captured OUT (default: all IN)
+#     pack_dim3: [<name>, ...]     # optional; dim3 args packed into one uint64 field
+#     strings: [<name>, ...]       # optional; char*/const char* args captured as strings
+#     types: {<name>: <DSL type>}  # optional; explicit override for a genuinely
+#                                  # ambiguous real C type (see lttng_curated_verify.py)
+#
+# Per-arg DSL type and the field-budget check are resolved and enforced
+# automatically from the real HIP header via a live libclang parse (see
+# lttng_curated_verify.py's infer_dsl_type()/expand_compact_apis()). Arg
+# names are cross-checked against the real header signature by the same
+# libclang-based drift verifier.
+
+# --- streams + sync ---
+- api: hipStreamCreate
+  args: [stream]
+  out: [stream]
+
+- api: hipStreamCreateWithFlags
+  args: [stream, flags]
+  out: [stream]
+
+- api: hipStreamCreateWithPriority
+  args: [stream, flags, priority]
+  out: [stream]
+
+- api: hipStreamDestroy
+  args: [stream]
+
+- api: hipStreamGetFlags
+  args: [stream, flags]
+  out: [flags]
+
+- api: hipStreamGetPriority
+  args: [stream, priority]
+  out: [priority]
+
+- api: hipStreamSynchronize
+  args: [stream]
+
+- api: hipStreamWaitEvent
+  args: [stream, event, flags]
+
+- api: hipStreamQuery
+  args: [stream]
+
+- api: hipStreamAddCallback
+  args: [stream, callback, userData, flags]
+
+- api: hipDeviceSynchronize
+  args: []
+
+- api: hipStreamAttachMemAsync
+  args: [stream, dev_ptr, length, flags]
+
+# --- events ---
+- api: hipEventCreate
+  args: [event]
+  out: [event]
+
+- api: hipEventCreateWithFlags
+  args: [event, flags]
+  out: [event]
+
+- api: hipEventDestroy
+  args: [event]
+
+- api: hipEventRecord
+  args: [event, stream]
+
+- api: hipEventSynchronize
+  args: [event]
+
+- api: hipEventQuery
+  args: [event]
+
+- api: hipEventElapsedTime
+  args: [ms, start, stop]
+  out: [ms]
+
+# --- kernel launch + module ---
+#
+# hipExtModuleLaunchKernel is intentionally OMITTED: it is declared
+# in hip_ext.h, not hip_runtime_api.h, and would require adding
+# hip_ext.h to the verifier's CMake invocation. Follow-up task.
+- api: hipLaunchKernel
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream]
+  pack_dim3: [numBlocks, dimBlocks]
+
+- api: hipLaunchCooperativeKernel
+  args: [f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream]
+  pack_dim3: [gridDim, blockDimX]
+
+- api: hipLaunchCooperativeKernelMultiDevice
+  args: [launchParamsList, numDevices, flags]
+
+- api: hipModuleLaunchKernel
+  args: [f, sharedMemBytes, stream, kernelParams, extra]
+
+- api: hipExtLaunchKernel
+  args: [function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags]
+  pack_dim3: [numBlocks, dimBlocks]
+
+- api: hipExtLaunchMultiKernelMultiDevice
+  args: [launchParamsList, numDevices, flags]
+
+- api: hipModuleGetFunction
+  args: [function, module, kname]
+  out: [function]
+  strings: [kname]
+
+- api: hipModuleLoadData
+  args: [module, image]
+  out: [module]
+
+- api: hipModuleLoadDataEx
+  args: [module, image, numOptions, options, optionValues]
+  out: [module]
+
+- api: hipModuleUnload
+  args: [module]
+
+# --- memory ---
+- api: hipMemcpy
+  args: [dst, src, sizeBytes, kind]
+
+- api: hipMemcpyDtoH
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyHtoD
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyDtoD
+  args: [dst, src, sizeBytes]
+
+- api: hipMemcpyPeer
+  args: [dst, dstDeviceId, src, srcDeviceId, sizeBytes]
+
+- api: hipMemcpyAsync
+  args: [dst, src, sizeBytes, kind, stream]
+
+- api: hipMemcpyDtoHAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyHtoDAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyDtoDAsync
+  args: [dst, src, sizeBytes, stream]
+
+- api: hipMemcpyPeerAsync
+  args: [dst, dstDeviceId, src, srcDevice, sizeBytes, stream]
+
+- api: hipMemcpy2DAsync
+  args: [dst, dpitch, src, spitch, width, height, kind, stream]
+
+- api: hipMemcpy3DAsync
+  args: [p, stream]
+
+- api: hipMalloc
+  args: [ptr, size]
+  out: [ptr]
+
+- api: hipMallocAsync
+  args: [dev_ptr, size, stream]
+  out: [dev_ptr]
+
+- api: hipMallocHost
+  args: [ptr, size]
+  out: [ptr]
+
+- api: hipHostMalloc
+  args: [ptr, size, flags]
+  out: [ptr]
+
+- api: hipMallocManaged
+  args: [dev_ptr, size, flags]
+  out: [dev_ptr]
+
+- api: hipFree
+  args: [ptr]
+
+- api: hipFreeAsync
+  args: [dev_ptr, stream]
+
+- api: hipFreeHost
+  args: [ptr]
+
+- api: hipHostFree
+  args: [ptr]
+
+- api: hipMemset
+  args: [dst, value, sizeBytes]
+
+- api: hipMemsetAsync
+  args: [dst, value, sizeBytes, stream]
+
+- api: hipMemsetD8
+  args: [dest, value, count]
+
+- api: hipMemsetD16
+  args: [dest, value, count]
+
+- api: hipMemsetD32
+  args: [dest, value, count]
+
+- api: hipMemPrefetchAsync
+  args: [dev_ptr, count, device, stream]
+
+- api: hipMemAdvise
+  args: [dev_ptr, count, advice, device]
+
+# --- graphs ---
+- api: hipGraphCreate
+  args: [pGraph, flags]
+  out: [pGraph]
+
+- api: hipGraphDestroy
+  args: [graph]
+
+- api: hipGraphInstantiate
+  args: [pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize]
+  out: [pGraphExec]
+
+- api: hipGraphExecDestroy
+  args: [graphExec]
+
+- api: hipStreamBeginCapture
+  args: [stream, mode]
+
+- api: hipStreamEndCapture
+  args: [stream, pGraph]
+  out: [pGraph]
+
+- api: hipStreamIsCapturing
+  args: [stream, pCaptureStatus]
+  out: [pCaptureStatus]
+
+- api: hipGraphAddKernelNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pNodeParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddMemcpyNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pCopyParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddMemsetNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, pMemsetParams]
+  out: [pGraphNode]
+
+- api: hipGraphAddEventRecordNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
+
+- api: hipGraphAddEventWaitNode
+  args: [pGraphNode, graph, pDependencies, numDependencies, event]
+  out: [pGraphNode]
+
+- api: hipGraphAddDependencies
+  args: [graph, from, to, numDependencies]
+
+- api: hipGraphLaunch
+  args: [graphExec, stream]
+
+- api: hipGraphExecKernelNodeSetParams
+  args: [hGraphExec, node, pNodeParams]
+
+- api: hipGraphExecMemcpyNodeSetParams1D
+  args: [hGraphExec, node, dst, src, count, kind]

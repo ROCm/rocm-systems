@@ -139,6 +139,9 @@ LTTNG_UST_TRACEPOINT_EVENT(
     )
 )
 
+/* Curated per-API typed tracepoint events (generated header). */
+#include "rocm_hip_curated_tp.h"
+
 #endif /* _ROCM_HIP_TP_H */
 
 #include <lttng/tracepoint-event.h>

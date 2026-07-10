@@ -149,4 +149,9 @@ static inline void rocm_trace_emit_hip_aql_kernel_dispatch_submit(
 
 #endif
 
+/* Curated per-API typed emit helpers (generated header). Self-contained:
+ * makes its own HIP_ENABLE_LTTNG_UST decision and includes the curated
+ * tracepoint header internally. */
+#include "rocm_trace_emit_curated.h"
+
 #endif /* ROCM_HIP_TRACE_EMIT_H_ */
