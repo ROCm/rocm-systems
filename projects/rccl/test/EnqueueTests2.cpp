@@ -210,5 +210,69 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // Scatter_SendHeavy_UsesNChannelsMax
+    //
+    // Mirror of Gather_RecvHeavy on the send direction (dir 1). Scatter fans
+    // out from the root, so the send total is nonzero while the recv total is
+    // zero: planTotalTasks = {0, N}, asymmetric == true. With nNodes == 1 the
+    // fix selects nChStart == nChannelsMax for the send direction. Read back
+    // via p2pTasks[1]->nChannels.
+    TEST(addP2pToPlan, Scatter_SendHeavy_UsesNChannelsMax)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 1;
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        // 4 MiB: fix -> nChannelsMax=8, old behaviour -> nChannelsMin=4 (see
+        // Gather_RecvHeavy for the sizing rationale).
+        const ssize_t kSendBytes = 4 * 1024 * 1024;
+
+        // Non-null send task so we can read back the selected channel count.
+        struct ncclTaskP2p sendTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {nullptr, &sendTask};
+
+        // Scatter at the root: send total nonzero, recv total zero.
+        int planTotalTasks[2] = {0, kNChannelsMax};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ kSendBytes,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ -1,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // The asymmetric path must start from nChannelsMax (not nChannelsMin).
+        EXPECT_EQ(sendTask.nChannels, kNChannelsMax);
+        EXPECT_GT(sendTask.nChannels, kNChannelsMin);
+
+        free(plan);
+        free(comm);
+    }
 }
 }
