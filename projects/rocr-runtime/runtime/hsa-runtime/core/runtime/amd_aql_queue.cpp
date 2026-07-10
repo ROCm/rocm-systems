@@ -816,9 +816,21 @@ void AqlQueue::Resume() {
 hsa_status_t AqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    auto err = agent_->driver().DestroyQueue(queue_id_);
-    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
-    (void)err;
+    if (core::Runtime::runtime_singleton_->flag().enable_drm() && drm_queue_id_ != 0) {
+      // DRM path: destroy using the DRM queue ID, not the KFD queue_id_.
+      // Using queue_id_ (KFD) here leaves the kernel userq alive, which
+      // causes amdgpu_userq_evict to crash when EOP/CWSR buffers are freed.
+      DrmDriver::DestroyQueueInParams queueIn(*agent_, drm_queue_id_, drm_doorbell_offset_);
+      auto err = static_cast<DrmDriver&>(agent_->driver()).DestroyQueue(&queueIn);
+      assert(err == HSA_STATUS_SUCCESS && "DRM DestroyQueue failed.");
+      (void)err;
+      drm_queue_id_ = 0;
+      drm_doorbell_offset_ = 0;
+    } else {
+      auto err = agent_->driver().DestroyQueue(queue_id_);
+      assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
+      (void)err;
+    }
     atomic::Fence(std::memory_order_acquire);
   }
   return HSA_STATUS_SUCCESS;
