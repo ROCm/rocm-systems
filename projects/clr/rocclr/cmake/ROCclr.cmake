@@ -89,6 +89,10 @@ endif()
 
 target_compile_definitions(rocclr PRIVATE ROCCLR_VERSION_GITHASH="${ROCCLR_VERSION_GITHASH}")
 
+if(USE_NEW_HOSTCALL_IMPL)
+  target_compile_definitions(rocclr PRIVATE USE_NEW_HOSTCALL_IMPL)
+endif()
+
 if(WIN32)
   target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/platform/interop_d3d9.cpp
