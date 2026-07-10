@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/ompt/details/format.hpp"  // NOLINT(unused-includes)
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -266,7 +267,15 @@ ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 {
     ::rocprofiler::registration::init_logging();
-    ::rocprofiler::registration::initialize();
+    {
+        // libomp holds its non-recursive init lock across this call; mark the OMPT path so
+        // find_clients() avoids dlopen (which would re-enter libomp and deadlock). scope_destructor
+        // runs the second (init) lambda on construct and the first (fini) lambda on destruct.
+        auto _ompt_init_guard = ::rocprofiler::common::scope_destructor{
+            []() { ::rocprofiler::registration::ompt_init_active() = false; },
+            []() { ::rocprofiler::registration::ompt_init_active() = true; }};
+        ::rocprofiler::registration::initialize();
+    }
     return rocprofiler_ompt_start_tool(omp_version, runtime_version);
 }
 }
