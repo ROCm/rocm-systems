@@ -492,5 +492,74 @@ namespace
         free(plan);
         free(comm);
     }
+
+    // SmallMessage_ClampsBelowNChannelsMax
+    //
+    // The fix picks nChStart = nChannelsMax for single-node asymmetric traffic,
+    // but the actual channel count is std::min(nChStart, divUp(bytes,
+    // minPartSize)). For a small message the divUp term is the binding
+    // constraint, so selecting nChannelsMax as the start must NOT force a high
+    // channel count -- small transfers stay proportional to their size.
+    //
+    // Single-node minPartSize = p2pChunkSize/8 = 8KiB. A 32KiB message gives
+    // divUp(32KiB, 8KiB) = 4, so nChannels clamps to 4 even though nChStart is
+    // nChannelsMax (8), and the partSize doubling loop does not promote it
+    // (partSize 8KiB <= maxPartSize 2MiB).
+    TEST(addP2pToPlan, SmallMessage_ClampsBelowNChannelsMax)
+    {
+        struct ncclComm* comm = static_cast<struct ncclComm*>(calloc(1, sizeof(*comm)));
+        struct ncclKernelPlan* plan = static_cast<struct ncclKernelPlan*>(calloc(1, sizeof(*plan)));
+        ASSERT_NE(comm, nullptr);
+        ASSERT_NE(plan, nullptr);
+
+        ncclMemoryStackConstruct(&comm->memScoped);
+
+        const int kNChannelsMin = 4;
+        const int kNChannelsMax = 8;
+        comm->rank = 0;
+        comm->nNodes = 1;
+        comm->maxLocalRanks = 1;
+        comm->p2pnChannels = 8;
+        comm->p2pnChannelsPerPeer = 8;
+        comm->p2pChannelShiftSize = 0;
+        comm->p2pChunkSize = 1 << 16;   // 64 KiB -> minPartSize 8 KiB
+        comm->p2pNet = 0;
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+            comm->buffSizes[p] = NCCL_STEPS * comm->p2pChunkSize;
+
+        plan->comm = comm;
+
+        uint64_t p2pKey = (uint64_t)(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT;
+        ncclDevFuncNameToId[p2pKey] = 0;
+
+        // 32 KiB: divUp(32KiB, 8KiB) = 4 channels, below nChannelsMax.
+        const ssize_t kRecvBytes = 32 * 1024;
+        const int kExpectedChannels = 4;
+
+        struct ncclTaskP2p recvTask = {};
+        struct ncclTaskP2p* p2pTasks[2] = {&recvTask, nullptr};
+
+        // Asymmetric (gather) traffic -> nChStart = nChannelsMax, but the
+        // message is too small to use them all.
+        int planTotalTasks[2] = {kNChannelsMax, 0};
+
+        const int rank = comm->rank;
+        ncclResult_t result = addP2pToPlan(
+            comm, plan,
+            /*nChannelsMin*/ kNChannelsMin, /*nChannelsMax*/ kNChannelsMax, /*p2pRound*/ 0,
+            /*sendRank*/ rank, /*sendAddr*/ nullptr, /*sendBytes*/ -1,
+            /*recvRank*/ rank, /*recvAddr*/ nullptr, /*recvBytes*/ kRecvBytes,
+            /*sendOpCount*/ 0, /*recvOpCount*/ 0,
+            planTotalTasks, p2pTasks);
+
+        EXPECT_EQ(result, ncclSuccess);
+
+        // std::min clamps to the message-derived count, below nChannelsMax.
+        EXPECT_EQ(recvTask.nChannels, kExpectedChannels);
+        EXPECT_LT(recvTask.nChannels, kNChannelsMax);
+
+        free(plan);
+        free(comm);
+    }
 }
 }
