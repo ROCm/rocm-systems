@@ -176,6 +176,7 @@ if(_rj_sanitizer_count GREATER 0)
             message(FATAL_ERROR "Only RJ_ENABLE_ASAN is supported by MSVC.")
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        list(APPEND RJ_SANITIZER_COMPILE_OPTIONS "-fno-sanitize-recover=all")
         list(
             APPEND RJ_SANITIZER_COMPILE_OPTIONS
             -fsanitize=${_rj_sanitizer_arg}
