@@ -1557,10 +1557,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode populates the sampled rows and backfills the full
-    code-object ISA: sampled offsets carry a kernel-attributed sample state,
-    the rest of the disassembly is added as un-attributed instruction lines,
-    and no (code object, offset) pair is duplicated."""
+    """Analyze in db mode records sampled rows and the full code-object ISA."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
@@ -1600,7 +1597,7 @@ def test_pc_sampling_analyze_db_output(
             inst_sample_total = conn.execute(
                 "SELECT SUM(count) FROM compute_instruction_sample"
             ).fetchone()[0]
-            # Sampled lines are attributed to a real kernel; backfilled ISA is not.
+            # Sampled lines are attributed to a real kernel; ISA-only lines are not.
             attributed = conn.execute(
                 "SELECT COUNT(*) FROM compute_instruction_line il "
                 "JOIN compute_kernel k ON il.kernel_uuid = k.kernel_uuid"
@@ -1616,7 +1613,7 @@ def test_pc_sampling_analyze_db_output(
                 "ON st.instruction_uuid = il.instruction_uuid "
                 "WHERE il.kernel_uuid IS NULL"
             ).fetchone()[0]
-            # The (code object, offset) pair is unique across sampled + backfilled.
+            # The (code object, offset) pair is unique across all lines.
             duplicate_offsets = conn.execute(
                 "SELECT COUNT(*) FROM ("
                 "SELECT code_object_uuid, code_object_offset "
@@ -1628,15 +1625,15 @@ def test_pc_sampling_analyze_db_output(
             conn.close()
         assert counts["compute_code_object_store"] > 0
         # Only sampled offsets carry a sample state; the full disassembly is
-        # backfilled as additional instruction lines, so lines outnumber states.
+        # added as additional instruction lines, so lines outnumber states.
         assert state_count > 0
         assert line_count > state_count
         assert attributed == state_count
         assert unattributed == line_count - state_count
         assert unattributed > 0
-        # Backfilled ISA lines carry no sample state.
+        # ISA-only lines carry no sample state.
         assert state_on_null_kernel == 0
-        # No duplicate ISA: sampled offsets are not re-inserted by the backfill.
+        # No duplicate ISA: sampled offsets are not re-inserted.
         assert duplicate_offsets == 0
         # inst_type is a per-sample class, so its counts sum to the sample total.
         assert inst_sample_total == state_total
