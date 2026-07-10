@@ -20,9 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Models an OpenBLAS-style library built with OpenMP support: its DT_INIT constructor
-// enters an OpenMP parallel region, which forces libomp's first-touch initialization
-// (and thus OMPT tool discovery) while this constructor is on the stack.
+// Models an OpenBLAS-style library built with OpenMP support (USE_OPENMP=1). On the AAC6
+// system the deadlock originated in OpenBLAS's DT_INIT constructor, which queries the CPU/thread
+// count through OpenMP:
+//
+//     gotoblas_init -> blas_get_cpu_number -> get_num_procs -> omp_get_num_places
+//
+// The call into libomp (omp_get_num_places) forces libomp's first-touch initialization, which
+// acquires libomp's non-recursive init lock and performs OMPT tool discovery while this
+// constructor is still on the stack. This stub reproduces that exact libomp entry point rather
+// than a generic parallel region so the call chain matches the real failure.
 
 #include <omp.h>
 
@@ -33,14 +40,10 @@ namespace
 __attribute__((constructor)) void
 blas_stub_init()
 {
-    fprintf(stderr, "[blas-stub] DT_INIT: entering omp parallel (triggers OMPT bring-up)\n");
+    fprintf(stderr, "[blas-stub] DT_INIT: omp_get_num_places() (models gotoblas_init CPU query)\n");
     fflush(stderr);
-#pragma omp parallel
-    {
-        if(omp_get_thread_num() == 0)
-            fprintf(stderr, "[blas-stub] in parallel, nthreads=%d\n", omp_get_num_threads());
-    }
-    fprintf(stderr, "[blas-stub] DT_INIT done\n");
+    int n = omp_get_num_places();
+    fprintf(stderr, "[blas-stub] omp_get_num_places() returned %d\n", n);
     fflush(stderr);
 }
 }  // namespace
