@@ -473,6 +473,27 @@ TEST(KernelScopeAnalysis, SeparatesAdjacentKernelEntries) {
   EXPECT_EQ(second->entry, block_for_offset(index, 4));
 }
 
+TEST(KernelScopeAnalysis, SymbolRangesExcludeTextPadding) {
+  std::vector<uint32_t> words = {
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      0,
+      0,
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  TestCodeObject co(words);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint64_t, 2> entries{0, 12};
+  constexpr std::array<BasicBlock::CodeRange, 2> ranges{{{0, 4}, {12, 4}}};
+  auto blocks = BasicBlock::build(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, entries, ranges);
+
+  ASSERT_EQ(blocks.size(), 2u);
+  EXPECT_EQ(blocks[0]->start_offset(), 0u);
+  EXPECT_EQ(blocks[1]->start_offset(), 12u);
+  EXPECT_TRUE(blocks[0]->successors().empty());
+  EXPECT_TRUE(blocks[1]->predecessors().empty());
+}
+
 TEST(KernelScopeAnalysis, SeedsAdditionalDescriptorEntryWithoutClaimingNextKernel) {
   std::vector<uint32_t> words = {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),

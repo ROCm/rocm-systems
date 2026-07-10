@@ -28,7 +28,7 @@ intended destination.
 | MOI `inline_shadow` | Narrow direct exact-shadow engine for native dword LDS, barriers, and one-slot atomic ordering controls. | Make this the exact low-volume GPU-side sanitizer. |
 | MOI `sampled` | Direct sampled entry publication plus host-side sampled conflict scan. | Make this the low-overhead sanitizer option with real runtime sampling. |
 | MOI broad operation | `record_replay` and `sampled` can run useful broad compatibility sweeps with prototype knobs; `inline_shadow` remains targeted. | Make `RJ_CONSAN_FLAVOR=moi` plus an engine choice usable over the standard corpus without per-kernel register, owner, epoch, or buffer tuning. |
-| Registers | Mix of conservative automatic selection, descriptor growth, and explicit env knobs. | Centralize scratch allocation and reuse existing spill/cave machinery. |
+| Registers | Kernel-scoped liveness plans automatically select per-site scratch for static record/replay and sampled access probes; other probe families still use explicit knobs and no ConSan path spills yet. | Extend the shared planner through spill-backed and persistent-state paths. |
 | Diagnostics | Useful test guards and compact summaries; inline diagnostics are still sparse. | Structured, bounded diagnostics suitable for team use. |
 | Flat/generic LDS | Conservative `Group`/`MaybeGroup` heuristic. | Harden provenance and address normalization before broadening coverage. |
 
@@ -122,8 +122,10 @@ configuration and has narrower coverage in its exact inline path.
 
 The gap is not one feature. It is a set of concrete blockers:
 
-- **Scratch register allocation.** MOI probes still use explicit knobs such as
-  `RJ_CONSAN_TMP_VGPR`, `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`,
+- **Scratch register allocation.** Static record/replay and sampled access
+  probes now choose per-site dead or fresh descriptor-backed VGPR windows.
+  Dynamic, barrier, atomic, inline-shadow, and persistent-state paths still use
+  explicit knobs such as `RJ_CONSAN_TMP_VGPR`, `RJ_CONSAN_MOI_EXEC_SAVE_SGPR`,
   `RJ_CONSAN_MOI_OWNER_SGPR`, `RJ_CONSAN_MOI_OWNER_VGPR`, and
   `RJ_CONSAN_MOI_EPOCH_VGPR` for important paths. Broad operation needs a
   single scratch-planning policy that can find free registers when possible,
@@ -241,11 +243,15 @@ Current placement mechanisms:
 Current register policy:
 
 - SuperCollider probes have the most mature automatic scratch selection.
-- Some paths can grow descriptor VGPR allocation as fallback.
-- MOI engines still rely heavily on explicit env knobs for scratch, owner,
-  epoch, and EXEC-save registers.
-- Descriptor growth does not prove liveness. It only makes the register
-  allocation legal in the kernel descriptor.
+- Static MOI record/replay and sampled access probes use a read-only,
+  kernel-scoped CFG/liveness plan. Each site first searches dead VGPRs within
+  its current descriptor allocation, then a fresh range above all guest
+  references, growing only the owning descriptor when needed.
+- Symbol-backed code ranges exclude alignment padding from CFG decoding, so
+  the same planning path works on normal multi-kernel HIP code objects.
+- Spill-required sites are reported with a typed resource outcome and left
+  unmodified. Dynamic, barrier, atomic, inline-shadow, owner/epoch, and
+  EXEC-save paths still rely on explicit env knobs.
 - There is no general ConSan spilling policy yet.
 
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch is now the
@@ -719,10 +725,10 @@ What it does not mean:
 
 ## Immediate Engineering Gaps
 
-The highest-leverage gap is register and spill policy. Most remaining feature
-work needs larger probes or more persistent state. Without a better scratch
-policy, each new probe risks adding another manual env knob or relying on
-descriptor growth as if it were liveness proof.
+The non-spill scratch policy is now in place for static record/replay and
+sampled access probes. The immediate gap is preserving a selected live victim
+when that policy returns `spill-required`, then extending the same resource
+model to the remaining probe families and persistent state.
 
 Before implementing new spilling machinery, start from Kunwar Grover's
 `text-relocation-land` branch:

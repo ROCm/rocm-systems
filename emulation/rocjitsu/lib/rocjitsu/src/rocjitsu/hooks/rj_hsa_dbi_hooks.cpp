@@ -2151,6 +2151,20 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     candidate.raw_scope ? std::to_string(*candidate.raw_scope).c_str() : "-",
                     candidate.raw_th ? std::to_string(*candidate.raw_th).c_str() : "-");
       }
+      for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
+        log_message(
+            kLogInfo,
+            "ConSan MOI resource reader=%llu candidate=%zu text_offset=0x%llx "
+            "source=%u reason=%u owners=%zu scratch_vgpr=%s scratch_count=%u "
+            "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
+            "private_bytes=%u",
+            static_cast<unsigned long long>(code_object_reader.handle), plan.candidate_index,
+            static_cast<unsigned long long>(plan.text_offset), static_cast<unsigned>(plan.source),
+            static_cast<unsigned>(plan.reason), plan.owner_descriptor_file_offsets.size(),
+            plan.scratch_vgpr ? std::to_string(*plan.scratch_vgpr).c_str() : "-",
+            plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
+            plan.required_vgpr_count, plan.original_private_segment_size);
+      }
     }
     size_t candidate_kernel_count = 0;
     size_t skipped_kernel_count = 0;

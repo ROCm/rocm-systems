@@ -1792,7 +1792,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1808,7 +1807,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=8"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1824,7 +1822,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=10"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1840,7 +1837,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=12"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1856,7 +1852,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=sampled"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1875,7 +1870,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1912,7 +1906,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                     "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )
@@ -1928,7 +1921,6 @@ if(RJ_ENABLE_HIP_TESTS)
                     "RJ_CONSAN_FLAVOR=moi"
                     "RJ_CONSAN_MOI_ENGINE=record_replay"
                     "RJ_CONSAN_LOG=1"
-                    "RJ_CONSAN_TMP_VGPR=4"
                     "RJ_CONSAN_MAX_PATCHES=2"
                     "RJ_CONSAN_REQUIRE_PATCH=1"
             )

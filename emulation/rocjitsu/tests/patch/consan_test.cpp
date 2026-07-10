@@ -1445,6 +1445,75 @@ TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {
   EXPECT_TRUE(saw_small_buffer_warning);
 }
 
+TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {
+  std::array<uint32_t, 170> text_words{};
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = 0xBFB00000u; // s_endpgm
+
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
+  EXPECT_EQ(result.patches.front().scratch_vgpr, 1);
+}
+
+TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
+  std::array<uint32_t, 170> text_words{};
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000102u; // ds_store_b32 v2, v1
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = 0xBFB00000u; // s_endpgm
+
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                    kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 0);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  EXPECT_EQ(plan.current_vgpr_count, 4);
+  EXPECT_EQ(plan.max_referenced_vgpr_count, 3);
+  EXPECT_EQ(plan.scratch_vgpr, 4);
+  EXPECT_EQ(plan.required_vgpr_count, 7);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().scratch_vgpr, 4);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  const uint64_t descriptor_offset = patched.kernels().front().descriptor_file_offset;
+  KD descriptor{};
+  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                            kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
+}
+
 TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
   std::array<uint32_t, 170> text_words{};
   text_words[0] = 0xD8340000u;
@@ -1702,6 +1771,33 @@ TEST(ConSanMoi, DirectSampledProbeWritesPackedWatchpointEntry) {
   }
   EXPECT_TRUE(saw_sampled_warning);
   EXPECT_FALSE(saw_access_warning);
+}
+
+TEST(ConSanMoi, DirectSampledProbeAutomaticallyUsesDeadVgprs) {
+  std::array<uint32_t, 170> text_words{};
+  text_words[0] = 0xD8340000u;
+  text_words[1] = 0x00000000u; // ds_store_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  text_words.back() = 0xBFB00000u; // s_endpgm
+
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiSampledWatchpointStore);
+  EXPECT_EQ(result.patches.front().scratch_vgpr, 1);
 }
 
 TEST(ConSanMoi, DirectSampledProbeCanUseSleepDelay) {

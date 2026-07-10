@@ -30,6 +30,7 @@ RJ_DIAGNOSTIC_POP
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -1625,25 +1626,6 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return true;
 }
 
-[[nodiscard]] uint32_t first_light_required_vgpr_count(const ConSanOptions &options) {
-  uint32_t required_count =
-      static_cast<uint32_t>(*options.scratch_vgpr) + (options.moi_dynamic_access_records ? 8u : 3u);
-  if (options.moi_owner_vgpr)
-    required_count = std::max<uint32_t>(required_count, *options.moi_owner_vgpr + 1u);
-  if (options.moi_epoch_vgpr)
-    required_count = std::max<uint32_t>(required_count, *options.moi_epoch_vgpr + 1u);
-  return required_count;
-}
-
-[[nodiscard]] uint32_t direct_sampled_required_vgpr_count(const ConSanOptions &options) {
-  uint32_t required_count = static_cast<uint32_t>(*options.scratch_vgpr) + 5u;
-  if (options.moi_owner_vgpr)
-    required_count = std::max<uint32_t>(required_count, *options.moi_owner_vgpr + 1u);
-  if (options.moi_epoch_vgpr)
-    required_count = std::max<uint32_t>(required_count, *options.moi_epoch_vgpr + 1u);
-  return required_count;
-}
-
 [[nodiscard]] const char *moi_delay_mode_name(ConSanDelayMode mode) {
   switch (mode) {
   case ConSanDelayMode::Nop:
@@ -1863,7 +1845,15 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
   std::ranges::sort(kernel_entries);
   kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
 
-  auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders);
+  std::vector<BasicBlock::CodeRange> code_ranges;
+  code_ranges.reserve(code_object.functions().size());
+  for (const AmdGpuFunctionInfo &function : code_object.functions()) {
+    if (function.code_size != 0)
+      code_ranges.push_back(
+          {.start_offset = function.entry_text_offset, .size = function.code_size});
+  }
+
+  auto blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
@@ -1976,6 +1966,132 @@ void append_moi_resource_plans(std::span<const uint8_t> bytes, const ConSanOptio
     candidate_plan.required_vgpr_count = register_plan.required_descriptor_count;
     result.resource_plans.push_back(std::move(candidate_plan));
   }
+}
+
+struct ResolvedMoiScratchPlan {
+  uint16_t base = 0;
+  uint16_t count = 0;
+  uint16_t required_vgpr_count = 0;
+  std::vector<uint64_t> owner_descriptor_file_offsets;
+  ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
+};
+
+[[nodiscard]] const ConSanCandidateResourcePlan *
+resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate &candidate) {
+  if (result.moi_candidates.empty())
+    return nullptr;
+  const auto it = std::ranges::find_if(result.moi_candidates,
+                                       [&](const auto &item) { return &item == &candidate; });
+  if (it == result.moi_candidates.end())
+    return nullptr;
+  const size_t index = static_cast<size_t>(std::distance(result.moi_candidates.begin(), it));
+  if (index >= result.resource_plans.size() ||
+      result.resource_plans[index].candidate_index != index) {
+    return nullptr;
+  }
+  return &result.resource_plans[index];
+}
+
+[[nodiscard]] std::optional<ResolvedMoiScratchPlan>
+resolve_nonspill_moi_scratch(const ConSanResult &result, const ConSanMoiCandidate &candidate,
+                             const ConSanOptions &options, uint16_t expected_count) {
+  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+  if (plan != nullptr && plan->scratch_vgpr && plan->scratch_vgpr_count == expected_count &&
+      (plan->source == ConSanRegisterAllocationSource::Explicit ||
+       plan->source == ConSanRegisterAllocationSource::LivenessDead ||
+       plan->source == ConSanRegisterAllocationSource::DescriptorGrowth)) {
+    ResolvedMoiScratchPlan resolved;
+    resolved.base = *plan->scratch_vgpr;
+    resolved.count = expected_count;
+    resolved.required_vgpr_count = plan->required_vgpr_count;
+    resolved.owner_descriptor_file_offsets = plan->owner_descriptor_file_offsets;
+    resolved.source = plan->source;
+    if (options.moi_owner_vgpr) {
+      resolved.required_vgpr_count = std::max<uint16_t>(
+          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_owner_vgpr + 1u));
+    }
+    if (options.moi_epoch_vgpr) {
+      resolved.required_vgpr_count = std::max<uint16_t>(
+          resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_epoch_vgpr + 1u));
+    }
+    return resolved;
+  }
+
+  // Until R1G, retain caller-selected function registers as an explicit debug
+  // compatibility path. Automatic plans never guess descriptor ownership for
+  // unreachable or multiply-owned shared text.
+  if (!candidate.in_kernel && options.scratch_vgpr &&
+      static_cast<uint32_t>(*options.scratch_vgpr) + expected_count <= kMaxVgprs) {
+    ResolvedMoiScratchPlan resolved;
+    resolved.base = *options.scratch_vgpr;
+    resolved.count = expected_count;
+    resolved.required_vgpr_count = static_cast<uint16_t>(*options.scratch_vgpr + expected_count);
+    resolved.source = ConSanRegisterAllocationSource::Explicit;
+    for (const ConSanKernelInfo &kernel : result.kernels)
+      resolved.owner_descriptor_file_offsets.push_back(kernel.descriptor_file_offset);
+    return resolved;
+  }
+  return std::nullopt;
+}
+
+using MoiDescriptorVgprRequirements = std::unordered_map<uint64_t, uint16_t>;
+
+void note_descriptor_requirements(MoiDescriptorVgprRequirements &requirements,
+                                  const ResolvedMoiScratchPlan &plan) {
+  for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+    auto [it, inserted] = requirements.emplace(descriptor_offset, plan.required_vgpr_count);
+    if (!inserted)
+      it->second = std::max(it->second, plan.required_vgpr_count);
+  }
+}
+
+[[nodiscard]] const ConSanKernelInfo *kernel_for_descriptor(const ConSanResult &result,
+                                                            uint64_t descriptor_offset) {
+  const auto it = std::ranges::find_if(result.kernels, [descriptor_offset](const auto &kernel) {
+    return kernel.descriptor_file_offset == descriptor_offset;
+  });
+  return it == result.kernels.end() ? nullptr : &*it;
+}
+
+[[nodiscard]] bool apply_descriptor_requirements(CodeObjectPatcher &patcher,
+                                                 std::span<const uint8_t> image,
+                                                 const ConSanResult &result,
+                                                 const MoiDescriptorVgprRequirements &requirements,
+                                                 std::vector<std::string> &errors) {
+  for (const auto &[descriptor_offset, required_count] : requirements) {
+    const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
+    if (kernel == nullptr) {
+      errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
+      return false;
+    }
+    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, *kernel, required_count, errors))
+      return false;
+  }
+  return true;
+}
+
+[[nodiscard]] bool apply_descriptor_requirements(std::vector<uint8_t> &image,
+                                                 const ConSanResult &result,
+                                                 const MoiDescriptorVgprRequirements &requirements,
+                                                 std::vector<std::string> &errors) {
+  for (const auto &[descriptor_offset, required_count] : requirements) {
+    if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+      errors.emplace_back("ConSan MOI resource-plan descriptor exceeds ELF bytes");
+      return false;
+    }
+    if (kernel_for_descriptor(result, descriptor_offset) == nullptr) {
+      errors.emplace_back("ConSan MOI resource plan references an unknown kernel descriptor");
+      return false;
+    }
+    KD descriptor{};
+    std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count)) {
+      errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
+      return false;
+    }
+    std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  }
+  return true;
 }
 
 [[nodiscard]] bool append_store_start_cell_from_lds_byte_offset(std::vector<uint32_t> &words,
@@ -3094,14 +3210,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         "ConSan MOI sampled probe requires room for the report header and one sampled entry");
     return;
   }
-  if (!options.scratch_vgpr) {
-    result.warnings.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
-    return;
-  }
-  if (static_cast<uint32_t>(*options.scratch_vgpr) + 5u > kMaxVgprs) {
-    result.warnings.emplace_back("ConSan MOI sampled probe needs five scratch VGPRs");
-    return;
-  }
   if (options.moi_sample_stride == 0) {
     result.warnings.emplace_back("ConSan MOI sampled probe requires a nonzero sample stride");
     return;
@@ -3128,6 +3236,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     const ConSanMoiCandidate *candidate = nullptr;
     uint64_t patch_bytes = 0;
     bool use_appended_cave = false;
+    ResolvedMoiScratchPlan resources;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   std::vector<PlannedSampledPatch> appended_cave_candidates;
@@ -3144,9 +3253,21 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       continue;
 
     const ConSanMoiCandidate &candidate = *candidate_ptr;
+    const auto resources = resolve_nonspill_moi_scratch(result, candidate, options, 5);
+    if (!resources) {
+      const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+      if (plan != nullptr && plan->source == ConSanRegisterAllocationSource::SpillRequired) {
+        result.warnings.emplace_back(
+            "ConSan MOI sampled probe deferred a spill-required candidate");
+      }
+      continue;
+    }
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
     std::vector<std::string> candidate_errors;
-    auto words = build_direct_sampled_watchpoint_words(
-        bytes, candidate, options, arch, 0, layout.sampled_watchpoints_offset, candidate_errors);
+    auto words =
+        build_direct_sampled_watchpoint_words(bytes, candidate, candidate_options, arch, 0,
+                                              layout.sampled_watchpoints_offset, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -3163,7 +3284,12 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
         if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
             compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size)) {
-          appended_cave_candidates.push_back({candidate_ptr, patch_bytes, true});
+          PlannedSampledPatch planned;
+          planned.candidate = candidate_ptr;
+          planned.patch_bytes = patch_bytes;
+          planned.use_appended_cave = true;
+          planned.resources = *resources;
+          appended_cave_candidates.push_back(std::move(planned));
           continue;
         }
       }
@@ -3189,7 +3315,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
 
     patched_ranges.emplace_back(patch_begin, patch_end);
-    planned_patches.push_back({candidate_ptr, patch_bytes, false});
+    PlannedSampledPatch planned;
+    planned.candidate = candidate_ptr;
+    planned.patch_bytes = patch_bytes;
+    planned.resources = *resources;
+    planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == max_candidates)
       break;
   }
@@ -3232,12 +3362,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         " sample-filter-selected candidates by report capacity or max-patch budget");
   }
 
+  MoiDescriptorVgprRequirements descriptor_requirements;
+  for (const PlannedSampledPatch &planned_patch : planned_patches)
+    note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
+
   const bool uses_appended_cave = std::ranges::any_of(
       planned_patches, [](const PlannedSampledPatch &patch) { return patch.use_appended_cave; });
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
-    if (!grow_moi_kernel_descriptor_vgprs(patcher, bytes, result,
-                                          direct_sampled_required_vgpr_count(options))) {
+    if (!apply_descriptor_requirements(patcher, bytes, result, descriptor_requirements,
+                                       result.errors)) {
       return;
     }
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3251,8 +3385,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     for (uint32_t i = 0; i < planned_patches.size(); ++i) {
       const PlannedSampledPatch &planned_patch = planned_patches[i];
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-      auto words = build_direct_sampled_watchpoint_words(
-          bytes, candidate, options, arch, i, layout.sampled_watchpoints_offset, result.errors);
+      ConSanOptions candidate_options = options;
+      candidate_options.scratch_vgpr = planned_patch.resources.base;
+      auto words =
+          build_direct_sampled_watchpoint_words(bytes, candidate, candidate_options, arch, i,
+                                                layout.sampled_watchpoints_offset, result.errors);
       if (!words)
         return;
 
@@ -3261,7 +3398,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                       ? ConSanPatchKind::TrampolineMoiSampledWatchpointStore
                       : ConSanPatchKind::InlineMoiSampledWatchpointStore;
       info.anchor_offset = candidate.text_offset;
-      info.scratch_vgpr = options.scratch_vgpr;
+      info.scratch_vgpr = planned_patch.resources.base;
 
       if (planned_patch.use_appended_cave) {
         const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
@@ -3330,8 +3467,11 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   for (uint32_t i = 0; i < planned_patches.size(); ++i) {
     const PlannedSampledPatch &planned_patch = planned_patches[i];
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
-    auto words = build_direct_sampled_watchpoint_words(
-        bytes, candidate, options, arch, i, layout.sampled_watchpoints_offset, result.errors);
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = planned_patch.resources.base;
+    auto words =
+        build_direct_sampled_watchpoint_words(bytes, candidate, candidate_options, arch, i,
+                                              layout.sampled_watchpoints_offset, result.errors);
     if (!words) {
       result.elf_bytes.clear();
       return;
@@ -3346,8 +3486,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!grow_moi_kernel_descriptor_vgprs(
-          result.elf_bytes, result, direct_sampled_required_vgpr_count(options), result.errors)) {
+  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements,
+                                     result.errors)) {
     result.elf_bytes.clear();
     return;
   }
@@ -3360,7 +3500,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     info.trampoline_offset = candidate.text_offset + candidate.size;
     info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
     info.trampoline_size = 0;
-    info.scratch_vgpr = options.scratch_vgpr;
+    info.scratch_vgpr = planned_patch.resources.base;
     result.patches.push_back(info);
   }
 
@@ -3386,18 +3526,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       options.moi_report_buffer_size, options.moi_track_barriers, options.moi_track_atomics);
   if (options.max_patches == 0 || layout.access_record_capacity == 0)
     return;
-  if (!options.scratch_vgpr) {
-    result.warnings.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
-    return;
-  }
   const uint16_t access_scratch_count = options.moi_dynamic_access_records ? 8u : 3u;
-  if (static_cast<uint32_t>(*options.scratch_vgpr) + access_scratch_count > 256u) {
-    result.warnings.emplace_back(options.moi_dynamic_access_records
-                                     ? "ConSan MOI dynamic access-record probe needs eight scratch "
-                                       "VGPRs"
-                                     : "ConSan MOI first-light probe needs three scratch VGPRs");
-    return;
-  }
   if (options.moi_dynamic_access_records && !options.moi_exec_save_sgpr) {
     result.warnings.emplace_back(
         "ConSan MOI dynamic access-record probe requires RJ_CONSAN_MOI_EXEC_SAVE_SGPR");
@@ -3424,6 +3553,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     bool use_appended_cave = false;
     uint32_t record_index = 0;
     uint32_t record_count = 0;
+    ResolvedMoiScratchPlan resources;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   std::vector<PlannedAccessRecordPatch> appended_cave_candidates;
@@ -3436,6 +3566,26 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     appended_cave_text_offset = code_object.text_sections().front()->size();
   for (const ConSanMoiCandidate *candidate_ptr : candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
+    const auto resources =
+        resolve_nonspill_moi_scratch(result, candidate, options, access_scratch_count);
+    if (!resources) {
+      const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+      if (plan != nullptr && plan->source == ConSanRegisterAllocationSource::SpillRequired) {
+        result.warnings.emplace_back(
+            "ConSan MOI first-light probe deferred a spill-required candidate");
+      } else if (plan != nullptr && plan->reason == ConSanRegisterPlanReason::ForbiddenOverlap &&
+                 options.scratch_vgpr) {
+        std::vector<std::string> overlap_errors;
+        const bool rejected = reject_candidate_scratch_range_overlap(
+            candidate, *options.scratch_vgpr, access_scratch_count, overlap_errors);
+        if (!rejected)
+          overlap_errors.emplace_back("ConSan MOI probe scratch VGPRs overlap a forbidden range");
+        result.warnings.insert(result.warnings.end(), overlap_errors.begin(), overlap_errors.end());
+      }
+      continue;
+    }
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = resources->base;
     const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
         candidate_access_ranges(bytes, candidate);
     if (!access_ranges || access_ranges->empty())
@@ -3449,8 +3599,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     }
     std::vector<std::string> candidate_errors;
-    auto words = build_first_light_access_record_words(
-        bytes, candidate, options, arch, 0, 0, layout.access_record_capacity, candidate_errors);
+    auto words =
+        build_first_light_access_record_words(bytes, candidate, candidate_options, arch, 0, 0,
+                                              layout.access_record_capacity, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -3467,8 +3618,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         const uint64_t return_branch_pc = appended_cave_text_offset + patch_bytes;
         if (compute_sopp_branch_simm16(candidate.text_offset, appended_cave_text_offset) &&
             compute_sopp_branch_simm16(return_branch_pc, candidate.text_offset + candidate.size)) {
-          appended_cave_candidates.push_back(
-              {candidate_ptr, patch_bytes, true, 0, candidate_record_count});
+          PlannedAccessRecordPatch planned;
+          planned.candidate = candidate_ptr;
+          planned.patch_bytes = patch_bytes;
+          planned.use_appended_cave = true;
+          planned.record_count = candidate_record_count;
+          planned.resources = *resources;
+          appended_cave_candidates.push_back(std::move(planned));
           continue;
         }
       }
@@ -3495,8 +3651,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
 
     patched_ranges.emplace_back(patch_begin, patch_end);
-    planned_patches.push_back(
-        {candidate_ptr, patch_bytes, false, planned_record_count, candidate_record_count});
+    PlannedAccessRecordPatch planned;
+    planned.candidate = candidate_ptr;
+    planned.patch_bytes = patch_bytes;
+    planned.record_index = planned_record_count;
+    planned.record_count = candidate_record_count;
+    planned.resources = *resources;
+    planned_patches.push_back(std::move(planned));
     planned_record_count += candidate_record_count;
     if (planned_patches.size() == options.max_patches)
       break;
@@ -3535,14 +3696,18 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   if (planned_patches.empty())
     return;
 
+  MoiDescriptorVgprRequirements descriptor_requirements;
+  for (const PlannedAccessRecordPatch &planned_patch : planned_patches)
+    note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
+
   const bool uses_appended_cave =
       std::ranges::any_of(planned_patches, [](const PlannedAccessRecordPatch &patch) {
         return patch.use_appended_cave;
       });
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
-    if (!grow_moi_kernel_descriptor_vgprs(patcher, bytes, result,
-                                          first_light_required_vgpr_count(options))) {
+    if (!apply_descriptor_requirements(patcher, bytes, result, descriptor_requirements,
+                                       result.errors)) {
       return;
     }
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3555,9 +3720,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     patches.reserve(planned_patches.size());
     for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
       const ConSanMoiCandidate &candidate = *planned_patch.candidate;
+      ConSanOptions candidate_options = options;
+      candidate_options.scratch_vgpr = planned_patch.resources.base;
       auto words = build_first_light_access_record_words(
-          bytes, candidate, options, arch, planned_patch.record_index, planned_record_count,
-          layout.access_record_capacity, result.errors);
+          bytes, candidate, candidate_options, arch, planned_patch.record_index,
+          planned_record_count, layout.access_record_capacity, result.errors);
       if (!words)
         return;
 
@@ -3565,7 +3732,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.kind = planned_patch.use_appended_cave ? ConSanPatchKind::TrampolineMoiAccessRecordStore
                                                   : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.text_offset;
-      info.scratch_vgpr = options.scratch_vgpr;
+      info.scratch_vgpr = planned_patch.resources.base;
 
       if (planned_patch.use_appended_cave) {
         const uint64_t cave_text_offset = static_cast<uint64_t>(new_text.size());
@@ -3633,8 +3800,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   result.elf_bytes.assign(bytes.begin(), bytes.end());
   for (const PlannedAccessRecordPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
+    ConSanOptions candidate_options = options;
+    candidate_options.scratch_vgpr = planned_patch.resources.base;
     auto words = build_first_light_access_record_words(
-        bytes, candidate, options, arch, planned_patch.record_index, planned_record_count,
+        bytes, candidate, candidate_options, arch, planned_patch.record_index, planned_record_count,
         layout.access_record_capacity, result.errors);
     if (!words) {
       result.elf_bytes.clear();
@@ -3650,8 +3819,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!grow_moi_kernel_descriptor_vgprs(result.elf_bytes, result,
-                                        first_light_required_vgpr_count(options), result.errors)) {
+  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements,
+                                     result.errors)) {
     result.elf_bytes.clear();
     return;
   }
@@ -3664,7 +3833,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     info.trampoline_offset = candidate.text_offset + candidate.size;
     info.original_size = static_cast<uint32_t>(planned_patch.patch_bytes);
     info.trampoline_size = 0;
-    info.scratch_vgpr = options.scratch_vgpr;
+    info.scratch_vgpr = planned_patch.resources.base;
     result.patches.push_back(info);
   }
 

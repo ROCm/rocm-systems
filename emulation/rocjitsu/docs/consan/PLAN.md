@@ -86,8 +86,8 @@ defined below.
 flowchart LR
   B0["B0: Current ConSan Baseline"]:::done
   R1A["R1A: Kernel Scope And Resource Model"]:::done
-  R1B["R1B: Automatic Non-Spill Allocation"]:::active
-  R1C["R1C: gfx1201 VGPR Spill Backend"]:::todo
+  R1B["R1B: Automatic Non-Spill Allocation"]:::done
+  R1C["R1C: gfx1201 VGPR Spill Backend"]:::active
   R1D["R1D: Spill-Backed Access Probes"]:::todo
   R1E["R1E: Persistent Owner And Epoch State"]:::todo
   R1F["R1F: Scalar And Special-State Policy"]:::todo
@@ -238,9 +238,9 @@ them as though the milestone created its prerequisites.
 
 The current autonomous priority order within that DAG is:
 
-1. Complete `R1A` and then `R1B`. `R1C` is independently ready from `B0` and
-   may be interleaved, but neither analysis nor encoding is presented as a
-   prerequisite of the other.
+1. Complete `R1C`, the gfx1201 spill emitter and hardware smoke. `R1A` and
+   `R1B` are complete; their kernel-scoped plans now select dead or fresh
+   descriptor-backed VGPRs for static record/replay and sampled probes.
 2. Once `R1B` and `R1C` are both complete, land `R1D`, the first forced-spill
    record/replay and sampled vertical slice.
 3. Complete `R1E` and `R1G` after that vertical slice. `R1F` becomes ready
@@ -603,7 +603,7 @@ Done criteria:
 - An ambiguous or unreachable function candidate is reported explicitly.
 - Existing DBT liveness and relocation tests remain unchanged in behavior.
 
-## R1B: Automatic Non-Spill Allocation - ACTIVE
+## R1B: Automatic Non-Spill Allocation - DONE
 
 Goal: eliminate manual scratch-register choices whenever a probe can use dead
 or genuinely new descriptor-backed registers.
@@ -637,7 +637,7 @@ Done criteria:
 - A 256-VGPR site returns `spill-required` rather than selecting an unproven
   high register or pretending that descriptor growth succeeded.
 
-## R1C: gfx1201 VGPR Spill Backend - TODO
+## R1C: gfx1201 VGPR Spill Backend - ACTIVE
 
 Goal: provide a standalone, tested backend that can preserve an ordinary VGPR
 window through per-lane private scratch on the local gfx1201 target.
