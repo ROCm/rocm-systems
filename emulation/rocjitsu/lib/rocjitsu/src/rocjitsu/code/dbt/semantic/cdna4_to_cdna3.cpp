@@ -97,13 +97,13 @@ build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint
   return cdna3::build_mubuf(op, fields);
 }
 
-[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_ds(uint8_t op, uint8_t vdst, uint8_t addr,
+[[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_ds(uint16_t op, uint8_t vdst, uint8_t addr,
                                                            uint8_t data0 = 0, uint8_t data1 = 0,
                                                            uint8_t offset0 = 0,
                                                            uint8_t offset1 = 0) {
   cdna3::DsMachineInst dst{};
   dst.encoding = 0x36;
-  dst.op = op;
+  dst.op = op & 0xFF;
   dst.offset0 = offset0;
   dst.offset1 = offset1;
   dst.addr = addr;
@@ -117,10 +117,10 @@ build_cdna3_vop3p_mfma(uint16_t op, const cdna4::Vop3pMfmaMachineInst &src, uint
 }
 
 [[nodiscard]] std::pair<uint32_t, uint32_t> build_cdna3_mubuf(const cdna4::MubufMachineInst &src,
-                                                              uint8_t op, uint8_t vdata) {
+                                                              uint16_t op, uint8_t vdata) {
   cdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
-  dst.op = op;
+  dst.op = op & 0x7F;
   dst.offset = src.offset;
   dst.offen = src.offen;
   dst.idxen = src.idxen;
