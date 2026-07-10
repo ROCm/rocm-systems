@@ -188,16 +188,8 @@ if(NOT hsakmt_FOUND)
     endif()
 endif()
 
-find_path( LIGHTNING_CMAKE_DIR NAMES LLVMConfig.cmake
-    PATHS $ENV{OUT_DIR}/llvm/lib/cmake/llvm NO_CACHE NO_DEFAULT_PATH)
-
-if ( DEFINED LIGHTNING_CMAKE_DIR AND EXISTS ${LIGHTNING_CMAKE_DIR} )
-    set ( LLVM_DIR ${LIGHTNING_CMAKE_DIR} )
-else()
-    message( STATUS "Couldn't find Lightning build in compute directory. "
-        "Searching LLVM_DIR then defaulting to system LLVM install if still not found..." )
-endif()
-
+# Find LLVM library
+# Uses LLVM_DIR (CMake/env variable) or CMAKE_PREFIX_PATH if set, otherwise system paths
 find_package( LLVM REQUIRED CONFIG )
 
 if( ${LLVM_PACKAGE_VERSION} VERSION_LESS "7.0" )
