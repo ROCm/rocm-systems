@@ -222,6 +222,15 @@ jobs:
           ROCM_PATH="$(rocm-sdk path --root)"
           export ROCM_PATH
           corpus_status=0
+          corpus_results=""
+          finish_target() {
+            local target_status="$1"
+            if [[ "${target_status}" -ne 0 ]]; then
+              corpus_status=1
+            fi
+            corpus_results+="${name}: $([[ "${target_status}" -eq 0 ]] && echo PASS || echo FAIL)"$'\n'
+            echo "::endgroup::"
+          }
           SHORT_TIMEOUT=15
           LONG_TIMEOUT=60
           MAX_TIMEOUT_FAILURES=5
@@ -251,7 +260,7 @@ jobs:
               --timeout-failures-config "${timeout_failures_config}" \
               --non-timeout-failures-config "${non_timeout_failures_config}" \
               --timeout "${SHORT_TIMEOUT}"; then
-              echo "::endgroup::"
+              finish_target 0
               continue
             fi
 
@@ -259,23 +268,20 @@ jobs:
             non_timeout_failures_json="$(tr -d '[:space:]' < "${non_timeout_failures_config}")"
             if [[ "${non_timeout_failures_json}" != "{}" ]]; then
               echo "::error::Corpus tests had regular failures; not retrying this target."
-              corpus_status=1
-              echo "::endgroup::"
+              finish_target 1
               continue
             fi
 
             if [[ "${timeout_failures_json}" == "{}" ]]; then
               echo "::error::Corpus tests failed, but no pytest-timeout failures were recorded."
-              corpus_status=1
-              echo "::endgroup::"
+              finish_target 1
               continue
             fi
 
             timeout_failure_count="$(jq '[.[] | length] | add // 0' "${timeout_failures_config}")"
             if [[ "${timeout_failure_count}" -gt "${MAX_TIMEOUT_FAILURES}" ]]; then
               echo "::error title=Too many pytest-timeout failures::Recorded ${timeout_failure_count} pytest-timeout failures, which is more than the retry limit of ${MAX_TIMEOUT_FAILURES}; not retrying this target."
-              corpus_status=1
-              echo "::endgroup::"
+              finish_target 1
               continue
             fi
 
@@ -293,11 +299,9 @@ jobs:
             else
               echo "::error::Retried pytest-timeout failures still failed with timeout=${LONG_TIMEOUT}s. Tests are hanging or otherwise stuck."
             fi
-
-            if [[ "${target_status}" -ne 0 ]]; then
-              corpus_status=1
-            fi
-
-            echo "::endgroup::"
+            finish_target "${target_status}"
           done
+          echo "::group::Corpus test status"
+          printf '%s' "${corpus_results}"
+          echo "::endgroup::"
           exit "${corpus_status}"
