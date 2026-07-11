@@ -622,7 +622,10 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // --sync-after-event: flush the GPU after every dispatched event and check
   // for async errors. This makes GPU faults show up at the exact causal event
   // rather than surfacing later on a sync or the next API call.
-  if (ctx.sync_after_event) {
+  // Skip while a stream graph capture is active: hipDeviceSynchronize is illegal
+  // during capture (HIP 901) and would invalidate it. The coherency hazard this
+  // guards against occurs at graph launch, not during capture.
+  if (ctx.sync_after_event && !ctx.in_graph_capture) {
     hipError_t se = hrr_watchdog_device_sync(ctx, "sync-after-event");
     if (se == hipSuccess) se = hipGetLastError();
     if (se != hipSuccess) {
@@ -1065,6 +1068,18 @@ int main(int argc, char** argv) {
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   printf("[HRR] Device  : %s (%s)\n", props.name, props.gcnArchName);
+
+  // gfx1250 (MI450): H2D-restored kernel INPUT buffers are not reliably coherent
+  // to the consuming kernel under replay's cold-alloc + tight back-to-back
+  // submission (kernels read stale-zero inputs -> wrong compute results). A
+  // per-event device sync restores coherency for reliable D2H validation. Root
+  // cause is a gfx1250 H2D->kernel input-visibility gap; this is the
+  // playback-side guard until a runtime fix lands.
+  if (!ctx.sync_after_event &&
+      (strstr(props.gcnArchName, "gfx1250") || strstr(props.gcnArchName, "gfx125"))) {
+    ctx.sync_after_event = true;
+    printf("[HRR] gfx1250 detected: enabling per-event device sync for D2H validation coherency\n");
+  }
 
   // Partition events by thread_id — O(n), no re-scan needed at replay time
   std::unordered_map<uint64_t, std::vector<const hrr::Event*>> thread_events;
