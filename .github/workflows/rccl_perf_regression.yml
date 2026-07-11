@@ -49,6 +49,11 @@ env:
   SLURM_RESERVATION: rccl_ci
   NODELIST: mia1-p01-g[22,26,28,32]
 
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write
+
 jobs:
   perf-gate:
     runs-on: [self-hosted, tw-gfx950-ainic-ROCm-scale-runner]
@@ -93,7 +98,7 @@ jobs:
 
       - name: Post / update PR comment
         if: always() && github.event_name == 'pull_request'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
           path: ${{ runner.temp }}/rccl_report.md
