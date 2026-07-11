@@ -24,6 +24,7 @@
 //
 // Default is <= 2 MiB (covers most deep-learning AllReduce sizes).  
 #define NCCL_CE_AR_MAX_MSG_BYTES  (256ull * 1024 * 1024)
+#define NCCL_CE_AR_MIN_MSG_BYTES  (4ull * 1024 * 1024)
 
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;

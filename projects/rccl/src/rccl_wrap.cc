@@ -43,7 +43,7 @@ RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
 RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(DirectAllGatherDisable, "DIRECT_ALLGATHER_DISABLE", 0);
-RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 0);
+RCCL_PARAM(CeAllReduce, "CE_ALLREDUCE", 1);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -589,8 +589,8 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 
   // Total message must fit within the pre-allocated staging buffer.
   size_t msgBytes = count * ncclTypeSize(datatype);
-  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES) return false;
-
+  if (msgBytes > NCCL_CE_AR_MAX_MSG_BYTES || msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) return false;
+  
   // Only standard reduction ops with a simple kernel implementation.
   // ncclAvg (maps to SumPostDiv) and user-defined PreMulSum fall back to ring.
   if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) return false;

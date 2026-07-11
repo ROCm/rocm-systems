@@ -3617,7 +3617,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         ncclIntruQueueEnqueue(&comm->ceInitTaskQueue, ceTask);
         ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
       }
-
+      // enable ce allreduce for allreduce with size >= 4MB and <= 256MB
       // Size gate for CE AllReduce: ceARTmpBuf is sized for at most
       // NCCL_CE_AR_MAX_MSG_BYTES total bytes.
       bool ceAllReduceFits = true;
@@ -3626,10 +3626,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           ceAvailable = false;
         } else {
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES) {
+          if (totalBytes > (size_t)NCCL_CE_AR_MAX_MSG_BYTES || totalBytes < (size_t)NCCL_CE_AR_MIN_MSG_BYTES) {
             ceAllReduceFits = false;
-            INFO(NCCL_COLL, "CE AllReduce: msg %zu B > cap %zu B, falling back to standard NCCL AllReduce",
-                 totalBytes, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
+            INFO(NCCL_COLL, "CE AllReduce: msg %zu B range (%zu, %zu) B, falling back to standard NCCL AllReduce",
+                 totalBytes, (size_t)NCCL_CE_AR_MIN_MSG_BYTES, (size_t)NCCL_CE_AR_MAX_MSG_BYTES);
           }
         }
       }
