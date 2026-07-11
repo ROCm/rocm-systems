@@ -222,10 +222,19 @@ hsa_status_t KfdVirtioDriver::SetTrapHandler(uint32_t node_id, const void* base,
 
 hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_region,
                                              core::MemoryRegion::AllocateFlags alloc_flags,
-                                             void** mem, size_t size, uint32_t agent_node_id) {
+                                             void** mem, size_t size, uint32_t agent_node_id,
+                                             core::DriverMemoryHandle* handle) {
   const MemoryRegion& m_region(static_cast<const MemoryRegion&>(mem_region));
   HsaMemFlags kmt_alloc_flags(m_region.mem_flags());
   HSAKMT_STATUS ret;
+
+  // Fills the caller's handle from whatever *mem holds: a VA for fragment and
+  // mapped allocations, or the opaque memory-only handle for NoAddress
+  // allocations. Both are the allocation word reinterpreted as uint64_t.
+  auto populate_handle = [&]() {
+    handle->handle = reinterpret_cast<uint64_t>(*mem);
+    handle->size = size;
+  };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
       (alloc_flags & core::MemoryRegion::AllocateExecutable ? 1 : 0);
@@ -275,6 +284,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
 
+      populate_handle();
       return HSA_STATUS_SUCCESS;
     }
   }
@@ -299,7 +309,10 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
   }
 
   if (*mem != nullptr) {
-    if (kmt_alloc_flags.ui32.NoAddress) return HSA_STATUS_SUCCESS;
+    if (kmt_alloc_flags.ui32.NoAddress) {
+      populate_handle();
+      return HSA_STATUS_SUCCESS;
+    }
 
     // Commit the memory.
     // For system memory, on non-restricted allocation, map it to all GPUs. On
@@ -319,12 +332,14 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
 
         if (map_node_count == 0) {
           // No need to pin since no GPU in the platform.
+          populate_handle();
           return HSA_STATUS_SUCCESS;
         }
 
         map_node_id = &core::Runtime::runtime_singleton_->gpu_ids()[0];
       } else {
         // No need to pin it for CPU exclusive access.
+        populate_handle();
         return HSA_STATUS_SUCCESS;
       }
     }
@@ -347,16 +362,18 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
       // TODO: Implement ASAN support for VIRTIO driver
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
+    populate_handle();
     return HSA_STATUS_SUCCESS;
   }
 
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
-hsa_status_t KfdVirtioDriver::FreeMemory(void* mem, size_t size) {
+hsa_status_t KfdVirtioDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
+  void* mem = reinterpret_cast<void*>(handle.handle);
   MakeMemoryUnresident(mem);
-  return vhsaKmtFreeMemory(mem, size) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
-                                                               : HSA_STATUS_ERROR;
+  return vhsaKmtFreeMemory(mem, handle.size) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
+                                                                      : HSA_STATUS_ERROR;
 }
 
 hsa_status_t KfdVirtioDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size,
@@ -547,9 +564,8 @@ hsa_status_t KfdVirtioDriver::Unmap(const core::DriverMemoryHandle& handle, void
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
-                                                    const core::Agent& agent,
-                                                    core::DriverMemoryHandle* handle, uint64_t* offset) {
+hsa_status_t KfdVirtioDriver::CreateShareableHandle(core::DriverMemoryHandle* handle,
+                                                    const core::Agent& agent, uint64_t* offset) {
   return HSA_STATUS_ERROR;
 }
 
