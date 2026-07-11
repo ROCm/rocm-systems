@@ -17,21 +17,14 @@
 #ifndef _OCL_KernelThroughput_H_
 #define _OCL_KernelThroughput_H_
 
-#ifdef WIN32
-#include "xmmintrin.h"
-#endif
 
 #include "OCLTestImp.h"
 // #include <sstream>
-// #define WIN32_LEAN_AND_MEAN //Restricts windows.h to include only the core
-// API. #include "windows.h" #undef Yield #include <process.h> #include
-//<xmmintrin.h> #include <emmintrin.h> #include <pmmintrin.h>
 
 #define LARGE_INT long long
 #define UNSIGNED_LARGE_INT unsigned long long
 #define MAX_LOOP_ITER 10
 typedef cl_float4 float4;
-typedef void (*CPUKernel)(__m128*, __m128*, unsigned int);
 
 class OCLPerfKernelThroughput : public OCLTestImp {
  public:
