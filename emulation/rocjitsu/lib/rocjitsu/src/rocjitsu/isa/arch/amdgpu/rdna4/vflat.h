@@ -20,6 +20,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadI8Vflat : public Vflat {
@@ -28,6 +29,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadU16Vflat : public Vflat {
@@ -36,6 +38,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadI16Vflat : public Vflat {
@@ -44,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadB32Vflat : public Vflat {
@@ -52,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadB64Vflat : public Vflat {
@@ -60,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadB96Vflat : public Vflat {
@@ -68,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadB128Vflat : public Vflat {
@@ -76,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatStoreB8Vflat : public Vflat {
@@ -84,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreB16Vflat : public Vflat {
@@ -92,6 +101,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreB32Vflat : public Vflat {
@@ -100,6 +110,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreB64Vflat : public Vflat {
@@ -108,6 +119,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreB96Vflat : public Vflat {
@@ -116,6 +128,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreB128Vflat : public Vflat {
@@ -124,6 +137,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatLoadD16U8Vflat : public Vflat {
@@ -132,6 +146,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadD16I8Vflat : public Vflat {
@@ -140,6 +155,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadD16B16Vflat : public Vflat {
@@ -148,6 +164,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadD16HiU8Vflat : public Vflat {
@@ -156,6 +173,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadD16HiI8Vflat : public Vflat {
@@ -164,6 +182,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatLoadD16HiB16Vflat : public Vflat {
@@ -172,6 +191,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand vaddr;
+  Operand gpumem;
 };
 
 class FlatStoreD16HiB8Vflat : public Vflat {
@@ -180,6 +200,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatStoreD16HiB16Vflat : public Vflat {
@@ -188,6 +209,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
 };
 
 class FlatAtomicSwapB32Vflat : public Vflat {
@@ -197,6 +219,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicCmpswapB32Vflat : public Vflat {
@@ -206,6 +230,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicAddU32Vflat : public Vflat {
@@ -215,6 +241,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicSubU32Vflat : public Vflat {
@@ -224,6 +252,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicSubClampU32Vflat : public Vflat {
@@ -233,6 +263,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMinI32Vflat : public Vflat {
@@ -242,6 +274,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMinU32Vflat : public Vflat {
@@ -251,6 +285,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMaxI32Vflat : public Vflat {
@@ -260,6 +296,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMaxU32Vflat : public Vflat {
@@ -269,6 +307,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicAndB32Vflat : public Vflat {
@@ -278,6 +318,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicOrB32Vflat : public Vflat {
@@ -287,6 +329,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicXorB32Vflat : public Vflat {
@@ -296,6 +340,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicIncU32Vflat : public Vflat {
@@ -305,6 +351,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicDecU32Vflat : public Vflat {
@@ -314,6 +362,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicSwapB64Vflat : public Vflat {
@@ -323,6 +373,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicCmpswapB64Vflat : public Vflat {
@@ -332,6 +384,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicAddU64Vflat : public Vflat {
@@ -341,6 +395,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicSubU64Vflat : public Vflat {
@@ -350,6 +406,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMinI64Vflat : public Vflat {
@@ -359,6 +417,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMinU64Vflat : public Vflat {
@@ -368,6 +428,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMaxI64Vflat : public Vflat {
@@ -377,6 +439,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMaxU64Vflat : public Vflat {
@@ -386,6 +450,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicAndB64Vflat : public Vflat {
@@ -395,6 +461,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicOrB64Vflat : public Vflat {
@@ -404,6 +472,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicXorB64Vflat : public Vflat {
@@ -413,6 +483,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicIncU64Vflat : public Vflat {
@@ -422,6 +494,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicDecU64Vflat : public Vflat {
@@ -431,6 +505,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicCondSubU32Vflat : public Vflat {
@@ -440,6 +516,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMinNumF32Vflat : public Vflat {
@@ -449,6 +527,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicMaxNumF32Vflat : public Vflat {
@@ -458,6 +538,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicAddF32Vflat : public Vflat {
@@ -467,6 +549,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicPkAddF16Vflat : public Vflat {
@@ -476,6 +560,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class FlatAtomicPkAddBf16Vflat : public Vflat {
@@ -485,6 +571,8 @@ public:
   Operand vdst;
   Operand vaddr;
   Operand vsrc;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 } // namespace rdna4

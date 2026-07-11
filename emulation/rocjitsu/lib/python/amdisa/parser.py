@@ -45,6 +45,7 @@ from amdisa.gpuisa import (
     Operand,
     OperandNamePattern,
     OperandSelector,
+    synthesize_fieldless_name,
 )
 from amdisa.isa_profile import IsaProfile
 
@@ -131,6 +132,39 @@ def _parse_enc_id_masks(
         )
     dont_care_bits = max_enc_bits - (flat_enc_mask[1] - flat_enc_mask[0])
     return flat_enc_mask, op_mask, dont_care_bits
+
+
+def _uniquify_fieldless_names(opnds: list[Operand]) -> None:
+    """Make field-less operand names unique within one instruction, in place.
+
+    Field-bearing operand names come from the encoding and are already unique.
+    Field-less operands are named from their type and can collide.
+    Disambiguate deterministically: keep the base if free, else append
+        ``_out``/``_in`` by role, else ``_<order>``.
+
+    ``opnds`` must already be sorted by ``order`` so assignment is stable across
+    regenerations.
+    """
+    used = {op.name for op in opnds if not op.field_less}
+    for op in opnds:
+        if not op.field_less:
+            continue
+        base = op.name
+        if base not in used:
+            used.add(base)
+            continue
+        role = '_out' if op.is_output and not op.is_input else '_in'
+        for candidate in (f'{base}{role}', f'{base}_{op.order}'):
+            if candidate not in used:
+                op.name = candidate
+                break
+        else:
+            # Extremely defensive: fall back to a guaranteed-unique suffix.
+            suffix = 0
+            while f'{base}_{op.order}_{suffix}' in used:
+                suffix += 1
+            op.name = f'{base}_{op.order}_{suffix}'
+        used.add(op.name)
 
 
 def _collapse_register_ranges(
@@ -880,21 +914,29 @@ class Parser:
                     field_name_node = opnd.find(xs.FIELD_NAME)
                     opnd_size = int(xs.get_node_text(opnd.find(xs.OPERAND_SIZE)))
                     opnd_type = xs.get_node_text(opnd.find(xs.OPERAND_TYPE))
+                    # Field-less operands do not have a name so create one.
+                    # Make them unique below
                     if field_name_node is not None:
-                        field_name = xs.get_node_text(field_name_node).lower()
-                        opnds.append(
-                            Operand(
-                                field_name,
-                                opnd_size,
-                                opnd_type,
-                                is_in,
-                                is_out,
-                                is_implicit,
-                                is_bin_ucode_required,
-                                order,
-                            )
+                        opnd_name = xs.get_node_text(field_name_node).lower()
+                        is_field_less = False
+                    else:
+                        opnd_name = synthesize_fieldless_name(opnd_type)
+                        is_field_less = True
+                    opnds.append(
+                        Operand(
+                            opnd_name,
+                            opnd_size,
+                            opnd_type,
+                            is_in,
+                            is_out,
+                            is_implicit,
+                            is_bin_ucode_required,
+                            order,
+                            is_field_less,
                         )
+                    )
                 opnds.sort(key=lambda x: x.order)
+                _uniquify_fieldless_names(opnds)
 
                 enc = self.isa_spec.encoding_map[enc_name]
                 is_implied_literal = (

@@ -21,6 +21,7 @@ public:
   Operand vdst;
   Operand vsrc;
   Operand attr;
+  Operand m0;
 };
 
 class VInterpP2F32Vintrp : public Vintrp {
@@ -30,6 +31,7 @@ public:
   Operand vdst;
   Operand vsrc;
   Operand attr;
+  Operand m0;
 };
 
 class VInterpMovF32Vintrp : public Vintrp {
@@ -39,6 +41,7 @@ public:
   Operand vdst;
   Operand vsrc;
   Operand attr;
+  Operand m0;
 };
 
 } // namespace cdna1

@@ -22,14 +22,17 @@ namespace gfx1250 {
 VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -140,14 +143,17 @@ void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -258,14 +264,17 @@ void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -376,14 +385,17 @@ void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -494,14 +506,17 @@ void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLgF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -612,14 +627,17 @@ void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -730,14 +748,17 @@ void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpOF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -848,14 +869,17 @@ void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpUF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -966,14 +990,17 @@ void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgeF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1084,14 +1111,17 @@ void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNlgF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1202,14 +1232,17 @@ void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgtF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1320,14 +1353,17 @@ void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNleF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1438,14 +1474,17 @@ void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeqF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1556,14 +1595,17 @@ void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNltF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -1674,12 +1716,15 @@ void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1790,12 +1835,15 @@ void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -1906,12 +1954,15 @@ void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2022,12 +2073,15 @@ void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2138,12 +2192,15 @@ void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLgF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2254,12 +2311,15 @@ void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2370,12 +2430,15 @@ void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpOF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2486,12 +2549,15 @@ void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpUF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2602,12 +2668,15 @@ void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgeF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2718,12 +2787,15 @@ void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNlgF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2834,12 +2906,15 @@ void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgtF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -2950,12 +3025,15 @@ void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNleF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -3066,12 +3144,15 @@ void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeqF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -3182,12 +3263,15 @@ void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNltF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -3298,12 +3382,15 @@ void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3414,12 +3501,15 @@ void VCmpLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3530,12 +3620,15 @@ void VCmpEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3646,12 +3739,15 @@ void VCmpLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3762,12 +3858,15 @@ void VCmpGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLgF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3878,12 +3977,15 @@ void VCmpLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -3994,12 +4096,15 @@ void VCmpGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_o_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpOF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4110,12 +4215,15 @@ void VCmpOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_u_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpUF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4226,12 +4334,15 @@ void VCmpUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgeF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4342,12 +4453,15 @@ void VCmpNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNlgF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4458,12 +4572,15 @@ void VCmpNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ngt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNgtF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4574,12 +4691,15 @@ void VCmpNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nle_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNleF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4690,12 +4810,15 @@ void VCmpNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_neq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeqF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4806,12 +4929,15 @@ void VCmpNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_nlt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNltF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -4922,14 +5048,17 @@ void VCmpNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5040,14 +5169,17 @@ void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5158,14 +5290,17 @@ void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5276,14 +5411,17 @@ void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5394,14 +5532,17 @@ void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5512,14 +5653,17 @@ void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeI16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5630,14 +5774,17 @@ void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5748,14 +5895,17 @@ void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5866,14 +6016,17 @@ void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -5984,14 +6137,17 @@ void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -6102,14 +6258,17 @@ void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -6220,14 +6379,17 @@ void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeU16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -6338,12 +6500,15 @@ void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6454,12 +6619,15 @@ void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6570,12 +6738,15 @@ void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6686,12 +6857,15 @@ void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6802,12 +6976,15 @@ void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -6918,12 +7095,15 @@ void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeI32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7034,12 +7214,15 @@ void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7150,12 +7333,15 @@ void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7266,12 +7452,15 @@ void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7382,12 +7571,15 @@ void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7498,12 +7690,15 @@ void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7614,12 +7809,15 @@ void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeU32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -7730,12 +7928,15 @@ void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -7846,12 +8047,15 @@ void VCmpLtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -7962,12 +8166,15 @@ void VCmpEqI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8078,12 +8285,15 @@ void VCmpLeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8194,12 +8404,15 @@ void VCmpGtI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8310,12 +8523,15 @@ void VCmpNeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeI64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8426,12 +8642,15 @@ void VCmpGeI64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_lt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLtU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8542,12 +8761,15 @@ void VCmpLtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_eq_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpEqU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8658,12 +8880,15 @@ void VCmpEqU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_le_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpLeU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8774,12 +8999,15 @@ void VCmpLeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_gt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGtU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -8890,12 +9118,15 @@ void VCmpGtU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ne_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpNeU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -9006,12 +9237,15 @@ void VCmpNeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_ge_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpGeU64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -9122,14 +9356,17 @@ void VCmpGeU64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f16_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpClassF16Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(16, OperandType::OPR_SRC,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true),
       vsrc1(16, OperandType::OPR_VGPR,
             static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vsrc1), true) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9240,12 +9477,15 @@ void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpClassF32Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -9356,12 +9596,15 @@ void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
     : Vopc("v_cmp_class_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<VCmpClassF64Vopc>()),
+      vcc(64, OperandType::OPR_VCC, 106),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  dst_operands_[0] = &vcc;
+  vcc.set_field_less(true);
   src_operands_[0] = &src0;
   src_operands_[1] = &vsrc1;
   num_src_ = 2;
-  num_dst_ = 0;
+  num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         64, OperandType::OPR_SIMM32,

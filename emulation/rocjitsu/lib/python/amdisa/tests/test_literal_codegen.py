@@ -6,8 +6,9 @@
 from types import SimpleNamespace
 
 from amdisa.codegen._generator import CodeGenerator
+from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Rdna4Profile
+from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
 from amdisa.semantics import InstructionSemantics
 
 
@@ -44,6 +45,7 @@ def _operand(
     is_input: bool = True,
     is_output: bool = False,
     order: int = 0,
+    field_less: bool = False,
 ) -> Operand:
     return Operand(
         name,
@@ -54,6 +56,7 @@ def _operand(
         is_implicit=False,
         is_binary_ucode_required=False,
         order=order,
+        field_less=field_less,
     )
 
 
@@ -111,6 +114,16 @@ def test_simm16_literal_operand_uses_low_half_of_extension_word():
     ) == stmt
 
 
+def test_fieldless_sopk_simm32_can_be_initialized_from_literal_member():
+    op = _operand('simm32', 'OPR_SIMM32', order=1, field_less=True)
+
+    stmt = CodeGenerator._literal_operand_from_expr_stmt(op, 'literal_')
+
+    assert (
+        'simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));'
+    ) == stmt
+
+
 def test_existing_literal_operand_does_not_need_simm32_fallback_member():
     inst = Instruction(
         'V_FMAAK_F32',
@@ -123,35 +136,18 @@ def test_existing_literal_operand_does_not_need_simm32_fallback_member():
     assert CodeGenerator._has_inline_literal_operand(inst)
 
 
-def test_scalar_literal_fma_synthesizes_third_source_operand():
-    inst = Instruction(
-        'S_FMAAK_F32',
-        'SOP2_INST_LITERAL',
-        opcode=69,
-        operands=[],
-        is_implied_literal_enc=True,
-    )
-
-    fixed = CodeGenerator._with_scalar_literal_fma_operand(inst)
-
-    assert fixed is not inst
-    assert fixed.operands[-1].name == 'src2'
-    assert fixed.operands[-1].operand_type == 'OPR_SIMM32'
-    assert fixed.operands[-1].is_input
-
-
-def test_scalar_fmamk_semantic_sources_use_synthesized_literal_as_multiplier():
+def test_scalar_fmamk_semantic_sources_use_fieldless_simm32_as_multiplier():
     operands = [
         _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
         _operand('ssrc0', 'OPR_SSRC', order=1),
         _operand('ssrc1', 'OPR_SSRC', order=2),
-        _operand('src2', 'OPR_SIMM32', order=3),
+        _operand('simm32', 'OPR_SIMM32', order=3, field_less=True),
     ]
     inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
 
     ordered = CodeGenerator._semantic_source_operands(inst, operands[1:])
 
-    assert [op.name for op in ordered] == ['ssrc0', 'src2', 'ssrc1']
+    assert [op.name for op in ordered] == ['ssrc0', 'simm32', 'ssrc1']
 
 
 def test_scalar_fmamk_semantic_sources_keep_explicit_literal_as_multiplier():
@@ -180,7 +176,7 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
         _operand('sdst', 'OPR_SDST', is_input=False, is_output=True, order=0),
         _operand('ssrc0', 'OPR_SSRC', order=1),
         _operand('ssrc1', 'OPR_SSRC', order=2),
-        _operand('src2', 'OPR_SIMM32', order=3),
+        _operand('simm32', 'OPR_SIMM32', order=3, field_less=True),
     ]
     inst = Instruction('S_FMAMK_F32', 'ENC_SOP2', opcode=70, operands=operands)
     sem = InstructionSemantics(
@@ -194,9 +190,57 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
     assert 'std::bit_cast<float>(ssrc0.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(src2.read_scalar(wf))' in body
+    assert 'std::bit_cast<float>(simm32.read_scalar(wf))' in body
     assert 'std::bit_cast<float>(ssrc1.read_scalar(wf))' in body
-    assert body.index('src2.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+    assert body.index('simm32.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+
+
+def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('vdst', 'OPR_VGPR', is_input=False, is_output=True, order=0),
+        _operand('src0', 'OPR_SRC', order=1),
+        _operand('vsrc1', 'OPR_VGPR', order=2),
+        _operand('simm32', 'OPR_SIMM32', order=3, field_less=True),
+    ]
+    inst = Instruction('V_FMAAK_F32', 'ENC_VOP2', opcode=70, operands=operands)
+    sem = InstructionSemantics(
+        'V_FMAAK_F32',
+        'vector_fmaak',
+        data_type='f32',
+    )
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
+
+    assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    assert 'simm32_' not in body
+
+
+def test_scalar_setreg_imm_execute_reads_fieldless_simm32_source():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='rdna4',
+        profile=Rdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [
+        _operand('simm16', 'OPR_HWREG', is_input=False, is_output=False, order=0),
+        _operand('simm32', 'OPR_SIMM32', order=1, field_less=True),
+    ]
+    inst = Instruction('S_SETREG_IMM32_B32', 'ENC_SOPK', opcode=20, operands=operands)
+    sem = InstructionSemantics('S_SETREG_IMM32_B32', 'scalar_setreg_imm')
+
+    body = codegen._gen_execute_body(inst, sem, 'ENC_SOPK')
+
+    assert 'uint32_t src = simm32.read_scalar(wf);' in body
+    assert 'uint32_t src = literal_;' not in body
 
 
 def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
@@ -237,6 +281,30 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
     assert 'ssrc1.read_scalar(wf)' not in body
 
 
-def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():
-    assert 's_fmaak_f32' in CodeGenerator._NON_SHAREABLE_MNEMONICS
-    assert 's_fmamk_f32' in CodeGenerator._NON_SHAREABLE_MNEMONICS
+def test_literal_fma_can_share_with_matching_operand_layouts_only():
+    plan = SharedInstructionPlan()
+    plan.family_shared['rdna'] = {}
+    plan.family_shared['rdna'][('s_fmaak_f32', 'ENC_SOP2')] = SharedInstInfo(
+        mnemonic='s_fmaak_f32',
+        encoding_name='ENC_SOP2',
+        field_layout=(),
+        semantic_class='scalar_binop',
+        operation='fma',
+        data_type='f32',
+        isa_names=['rdna3_5', 'rdna4'],
+    )
+
+    rdna_codegen = object.__new__(CodeGenerator)
+    rdna_codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
+    rdna_codegen.shared_plan = plan
+    rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
+
+    gfx_codegen = object.__new__(CodeGenerator)
+    gfx_codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250', profile=Gfx1250Profile()
+    )
+    gfx_codegen.shared_plan = plan
+    gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
+
+    assert rdna_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')
+    assert not gfx_codegen._can_share_execute('s_fmaak_f32', enc_name='ENC_SOP2')

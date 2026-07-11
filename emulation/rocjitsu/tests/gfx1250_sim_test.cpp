@@ -3178,14 +3178,28 @@ TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
+
+  const Operand *vdst = inst->dst_operand(0);
+  ASSERT_NE(vdst, nullptr);
+  EXPECT_FALSE(vdst->is_field_less());
+  EXPECT_EQ(vdst->name(), "v[32:35]");
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_field_less());
   EXPECT_EQ(vaddr->size_bits(), 32);
   ASSERT_TRUE(vaddr->to_register_ref().has_value());
   EXPECT_EQ(*vaddr->to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
-  EXPECT_NE(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_field_less());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], v7, s[4:7], NULL offen");
 }
 
 TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
@@ -3200,13 +3214,22 @@ TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
   std::unique_ptr<Instruction> inst(decoder->decode(words));
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
-  ASSERT_GE(inst->num_src_operands(), 1);
+  ASSERT_EQ(inst->num_dst_operands(), 1);
+  ASSERT_EQ(inst->num_src_operands(), 4);
 
   const Operand *vaddr = inst->src_operand(0);
   ASSERT_NE(vaddr, nullptr);
+  EXPECT_FALSE(vaddr->is_field_less());
   EXPECT_EQ(vaddr->size_bits(), 0);
   EXPECT_FALSE(vaddr->to_register_ref().has_value());
-  EXPECT_EQ(inst->disassemble().find("v7"), std::string::npos);
+
+  const Operand *gpumem = inst->src_operand(3);
+  ASSERT_NE(gpumem, nullptr);
+  EXPECT_TRUE(gpumem->is_field_less());
+  EXPECT_EQ(gpumem->size_bits(), 128);
+  EXPECT_FALSE(gpumem->to_register_ref().has_value());
+
+  EXPECT_EQ(inst->disassemble(), "buffer_load_b128 v[32:35], s[4:7], NULL");
 }
 
 TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {

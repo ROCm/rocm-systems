@@ -20,6 +20,8 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand attr;
+  Operand dsmem;
+  Operand m0;
 };
 
 class LdsDirectLoadLdsdir : public Ldsdir {
@@ -27,6 +29,8 @@ public:
   LdsDirectLoadLdsdir(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
+  Operand dsmem;
+  Operand m0;
 };
 
 } // namespace rdna3_5

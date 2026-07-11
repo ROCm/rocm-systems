@@ -26,20 +26,64 @@ class MicrocodeField:
     bit_offset: int
 
 
+#: Base C++ identifier synthesized for a field-less operand of each operand
+#: type (field-less operands have no ``<FieldName>`` in the MR ISA to derive a
+#: name from). Bases are deliberately distinct per type so the name reflects
+#: which operand it is -- in particular ``OPR_EXEC`` (``exec``) and
+#: ``OPR_SDST_EXEC`` (``sdst_exec``) are kept apart. This is a readability
+#: choice, not a correctness one. Any type not listed falls back to the type
+#: name with the ``OPR_`` prefix stripped and lowercased (see
+#: ``synthesize_fieldless_name``).
+_FIELDLESS_NAME_MAP: dict[str, str] = {
+    'OPR_VCC': 'vcc',
+    'OPR_EXEC': 'exec',
+    'OPR_SDST_EXEC': 'sdst_exec',
+    'OPR_SSRC_SPECIAL_SCC': 'scc',
+    'OPR_PC': 'pc',
+    'OPR_SDST_M0': 'm0',
+    'OPR_DSMEM': 'dsmem',
+    'OPR_GPUMEM': 'gpumem',
+    'OPR_FLAT_SCRATCH': 'flat_scratch',
+    # Field-less OPR_VGPR is the image ADDRESS/coordinate operand (vaddr).
+    'OPR_VGPR': 'vaddr',
+    'OPR_SIMM32': 'simm32',
+}
+
+
+def synthesize_fieldless_name(operand_type: str) -> str:
+    """Return a stable, valid C++ base identifier for a field-less operand.
+
+    Field-less operands (no ``<FieldName>`` in the MR ISA) cannot derive their
+    name from an encoding field, so one is synthesized from the operand type.
+    The result is a *base* name; callers must still guarantee uniqueness within
+    an instruction (two field-less operands can share a type). See
+    ``_FIELDLESS_NAME_MAP`` for the curated bases; anything else strips the
+    ``OPR_`` prefix and lowercases.
+    """
+    if operand_type in _FIELDLESS_NAME_MAP:
+        return _FIELDLESS_NAME_MAP[operand_type]
+    base = operand_type
+    if base.startswith('OPR_'):
+        base = base[len('OPR_') :]
+    return base.lower()
+
+
 @dataclass
 class Operand:
     """An instruction operand.
 
     Attributes:
-        name: Name of the operand.
+        name: Name of the operand (``<FieldName>`` ? name : synthesized id).
         size: Size of the operand in bits.
         operand_type: ISA-specific operand type.
         is_input: True if the operand is an input.
         is_output: True if the operand is an output.
-        is_implicit: True if the operand is implicit.
+        is_implicit: True if the operand is implicit (the MR ISA
+            ``IsImplicit`` attribute)
         is_binary_ucode_required: True if the operand is missing from the
             encoding but implied by the type of the operand.
         order: Order of the operand.
+        field_less: True if the operand has no ``<FieldName>`` in the MR ISA
     """
 
     name: str
@@ -50,6 +94,7 @@ class Operand:
     is_implicit: bool
     is_binary_ucode_required: bool
     order: int
+    field_less: bool = False
 
 
 @dataclass
@@ -211,6 +256,30 @@ class Instruction(InstBase):
     def mnemonic(self) -> str:
         """Instruction mnemonic (lowercase name)."""
         return self.name.lower()
+
+    @property
+    def implicit_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are implicit (``is_implicit=True``)."""
+        return [op for op in self.operands if op.is_implicit]
+
+    @property
+    def explicit_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are explicit (``is_implicit=False``)."""
+        return [op for op in self.operands if not op.is_implicit]
+
+    @property
+    def src_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are inputs (``is_input=True``)."""
+        return [op for op in self.operands if op.is_input]
+
+    @property
+    def dst_operands(self) -> list[Operand]:
+        """Subset of ``operands`` that are outputs (``is_output=True``)."""
+        return [op for op in self.operands if op.is_output]
+
+    def has_implicit_operand(self, operand_type: str) -> bool:
+        """True if any implicit operand has the given ``operand_type``."""
+        return any(op.operand_type == operand_type for op in self.implicit_operands)
 
 
 @dataclass

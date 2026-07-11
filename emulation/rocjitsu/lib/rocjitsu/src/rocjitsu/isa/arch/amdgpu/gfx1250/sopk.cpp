@@ -114,10 +114,13 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
     : Sopk("s_cmovk_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SCmovkI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
+  src_operands_[1] = &scc;
+  scc.set_field_less(true);
+  num_src_ = 2;
   num_dst_ = 1;
   flags_ |= PREDICATED_DEF;
 }
@@ -130,11 +133,14 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
     : Sopk("s_addk_co_i32", reinterpret_cast<const OpEncoding *>(inst),
            make_exec_fn<SAddkCoI32Sopk>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 1;
-  num_dst_ = 1;
+  num_dst_ = 2;
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -229,7 +235,7 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   if (offset + size > 32)
     size = 32 - offset;
   uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = literal_;
+  uint32_t src = literal.read_scalar(wf);
   if (!write_hwreg(wf, reg_id, offset, mask, src))
     util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
 }
@@ -237,11 +243,16 @@ void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 SCallI64Sopk::SCallI64Sopk(const MachineInst *inst)
     : Sopk("s_call_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SCallI64Sopk>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
-      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16) {
+      simm16(16, OperandType::OPR_LABEL, reinterpret_cast<const OpEncoding *>(inst)->simm16),
+      pc(64, OperandType::OPR_PC, 0), pc_in(64, OperandType::OPR_PC, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &simm16;
-  num_src_ = 1;
-  num_dst_ = 1;
+  dst_operands_[1] = &pc;
+  pc.set_field_less(true);
+  src_operands_[1] = &pc_in;
+  pc_in.set_field_less(true);
+  num_src_ = 2;
+  num_dst_ = 2;
   flags_ |= INDIRECT_CALL;
 }
 

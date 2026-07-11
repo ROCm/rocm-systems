@@ -20,10 +20,13 @@ ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
     : Vsample("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageMsaaLoadVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  num_src_ = 1;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  num_src_ = 2;
   num_dst_ = 1;
 }
 
@@ -36,12 +39,15 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
     : Vsample("image_sample", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -53,12 +59,15 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
     : Vsample("image_sample_d", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -70,12 +79,15 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
     : Vsample("image_sample_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -87,12 +99,15 @@ ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
     : Vsample("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -104,12 +119,15 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
     : Vsample("image_sample_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -121,12 +139,15 @@ ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
     : Vsample("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -138,12 +159,15 @@ ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -155,12 +179,15 @@ ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -172,12 +199,15 @@ ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -189,12 +219,15 @@ ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -206,12 +239,15 @@ ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
     : Vsample("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -223,12 +259,15 @@ ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -240,12 +279,15 @@ ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
     : Vsample("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -257,12 +299,15 @@ ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -274,12 +319,15 @@ ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -291,12 +339,15 @@ ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -308,12 +359,15 @@ ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -325,12 +379,15 @@ ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -342,12 +399,15 @@ ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -359,12 +419,15 @@ ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -376,12 +439,15 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
     : Vsample("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -393,12 +459,15 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
     : Vsample("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -410,12 +479,15 @@ ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
     : Vsample("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4BVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -427,12 +499,15 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -444,12 +519,15 @@ ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
     : Vsample("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -461,12 +539,15 @@ ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLzVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -478,12 +559,15 @@ ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
     : Vsample("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4OVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -495,12 +579,15 @@ ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4LzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -512,12 +599,15 @@ ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLzOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -529,12 +619,15 @@ ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
     : Vsample("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGetLodVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -546,12 +639,15 @@ ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -563,12 +659,15 @@ ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -580,12 +679,15 @@ ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -597,12 +699,15 @@ ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -614,12 +719,15 @@ ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
     : Vsample("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -631,12 +739,15 @@ ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -648,12 +759,15 @@ ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -665,12 +779,15 @@ ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -682,12 +799,15 @@ ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -699,12 +819,15 @@ ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -716,12 +839,15 @@ ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
     : Vsample("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -733,12 +859,15 @@ ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -750,12 +879,15 @@ ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleBClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -767,12 +899,15 @@ ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -784,12 +919,15 @@ ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -801,12 +939,15 @@ ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
     : Vsample("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCBClOVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(224, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -818,12 +959,15 @@ ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -835,12 +979,15 @@ ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(288, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -852,12 +999,15 @@ ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleCDClOG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(320, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -869,12 +1019,15 @@ ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
     : Vsample("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageSampleDClG16Vsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(256, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -886,12 +1039,15 @@ ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
     : Vsample("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4ClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -903,12 +1059,15 @@ ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
     : Vsample("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4BClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -920,12 +1079,15 @@ ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -937,12 +1099,15 @@ ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CLVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -954,12 +1119,15 @@ ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CBVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(160, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -971,12 +1139,15 @@ ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
     : Vsample("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4CBClVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(192, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -988,12 +1159,15 @@ ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
     : Vsample("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
               make_exec_fn<ImageGather4hVsample>()),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(96, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       samp(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->samp) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &rsrc;
-  src_operands_[1] = &samp;
-  num_src_ = 2;
+  src_operands_[0] = &vaddr;
+  vaddr.set_field_less(true);
+  src_operands_[1] = &rsrc;
+  src_operands_[2] = &samp;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 

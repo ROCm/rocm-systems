@@ -1185,11 +1185,14 @@ BufferLoadLdsU8Mubuf::BufferLoadLdsU8Mubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 
@@ -1204,11 +1207,14 @@ BufferLoadLdsI8Mubuf::BufferLoadLdsI8Mubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 
@@ -1223,11 +1229,14 @@ BufferLoadLdsU16Mubuf::BufferLoadLdsU16Mubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 
@@ -1242,11 +1251,14 @@ BufferLoadLdsI16Mubuf::BufferLoadLdsI16Mubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 
@@ -1261,11 +1273,14 @@ BufferLoadLdsB32Mubuf::BufferLoadLdsB32Mubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 
@@ -1280,11 +1295,14 @@ BufferLoadLdsFormatXMubuf::BufferLoadLdsFormatXMubuf(const MachineInst *inst)
       vaddr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
       soffset(32, OperandType::OPR_SREG_M0_INL,
-              reinterpret_cast<const OpEncoding *>(inst)->soffset) {
+              reinterpret_cast<const OpEncoding *>(inst)->soffset),
+      m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &soffset;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
 }
 

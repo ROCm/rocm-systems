@@ -86,6 +86,15 @@ public:
   /// the auto-generated is_vgpr_operand_type() from operand_types.h.
   [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
 
+  /// @brief Whether this operand is field-less
+  /// @details Field-less operands (has no encoding field in MR ISA) are
+  /// constructed from a fixed canonical encoding value rather than a decoded
+  /// field.
+  [[nodiscard]] bool is_field_less() const { return field_less_; }
+
+  /// @brief Mark this operand as field-less. Set by generated constructors.
+  void set_field_less(bool value = true) { field_less_ = value; }
+
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
 
@@ -207,6 +216,9 @@ public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
   bool is_vgpr_ = false;
+  /// @brief True if this operand has no MR ISA encoding field (see
+  /// is_field_less()). Suppressed from disassembly.
+  bool field_less_ = false;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:

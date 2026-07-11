@@ -7935,12 +7935,15 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8045,12 +8048,15 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8155,12 +8161,15 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8265,12 +8274,15 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8375,12 +8387,15 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLgF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8485,12 +8500,15 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8595,12 +8613,15 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxOF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8705,12 +8726,15 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxUF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8815,12 +8839,15 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgeF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -8925,12 +8952,15 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNlgF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9035,12 +9065,15 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNgtF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9145,12 +9178,15 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNleF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9255,12 +9291,15 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNeqF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9365,12 +9404,15 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxNltF16Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
@@ -9475,12 +9517,15 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLtF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -9582,12 +9627,15 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxEqF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -9689,12 +9737,15 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLeF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -9796,12 +9847,15 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGtF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -9903,12 +9957,15 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxLgF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -10010,12 +10067,15 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxGeF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -10117,12 +10177,15 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxOF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -10224,12 +10287,15 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
            make_exec_fn<VCmpxUF32Vop3>()),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
+      src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1),
+      sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
+  dst_operands_[1] = &sdst_exec;
+  sdst_exec.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,

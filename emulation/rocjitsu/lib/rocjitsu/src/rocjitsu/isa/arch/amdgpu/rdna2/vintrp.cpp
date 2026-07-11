@@ -21,11 +21,14 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
              make_exec_fn<VInterpP1F32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
+      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vsrc;
   src_operands_[1] = &attr;
-  num_src_ = 2;
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -38,12 +41,15 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
              make_exec_fn<VInterpP2F32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
+      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
   src_operands_[1] = &vsrc;
   src_operands_[2] = &attr;
-  num_src_ = 3;
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
 }
 
@@ -56,11 +62,14 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
              make_exec_fn<VInterpMovF32Vintrp>()),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       vsrc(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
-      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr) {
+      attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &vsrc;
   src_operands_[1] = &attr;
-  num_src_ = 2;
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
 }
 

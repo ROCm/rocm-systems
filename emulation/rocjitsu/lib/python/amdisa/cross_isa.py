@@ -103,10 +103,21 @@ def _sem_key(sem: InstructionSemantics | None) -> tuple[str, str | None, str | N
 def _operand_signature(
     inst: Instruction,
 ) -> tuple[tuple[str, str, int, bool, bool], ...]:
-    """Return a canonical tuple of operand (name, type, size, is_input, is_output)."""
+    """Return a canonical tuple of operand (name, type, size, is_input, is_output).
+
+    TODO: Add field-less operands.
+    Field-less operands are excluded until we are ready to change C++:
+    their names are synthesized (not decoded from the encoding) and they carry
+    no encoding field, so including them would perturb the
+    universal/family/exclusive classification (and therefore the
+    ``execute_shared.h`` partitioning) without any semantic difference. The
+    signature intentionally mirrors the field-bearing operand set used to build
+    the runtime encoding structs.
+    """
     return tuple(
         (op.name, op.operand_type, op.size, op.is_input, op.is_output)
         for op in inst.operands
+        if not op.field_less
     )
 
 

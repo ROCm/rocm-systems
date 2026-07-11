@@ -28,10 +28,15 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -65,10 +70,15 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -103,10 +113,15 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUshortFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -140,10 +155,15 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSshortFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -178,10 +198,15 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -215,10 +240,15 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx2Flat>()),
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -252,10 +282,15 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx3Flat>()),
       vdst(96, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -289,10 +324,15 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadDwordx4Flat>()),
       vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -326,10 +366,15 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreByteFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -372,10 +417,15 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreByteD16HiFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -419,10 +469,15 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreShortFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -465,10 +520,15 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreShortD16HiFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -512,10 +572,15 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordFlat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -558,10 +623,15 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx2Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -606,10 +676,15 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx3Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(96, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -656,10 +731,15 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
            make_exec_fn<FlatStoreDwordx4Flat>()),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(128, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -708,10 +788,15 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteD16Flat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -746,10 +831,15 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadUbyteD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -784,10 +874,15 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteD16Flat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -823,10 +918,15 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadSbyteD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -862,10 +962,15 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
            make_exec_fn<FlatLoadShortD16Flat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -900,10 +1005,15 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
            make_exec_fn<FlatLoadShortD16HiFlat>()),
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  num_src_ = 1;
+  src_operands_[1] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[2] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -939,11 +1049,16 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -989,11 +1104,16 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1041,11 +1161,16 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1091,11 +1216,16 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1141,11 +1271,16 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1191,11 +1326,16 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1241,11 +1381,16 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1291,11 +1436,16 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1341,11 +1491,16 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1391,11 +1546,16 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1441,11 +1601,16 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1491,11 +1656,16 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1541,11 +1711,16 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1591,11 +1766,16 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1641,11 +1821,16 @@ FlatAtomicPkAddF16Flat::FlatAtomicPkAddF16Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1691,11 +1876,16 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1743,11 +1933,16 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1795,11 +1990,16 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1847,11 +2047,16 @@ FlatAtomicPkAddBf16Flat::FlatAtomicPkAddBf16Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(32, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1897,11 +2102,16 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -1949,11 +2159,16 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(128, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2005,11 +2220,16 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2057,11 +2277,16 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2109,11 +2334,16 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2161,11 +2391,16 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2213,11 +2448,16 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2265,11 +2505,16 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2317,11 +2562,16 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2369,11 +2619,16 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2421,11 +2676,16 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2473,11 +2733,16 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -2525,11 +2790,16 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       data(64, OperandType::OPR_VGPR_OR_ACCVGPR, reinterpret_cast<const OpEncoding *>(inst)->data),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
       saddr(0, OperandType::OPR_SREG, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data;
-  num_src_ = 2;
+  src_operands_[2] = &flat_scratch;
+  flat_scratch.set_field_less(true);
+  src_operands_[3] = &m0;
+  m0.set_field_less(true);
+  num_src_ = 4;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);

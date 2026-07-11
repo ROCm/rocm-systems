@@ -424,17 +424,25 @@ class CodeGenerator:
         return _LITERAL_ENCODING_OPERANDS.get(lit_enc.enc_name.upper())
 
     @staticmethod
-    def _literal_operand_fixup_stmt(
-        opnd: Operand, lit_struct: str, size_expr: str | None = None
+    def _literal_operand_from_expr_stmt(
+        opnd: Operand, literal_expr: str, size_expr: str | None = None
     ) -> str | None:
         if opnd.operand_type not in ('OPR_SIMM16', 'OPR_SIMM32'):
             return None
-        literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
         if opnd.operand_type == 'OPR_SIMM16' or opnd.size == 16:
             literal_expr = f'({literal_expr} & 0xFFFFu)'
         return (
             f'{opnd.name} = Operand({size_expr or opnd.size}, '
             f'OperandType::{opnd.operand_type}, static_cast<int>({literal_expr}));'
+        )
+
+    @staticmethod
+    def _literal_operand_fixup_stmt(
+        opnd: Operand, lit_struct: str, size_expr: str | None = None
+    ) -> str | None:
+        literal_expr = f'reinterpret_cast<const {lit_struct} *>(inst)->simm32'
+        return CodeGenerator._literal_operand_from_expr_stmt(
+            opnd, literal_expr, size_expr
         )
 
     @staticmethod
@@ -445,32 +453,6 @@ class CodeGenerator:
         )
 
     @staticmethod
-    def _with_scalar_literal_fma_operand(inst: Instruction) -> Instruction:
-        if inst.name not in ('S_FMAAK_F32', 'S_FMAMK_F32') or any(
-            op.name == 'src2' for op in inst.operands
-        ):
-            return inst
-        return Instruction(
-            inst.name,
-            inst.enc_name,
-            inst.opcode,
-            [
-                *inst.operands,
-                Operand(
-                    'src2',
-                    32,
-                    'OPR_SIMM32',
-                    is_input=True,
-                    is_output=False,
-                    is_implicit=False,
-                    is_binary_ucode_required=True,
-                    order=len(inst.operands),
-                ),
-            ],
-            inst.is_implied_literal_enc,
-        )
-
-    @staticmethod
     def _semantic_source_operands(
         inst: Instruction, src_operands: list[Operand]
     ) -> list[Operand]:
@@ -478,7 +460,9 @@ class CodeGenerator:
             return src_operands
 
         by_name = {op.name: op for op in src_operands}
-        mul_literal = by_name.get('literal') or by_name.get('src2')
+        mul_literal = (
+            by_name.get('simm32') or by_name.get('literal') or by_name.get('src2')
+        )
         ssrc0 = by_name.get('ssrc0')
         ssrc1 = by_name.get('ssrc1')
         if ssrc0 is None or ssrc1 is None or mul_literal is None:
@@ -488,6 +472,19 @@ class CodeGenerator:
         ordered_names = {op.name for op in ordered}
         ordered.extend(op for op in src_operands if op.name not in ordered_names)
         return ordered
+
+    @staticmethod
+    def _execute_operand_participates(opnd: Operand) -> bool:
+        """Whether codegen should expose this operand to execute templates.
+
+        Most field-less operands are hardwired side effects already handled by
+        the semantic emitters (VCC/EXEC/SCC/M0/PC). Field-less OPR_SIMM32 is
+        different: it is an instruction-local literal value and must remain in
+        the source list so execute bodies can read it as an operand. This will
+        allow us to gradually switch from hardwired effects to using the
+        operands.
+        """
+        return not opnd.field_less or opnd.operand_type == 'OPR_SIMM32'
 
     def _has_machine_inst_struct(self, struct_name: str) -> bool:
         return struct_name in {
@@ -2581,8 +2578,16 @@ class CodeGenerator:
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
     ) -> tuple[list[Operand], list[Operand]]:
-        dst_operands = [op for op in inst.operands if not op.is_input]
-        src_operands = [op for op in inst.operands if op.is_input]
+        # TODO: Incorporate field-less operand side effects into execute bodies.
+        # Execute bodies reference operands positionally (src_ops[i]/dst_ops[i]).
+        # Field-less side-effect operands (VCC/EXEC/SCC/...) are excluded here
+        # so these indices match the field-bearing operand set exactly as
+        # before. Field-less OPR_SIMM32 is value-bearing, so it stays visible.
+        visible_operands = [
+            op for op in inst.operands if self._execute_operand_participates(op)
+        ]
+        dst_operands = [op for op in visible_operands if not op.is_input]
+        src_operands = [op for op in visible_operands if op.is_input]
         # Some instructions mark their destination as input (read-modify-write,
         # e.g. S_BITSET0, S_CMOV, V_FMAC, V_SWAP). Recover the destination
         # from src_ops when it looks like one.
@@ -3454,7 +3459,8 @@ class CodeGenerator:
             L.append(
                 '  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);'
             )
-            L.append('  uint32_t src = literal_;')
+            src_expr = f'{src_ops[0]}.read_scalar(wf)' if src_ops else 'literal_'
+            L.append(f'  uint32_t src = {src_expr};')
             if profile.use_hwreg_helpers:
                 L.append('  if (!write_hwreg(wf, reg_id, offset, mask, src))')
                 L.append(
@@ -3512,10 +3518,12 @@ class CodeGenerator:
 
         if cls == 'vector_fmamk':
             # D = S0 * K + S2, K is inline constant (second src operand)
-            # Some ISA specs omit the simm32 operand; fall back to the
-            # simm32_ member populated in the constructor.
-            k_expr = f'{src_ops[1]}.encoding_value_' if len(src_ops) >= 3 else 'simm32_'
-            s2_expr = src_ops[2] if len(src_ops) >= 3 else src_ops[1]
+            if len(src_ops) < 3:
+                raise ValueError(
+                    f'{inst.name}: expected field-less simm32 operand for {cls}'
+                )
+            k_expr = f'{src_ops[1]}.encoding_value_'
+            s2_expr = src_ops[2]
             L.append('  uint64_t exec = wf.exec();')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -3548,9 +3556,11 @@ class CodeGenerator:
 
         if cls == 'vector_fmaak':
             # D = S0 * S1 + K, K is inline constant (third src operand)
-            # Some ISA specs omit the simm32 operand; fall back to the
-            # simm32_ member populated in the constructor.
-            k_expr = f'{src_ops[2]}.encoding_value_' if len(src_ops) >= 3 else 'simm32_'
+            if len(src_ops) < 3:
+                raise ValueError(
+                    f'{inst.name}: expected field-less simm32 operand for {cls}'
+                )
+            k_expr = f'{src_ops[2]}.encoding_value_'
             L.append('  uint64_t exec = wf.exec();')
             L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -3870,6 +3880,13 @@ class CodeGenerator:
             return '\n'.join(L)
 
         # ── Image pipeline stubs ──────────────────────────────────────────
+        # NOTE for image execution: the image ADDRESS is carried as the
+        # field-less ``vaddr`` operand (OPR_VGPR), currently emitted as an
+        # inert placeholder. The real gfx12 address is NSA -- up to
+        # up to 5 non-contiguous VGPRs (vaddr0..vaddr4 in the encoding) that a
+        # single base+width Operand cannot express -- so decode it from the
+        # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
+        # and already modeled.
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
             # Full image addressing (texture coordinates, dimensions) not yet implemented.
@@ -5263,7 +5280,7 @@ class CodeGenerator:
             # HWREG IDs and helper mappings are profile-specific.
             'scalar_getreg',
             'scalar_setreg',
-            # S_SETREG_IMM32_B32 reads the instruction-local literal_ member.
+            # S_SETREG_IMM32_B32 shares the profile-specific HWREG handling.
             'scalar_setreg_imm',
             # MFMA/WMMA reference ISA-specific headers:
             'mfma',
@@ -5292,14 +5309,6 @@ class CodeGenerator:
             'cvt_scalef32',
             # vector_cvt_pk FP8 pack/unpack uses inst_.op_sel for word sel:
             'vector_cvt_pk',
-        }
-    )
-    _NON_SHAREABLE_MNEMONICS = frozenset(
-        {
-            # FMAAK/FMAMK carry a literal addend/multiplicand through
-            # ISA-specific constructor operands.
-            's_fmaak_f32',
-            's_fmamk_f32',
         }
     )
 
@@ -5413,8 +5422,6 @@ class CodeGenerator:
             return False
         if self._shared_execute_key_denied(mnemonic, inst, enc_name):
             return False
-        if mnemonic in self._NON_SHAREABLE_MNEMONICS:
-            return False
         arch = self.isa_spec.arch_name
         # Check universal
         if mnemonic in self.shared_plan.universal:
@@ -5472,6 +5479,28 @@ class CodeGenerator:
             expr = f'static_cast<unsigned short>({expr})'
         return expr
 
+    def _fieldless_canonical_value(self, operand_type: str) -> int:
+        """Canonical fixed encoding value for a field-less operand type.
+
+        Field-less operands have no encoding field to decode, so they are built
+        from a fixed value. That value is the minimum selector value for the
+        type (single-valued selectors -> that value; EXEC LO/HI -> LO; register
+        ranges -> MIN), which is exactly what the generated ``name()`` /
+        ``to_register_ref()`` switch cases gate on (e.g. OPR_PC -> OPR_PC_PC_ALL,
+        OPR_VCC -> OPR_VCC_VCC, OPR_SDST_EXEC -> OPR_SDST_EXEC_EXEC_LO). Computed
+        from the ISA's own selectors rather than a hand-maintained table; falls
+        back to 0 for types without a selector.
+        """
+        cache = getattr(self, '_fieldless_canon_cache', None)
+        if cache is None:
+            cache = {}
+            for sel in self.isa_spec.opnd_selectors:
+                vals = [int(v) for _, v in sel.op_sel_vals]
+                if vals:
+                    cache[sel.operand_type] = min(vals)
+            self._fieldless_canon_cache = cache
+        return cache.get(operand_type, 0)
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -5519,7 +5548,6 @@ class CodeGenerator:
                         if self.semantics
                         else None
                     )
-                    inst = self._with_scalar_literal_fma_operand(inst)
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
                     # VOP3_SDST_ENC under ENC_VOP3) carry their original
@@ -5591,7 +5619,10 @@ class CodeGenerator:
                                 f'dst_operands_[{dst_idx}] = &{opnd.name};'
                             )
                             dst_idx += 1
-                        if self.isa_spec.profile.uses_vgpr_msb_indexing:
+                        if (
+                            self.isa_spec.profile.uses_vgpr_msb_indexing
+                            and not opnd.field_less
+                        ):
                             _role = None
                             if self._operand_can_use_vgpr_msb(opnd):
                                 if self._vbuffer_store_data_uses_dst_vgpr_msb_role(
@@ -5636,6 +5667,19 @@ class CodeGenerator:
                                 f'OperandType::{opr_type}, '
                                 f'{operand_value}{packed_16bit_source_arg})'
                             )
+                        elif opnd.field_less:
+                            # Field-less operand: no encoding field to decode,
+                            # so construct it from its canonical fixed value.
+                            # Mark it field-less so the disassembler suppresses
+                            # it for now
+                            canonical = self._fieldless_canonical_value(
+                                opnd.operand_type
+                            )
+                            opnd_ctor_init.append(
+                                f'{opnd.name}({opnd_size_expr}, '
+                                f'OperandType::{opnd.operand_type}, {canonical})'
+                            )
+                            opnd_body.append(f'{opnd.name}.set_field_less(true);')
                         else:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd.size}, '
@@ -5782,6 +5826,12 @@ class CodeGenerator:
                     if _lit_info and self._has_machine_inst_struct(_lit_info[0]):
                         _lit_struct, _lit_fields = _lit_info
                         for opnd in inst.operands:
+                            # Field-less side-effect operands are fixed
+                            # placeholders. Field-less OPR_SIMM32 is
+                            # value-bearing and is patched from the extension
+                            # word below.
+                            if opnd.field_less and opnd.operand_type != 'OPR_SIMM32':
+                                continue
                             if (
                                 opnd.name in _lit_fields
                                 and opnd.name in enc_field_names
@@ -5807,6 +5857,30 @@ class CodeGenerator:
                                 )
                                 if fixup:
                                     ctor_body_parts.append(fixup)
+                                    if opnd.field_less:
+                                        ctor_body_parts.append(
+                                            f'{opnd.name}.set_field_less(true);'
+                                        )
+
+                    # SOPK's S_SETREG_IMM32_B32 carries its extension literal
+                    # through the encoding base's literal_ member instead of a
+                    # separate *InstLiteralMachineInst struct.
+                    if inst.name == 'S_SETREG_IMM32_B32':
+                        for opnd in inst.operands:
+                            if not (
+                                opnd.field_less and opnd.operand_type == 'OPR_SIMM32'
+                            ):
+                                continue
+                            fixup = self._literal_operand_from_expr_stmt(
+                                opnd,
+                                'literal_',
+                                operand_size_exprs.get(opnd.name),
+                            )
+                            if fixup:
+                                ctor_body_parts.append(fixup)
+                                ctor_body_parts.append(
+                                    f'{opnd.name}.set_field_less(true);'
+                                )
 
                     # DPP fixup: when src0 == amdgpu::SRC_DPP (DPP marker), replace the
                     # src0 operand with vsrc0 from the DPP extension dword.
@@ -5916,33 +5990,6 @@ class CodeGenerator:
                                         )
                                         + f'{_sdwa_s1_code}}}'
                                     )
-
-                    # Implied literal fixup: FMAMK/FMAAK always carry an
-                    # inline 32-bit literal even when the ISA spec omits the
-                    # simm32 operand. Add a simm32_ member to hold it.
-                    _FMAMK_FMAAK = frozenset(
-                        {
-                            'vector_fmamk',
-                            'vector_fmaak',
-                        }
-                    )
-                    _has_simm32 = any(op.name == 'simm32' for op in inst.operands)
-                    if (
-                        _mem_sem
-                        and _mem_sem.semantic_class in _FMAMK_FMAAK
-                        and not _has_simm32
-                        and not self._has_inline_literal_operand(inst)
-                        and _lit_info
-                    ):
-                        _lit_struct = _lit_info[0]
-                        private_members.append(cgen.Statement('uint32_t simm32_'))
-                        opnd_ctor_init.append('simm32_(0)')
-                        init_list_parts.append('simm32_(0)')
-                        init_list = ', '.join(init_list_parts)
-                        ctor_body_parts.append(
-                            f'simm32_ = reinterpret_cast<const '
-                            f'{_lit_struct}*>(inst)->simm32;'
-                        )
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
 
@@ -6092,10 +6139,17 @@ class CodeGenerator:
                             or _has_sdwa_encoding
                         )
                         if _has_dpp_encoding:
-                            _src0_name = next(
-                                (o.name for o in inst.operands if o.is_input), None
-                            )
-                            _src_inputs = [o.name for o in inst.operands if o.is_input]
+                            # DPP/SDWA permute the field-bearing vector sources
+                            # only; field-less operands (VCC/M0/... side effects)
+                            # are never permuted and would shift these positional
+                            # names off the real src0/src1, so exclude them. This
+                            # matches src_operands_[0]/[1] set by the constructor.
+                            _src_inputs = [
+                                o.name
+                                for o in inst.operands
+                                if o.is_input and not o.field_less
+                            ]
+                            _src0_name = _src_inputs[0] if _src_inputs else None
                             _src1_name = (
                                 _src_inputs[1] if len(_src_inputs) > 1 else None
                             )
@@ -7203,9 +7257,6 @@ class CodeGenerator:
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)mnemonic\(\)', 'inst.mnemonic()', prefixed_body
             )
-            prefixed_body = _re.sub(
-                r'(?<!\.)(?<!\w)simm32_(?!\w)', 'inst.simm32_', prefixed_body
-            )
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
@@ -7913,6 +7964,16 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ref_impl = (
             f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
             f'if (size_bits_ == 0)\n'
+            f'  return std::nullopt;\n'
+            f'// A field-less operand (no MR ISA encoding field: a hardwired\n'
+            f'// register/side effect like VCC/EXEC/SCC, or the field-less image\n'
+            f'// address) never denotes a def-use-tracked register: its\n'
+            f'// encoding value is a fixed placeholder, not a decoded index, so\n'
+            f'// mapping it to a RegisterRef would fabricate a spurious def/use.\n'
+            f'// Making this explicit keeps every field-less operand inert by\n'
+            f'// design (not by per-type coincidence) if it is placed in the\n'
+            f'// operand arrays.\n'
+            f'if (field_less_)\n'
             f'  return std::nullopt;\n'
             f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
             f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'

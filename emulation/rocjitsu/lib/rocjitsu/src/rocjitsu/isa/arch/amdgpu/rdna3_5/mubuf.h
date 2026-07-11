@@ -433,6 +433,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsI8Mubuf : public Mubuf {
@@ -442,6 +443,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsU16Mubuf : public Mubuf {
@@ -451,6 +453,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsI16Mubuf : public Mubuf {
@@ -460,6 +463,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsB32Mubuf : public Mubuf {
@@ -469,6 +473,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferLoadLdsFormatXMubuf : public Mubuf {
@@ -478,6 +483,7 @@ public:
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand m0;
 };
 
 class BufferAtomicSwapB32Mubuf : public Mubuf {

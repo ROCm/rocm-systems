@@ -21,12 +21,15 @@ SAddU32Sop2::SAddU32Sop2(const MachineInst *inst)
     : Sop2("s_add_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -43,12 +46,15 @@ SSubU32Sop2::SSubU32Sop2(const MachineInst *inst)
     : Sop2("s_sub_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSubU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -65,12 +71,15 @@ SAddI32Sop2::SAddI32Sop2(const MachineInst *inst)
     : Sop2("s_add_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAddI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -87,12 +96,15 @@ SSubI32Sop2::SSubI32Sop2(const MachineInst *inst)
     : Sop2("s_sub_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSubI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -109,12 +121,18 @@ SAddcU32Sop2::SAddcU32Sop2(const MachineInst *inst)
     : Sop2("s_addc_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAddcU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
+  src_operands_[2] = &scc_in;
+  scc_in.set_field_less(true);
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -133,12 +151,18 @@ SSubbU32Sop2::SSubbU32Sop2(const MachineInst *inst)
     : Sop2("s_subb_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SSubbU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253),
+      scc_in(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
+  src_operands_[2] = &scc_in;
+  scc_in.set_field_less(true);
+  num_src_ = 3;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -158,12 +182,15 @@ SAbsdiffI32Sop2::SAbsdiffI32Sop2(const MachineInst *inst)
            make_exec_fn<SAbsdiffI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -182,12 +209,15 @@ SLshlB32Sop2::SLshlB32Sop2(const MachineInst *inst)
     : Sop2("s_lshl_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshlB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -206,12 +236,15 @@ SLshlB64Sop2::SLshlB64Sop2(const MachineInst *inst)
     : Sop2("s_lshl_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshlB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -230,12 +263,15 @@ SLshrB32Sop2::SLshrB32Sop2(const MachineInst *inst)
     : Sop2("s_lshr_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshrB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -254,12 +290,15 @@ SLshrB64Sop2::SLshrB64Sop2(const MachineInst *inst)
     : Sop2("s_lshr_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SLshrB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -278,12 +317,15 @@ SAshrI32Sop2::SAshrI32Sop2(const MachineInst *inst)
     : Sop2("s_ashr_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAshrI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -302,12 +344,15 @@ SAshrI64Sop2::SAshrI64Sop2(const MachineInst *inst)
     : Sop2("s_ashr_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAshrI64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -327,12 +372,15 @@ SLshl1AddU32Sop2::SLshl1AddU32Sop2(const MachineInst *inst)
            make_exec_fn<SLshl1AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -352,12 +400,15 @@ SLshl2AddU32Sop2::SLshl2AddU32Sop2(const MachineInst *inst)
            make_exec_fn<SLshl2AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -377,12 +428,15 @@ SLshl3AddU32Sop2::SLshl3AddU32Sop2(const MachineInst *inst)
            make_exec_fn<SLshl3AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -402,12 +456,15 @@ SLshl4AddU32Sop2::SLshl4AddU32Sop2(const MachineInst *inst)
            make_exec_fn<SLshl4AddU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -426,12 +483,15 @@ SMinI32Sop2::SMinI32Sop2(const MachineInst *inst)
     : Sop2("s_min_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMinI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -448,12 +508,15 @@ SMinU32Sop2::SMinU32Sop2(const MachineInst *inst)
     : Sop2("s_min_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMinU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -470,12 +533,15 @@ SMaxI32Sop2::SMaxI32Sop2(const MachineInst *inst)
     : Sop2("s_max_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMaxI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -492,12 +558,15 @@ SMaxU32Sop2::SMaxU32Sop2(const MachineInst *inst)
     : Sop2("s_max_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SMaxU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -514,12 +583,15 @@ SAndB32Sop2::SAndB32Sop2(const MachineInst *inst)
     : Sop2("s_and_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAndB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -536,12 +608,15 @@ SAndB64Sop2::SAndB64Sop2(const MachineInst *inst)
     : Sop2("s_and_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SAndB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -558,12 +633,15 @@ SOrB32Sop2::SOrB32Sop2(const MachineInst *inst)
     : Sop2("s_or_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SOrB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -580,12 +658,15 @@ SOrB64Sop2::SOrB64Sop2(const MachineInst *inst)
     : Sop2("s_or_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SOrB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -602,12 +683,15 @@ SXorB32Sop2::SXorB32Sop2(const MachineInst *inst)
     : Sop2("s_xor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -624,12 +708,15 @@ SXorB64Sop2::SXorB64Sop2(const MachineInst *inst)
     : Sop2("s_xor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -646,12 +733,15 @@ SNandB32Sop2::SNandB32Sop2(const MachineInst *inst)
     : Sop2("s_nand_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNandB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -670,12 +760,15 @@ SNandB64Sop2::SNandB64Sop2(const MachineInst *inst)
     : Sop2("s_nand_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNandB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -694,12 +787,15 @@ SNorB32Sop2::SNorB32Sop2(const MachineInst *inst)
     : Sop2("s_nor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -716,12 +812,15 @@ SNorB64Sop2::SNorB64Sop2(const MachineInst *inst)
     : Sop2("s_nor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SNorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -738,12 +837,15 @@ SXnorB32Sop2::SXnorB32Sop2(const MachineInst *inst)
     : Sop2("s_xnor_b32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXnorB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -762,12 +864,15 @@ SXnorB64Sop2::SXnorB64Sop2(const MachineInst *inst)
     : Sop2("s_xnor_b64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SXnorB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -787,12 +892,15 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
            make_exec_fn<SAndNot1B32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -812,12 +920,15 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
            make_exec_fn<SAndNot1B64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -837,12 +948,15 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
            make_exec_fn<SOrNot1B32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -862,12 +976,15 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
            make_exec_fn<SOrNot1B64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -886,12 +1003,15 @@ SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
     : Sop2("s_bfe_u32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeU32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -908,12 +1028,15 @@ SBfeI32Sop2::SBfeI32Sop2(const MachineInst *inst)
     : Sop2("s_bfe_i32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeI32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
@@ -930,12 +1053,15 @@ SBfeU64Sop2::SBfeU64Sop2(const MachineInst *inst)
     : Sop2("s_bfe_u64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeU64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -952,12 +1078,15 @@ SBfeI64Sop2::SBfeI64Sop2(const MachineInst *inst)
     : Sop2("s_bfe_i64", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<SBfeI64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
+  dst_operands_[1] = &scc;
+  scc.set_field_less(true);
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 2;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         64, OperandType::OPR_SIMM32,
@@ -1091,11 +1220,14 @@ SCselectB32Sop2::SCselectB32Sop2(const MachineInst *inst)
            make_exec_fn<SCselectB32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
+  src_operands_[2] = &scc;
+  scc.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -1116,11 +1248,14 @@ SCselectB64Sop2::SCselectB64Sop2(const MachineInst *inst)
            make_exec_fn<SCselectB64Sop2>()),
       sdst(64, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      scc(1, OperandType::OPR_SSRC_SPECIAL_SCC, 253) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  num_src_ = 2;
+  src_operands_[2] = &scc;
+  scc.set_field_less(true);
+  num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
@@ -1360,11 +1495,12 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
       ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      src2(32, OperandType::OPR_SIMM32, 0) {
+      simm32(32, OperandType::OPR_SIMM32, 0) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
-  src_operands_[2] = &src2;
+  src_operands_[2] = &simm32;
+  simm32.set_field_less(true);
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
@@ -1375,16 +1511,14 @@ SFmaakF32Sop2::SFmaakF32Sop2(const MachineInst *inst)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  src2 =
+  simm32 =
       Operand(32, OperandType::OPR_SIMM32,
               static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  simm32.set_field_less(true);
 }
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)),
-                          std::bit_cast<float>(src2.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  amdgpu::execute_s_fmaak_f32_sop2(*this, wf);
 }
 
 SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
@@ -1392,32 +1526,31 @@ SFmamkF32Sop2::SFmamkF32Sop2(const MachineInst *inst)
            make_exec_fn<SFmamkF32Sop2>()),
       sdst(32, OperandType::OPR_SDST, reinterpret_cast<const OpEncoding *>(inst)->sdst),
       ssrc0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
-      src2(32, OperandType::OPR_SIMM32, 0) {
+      simm32(32, OperandType::OPR_SIMM32, 0),
+      ssrc1(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1) {
   dst_operands_[0] = &sdst;
   src_operands_[0] = &ssrc0;
-  src_operands_[1] = &ssrc1;
-  src_operands_[2] = &src2;
+  src_operands_[1] = &simm32;
+  simm32.set_field_less(true);
+  src_operands_[2] = &ssrc1;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  simm32 =
+      Operand(32, OperandType::OPR_SIMM32,
+              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
+  simm32.set_field_less(true);
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
     ssrc1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
-  src2 =
-      Operand(32, OperandType::OPR_SIMM32,
-              static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  float result = std::fma(std::bit_cast<float>(ssrc0.read_scalar(wf)),
-                          std::bit_cast<float>(src2.read_scalar(wf)),
-                          std::bit_cast<float>(ssrc1.read_scalar(wf)));
-  sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+  amdgpu::execute_s_fmamk_f32_sop2(*this, wf);
 }
 
 SFmacF32Sop2::SFmacF32Sop2(const MachineInst *inst)

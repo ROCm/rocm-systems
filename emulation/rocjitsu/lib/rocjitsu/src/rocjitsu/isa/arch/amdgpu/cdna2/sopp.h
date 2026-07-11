@@ -47,6 +47,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand scc;
 };
 
 class SCbranchScc1Sopp : public Sopp {
@@ -55,6 +56,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand scc;
 };
 
 class SCbranchVcczSopp : public Sopp {
@@ -63,6 +65,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand vcc;
 };
 
 class SCbranchVccnzSopp : public Sopp {
@@ -71,6 +74,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand vcc;
 };
 
 class SCbranchExeczSopp : public Sopp {
@@ -79,6 +83,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand sdst_exec;
 };
 
 class SCbranchExecnzSopp : public Sopp {
@@ -87,6 +92,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
+  Operand sdst_exec;
 };
 
 class SBarrierSopp : public Sopp {
@@ -135,6 +141,7 @@ public:
   SSendmsgSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  Operand m0;
 };
 
 class SSendmsghaltSopp : public Sopp {
@@ -142,6 +149,7 @@ public:
   SSendmsghaltSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  Operand m0;
 };
 
 class STrapSopp : public Sopp {
@@ -175,6 +183,7 @@ class STtracedataSopp : public Sopp {
 public:
   STtracedataSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  Operand m0;
 };
 
 class SCbranchCdbgsysSopp : public Sopp {
@@ -222,6 +231,8 @@ public:
   SSetGprIdxModeSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand simm16;
+  Operand m0;
+  Operand m0_in;
 };
 
 class SEndpgmOrderedPsDoneSopp : public Sopp {

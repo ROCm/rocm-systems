@@ -124,6 +124,41 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+TEST(FieldlessOperandDecodeTest, SaveexecExposesInertExecAndSccOperands) {
+  const uint32_t words[] = {
+      0xBE802000u, // s_and_saveexec_b64 s[0:1], s[0:1]
+      0x00000000u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "s_and_saveexec_b64");
+  ASSERT_EQ(inst->num_dst_operands(), 3);
+  ASSERT_EQ(inst->num_src_operands(), 2);
+
+  const Operand *sdst = inst->dst_operand(0);
+  ASSERT_NE(sdst, nullptr);
+  EXPECT_FALSE(sdst->is_field_less());
+  EXPECT_TRUE(sdst->to_register_ref().has_value());
+
+  auto expect_inert_fieldless_operand = [](const Operand *op, int size_bits, int encoding_value) {
+    ASSERT_NE(op, nullptr);
+    EXPECT_TRUE(op->is_field_less());
+    EXPECT_EQ(op->size_bits(), size_bits);
+    EXPECT_EQ(op->encoding_value(), encoding_value);
+    EXPECT_FALSE(op->to_register_ref().has_value());
+  };
+
+  expect_inert_fieldless_operand(inst->dst_operand(1), 64, 126); // EXEC write.
+  expect_inert_fieldless_operand(inst->dst_operand(2), 1, 253);  // SCC write.
+  expect_inert_fieldless_operand(inst->src_operand(1), 64, 126); // EXEC read.
+
+  EXPECT_EQ(inst->disassemble(), "s_and_saveexec_b64 s[0:1], s[0:1]");
+}
+
 TEST(Rdna4WaitcntDecodeSmokeTest, FormatsCompatWaitcntWithGfx11Layout) {
   constexpr uint32_t s_waitcnt_vmcnt1 = make_sopp(/*op=*/9, /*simm16=*/1u << 10);
 

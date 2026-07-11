@@ -448,6 +448,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsB32Vop3 : public Vop3 {
@@ -456,6 +457,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsdB32Vop3 : public Vop3 {
@@ -464,6 +466,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VMovrelsd2B32Vop3 : public Vop3 {
@@ -472,6 +475,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+  Operand m0;
 };
 
 class VCvtF16U16Vop3 : public Vop3 {
@@ -1466,6 +1470,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
 };
 
 class VDivFmasF64Vop3 : public Vop3 {
@@ -1476,6 +1481,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  Operand vcc;
 };
 
 class VMsadU8Vop3 : public Vop3 {
@@ -3182,6 +3188,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF16Vop3 : public Vop3 {
@@ -3191,6 +3198,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF16Vop3 : public Vop3 {
@@ -3200,6 +3208,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF16Vop3 : public Vop3 {
@@ -3209,6 +3218,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF16Vop3 : public Vop3 {
@@ -3218,6 +3228,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF16Vop3 : public Vop3 {
@@ -3227,6 +3238,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF16Vop3 : public Vop3 {
@@ -3236,6 +3248,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF16Vop3 : public Vop3 {
@@ -3245,6 +3258,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF16Vop3 : public Vop3 {
@@ -3254,6 +3268,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF16Vop3 : public Vop3 {
@@ -3263,6 +3278,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF16Vop3 : public Vop3 {
@@ -3272,6 +3288,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF16Vop3 : public Vop3 {
@@ -3281,6 +3298,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF16Vop3 : public Vop3 {
@@ -3290,6 +3308,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF16Vop3 : public Vop3 {
@@ -3299,6 +3318,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF32Vop3 : public Vop3 {
@@ -3308,6 +3328,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF32Vop3 : public Vop3 {
@@ -3317,6 +3338,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF32Vop3 : public Vop3 {
@@ -3326,6 +3348,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF32Vop3 : public Vop3 {
@@ -3335,6 +3358,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF32Vop3 : public Vop3 {
@@ -3344,6 +3368,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF32Vop3 : public Vop3 {
@@ -3353,6 +3378,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF32Vop3 : public Vop3 {
@@ -3362,6 +3388,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF32Vop3 : public Vop3 {
@@ -3371,6 +3398,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF32Vop3 : public Vop3 {
@@ -3380,6 +3408,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF32Vop3 : public Vop3 {
@@ -3389,6 +3418,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF32Vop3 : public Vop3 {
@@ -3398,6 +3428,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF32Vop3 : public Vop3 {
@@ -3407,6 +3438,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF32Vop3 : public Vop3 {
@@ -3416,6 +3448,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF32Vop3 : public Vop3 {
@@ -3425,6 +3458,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtF64Vop3 : public Vop3 {
@@ -3434,6 +3468,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqF64Vop3 : public Vop3 {
@@ -3443,6 +3478,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeF64Vop3 : public Vop3 {
@@ -3452,6 +3488,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtF64Vop3 : public Vop3 {
@@ -3461,6 +3498,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLgF64Vop3 : public Vop3 {
@@ -3470,6 +3508,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeF64Vop3 : public Vop3 {
@@ -3479,6 +3518,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxOF64Vop3 : public Vop3 {
@@ -3488,6 +3528,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxUF64Vop3 : public Vop3 {
@@ -3497,6 +3538,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgeF64Vop3 : public Vop3 {
@@ -3506,6 +3548,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNlgF64Vop3 : public Vop3 {
@@ -3515,6 +3558,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNgtF64Vop3 : public Vop3 {
@@ -3524,6 +3568,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNleF64Vop3 : public Vop3 {
@@ -3533,6 +3578,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeqF64Vop3 : public Vop3 {
@@ -3542,6 +3588,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNltF64Vop3 : public Vop3 {
@@ -3551,6 +3598,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI16Vop3 : public Vop3 {
@@ -3560,6 +3608,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI16Vop3 : public Vop3 {
@@ -3569,6 +3618,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI16Vop3 : public Vop3 {
@@ -3578,6 +3628,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI16Vop3 : public Vop3 {
@@ -3587,6 +3638,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI16Vop3 : public Vop3 {
@@ -3596,6 +3648,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI16Vop3 : public Vop3 {
@@ -3605,6 +3658,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU16Vop3 : public Vop3 {
@@ -3614,6 +3668,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU16Vop3 : public Vop3 {
@@ -3623,6 +3678,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU16Vop3 : public Vop3 {
@@ -3632,6 +3688,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU16Vop3 : public Vop3 {
@@ -3641,6 +3698,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU16Vop3 : public Vop3 {
@@ -3650,6 +3708,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU16Vop3 : public Vop3 {
@@ -3659,6 +3718,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI32Vop3 : public Vop3 {
@@ -3668,6 +3728,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI32Vop3 : public Vop3 {
@@ -3677,6 +3738,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI32Vop3 : public Vop3 {
@@ -3686,6 +3748,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI32Vop3 : public Vop3 {
@@ -3695,6 +3758,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI32Vop3 : public Vop3 {
@@ -3704,6 +3768,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI32Vop3 : public Vop3 {
@@ -3713,6 +3778,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU32Vop3 : public Vop3 {
@@ -3722,6 +3788,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU32Vop3 : public Vop3 {
@@ -3731,6 +3798,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU32Vop3 : public Vop3 {
@@ -3740,6 +3808,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU32Vop3 : public Vop3 {
@@ -3749,6 +3818,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU32Vop3 : public Vop3 {
@@ -3758,6 +3828,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU32Vop3 : public Vop3 {
@@ -3767,6 +3838,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtI64Vop3 : public Vop3 {
@@ -3776,6 +3848,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqI64Vop3 : public Vop3 {
@@ -3785,6 +3858,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeI64Vop3 : public Vop3 {
@@ -3794,6 +3868,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtI64Vop3 : public Vop3 {
@@ -3803,6 +3878,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeI64Vop3 : public Vop3 {
@@ -3812,6 +3888,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeI64Vop3 : public Vop3 {
@@ -3821,6 +3898,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLtU64Vop3 : public Vop3 {
@@ -3830,6 +3908,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxEqU64Vop3 : public Vop3 {
@@ -3839,6 +3918,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxLeU64Vop3 : public Vop3 {
@@ -3848,6 +3928,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGtU64Vop3 : public Vop3 {
@@ -3857,6 +3938,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxNeU64Vop3 : public Vop3 {
@@ -3866,6 +3948,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxGeU64Vop3 : public Vop3 {
@@ -3875,6 +3958,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF16Vop3 : public Vop3 {
@@ -3884,6 +3968,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF32Vop3 : public Vop3 {
@@ -3893,6 +3978,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VCmpxClassF64Vop3 : public Vop3 {
@@ -3902,6 +3988,7 @@ public:
   Operand vdst;
   Operand src0;
   Operand src1;
+  Operand sdst_exec;
 };
 
 class VAddCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
