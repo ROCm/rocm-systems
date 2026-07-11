@@ -87,6 +87,11 @@ extern void FlushAsyncLogs();
 //! \brief Force flush of pending async log entries in the current thread (synchronous).
 extern void FlushAsyncLogsInCurrentThread();
 
+//! \brief FILE* that ROCr should log through so its output stays ordered with ours.
+//! When async logging is active this returns a sink that funnels ROCr's lines into
+//! the async ring buffer; otherwise it returns outFile (direct, already ordered).
+extern FILE* GetRocrLogSink();
+
 /*@}*/  // namespace amd
 }  // namespace amd
 

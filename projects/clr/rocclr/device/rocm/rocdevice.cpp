@@ -736,7 +736,9 @@ bool Device::create() {
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_AQL);
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_SDMA);
     hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_INFO);
-    Hsa::enable_logging(logMask, outFile);
+    // Route ROCr's logs through the ordered sink so they interleave correctly with
+    // CLR's async log entries instead of racing ahead via direct fflush.
+    Hsa::enable_logging(logMask, amd::GetRocrLogSink());
   }
 
   return true;

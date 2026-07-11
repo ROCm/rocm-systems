@@ -57,16 +57,18 @@ uint8_t log_flags[8];
 
 void log_printf(const char* file, int line, const char* format, ...) {
   va_list ap;
-  std::stringstream pidtid;
-  pidtid << "[pid:" << os::GetProcessId() << " tid: 0x" ;
-  pidtid << std::hex << std::setw(5) << std::this_thread::get_id() << "]";
+  // Match HIP's thread-id rendering exactly
+  size_t tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+  char pidtid[64] = "";
+  snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]",
+           static_cast<unsigned>(os::GetProcessId()), tid_hash & 0xFFFFF);
   va_start(ap, format);
   char message[4096];
   vsnprintf(message, sizeof(message), format, ap);
   va_end(ap);
   fprintf(log_file, ":7:%-25s:%-4d: %010lld us: %s [***rocr***] %s\n",
           file, line, os::ReadAccurateClock()/1000ULL,
-          pidtid.str().c_str(), message);
+          pidtid, message);
   fflush(log_file);
 }
 

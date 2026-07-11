@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+// _GNU_SOURCE must be defined before any header so glibc declares fopencookie(),
+// which backs the ordered log sink handed to ROCr (see GetRocrLogSink below).
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "top.hpp"
 #include "utils/debug.hpp"
 #include "os/os.hpp"
@@ -58,6 +64,7 @@ struct LogEntry {
   uint32_t tid;            //!< Thread ID (hash)
   uint64_t duration;       //!< Duration in microseconds (0 if not a duration log)
   bool hasDuration;        //!< True if this is a duration log entry
+  bool isRaw;              //!< True if message is a pre-formatted line to emit verbatim
   std::atomic<bool> valid; //!< Valid flag for lock-free synchronization
 
   LogEntry()
@@ -68,6 +75,7 @@ struct LogEntry {
         pid(0),
         duration(0),
         hasDuration(false),
+        isRaw(false),
         valid(false) {}
 };
 
@@ -157,6 +165,32 @@ class AsyncLogger {
         std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF);
     entry.duration = duration;
     entry.hasDuration = hasDuration;
+    entry.isRaw = false;
+    entry.valid.store(true, std::memory_order_release);
+  }
+
+  // Enqueue a pre-formatted line (e.g. from ROCr) so it is emitted verbatim and
+  // in generation order relative to the structured entries from this logger.
+  void logRaw(std::string line) {
+    if (!enabled_.load(std::memory_order_relaxed)) {
+      // Async drained/disabled: emit directly so the line is not lost.
+      fwrite(line.data(), 1, line.size(), outFile);
+      fflush(outFile);
+      return;
+    }
+
+    size_t currentWrite = writeIndex_.fetch_add(1, std::memory_order_release);
+    size_t currentRead = readIndex_.load(std::memory_order_acquire);
+
+    while (currentWrite - currentRead >= kBufferSize) {
+      flush();
+      currentRead = readIndex_.load(std::memory_order_acquire);
+    }
+
+    LogEntry& entry = buffer_[currentWrite % kBufferSize];
+    entry.isRaw = true;
+    entry.hasDuration = false;
+    entry.message = std::move(line);
     entry.valid.store(true, std::memory_order_release);
   }
 
@@ -241,6 +275,12 @@ class AsyncLogger {
   }
 
   void writeToFile(const LogEntry& entry) {
+    if (entry.isRaw) {
+      // Already fully formatted (including the trailing newline) by the producer.
+      fwrite(entry.message.data(), 1, entry.message.size(), outFile);
+      return;
+    }
+
     char pidtid[64] = "";
     if (AMD_LOG_LEVEL >= 4) {
       snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05x]", entry.pid, entry.tid);
@@ -268,6 +308,75 @@ static void crashFlushCallback() {
 static AsyncLogger& getAsyncLogger() {
   static AsyncLogger instance;
   return instance;
+}
+
+// ================================================================================================
+// Ordered log sink for ROCr
+//
+// ROCr writes its own already-formatted log lines synchronously to whatever FILE*
+// it is handed via hsa_amd_enable_logging(). When this logger runs asynchronously,
+// those direct writes race ahead of the buffered entries still sitting in our ring,
+// scrambling the interleaving in the combined log. To keep a single global ordering
+// we hand ROCr a cookie stream whose writes are funneled, line by line, into the same
+// async ring as raw entries. The one worker thread then drains everything in
+// generation order.
+#if defined(__linux__)
+namespace {
+
+struct RocrCookieContext {
+  std::string partial;  //!< Holds a not-yet-terminated line across writes.
+};
+
+// Called by stdio (under the stream lock) whenever ROCr flushes to the cookie stream.
+ssize_t RocrCookieWrite(void* cookie, const char* buf, size_t size) {
+  auto* context = static_cast<RocrCookieContext*>(cookie);
+  context->partial.append(buf, size);
+
+  size_t line_start = 0;
+  size_t newline_pos;
+  while ((newline_pos = context->partial.find('\n', line_start)) != std::string::npos) {
+    getAsyncLogger().logRaw(context->partial.substr(line_start, newline_pos - line_start + 1));
+    line_start = newline_pos + 1;
+  }
+  context->partial.erase(0, line_start);
+  return static_cast<ssize_t>(size);
+}
+
+int RocrCookieClose(void* cookie) {
+  auto* context = static_cast<RocrCookieContext*>(cookie);
+  if (!context->partial.empty()) {
+    getAsyncLogger().logRaw(std::move(context->partial));
+  }
+  delete context;
+  return 0;
+}
+
+}  // namespace
+#endif  // __linux__
+
+FILE* GetRocrLogSink() {
+#if defined(__linux__)
+  // Only interpose when async logging is active; otherwise ROCr writing straight to
+  // outFile is already correctly ordered with our synchronous path.
+  if (getAsyncLogger().isEnabled()) {
+    static FILE* sink = [] () -> FILE* {
+      cookie_io_functions_t io_funcs = {};
+      io_funcs.write = RocrCookieWrite;
+      io_funcs.close = RocrCookieClose;
+      auto* context = new RocrCookieContext();
+      FILE* stream = fopencookie(context, "w", io_funcs);
+      if (stream == nullptr) {
+        delete context;
+        return outFile;
+      }
+      // Unbuffered so each ROCr fprintf/fflush surfaces as a complete line promptly.
+      setvbuf(stream, nullptr, _IONBF, 0);
+      return stream;
+    }();
+    return sink;
+  }
+#endif  // __linux__
+  return outFile;
 }
 
 // ================================================================================================
