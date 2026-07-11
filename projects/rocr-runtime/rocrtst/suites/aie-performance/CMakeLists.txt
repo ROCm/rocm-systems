@@ -200,3 +200,14 @@ target_link_libraries(vector-scalar-add-hsa PRIVATE
   hsa-runtime64::hsa-runtime64
 )
 add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
+
+# ---------------------------------------------------------------------------
+# HSA vmem alloc/release microbenchmark
+# ---------------------------------------------------------------------------
+
+add_executable(vmem-alloc-hsa vmem_alloc_hsa.cpp)
+target_compile_features(vmem-alloc-hsa PRIVATE cxx_std_20)
+target_link_libraries(vmem-alloc-hsa PRIVATE
+  benchmark::benchmark_main
+  hsa-runtime64::hsa-runtime64
+)
