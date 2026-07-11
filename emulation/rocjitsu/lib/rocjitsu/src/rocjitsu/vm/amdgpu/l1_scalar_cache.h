@@ -65,6 +65,7 @@ public:
 
 private:
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void flush_line(uint64_t addr, uint32_t vmid = 0);
 
   CacheStore cache_;
   L2Cache *l2_;
