@@ -297,7 +297,7 @@ jobs:
               echo "::warning::Retried pytest-timeout failures passed."
               target_status=0
             else
-              echo "::error::Retried pytest-timeout failures still failed with timeout=${LONG_TIMEOUT}s. Tests are hanging or otherwise stuck."
+              echo "::error::Retried tests that previously timed out still failed with timeout=${LONG_TIMEOUT}s. Check the pytest log to see whether they timed out again or failed normally."
             fi
             finish_target "${target_status}"
           done
