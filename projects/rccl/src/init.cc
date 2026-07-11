@@ -1417,8 +1417,14 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   // Check for MNNVL support
   NCCLCHECKGOTO(ncclGetUserP2pLevel(&p2pLevel), ret, fail);
-  if ((nNodes > 1 && ncclParamMNNVLEnable() != 0 && p2pLevel != 0) || ncclParamMNNVLEnable() == 1) {
-    NCCLCHECKGOTO(ncclMnnvlCheck(comm), ret, fail);
+  {
+    const int mnnvlEnable = ncclParamMNNVLEnable();
+    const bool isGfx1250 = comm->archName && IsArchMatch(comm->archName, "gfx1250");
+    // Auto (default=2): multi-node, or single-node gfx1250
+    const bool mnnvlAutoScope = (nNodes > 1 || isGfx1250) && p2pLevel != 0;
+    if (mnnvlEnable == 1 || (mnnvlEnable != 0 && mnnvlAutoScope)) {
+      NCCLCHECKGOTO(ncclMnnvlCheck(comm), ret, fail);
+    }
   }
 
   do {
