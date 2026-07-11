@@ -551,7 +551,6 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.CPUAccessToGPUMemoryTest();
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
-    vmt.ImportedShareableHandleSetAccessAfterFdClose();
     RunCustomTestEpilog(&vmt);
 }
 

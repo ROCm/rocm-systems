@@ -364,9 +364,6 @@ bool MapMemory(void* addr, size_t size, MemProt prot, int fd, uint64_t cpu_addr)
 /// Close a dmabuf file descriptor and set *dmabuf to -1.
 hsa_status_t DmaBufClose(int* dmabuf);
 
-/// Duplicate a dmabuf file descriptor. Returns the new fd, or -1 on failure.
-int DmaBufDup(int dmabuf);
-
 bool ProtectMemory(void* va, size_t size, MemProt perms);
 
 uint64_t HostTotalPhysicalMemory();
