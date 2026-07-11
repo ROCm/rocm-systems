@@ -285,6 +285,7 @@ void TesterArguments::get_arguments() {
     case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
     case TeamBroadcastTestType:
     case PingAllTestType:
     case TeamBarrierTestType:
@@ -317,6 +318,15 @@ void TesterArguments::get_arguments() {
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
     case HostTeamSyncBarrierTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
+    // Tile collective tests - support any number of PEs
+    case TileBroadcastTestType:
+    case TileBroadcastWaveTestType:
+    case TileBroadcastWGTestType:
+    case TileAllgatherTestType:
+    case TileAllgatherWaveTestType:
+    case TileAllgatherWGTestType:
       requires_two_pes = false;
       break;
     default:

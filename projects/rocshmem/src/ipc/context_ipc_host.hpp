@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_IPC_CONTEXT_HOST_HPP_
 
 #include "context.hpp"
+#include "memory/window_info.hpp"
 
 namespace rocshmem {
 
@@ -139,7 +140,11 @@ class IPCHostContext : public Context {
   __host__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ int reduce_on_stream(rocshmem_team_t team, T *dest, const T *source, 
+  __host__ int reduce_scatter(rocshmem_team_t team, T *dest, const T *source,
+                              int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T *dest, const T *source,
                                 int nreduce, hipStream_t stream);
 
   template <typename T>
@@ -186,6 +191,27 @@ class IPCHostContext : public Context {
 
   /* An MPI Window implements a context */
   WindowInfo *context_window_info{nullptr};
+
+  /* Per-context HIP stream for non-MPI IPC host ops (nullptr on MPI path) */
+  hipStream_t ctx_stream_{nullptr};
+
+  /* ipc_amo_fadd: fetch=true (default) syncs the stream and returns the old
+   * value via ipc_staging_buf_.  fetch=false enqueues the kernel without
+   * syncing; the caller is responsible for ordering via quiet/fence.
+   * ipc_amo_fcas: always syncs and returns the old value.
+   */
+  template <typename T>
+  __host__ T ipc_amo_fadd(T *dst, T val, bool fetch = true);
+  template <typename T>
+  __host__ T ipc_amo_fcas(T *dst, T cond, T val);
+
+  /* Fine-grained staging buffer for AMO kernel result readback (non-MPI only) */
+  uint64_t *ipc_staging_buf_{nullptr};
+
+  /* Returns true when running on the non-MPI IPC path */
+  bool is_ipc_non_mpi() const {
+    return dynamic_cast<WindowInfoMPI *>(context_window_info) == nullptr;
+  }
 };
 
 }  // namespace rocshmem

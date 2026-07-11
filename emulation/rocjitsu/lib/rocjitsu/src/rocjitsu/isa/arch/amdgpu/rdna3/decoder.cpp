@@ -14,6 +14,8 @@ namespace rocjitsu {
 namespace rdna3 {
 
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
+  if (Vopd::is_vopd(opcode))
+    return std::make_unique<Vopd>(opcode);
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }

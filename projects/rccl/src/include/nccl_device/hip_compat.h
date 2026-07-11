@@ -34,6 +34,29 @@
 #define NCCL_CHECK_CUDACC NCCL_DEVICE_COMPILE
 
 ////////////////////////////////////////////////////////////////////////////////
+// CUDA driver memory-location enum shim (host-NUMA)
+//
+// CU_MEM_LOCATION_TYPE_HOST_NUMA is a CUDA driver enumerator (CUmemLocationType,
+// value 3) with no ROCm equivalent: hipMemLocationType has no host-NUMA member,
+// CLR rejects host-NUMA VMM locations, and there is no <cuda.h> on the AMD build
+// (CUDA headers are hipified away), so the enumerator is undeclared in every AMD
+// translation unit. RCCL gates all host-NUMA VMM allocation paths behind
+// `CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200`, so on a ROCm < 7.12 build the
+// only live references are the *ungated* v2.30.4 elastic-buffer-for-GIN comparisons
+// in dev_runtime.cc (host) and nccl_device/impl/gin__funcs.h (device). Define the
+// macro to its genuine CUDA value so those comparisons compile and stay inert: AMD
+// GIN segments are always device-backed (memType == CU_MEM_LOCATION_TYPE_DEVICE),
+// never host-NUMA, so every comparison evaluates false and the host-NUMA branches
+// never execute. A #define is collision-free precisely because no <cuda.h> declares
+// the enumerator on AMD; the guard leaves NVIDIA and ROCm >= 7.12 builds (which
+// provide the real API) untouched.
+////////////////////////////////////////////////////////////////////////////////
+
+#if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
+  #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
 // Device function qualifiers
 ////////////////////////////////////////////////////////////////////////////////
 

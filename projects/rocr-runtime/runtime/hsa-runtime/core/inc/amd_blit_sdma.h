@@ -81,6 +81,21 @@ class BlitSdmaBase : public core::Blit {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) = 0;
 
+  /// @brief Multicast (one source, N destinations) linear copy.  Only valid
+  /// when MulticastSupported() is true.  When @p profiling_enabled, the plain
+  /// multicast packet is submitted through the classic prologue/copy/epilogue
+  /// path so start/end timestamps are collected.  Otherwise it fuses the GCR
+  /// invalidate prologue, poll+copy+signal, and the GCR writeback + mailbox
+  /// epilogue into a single ring reservation: dep_signals[0] folds into each
+  /// chunk's packet WAIT and out_signal is decremented by every chunk's SIGNAL
+  /// (the count is pre-loaded accordingly); any remaining dep_signals are
+  /// emitted as poll commands.
+  virtual hsa_status_t SubmitLinearCopyMulticastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal,
+      bool profiling_enabled) = 0;
+
   /// @brief Pack N linear copy packets back-to-back in a single SDMA ring
   /// submission (linearB2BCopy path).  Each entry i copies srcs[i] -> dsts[i]
   /// of sizes[i] bytes.  For the broadcast case (same src/size for all dsts),
@@ -91,8 +106,17 @@ class BlitSdmaBase : public core::Blit {
       core::Signal& out_signal) = 0;
 
   virtual bool BroadcastSupported() const = 0;
+  virtual bool MulticastSupported() const = 0;
   virtual bool PlatformAtomicSupport() const = 0;
   virtual bool IsGfx1250() const = 0;
+
+  /// @brief Maximum byte count a single linear copy packet can describe
+  /// (the 30-bit count field, ~1 GiB).  Larger copies are split into multiple
+  /// chunked packets; both the plain (BuildCopyCommand) and fused WaitSignal
+  /// builders chunk internally.  The indirect WaitSignal packet is the lone
+  /// exception - it has no offset field, so callers must reject indirect copies
+  /// larger than this limit.
+  virtual size_t MaxSingleLinearCopySize() const = 0;
 
   virtual hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
                                       core::Signal& out_signal,
@@ -118,10 +142,19 @@ class BlitSdmaBase : public core::Blit {
                                             core::Signal& prologue_signal,
                                             core::Signal& body_signal) = 0;
 
+  /// @brief Emit a fused wait/copy/signal linear copy.  @p dep_signals[0] folds
+  /// into the packet WAIT and @p out_signal is decremented by the packet SIGNAL
+  /// on the final chunk (large copies are chunked internally).  When
+  /// @p fused_notify is true the GCR invalidate (prologue) and GCR writeback +
+  /// mailbox notify (epilogue) are emitted in the same ring reservation, so a
+  /// standalone single-engine copy needs only one reserve/release instead of
+  /// three; the fan-out path leaves it false and drives notify separately across
+  /// engines.
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) = 0;
+      core::Signal& out_signal,
+      bool fused_notify = true) = 0;
 
   virtual hsa_status_t SubmitLinearSwapBodyWaitSignal(
       void* addr_a, void* addr_b, size_t size_a, size_t size_b,
@@ -219,6 +252,12 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
       std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal) override;
 
+  hsa_status_t SubmitLinearCopyMulticastCommand(
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal,
+      bool profiling_enabled) override;
+
   hsa_status_t SubmitLinearCopyB2BCommand(
       const std::vector<void*>& dsts, const std::vector<const void*>& srcs,
       const std::vector<size_t>& sizes, std::vector<core::Signal*>& dep_signals,
@@ -238,8 +277,12 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   virtual void GangLeader(bool gang_leader) override { gang_leader_ = gang_leader; }
   virtual bool GangLeader() const override { return gang_leader_; }
   bool BroadcastSupported() const override { return broadcast_supported_; }
+  bool MulticastSupported() const override { return multicast_supported_; }
   bool PlatformAtomicSupport() const override { return platform_atomic_support_; }
   bool IsGfx1250() const override { return is_gfx1250_; }
+  size_t MaxSingleLinearCopySize() const override {
+    return max_single_linear_copy_size_ ? max_single_linear_copy_size_ : kMaxSingleCopySize;
+  }
 
   hsa_status_t SubmitPrologue(const std::vector<core::Signal*>& dep_signals,
                               core::Signal& out_signal,
@@ -264,7 +307,8 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
-      core::Signal& out_signal) override;
+      core::Signal& out_signal,
+      bool fused_notify) override;
 
   hsa_status_t SubmitLinearSwapBodyWaitSignal(
       void* addr_a, void* addr_b, size_t size_a, size_t size_b,
@@ -341,6 +385,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   void BuildMulticastCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                                  const std::vector<void*>& dsts, const void* src, size_t size);
+
+  void BuildMulticastWaitSignalCopyCommand(
+      char* cmd_addr, uint32_t num_copy_command,
+      const std::vector<void*>& dsts, const void* src, size_t size,
+      const core::Signal* wait_signal, core::Signal* signal_signal);
 
   void BuildSwapCopyCommand(char* cmd_addr, uint32_t num_copy_command,
                             void* addr_a, void* addr_b, size_t size);
@@ -503,6 +552,9 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   /// True if SDMA supports broadcast linear copy (one src -> two dst).
   bool broadcast_supported_;
 
+  /// True if SDMA supports multicast linear copy (one src -> N dst), gfx1250+.
+  bool multicast_supported_;
+
   /// True for gfx1250 (major=12 minor=5): multicast, wait/signal packets, 64b poll/fence.
   bool is_gfx1250_;
 
@@ -520,10 +572,12 @@ typedef BlitSdma<false, false> BlitSdmaV4;
 typedef BlitSdma<true, false> BlitSdmaV5;
 
 // SDMA ops are done by DACC Backend so LINEAR_COPY and CONSTANT_FILL ops are
-// not cached in GL2.
+// not cached in GL2, so GCR cache invalidate/writeback packets are not needed
+// (useGCR=false); the per-packet scope fields (scopeFields=true) handle
+// coherency instead.
 // SDMA ops support NPD field (no prior dependency)
 // SDMA OSS v7.1
-typedef BlitSdma<true, true> BlitSdmaV6;
+typedef BlitSdma<false, true> BlitSdmaV6;
 
 }  // namespace amd
 }  // namespace rocr

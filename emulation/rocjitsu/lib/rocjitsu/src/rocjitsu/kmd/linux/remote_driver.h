@@ -12,6 +12,7 @@
 /// passed through SCM_RIGHTS. The client mmaps these memfds locally at the
 /// addresses ROCR's FMM expects.
 
+#include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/driver.h"
 
 #include <atomic>
@@ -39,6 +40,11 @@ public:
 
   /// @brief Get the daemon's DRM sysfs directory path.
   [[nodiscard]] const std::string &drm_path() const { return drm_path_; }
+
+  /// @brief Get GPU metadata received from the daemon handshake.
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
+    return has_gpu_info_ ? &gpu_info_ : nullptr;
+  }
 
   /// @brief Find a stored memfd that covers the given GPUVM address.
   /// @details Used by the interposer to intercept anonymous MAP_FIXED at
@@ -97,6 +103,8 @@ private:
   uint32_t next_id_ = 0;             ///< Monotonic request ID counter (for debugging).
   std::string topology_path_;        ///< Daemon's sysfs topology directory path.
   std::string drm_path_;             ///< Daemon's DRM sysfs directory path.
+  Sysfs::GpuInfo gpu_info_{};        ///< GPU metadata received from daemon handshake.
+  bool has_gpu_info_ = false;        ///< True when gpu_info_ is valid.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   int shutdown_efd_ = -1;            ///< eventfd written by close() to wake WAIT_EVENTS pollers.
 

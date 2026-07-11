@@ -398,7 +398,9 @@ class _ScalarBinop(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         op = sem.operation
         ty = _dtype_to_sema(sem.data_type)
-        raw_carry_bits = sem.sets_scc in ('carry', 'borrow') and ty.base == 'I'
+        raw_carry_bits = (
+            sem.sets_scc in ('carry', 'borrow', 'overflow') and ty.base == 'I'
+        )
         calc_ty = SemaType('U', ty.size) if raw_carry_bits else ty
         src0 = _cast(_src(0), calc_ty)
         src1 = _cast(_src(1), calc_ty)
@@ -507,10 +509,23 @@ class _ScalarBinop(_ScalarDeriver):
             result = SemaNode(
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
             )
+        elif op in ('add', 'sub') and ty.base == 'I':
+            # Emulate the hardware's wrap-around arithmetic in unsigned. A bare
+            # signed `s0 + s1` is undefined on overflow, which GCC -O1+ exploits
+            # to fold away the signed-overflow SCC check. Derive SCC from the
+            # the sign-bit identity
+            u_ty = SemaType.U32 if ty.size == 32 else SemaType.U64
+            result = SemaNode(
+                kind,
+                ty=u_ty,
+                children=(_cast(src0, u_ty), _cast(src1, u_ty)),
+            )
         else:
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
         result_ty = calc_ty if raw_carry_bits else ty
+        if op in ('mul', 'add', 'sub') and ty.base == 'I':
+            result_ty = result.ty or result_ty
         if ty.base in ('F', 'BF') and ty.size == 16:
             result_ty = SemaType.F32
         stmts.append(_assign(_id('result', result_ty), result))
@@ -544,22 +559,14 @@ class _ScalarBinop(_ScalarDeriver):
                     ),
                 )
             elif sem.sets_scc == 'overflow':
-                overflow_kind = SemaNodeKind.SUB if op == 'sub' else SemaNodeKind.ADD
-                wide = SemaNode(
-                    overflow_kind,
-                    ty=SemaType.I64,
-                    children=(
-                        _cast(src0, SemaType.I64),
-                        _cast(src1, SemaType.I64),
-                    ),
-                )
+                # Signed-overflow SCC detected in unsigned via the sign-bit
+                # identity
+                fn = 'signed_sub_overflows' if op == 'sub' else 'signed_add_overflows'
                 scc_expr = SemaNode(
-                    SemaNodeKind.NE,
+                    SemaNodeKind.CALL,
                     ty=SemaType.U1,
-                    children=(
-                        wide,
-                        _cast(_id('result', ty), SemaType.I64),
-                    ),
+                    call_name=fn,
+                    children=(_id(fn), src0, src1),
                 )
             elif sem.sets_scc == 'compare':
                 cmp_kind = SemaNodeKind.GE if op == 'max' else SemaNodeKind.LT
@@ -1156,6 +1163,18 @@ class _VectorBinop(_ScalarDeriver):
             body = _assign(_cast(_dst(0), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op in ('add', 'sub', 'subrev', 'rsub') and ty.base == 'I':
+            # Integer vector ALU wraps in two's-complement; emit raw unsigned
+            # arithmetic so generated C++ has no signed-overflow UB.
+            u_ty = SemaType('U', ty.size)
+            src0 = _src(0, u_ty)
+            src1 = _src(1, u_ty)
+            lhs, rhs = (src1, src0) if op in ('subrev', 'rsub') else (src0, src1)
+            kind = SemaNodeKind.ADD if op == 'add' else SemaNodeKind.SUB
+            result = SemaNode(kind, ty=u_ty, children=(lhs, rhs))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
         result = _vec_binop_expr(op, src0, src1, ty)
@@ -1182,6 +1201,21 @@ class _VectorTernary(_ScalarDeriver):
                     _cast(_src(0), ty),
                     _cast(_src(1), ty),
                     _cast(_src(2), ty),
+                ),
+            )
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'mad' and dtype == 'u16':
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=ty,
+                call_name='mad_lo_u16',
+                children=(
+                    _id('mad_lo_u16'),
+                    _src(0),
+                    _src(1),
+                    _src(2),
                 ),
             )
             body = _assign(_cast(_dst(0), ty), result)

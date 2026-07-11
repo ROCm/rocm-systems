@@ -3,6 +3,8 @@
 
 #include "rocprof-sys-instrument.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/path.hpp"
 #include "core/demangler.hpp"
@@ -60,7 +62,8 @@ auto
 get_default_min_instructions()
 {
     // default to 1024
-    return tim::get_env<size_t>("ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS", (1 << 10), false);
+    return rocprofsys::get_env<size_t>(rocprofsys::env_vars::DEFAULT_MIN_INSTRUCTIONS,
+                                       (1 << 10));
 }
 auto
 get_default_min_address_range()
@@ -92,9 +95,10 @@ bool   instr_print                  = false;
 bool   simulate                     = false;
 bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
-int    verbose_level   = tim::get_env<int>("ROCPROFSYS_VERBOSE_INSTRUMENT", 0);
-int    num_log_entries = tim::get_env<int>(
-    "ROCPROFSYS_LOG_COUNT", tim::get_env<bool>("ROCPROFSYS_CI", false) ? 20 : 50);
+int verbose_level = rocprofsys::get_env<int>(rocprofsys::env_vars::VERBOSE_INSTRUMENT, 0);
+int num_log_entries = rocprofsys::get_env<int>(
+    rocprofsys::env_vars::LOG_COUNT,
+    rocprofsys::get_env<bool>(rocprofsys::env_vars::CI, false) ? 20 : 50);
 string_t main_fname     = "main";
 string_t argv0          = {};
 string_t cmdv0          = {};
@@ -146,7 +150,6 @@ using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
 
 bool                                            binary_rewrite       = false;
-bool                                            is_attached          = false;
 bool                                            use_mpi              = false;
 bool                                            is_static_exe        = false;
 bool                                            force_config         = false;
@@ -175,13 +178,13 @@ bool                                            dump_info_enabled    = false;
 std::string                                     modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-strvec_t lib_search_paths =
-    tim::delimit(rocprofsys::join(':', path::get_internal_libdir(),
-                                  tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-                                  tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-                                  tim::get_env<std::string>("LD_LIBRARY_PATH")),
-                 ":");
-strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
+strvec_t lib_search_paths = tim::delimit(
+    rocprofsys::join(':', path::get_internal_libdir(),
+                     rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+                     rocprofsys::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+                     rocprofsys::get_env<std::string>("LD_LIBRARY_PATH")),
+    ":");
+strvec_t bin_search_paths = tim::delimit(rocprofsys::get_env<std::string>("PATH"), ":");
 
 auto _dyn_api_rt_paths = tim::delimit(
     rocprofsys::join(":", path::get_internal_libdir(),
@@ -286,8 +289,9 @@ main(int argc, char** argv)
 {
     argv0 = argv[0];
 
-    auto _omni_root = tim::get_env<std::string>(
-        "rocprofiler_systems_ROOT", tim::get_env<std::string>("ROCPROFSYS_ROOT", ""));
+    auto _omni_root = rocprofsys::get_env<std::string>(
+        "rocprofiler_systems_ROOT",
+        rocprofsys::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
     if(!_omni_root.empty() && exists(_omni_root))
     {
         bin_search_paths.emplace_back(JOIN('/', _omni_root, "bin"));
@@ -375,7 +379,6 @@ main(int argc, char** argv)
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
-    process::id_t         _pid          = -1;
 
     fixed_module_functions = {
         { &available_module_functions, false },
@@ -609,10 +612,6 @@ main(int argc, char** argv)
             binary_rewrite = true;
             outfile        = p.get<string_t>("output");
         });
-    parser.add_argument({ "-p", "--pid" }, "Connect to running process")
-        .dtype("int")
-        .count(1)
-        .action([&_pid](parser_t& p) { _pid = p.get<int>("pid"); });
     parser
         .add_argument({ "-M", "--mode" },
                       "Instrumentation mode. 'trace' mode instruments the selected "
@@ -1275,25 +1274,31 @@ main(int argc, char** argv)
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
 
-        add_regex(func_include, tim::get_env<string_t>("ROCPROFSYS_REGEX_INCLUDE", ""));
-        add_regex(func_exclude, tim::get_env<string_t>("ROCPROFSYS_REGEX_EXCLUDE", ""));
-        add_regex(func_restrict, tim::get_env<string_t>("ROCPROFSYS_REGEX_RESTRICT", ""));
-        add_regex(caller_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_CALLER_INCLUDE"));
+        add_regex(func_include,
+                  rocprofsys::get_env<string_t>(rocprofsys::env_vars::REGEX_INCLUDE, ""));
+        add_regex(func_exclude,
+                  rocprofsys::get_env<string_t>(rocprofsys::env_vars::REGEX_EXCLUDE, ""));
+        add_regex(func_restrict, rocprofsys::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_RESTRICT, ""));
+        add_regex(caller_include, rocprofsys::get_env<string_t>(
+                                      rocprofsys::env_vars::REGEX_CALLER_INCLUDE));
         add_regex(func_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INTERNAL_INCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INTERNAL_INCLUDE, ""));
 
-        add_regex(file_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INCLUDE", ""));
-        add_regex(file_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_EXCLUDE", ""));
-        add_regex(file_restrict,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_RESTRICT", ""));
+        add_regex(file_include, rocprofsys::get_env<string_t>(
+                                    rocprofsys::env_vars::REGEX_MODULE_INCLUDE, ""));
+        add_regex(file_exclude, rocprofsys::get_env<string_t>(
+                                    rocprofsys::env_vars::REGEX_MODULE_EXCLUDE, ""));
+        add_regex(file_restrict, rocprofsys::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_MODULE_RESTRICT, ""));
         add_regex(file_internal_include,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_MODULE_INTERNAL_INCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_MODULE_INTERNAL_INCLUDE, ""));
 
         add_regex(instruction_exclude,
-                  tim::get_env<string_t>("ROCPROFSYS_REGEX_INSTRUCTION_EXCLUDE", ""));
+                  rocprofsys::get_env<string_t>(
+                      rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE, ""));
 
         //  Helper function for parsing the regex options
         auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
@@ -1404,29 +1409,28 @@ main(int argc, char** argv)
 
     //----------------------------------------------------------------------------------//
     //
-    //  Start the instrumentation procedure by opening a file for binary editing,
-    //  attaching to a running process, or starting a process
+    //  Start the instrumentation procedure by opening a file for binary editing
+    //  or starting a process
     //
     //----------------------------------------------------------------------------------//
 
     // prioritize the user environment arguments
-    auto instr_mode_v     = (binary_rewrite) ? InstrumentMode::BinaryRewrite
-                            : (_pid < 0)     ? InstrumentMode::ProcessCreate
-                                             : InstrumentMode::ProcessAttach;
+    auto instr_mode_v =
+        (binary_rewrite) ? InstrumentMode::BinaryRewrite : InstrumentMode::ProcessCreate;
     auto instr_mode_v_int = static_cast<int>(instr_mode_v);
     auto env_vars         = parser.get<strvec_t>("env");
     env_vars.reserve(env_vars.size() + env_config_variables.size());
     for(auto&& itr : env_config_variables)
         env_vars.emplace_back(itr);
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MODE", instr_mode));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MODE, instr_mode));
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INSTRUMENT_MODE", instr_mode_v_int));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_INIT", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_FINALIZE", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_CODE_COVERAGE",
+        TIMEMORY_JOIN('=', rocprofsys::env_vars::INSTRUMENT_MODE, instr_mode_v_int));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_INIT, "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::MPI_FINALIZE, "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_CODE_COVERAGE,
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
-                                              binary_rewrite, _pid, mutname);
+                                              binary_rewrite, mutname);
 
     // addr_space->allowTraps(instr_traps);
 
@@ -1632,10 +1636,6 @@ main(int argc, char** argv)
         app_binary = static_cast<BPatch_binaryEdit*>(addr_space);
     else
         app_thread = static_cast<BPatch_process*>(addr_space);
-
-    is_attached = (_pid >= 0 && app_thread != nullptr);
-
-    ROCPROFSYS_ADD_LOG_ENTRY("address space is attached:", is_attached);
 
     if(!app_binary && !app_thread)
     {
@@ -1980,15 +1980,9 @@ main(int argc, char** argv)
 
     if(main_func) main_sign.get();
 
-    // There is no need to use rocprofsys_push_trace_with_args here. This is only used
-    // for process attach (--pid). Even then, the source_object value will match the name
-    // of this binary, which is already the label of the root region pushed by
-    // rocprofsys_postinit (in dl.cpp), so attaching it as an argument here would be
-    // redundant
-    auto main_call_args = rocprofsys_call_expr(main_sign.get());
     auto init_call_args = rocprofsys_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = rocprofsys_call_expr();
-    auto umpi_call_args = rocprofsys_call_expr(use_mpi, is_attached);
+    auto umpi_call_args = rocprofsys_call_expr(use_mpi);
     auto none_call_args = rocprofsys_call_expr();
     auto set_instr_args = rocprofsys_call_expr(instr_mode_v_int);
 
@@ -1999,7 +1993,6 @@ main(int argc, char** argv)
     auto fini_call      = fini_call_args.get(fini_func);
     auto umpi_call      = umpi_call_args.get(mpi_func);
     auto set_instr_call = set_instr_args.get(set_instr_func);
-    auto main_beg_call  = main_call_args.get(entr_trace);
 
     verbprintf(2, "Done\n");
 
@@ -2023,17 +2016,18 @@ main(int argc, char** argv)
     }
     if(_libname.empty()) _libname = "librocprof-sys-dl.so";
 
-    if(!binary_rewrite && !is_attached) env_vars.clear();
+    if(!binary_rewrite) env_vars.clear();
 
     env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_INIT_ENABLED",
+        TIMEMORY_JOIN('=', rocprofsys::env_vars::INIT_ENABLED,
                       (user_start_func && user_stop_func) ? "OFF" : "ON"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_MPIP",
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_MPIP,
                                         (binary_rewrite && use_mpi) ? "ON" : "OFF"));
-    if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_PID", "ON"));
+    if(use_mpi)
+        env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::USE_PID, "ON"));
 
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "ROCPROFSYS_SCRIPT_PATH", _omni_internal_libexec_path));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', rocprofsys::env_vars::SCRIPT_PATH,
+                                        _omni_internal_libexec_path));
 
     for(auto& itr : env_vars)
     {
@@ -2045,7 +2039,7 @@ main(int argc, char** argv)
         }
         auto _var = itr.substr(0, _pos);
         auto _val = itr.substr(_pos + 1);
-        tim::set_env(_var, _val);
+        rocprofsys::set_env(_var.c_str(), _val, 0);
         auto _expr = rocprofsys_call_expr(_var, _val);
         env_variables.emplace_back(_expr.get(env_func));
     }
@@ -2082,8 +2076,6 @@ main(int argc, char** argv)
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
     if(!binary_rewrite && init_call) init_names.emplace_back(init_call.get());
-    if(is_attached && main_func && main_beg_call)
-        init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
         if(itr.second) fini_names.emplace_back(itr.second.get());
@@ -2148,7 +2140,6 @@ main(int argc, char** argv)
     auto _init_sequence = sequence_t{ init_names };
     auto _fini_sequence = sequence_t{ fini_names };
 
-    if(!is_attached)
     {
         auto _insert_init_callbacks = std::function<bool()>{};
         auto _insert_init_snippets  = std::function<bool()>{};
@@ -2563,7 +2554,7 @@ main(int argc, char** argv)
             code = app_thread->getExitCode();
         };
 
-        if(!app_thread->isTerminated() && !is_attached)
+        if(!app_thread->isTerminated())
         {
             pid_t cpid   = app_thread->getPid();
             int   status = 0;
@@ -2595,22 +2586,6 @@ main(int argc, char** argv)
                     WAITPID_DEBUG_MESSAGE(code = WIFCONTINUED(status));
                 }
             } while(WIFEXITED(status) == 0 && WIFSIGNALED(status) == 0);
-        }
-        else if(!app_thread->isTerminated() && is_attached)
-        {
-            bpatch->setDebugParsing(false);
-            bpatch->setDelayedParsing(true);
-            verbprintf(1, "Executing initial snippets...\n");
-            for(auto* itr : init_names)
-                app_thread->oneTimeCode(*itr);
-
-            app_thread->continueExecution();
-            while(!app_thread->isTerminated())
-            {
-                while(bpatch->waitForStatusChange())
-                    app_thread->continueExecution();
-            }
-            _compute_exit_code();
         }
         else
         {
@@ -2918,7 +2893,7 @@ find_dyn_api_rt()
 #endif
 
     auto _dyn_api_rt_env =
-        tim::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
+        rocprofsys::get_env<std::string>("DYNINSTAPI_RT_LIB", _dyn_api_rt_base + ".so");
     auto _dyn_api_rt_abs = get_absolute_lib_filepath(_dyn_api_rt_env);
 
     if(!exists(_dyn_api_rt_abs))
@@ -2927,14 +2902,15 @@ find_dyn_api_rt()
     if(exists(_dyn_api_rt_abs))
     {
         namespace join = ::timemory::join;
-        tim::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
-        tim::set_env<string_t>("DYNINST_REWRITER_PATHS",
-                               join::join(join::array_config{ ":", "", "" },
-                                          dirname(_dyn_api_rt_abs), lib_search_paths),
-                               1);
+        rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
+        rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
+                                      join::join(join::array_config{ ":", "", "" },
+                                                 dirname(_dyn_api_rt_abs),
+                                                 lib_search_paths),
+                                      1);
     }
 
-    auto _v = tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
+    auto _v = rocprofsys::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
     verbprintf(0, "DYNINST_API_RT: %s\n", (_v.empty()) ? "<unknown>" : _v.c_str());
 }
 }  // namespace
