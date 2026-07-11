@@ -680,4 +680,14 @@ TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
   EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
+TEST(DisasmCacheTest, HandlesNonMonotonicPcOrder) {
+  plugins::race_detector::DisasmCache cache;
+  cache.record(0x540024b100, "s_nop 0");
+  cache.record(0x100002a100, "s_endpgm");
+
+  auto disasm = cache.to_map();
+  EXPECT_EQ(disasm.at(0x540024b100), "s_nop 0");
+  EXPECT_EQ(disasm.at(0x100002a100), "s_endpgm");
+}
+
 } // namespace

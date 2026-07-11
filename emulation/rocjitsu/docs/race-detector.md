@@ -243,8 +243,8 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `hip_race_tests.hip` — end-to-end HIP kernel tests run under the emulator with
-  `RJ_RACE=1`.
+- `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
+  kernel tests run under the emulator with `RJ_RACE=1`.
 
 ```bash
 # Core detection tests
