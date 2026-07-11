@@ -25,7 +25,7 @@ on:
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
         # Last updated on 2026/07/10.
-        default: "ef0c135e0ed7e8a28f2e0fd1b4c5dcf58976e7b2"
+        default: "4691a2ce389ab9f721259c53bff502786c5a91b5"
         required: true
 
 concurrency:
@@ -104,7 +104,7 @@ jobs:
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           # Last updated on 2026/07/10.
-          ref: ef0c135e0ed7e8a28f2e0fd1b4c5dcf58976e7b2
+          ref: 4691a2ce389ab9f721259c53bff502786c5a91b5
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -246,7 +246,7 @@ jobs:
             if rocjitsu \
               --config "${rocjitsu_config_path}" \
               -- pytest \
-              tests/test_corpus.py -vv \
+              tests/test_corpus.py \
               "${common_pytest_args[@]}" \
               --timeout-failures-config "${timeout_failures_config}" \
               --non-timeout-failures-config "${non_timeout_failures_config}" \
