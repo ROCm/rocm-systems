@@ -698,23 +698,21 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   const int deviceId = hip::Stream::DeviceId(stream);
 
   const auto [hip_error, func] = [&]() -> std::pair<hipError_t, hipFunction_t> {
-    hipFunction_t f;
+    hipFunction_t f = nullptr;
     const hipError_t err = PlatformState::Instance().StatCO().GetFunc(&f, hostFunction, deviceId);
-    
-    // Propagate specific invalid code object errors
-    if (err == hipErrorInvalidKernelFile ||
-        err == hipErrorInvalidDeviceFunction ||
-        err == hipErrorInvalidImage) {
-      return {err, nullptr};
-    }
-    
+
     // If successful lookup with valid function, use it
     if (err == hipSuccess && f) {
       return {hipSuccess, f};
     }
-    
-    // Fallback: assume it's a hip function type
-    return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+
+    // Only take fallback for hipErrorInvalidSymbol (not in registered table)
+    if (err == hipErrorInvalidSymbol) {
+      return {hipSuccess, reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction))};
+    }
+
+    // Propagate all other errors
+    return {err != hipSuccess ? err : hipErrorInvalidDeviceFunction, nullptr};
   }();
 
   if (hip_error != hipSuccess) {
