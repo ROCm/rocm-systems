@@ -61,6 +61,7 @@ namespace AMD {
 /// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
 /// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
+ public:
   /// @brief BO handle information.
   struct BOHandle {
     /// Mapped address.
@@ -188,12 +189,6 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
  private:
-  /// @brief Destroys @p bo_handle.
-  ///
-  /// @note This function will unmap the virtual address and close the BO, even if the former fails.
-  ///
-  /// @param[in,out] bo_handle BO handle to destroy.
-  hsa_status_t DestroyBOHandle(BOHandle& bo_handle) const;
 
   /// @brief Queries the driver version and updates internal state.
   hsa_status_t QueryDriverVersion();
@@ -203,12 +198,6 @@ public:
 
   /// @brief Free device accessible heap space.
   hsa_status_t FreeDeviceHeap();
-
-  /// @brief Creates a command BO and returns it to @p bo_info.
-  ///
-  /// @param[in] size size of memory to allocate
-  /// @param[out] bo_info allocated BO
-  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info) const;
 
   /// @brief Virtual address range allocated for the device heap.
   ///
