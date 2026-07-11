@@ -492,6 +492,14 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
+  // CE AllReduce 
+  if (rcclUseCeAllReduce(comm, count, datatype, op) && comm->ceColl.ceARTmpBuf != NULL) {
+    if (count == 0) return ncclSuccess;
+    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d",
+         count, (int)datatype, (int)op, comm->rank, comm->nRanks);
+    return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+  }
+
   if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
