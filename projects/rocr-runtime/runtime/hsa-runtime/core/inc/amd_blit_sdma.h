@@ -169,15 +169,20 @@ class BlitSdmaBase : public core::Blit {
   /// decrements out_signal via fused WaitSignal packets; dep_signals[1..] are
   /// leading 64b polls.  Arms out_signal for chunk extras:
   /// AddRelaxed(total_chunks - num_entries).
+  ///
+  /// Entries are gathered directly from the caller's master @p dst_list /
+  /// @p src_list / @p size_list arrays via @p indices, avoiding per-engine
+  /// temporary copies at the call site.
+  /// @param indices  Master-list indices of the entries this engine handles.
   /// @param body_signal  When non-null (!platform_atomic_support_ classic path),
   ///   the body fences this signal to 0 on completion instead of atomic-
   ///   decrementing out_signal.  Caller allocates one per engine group.
   virtual hsa_status_t SubmitBodies(
       hsa_amd_memory_copy_op_type_t op,
-      const std::vector<void*>& dsts,
-      const std::vector<const void*>& srcs,
-      const std::vector<size_t>& sizes_a,
-      const std::vector<size_t>& sizes_b,
+      void* const* dst_list,
+      const void* const* src_list,
+      const size_t* size_list,
+      const std::vector<uint32_t>& indices,
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,
@@ -316,10 +321,10 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   hsa_status_t SubmitBodies(
       hsa_amd_memory_copy_op_type_t op,
-      const std::vector<void*>& dsts,
-      const std::vector<const void*>& srcs,
-      const std::vector<size_t>& sizes_a,
-      const std::vector<size_t>& sizes_b,
+      void* const* dst_list,
+      const void* const* src_list,
+      const size_t* size_list,
+      const std::vector<uint32_t>& indices,
       bool indirect_src, bool indirect_dst,
       const std::vector<core::Signal*>& dep_signals,
       core::Signal& out_signal,

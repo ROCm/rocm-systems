@@ -1289,18 +1289,17 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
 template <bool useGCR, bool scopeFields>
 hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     hsa_amd_memory_copy_op_type_t op,
-    const std::vector<void*>& dsts,
-    const std::vector<const void*>& srcs,
-    const std::vector<size_t>& sizes_a,
-    const std::vector<size_t>& sizes_b,
+    void* const* dst_list,
+    const void* const* src_list,
+    const size_t* size_list,
+    const std::vector<uint32_t>& indices,
     bool indirect_src, bool indirect_dst,
     const std::vector<core::Signal*>& dep_signals,
     core::Signal& out_signal,
     core::Signal* body_signal) {
 
-  const size_t num_entries = dsts.size();
-  if (num_entries == 0 || srcs.size() != num_entries || sizes_a.size() != num_entries)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const size_t num_entries = indices.size();
+  if (num_entries == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const bool is_swap = (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP);
   const bool is_indirect = (indirect_src || indirect_dst);
@@ -1314,8 +1313,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
   if (is_swap) {
     constexpr size_t kAlign = SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250::kAlignment_;
     for (size_t i = 0; i < num_entries; ++i) {
-      if ((reinterpret_cast<uintptr_t>(dsts[i]) & (kAlign - 1)) != 0 ||
-          (reinterpret_cast<uintptr_t>(srcs[i]) & (kAlign - 1)) != 0)
+      const uint32_t d = indices[i];
+      if ((reinterpret_cast<uintptr_t>(dst_list[d]) & (kAlign - 1)) != 0 ||
+          (reinterpret_cast<uintptr_t>(src_list[d]) & (kAlign - 1)) != 0)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -1333,9 +1333,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     uint32_t total_chunks = 0;
     uint64_t total_bytes = 0;
     for (size_t i = 0; i < num_entries; ++i) {
-      const size_t entry_size = is_swap
-          ? std::max(sizes_a[i], sizes_b[i])
-          : sizes_a[i];
+      const size_t entry_size = size_list[indices[i]];
       if (is_indirect && entry_size > max_copy_size)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       chunks[i] = is_indirect ? 1
@@ -1383,19 +1381,20 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     const uint32_t copy_start = wrapped_index;
 
     for (size_t i = 0; i < num_entries; ++i) {
+      const uint32_t d = indices[i];
       if (is_indirect) {
         BuildWaitSignalIndirectCopyCommand(command_addr,
-            dsts[i], srcs[i], sizes_a[i],
+            dst_list[d], src_list[d], size_list[d],
             indirect_src, indirect_dst,
             wait_sig, &out_signal);
       } else if (is_swap) {
         BuildWaitSignalSwapCommand(command_addr, chunks[i],
-            dsts[i], const_cast<void*>(srcs[i]),
-            sizes_a[i], sizes_b[i],
+            dst_list[d], const_cast<void*>(src_list[d]),
+            size_list[d], size_list[d],
             wait_sig, &out_signal);
       } else {
         BuildWaitSignalCopyCommand(command_addr, chunks[i],
-            dsts[i], srcs[i], sizes_a[i],
+            dst_list[d], src_list[d], size_list[d],
             wait_sig, &out_signal);
       }
       const uint32_t entry_bytes = chunks[i] * per_pkt_dws * sizeof(uint32_t);
@@ -1432,7 +1431,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     uint32_t total_copy_bytes = 0;
     uint64_t total_bytes = 0;
     for (size_t i = 0; i < num_entries; ++i) {
-      const size_t entry_size = sizes_a[i];
+      const size_t entry_size = size_list[indices[i]];
       chunks[i] = static_cast<uint32_t>((entry_size + classic_max - 1) / classic_max);
       total_copy_bytes += chunks[i] * per_pkt_dws * sizeof(uint32_t);
       total_bytes += entry_size;
@@ -1469,13 +1468,14 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
     // Copy packets (all entries, serialized).
     const uint32_t copy_start = wrapped_index;
     for (size_t i = 0; i < num_entries; ++i) {
+      const uint32_t d = indices[i];
       const uint32_t entry_copy_bytes = chunks[i] * per_pkt_dws * sizeof(uint32_t);
 
       if (is_swap) {
         BuildSwapCopyCommand(command_addr, chunks[i],
-                             dsts[i], const_cast<void*>(srcs[i]), sizes_a[i]);
+                             dst_list[d], const_cast<void*>(src_list[d]), size_list[d]);
       } else {
-        BuildCopyCommand(command_addr, chunks[i], dsts[i], srcs[i], sizes_a[i]);
+        BuildCopyCommand(command_addr, chunks[i], dst_list[d], src_list[d], size_list[d]);
       }
       command_addr += entry_copy_bytes;
       wrapped_index += entry_copy_bytes;

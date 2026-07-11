@@ -1660,26 +1660,13 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     for (const auto& grp : engine_groups) {
       if (grp.first == coord_idx) continue;
       const std::vector<uint32_t>& idxs = grp.second;
-      std::vector<void*> g_dsts;
-      std::vector<const void*> g_srcs;
-      std::vector<size_t> g_sizes_a, g_sizes_b;
-      g_dsts.reserve(idxs.size());
-      g_srcs.reserve(idxs.size());
-      g_sizes_a.reserve(idxs.size());
-      g_sizes_b.reserve(idxs.size());
-      for (uint32_t d : idxs) {
-        g_dsts.push_back(dst_list[d]);
-        g_srcs.push_back(src_list[d]);
-        g_sizes_a.push_back(size_list[d]);
-        g_sizes_b.push_back(size_list[d]);
-      }
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
                "SDMA FanOut(%s) Bodies: engine %02u, entries=%zu, "
                "completion_signal=0x%zx",
                op_name, grp.first, idxs.size(),
                core::Signal::Convert(&out_signal).handle);
       stat = engines[idxs[0]].blit->SubmitBodies(
-          op, g_dsts, g_srcs, g_sizes_a, g_sizes_b,
+          op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, out_signal, nullptr);
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
@@ -1732,19 +1719,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     size_t grp_idx = 0;
     for (const auto& grp : engine_groups) {
       const std::vector<uint32_t>& idxs = grp.second;
-      std::vector<void*> g_dsts;
-      std::vector<const void*> g_srcs;
-      std::vector<size_t> g_sizes_a, g_sizes_b;
-      g_dsts.reserve(idxs.size());
-      g_srcs.reserve(idxs.size());
-      g_sizes_a.reserve(idxs.size());
-      g_sizes_b.reserve(idxs.size());
-      for (uint32_t d : idxs) {
-        g_dsts.push_back(dst_list[d]);
-        g_srcs.push_back(src_list[d]);
-        g_sizes_a.push_back(size_list[d]);
-        g_sizes_b.push_back(size_list[d]);
-      }
       core::Signal* body_sig = use_body_signals ? body_signals_raw[grp_idx] : nullptr;
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
                "SDMA FanOut(%s) Bodies: engine %02u, entries=%zu, "
@@ -1753,7 +1727,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                core::Signal::Convert(&out_signal).handle,
                body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
-          op, g_dsts, g_srcs, g_sizes_a, g_sizes_b,
+          op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, out_signal, body_sig);
       if (stat != HSA_STATUS_SUCCESS) return stat;
       ++grp_idx;
