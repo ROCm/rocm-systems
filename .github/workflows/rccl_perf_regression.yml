@@ -59,6 +59,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect changed paths
+        id: paths
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -q '^projects/rccl/' \
+            && echo "rccl_changed=1" >> "$GITHUB_OUTPUT" \
+            || echo "rccl_changed=0" >> "$GITHUB_OUTPUT"
+
       - name: Build + run A/B detector (one sbatch allocation on pinned nodes)
         id: detect
         # Build of reference+candidate librccl and the detector run happen inside
@@ -66,7 +75,7 @@ jobs:
         # want to post the report below — the final "Gate" step enforces it.
         continue-on-error: true
         env:
-          BUILD_RCCL: ${{ github.event_name == 'pull_request' && '1' || inputs.build_rccl || '0' }}
+          BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
           BASE_REF: origin/${{ github.base_ref || 'develop' }}
           _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect.json' }}
