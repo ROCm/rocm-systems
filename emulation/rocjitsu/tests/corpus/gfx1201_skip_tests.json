@@ -31,7 +31,5 @@
     "cts.gfx1201.fpsan.fpsan_xlane_test"
   ],
   "kernels": [
-    "llama_mul_mat_vec_q::default",
-    "llama_rms_norm::default"
   ]
 }
