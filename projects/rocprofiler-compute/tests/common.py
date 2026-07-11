@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from threading import Thread
 from unittest.mock import Mock
 
 import pandas as pd
@@ -236,6 +237,59 @@ def get_num_pmc_file(output_dir):
 def strip_ansi(s: str) -> str:
     ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
     return ansi_escape.sub("", s)
+
+
+def run_subprocess(
+    command, capture_output=False, stream=False, text=True
+) -> subprocess.CompletedProcess:
+    """Run command and return a CompletedProcess.
+
+    capture_output: capture stdout and stderr onto the returned object.
+    stream: echo output line by line as the child produces it (requires
+        capture_output); otherwise captured output is printed once at the end.
+    text: decode output as text rather than bytes.
+    """
+    if not capture_output:
+        return subprocess.run(command, text=text)
+
+    if not stream:
+        # Capture everything, then echo it in one shot after the child exits.
+        process = subprocess.run(command, text=text, capture_output=True)
+        if process.stdout:
+            print(process.stdout, end="")
+        if process.stderr:
+            print(process.stderr, end="", file=sys.stderr)
+        return process
+
+    # Echo each line as it arrives while accumulating it for the return value.
+    def _tee(pipe, sink, out):
+        with pipe:
+            for line in pipe:
+                print(line, end="", file=sink)
+                out.append(line)
+
+    # Read each pipe on its own thread; reading serially can deadlock if one
+    # fills its buffer while we block on the other.
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        bufsize=1,
+    )
+    out_buf, err_buf = [], []
+    readers = [
+        Thread(target=_tee, args=(proc.stdout, sys.stdout, out_buf)),
+        Thread(target=_tee, args=(proc.stderr, sys.stderr, err_buf)),
+    ]
+    for r in readers:
+        r.start()
+    for r in readers:
+        r.join()
+    proc.wait()
+    return subprocess.CompletedProcess(
+        command, proc.returncode, "".join(out_buf), "".join(err_buf)
+    )
 
 
 def patch_console(monkeypatch, module, *names, **overrides):
