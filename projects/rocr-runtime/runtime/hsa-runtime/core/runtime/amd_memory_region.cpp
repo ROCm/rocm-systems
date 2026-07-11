@@ -141,11 +141,10 @@ namespace {
 // agent_memory_lock_.
 thread_local unsigned tls_agent_lock_depth = 0;
 
-// Deferred free: region pointer, address, and size.
+// Deferred free: region pointer and driver memory handle.
 struct DeferredFree {
   const MemoryRegion* region;
-  void* address;
-  size_t size;
+  core::DriverMemoryHandle handle;
 };
 
 // Per-thread queue of deferred frees, drained when outermost lock exits.
@@ -163,10 +162,10 @@ MemoryRegion::ScopedAgentMemoryLock::~ScopedAgentMemoryLock() {
   if (tls_agent_lock_depth == 0) DrainDeferredFrees();
 }
 
-bool MemoryRegion::DeferFreeIfLockHeld(void* address, size_t size) const {
+bool MemoryRegion::DeferFreeIfLockHeld(const core::DriverMemoryHandle& handle) const {
   if (tls_agent_lock_depth == 0) return false;
   // Thread already holds the lock; defer to avoid re-entrant deadlock.
-  tls_deferred_frees.push_back(DeferredFree{this, address, size});
+  tls_deferred_frees.push_back(DeferredFree{this, handle});
   return true;
 }
 
@@ -183,29 +182,34 @@ void MemoryRegion::DrainDeferredFrees() {
     MAKE_SCOPE_GUARD([&]() { --tls_agent_lock_depth; });
 
     try {
-      hsa_status_t status = item.region->FreeImpl(item.address, item.size);
+      hsa_status_t status = item.region->FreeImpl(item.handle);
       if (status != HSA_STATUS_SUCCESS) {
-        fprintf(stderr, "ROCR: Deferred free failed: %p size=%zu status=%d\n", item.address,
-                item.size, static_cast<int>(status));
+        fprintf(stderr, "ROCR: Deferred free failed: handle=0x%llx size=%zu status=%d\n",
+                static_cast<unsigned long long>(item.handle.handle), item.handle.size,
+                static_cast<int>(status));
       }
     } catch (...) {
-      fprintf(stderr, "ROCR: Deferred free threw: %p size=%zu\n", item.address, item.size);
+      fprintf(stderr, "ROCR: Deferred free threw: handle=0x%llx size=%zu\n",
+              static_cast<unsigned long long>(item.handle.handle), item.handle.size);
     }
   }
 }
 #endif  // SANITIZER_AMDGPU
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem,
+                                    uint32_t agent_node_id,
+                                    core::DriverMemoryHandle* handle) const {
 #if defined(SANITIZER_AMDGPU)
   ScopedAgentMemoryLock lock(owner()->agent_memory_lock_);
 #else
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
 #endif
-  return AllocateImpl(size, alloc_flags, mem, agent_node_id);
+  return AllocateImpl(size, alloc_flags, mem, agent_node_id, handle);
 }
 
-hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
-                                        void** mem, int agent_node_id) const {
+hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** mem,
+                                        uint32_t agent_node_id,
+                                        core::DriverMemoryHandle* handle) const {
   if (mem == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -226,24 +230,27 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id, handle);
 }
 
-hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
+hsa_status_t MemoryRegion::Free(const core::DriverMemoryHandle& handle) const {
 #if defined(SANITIZER_AMDGPU)
   // If re-entrant (under ASAN), defer; otherwise take lock and free normally.
-  if (DeferFreeIfLockHeld(address, size)) return HSA_STATUS_SUCCESS;
+  if (DeferFreeIfLockHeld(handle)) return HSA_STATUS_SUCCESS;
   ScopedAgentMemoryLock lock(owner()->agent_memory_lock_);
 #else
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
 #endif
-  return FreeImpl(address, size);
+  return FreeImpl(handle);
 }
 
-hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
-  if (fragment_allocator_.free(address)) return HSA_STATUS_SUCCESS;
+hsa_status_t MemoryRegion::FreeImpl(const core::DriverMemoryHandle& handle) const {
+  // The fragment allocator (KFD/virtio only) keys on the allocation's virtual
+  // address, which is the driver handle word for those backends. Other drivers, e.g., XDNA, do not
+  // use the fragment allocator.
+  if (fragment_allocator_.free(reinterpret_cast<void*>(handle.handle))) return HSA_STATUS_SUCCESS;
 
-  return owner()->driver().FreeMemory(address, size);
+  return owner()->driver().FreeMemory(handle);
 }
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
@@ -720,8 +727,12 @@ void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated
   void* ret;
   size_t bsize = AlignUp(request_size, block_size());
 
+  // The block's driver identity is reconstructed from base address and length
+  // on free (see BlockAllocator::free), so the handle is not retained here.
+  core::DriverMemoryHandle handle{};
   hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, 0);
+      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, 0,
+      &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
   assert(ret != nullptr && "Region returned nullptr on success.");

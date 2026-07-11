@@ -82,9 +82,10 @@ class MemoryRegion : public core::MemoryRegion {
 
   ~MemoryRegion();
 
-  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id = 0) const;
+  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address,
+                        uint32_t agent_node_id, core::DriverMemoryHandle* handle) const override;
 
-  hsa_status_t Free(void* address, size_t size) const;
+  hsa_status_t Free(const core::DriverMemoryHandle& handle) const override;
 
   hsa_status_t IPCFragmentExport(void* address) const;
 
@@ -196,10 +197,11 @@ private:
                                              const core::Runtime::LinkInfo& link_info) const;
 
   // Operational body for Allocate.  Recursive.
-  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const;
+  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address,
+                            uint32_t agent_node_id, core::DriverMemoryHandle* handle) const;
 
   // Operational body for Free.  Recursive.
-  hsa_status_t FreeImpl(void* address, size_t size) const;
+  hsa_status_t FreeImpl(const core::DriverMemoryHandle& handle) const;
 
 #if defined(SANITIZER_AMDGPU)
   // ASAN re-entrancy guard: avoid deadlock when ASAN quarantine evicts a GPU
@@ -217,7 +219,7 @@ private:
 
   // Queue free if an agent_memory_lock_ is already held by this thread; returns
   // true if the free was deferred, false if the caller should free normally.
-  bool DeferFreeIfLockHeld(void* address, size_t size) const;
+  bool DeferFreeIfLockHeld(const core::DriverMemoryHandle& handle) const;
 
   // Drain queued frees after the outermost lock release.
   static void DrainDeferredFrees();
@@ -230,7 +232,14 @@ private:
    public:
     explicit BlockAllocator(MemoryRegion& region) : region_(region) {}
     void* alloc(size_t request_size, size_t& allocated_size) const;
-    void free(void* ptr, size_t length) const { region_.FreeImpl(ptr, length); }
+    void free(void* ptr, size_t length) const {
+      // Fragment blocks are KFD/virtio-only; for those backends the driver handle
+      // word is the block's virtual address, which routes the fragment-allocator probe.
+      core::DriverMemoryHandle handle{};
+      handle.handle = reinterpret_cast<uint64_t>(ptr);
+      handle.size = length;
+      region_.FreeImpl(handle);
+    }
     size_t block_size() const { return block_size_; }
   };
 
