@@ -59,6 +59,7 @@
 #include <unistd.h>
 
 #include "inc/hsa_ext_amd_aie.h"
+#include "core/inc/amd_aie_section.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
@@ -1129,29 +1130,42 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     const auto pkt_idx = (first_pkt_idx + i) & mask;
     auto* pkt = queue + pkt_idx;
 
-    // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
-    // context will be reconfigured.
-    void* pdi_base = nullptr;
-    size_t pdi_size = 0;
-    uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
-    hsa_status_t err = ResolveBOHandle(pkt->pdi_addr, agent, &pdi_handle, &pdi_base, &pdi_size);
-    if (err != HSA_STATUS_SUCCESS) {
-      return err;
+    // The packet carries an opaque handle to a host-owned kernel descriptor.
+    const auto* desc = reinterpret_cast<const AieKernelDescriptor*>(
+        Concat<uint64_t>(pkt->kernel_object_high, pkt->kernel_object_low));
+    if (!desc) {
+      assert(false && "Null kernel descriptor in command packet.");
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    auto cached_pdi_index = kmq_metadata->pdi_cache.GetIndex(pdi_handle);
-    if (cached_pdi_index == PDICache::NotFound) {
-      FlushCpuCache(pdi_base, 0, pdi_size);
-      err = kmq_metadata->pdi_cache.SetNext(pdi_handle, cached_pdi_index);
+
+    // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
+    // context will be reconfigured. A descriptor with no PDI (pdi_dev_addr == 0) uses CU index 0.
+    hsa_status_t err = HSA_STATUS_SUCCESS;
+    int cached_pdi_index = 0;
+    if (desc->pdi_dev_addr != 0) {
+      void* pdi_base = nullptr;
+      size_t pdi_size = 0;
+      uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
+      err = ResolveBOHandle(reinterpret_cast<void*>(desc->pdi_dev_addr), agent, &pdi_handle,
+                            &pdi_base, &pdi_size);
       if (err != HSA_STATUS_SUCCESS) {
-        assert(false && "Failed to set PDI in cache.");
         return err;
       }
-      reconfigure_queue = true;
+      auto idx = kmq_metadata->pdi_cache.GetIndex(pdi_handle);
+      if (idx == PDICache::NotFound) {
+        FlushCpuCache(pdi_base, 0, pdi_size);
+        err = kmq_metadata->pdi_cache.SetNext(pdi_handle, idx);
+        if (err != HSA_STATUS_SUCCESS) {
+          assert(false && "Failed to set PDI in cache.");
+          return err;
+        }
+        reconfigure_queue = true;
+      }
+      cached_pdi_index = static_cast<int>(idx);
     }
 
     // Add the instruction sequence BO handle to bo_handles and flush cache.
-    void* insts_addr =
-        reinterpret_cast<void*>(Concat<uint64_t>(pkt->insts_addr_high, pkt->insts_addr_low));
+    void* insts_addr = reinterpret_cast<void*>(desc->insts_dev_addr);
     uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
     err = ResolveBOHandle(insts_addr, agent, &instr_handle, nullptr, nullptr);
     if (err != HSA_STATUS_SUCCESS) {
@@ -1159,7 +1173,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
       return err;
     }
     bo_handles.push_back(instr_handle);
-    FlushCpuCache(insts_addr, 0, pkt->insts_size);
+    FlushCpuCache(insts_addr, 0, desc->insts_size);
 
     // Add the argument BO handles to bo_handles.
     auto* kernarg_address = static_cast<uint64_t*>(pkt->kernarg_address);
@@ -1204,7 +1218,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
                     (reinterpret_cast<uintptr_t>(insts_addr) &
                      DEV_ADDR_OFFSET_MASK));              // instruction sequence address (lo)
     cmd->data[4] = 0x0;                                   // instruction sequence address (hi)
-    cmd->data[5] = (pkt->insts_size / sizeof(uint32_t));  // instruction sequence dword count
+    cmd->data[5] = (desc->insts_size / sizeof(uint32_t));  // instruction sequence dword count
     for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
       const auto kernarg = kernarg_address[kernarg_idx];
       cmd->data[6 + 2 * kernarg_idx] = (kernarg & 0xFFFFFFFF);  // argument address (lo)
