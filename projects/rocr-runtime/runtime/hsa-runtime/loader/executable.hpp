@@ -61,6 +61,7 @@
 #include "inc/hsa_ext_image.h"
 #include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/amd_hsa_code.hpp"
+#include "core/inc/amd_aie_section.h"
 #include "inc/amd_hsa_kernel_code.h"
 #include "amd_hsa_locks.hpp"
 
@@ -308,31 +309,24 @@ private:
 
 /// @brief Kernel symbol for AIE/NPU code objects.
 ///
-/// Provides instruction buffer address and size needed for NPU kernel dispatch.
+/// The kernel_object handle exposed via HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
+/// is a pointer to a host-owned AieKernelDescriptor (see amd_aie_section.h).
 class AieKernelSymbol final : public SymbolImpl {
  public:
-  AieKernelSymbol(const std::string& _symbol_name, uint64_t _instr_address, uint32_t _instr_size,
-                  uint32_t _kernarg_size,
+  AieKernelSymbol(const std::string& _symbol_name, uint64_t _descriptor_ptr, uint32_t _kernarg_size,
                   uint32_t _num_cols = 1)
       : SymbolImpl(true,  // is_loaded
                    HSA_SYMBOL_KIND_KERNEL,
                    "",  // module_name
                    _symbol_name, HSA_SYMBOL_LINKAGE_PROGRAM,
                    true,  // is_definition
-                   _instr_address),
+                   _descriptor_ptr),
         full_name(_symbol_name),
-        instr_address(_instr_address),
-        instr_size(_instr_size),
+        descriptor_ptr(_descriptor_ptr),
         kernarg_size(_kernarg_size),
         num_cols(_num_cols) {}
 
   bool GetInfo(hsa_symbol_info32_t symbol_info, void* value);
-
-  /// @brief Gets the device address of the instruction buffer.
-  uint64_t GetInstructionAddress() const { return instr_address; }
-
-  /// @brief Gets the size of the instruction buffer in bytes.
-  uint32_t GetInstructionSize() const { return instr_size; }
 
   /// @brief Gets the size of the kernel argument buffer.
   uint32_t GetKernargSize() const { return kernarg_size; }
@@ -341,8 +335,7 @@ class AieKernelSymbol final : public SymbolImpl {
   uint32_t GetNumCols() const { return num_cols; }
 
   std::string full_name;
-  uint64_t instr_address;
-  uint32_t instr_size;
+  uint64_t descriptor_ptr;
   uint32_t kernarg_size;
   uint32_t num_cols;
 };
@@ -462,32 +455,19 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
 
   const void* elf_data;
   const size_t elf_size;
-  void* instr_buffer;       // Host address of instruction buffer
-  uint64_t instr_dev_addr;  // Device address of instruction buffer
-  size_t instr_size;        // Size of instruction buffer
 
  public:
   AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
-                          size_t elf_size_, void* instr_buffer_, uint64_t instr_dev_addr_,
-                          size_t instr_size_)
-      : ExecutableObject(owner_, agent_),
-        elf_data(elf_data_),
-        elf_size(elf_size_),
-        instr_buffer(instr_buffer_),
-        instr_dev_addr(instr_dev_addr_),
-        instr_size(instr_size_) {}
+                          size_t elf_size_)
+      : ExecutableObject(owner_, agent_), elf_data(elf_data_), elf_size(elf_size_) {}
 
   const void* ElfData() const { return elf_data; }
   size_t ElfSize() const { return elf_size; }
 
-  /// @brief Gets the device address of the instruction buffer.
-  uint64_t GetInstructionDeviceAddress() const { return instr_dev_addr; }
-
-  /// @brief Gets the host address of the instruction buffer.
-  void* GetInstructionHostAddress() const { return instr_buffer; }
-
-  /// @brief Gets the size of the instruction buffer.
-  size_t GetInstructionSize() const { return instr_size; }
+  // Host-owned kernel descriptors; the kernel_object handles point at these.
+  std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
+  // Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
+  std::vector<std::pair<void*, size_t>> device_buffers;
 
   bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;
 
@@ -497,7 +477,7 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
 
   void Print(std::ostream& out) override;
 
-  void Destroy() override {}
+  void Destroy() override;
 
   hsa_agent_t getAgent() const override;
   hsa_executable_t getExecutable() const override;

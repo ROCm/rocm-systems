@@ -38,6 +38,21 @@ struct aie_kernel_entry {
   uint32_t reserved[4];   // must be 0
 };
 
+// Internal, host-side kernel descriptor. The kernel_object handle is a pointer
+// to one of these. Owned by the loaded code object; freed at executable destroy.
+struct AieKernelDescriptor {
+  uint32_t version;         // reserved for a future on-device format; set to 1
+  uint32_t reserved0;       // must be 0
+  uint64_t insts_dev_addr;  // device address of instruction blob (an XDNA BO)
+  uint64_t insts_size;
+  uint64_t pdi_dev_addr;    // device address of PDI blob (an XDNA BO), or 0
+  uint64_t pdi_size;        // 0 if no PDI
+  uint32_t kernarg_size;
+  uint32_t num_cols;
+};
+
+constexpr uint32_t kAieKernelDescriptorVersion = 1;
+
 }  // namespace AMD
 }  // namespace rocr
 

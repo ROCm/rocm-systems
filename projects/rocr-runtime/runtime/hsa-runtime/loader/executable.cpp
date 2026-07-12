@@ -59,6 +59,8 @@
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
 #include "core/inc/amd_aie_code.hpp"
+#include "core/inc/amd_aie_agent.h"
+#include "core/inc/amd_aie_section.h"
 #include "core/inc/amd_hsa_code.hpp"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
@@ -731,7 +733,7 @@ bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
       memcpy(value, full_name.c_str(), full_name.size() + 1);
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
-      *static_cast<uint64_t*>(value) = instr_address;
+      *static_cast<uint64_t*>(value) = descriptor_ptr;
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
       *static_cast<uint32_t*>(value) = kernarg_size;
@@ -828,8 +830,16 @@ hsa_status_t AieLoadedCodeObjectImpl::IterateLoadedSegments(
 void AieLoadedCodeObjectImpl::Print(std::ostream& out) {
   out << "AIE Loaded Code Object:" << std::endl;
   out << "  ELF Size: " << elf_size << std::endl;
-  out << "  Instruction Buffer Size: " << instr_size << std::endl;
-  out << "  Instruction Device Address: 0x" << std::hex << instr_dev_addr << std::dec << std::endl;
+  out << "  Kernels: " << descriptors.size() << std::endl;
+  out << "  Device Buffers: " << device_buffers.size() << std::endl;
+}
+
+void AieLoadedCodeObjectImpl::Destroy() {
+  for (auto& b : device_buffers) {
+    owner->context()->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, b.first, b.second);
+  }
+  device_buffers.clear();
+  descriptors.clear();
 }
 
 hsa_agent_t AieLoadedCodeObjectImpl::getAgent() const { return agent; }
@@ -846,9 +856,9 @@ uint64_t AieLoadedCodeObjectImpl::getElfSize() const { return elf_size; }
 
 uint64_t AieLoadedCodeObjectImpl::getStorageOffset() const { return 0; }
 
-uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return instr_dev_addr; }
+uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return 0; }
 
-uint64_t AieLoadedCodeObjectImpl::getLoadSize() const { return instr_size; }
+uint64_t AieLoadedCodeObjectImpl::getLoadSize() const { return 0; }
 
 int64_t AieLoadedCodeObjectImpl::getDelta() const { return 0; }
 
@@ -1582,69 +1592,88 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
                                                const std::string& uri,
                                                hsa_loaded_code_object_t* loaded_code_object) {
-  // Parse the AIE code object.
   auto aie_code = AMD::AieCode::Create(data, size);
   if (!aie_code) {
     logger_ << "LoaderError: failed to parse AIE code object\n";
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  // Allocate and copy instruction buffer to device memory.
-  void* instr_buffer = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent,
-                                              aie_code->GetInstructionSize(), 64, false);
-  if (!instr_buffer) {
-    logger_ << "LoaderError: failed to allocate instruction buffer\n";
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  // Arch-vs-agent validation: the section name must match one the agent accepts.
+  auto* aie_agent = static_cast<AMD::AieAgent*>(core::Agent::Convert(agent));
+  const auto& arches = aie_agent->supported_arch_names();
+  if (std::find(arches.begin(), arches.end(), aie_code->GetArchSectionName()) == arches.end()) {
+    logger_ << "LoaderError: code object arch does not match agent\n";
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   }
 
-  // Copy instruction data.
-  if (!context_->SegmentCopy(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer, 0,
-                             aie_code->GetInstructionData(), aie_code->GetInstructionSize())) {
-    context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer,
-                          aie_code->GetInstructionSize());
-    logger_ << "LoaderError: failed to copy instruction data\n";
-    return HSA_STATUS_ERROR;
+  auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(this, agent, data, size);
+
+  // Copy each unique blob to device memory once, keyed on (host source, size).
+  std::map<std::pair<const uint8_t*, uint64_t>, uint64_t> blob_dev_addr;
+  auto place_blob = [&](const uint8_t* src, uint64_t len, uint64_t* out_dev) -> hsa_status_t {
+    if (len == 0) {
+      *out_dev = 0;
+      return HSA_STATUS_SUCCESS;
+    }
+    auto key = std::make_pair(src, len);
+    auto it = blob_dev_addr.find(key);
+    if (it != blob_dev_addr.end()) {
+      *out_dev = it->second;
+      return HSA_STATUS_SUCCESS;
+    }
+    void* buf = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, 64, false);
+    if (!buf) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    if (!context_->SegmentCopy(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0, src, len)) {
+      context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+      return HSA_STATUS_ERROR;
+    }
+    context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
+    void* dev = context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0);
+    loaded_obj->device_buffers.emplace_back(buf, len);
+    uint64_t dev_addr = reinterpret_cast<uint64_t>(dev);
+    blob_dev_addr[key] = dev_addr;
+    *out_dev = dev_addr;
+    return HSA_STATUS_SUCCESS;
+  };
+
+  // Reject duplicate (name, agent) before allocating anything.
+  for (const auto& kernel_name : aie_code->GetKernelNames()) {
+    if (agent_symbols_.count(std::make_pair(kernel_name, agent))) {
+      logger_ << "LoaderError: kernel already defined: " << kernel_name << "\n";
+      return HSA_STATUS_ERROR_VARIABLE_ALREADY_DEFINED;
+    }
   }
 
-  // Freeze the segment to ensure data is visible to device.
-  context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer,
-                          aie_code->GetInstructionSize());
+  for (const auto& kernel_name : aie_code->GetKernelNames()) {
+    const auto* ki = aie_code->GetKernel(kernel_name);
+    uint64_t insts_dev = 0, pdi_dev = 0;
+    if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS)
+      return s;
+    if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS)
+      return s;
 
-  // Get the device address using SegmentAddress.
-  // SegmentAddress returns the device-visible address for the segment.
-  void* dev_addr_ptr =
-      context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer, 0);
-  uint64_t instr_dev_addr = reinterpret_cast<uint64_t>(dev_addr_ptr);
+    auto desc = std::make_unique<AMD::AieKernelDescriptor>();
+    desc->version = AMD::kAieKernelDescriptorVersion;
+    desc->reserved0 = 0;
+    desc->insts_dev_addr = insts_dev;
+    desc->insts_size = ki->insts_size;
+    desc->pdi_dev_addr = pdi_dev;
+    desc->pdi_size = ki->pdi_size;
+    desc->kernarg_size = ki->kernarg_size;
+    desc->num_cols = ki->num_cols;
+    uint64_t desc_ptr = reinterpret_cast<uint64_t>(desc.get());
+    loaded_obj->descriptors.push_back(std::move(desc));
 
-  // Create the loaded code object.
-  auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(
-      this, agent, data, size, instr_buffer, instr_dev_addr, aie_code->GetInstructionSize());
+    auto kernel_sym =
+        std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size, ki->num_cols);
+    kernel_sym->agent = agent;
+    agent_symbols_[std::make_pair(kernel_name, agent)] = kernel_sym;
+  }
 
   objects.push_back(loaded_obj);
-
-  // Create kernel symbols for each kernel in the code object.
-  for (const auto& kernel_name : aie_code->GetKernelNames()) {
-    const auto* kernel_info = aie_code->GetKernel(kernel_name);
-    if (!kernel_info) continue;
-
-    // Calculate the device address for this kernel's instructions.
-    uint64_t kernel_instr_addr = instr_dev_addr + kernel_info->instr_offset;
-
-    auto kernel_sym = std::make_shared<AieKernelSymbol>(
-        kernel_name, kernel_instr_addr, static_cast<uint32_t>(kernel_info->instr_size),
-        kernel_info->kernarg_size, kernel_info->num_cols);
-
-    kernel_sym->agent = agent;
-
-    // Add to agent symbols map.
-    AgentSymbol agent_sym = std::make_pair(kernel_name, agent);
-    agent_symbols_[agent_sym] = kernel_sym;
-  }
-
   if (loaded_code_object) {
     *loaded_code_object = LoadedCodeObject::Handle(loaded_obj.get());
   }
-
   return HSA_STATUS_SUCCESS;
 }
 
