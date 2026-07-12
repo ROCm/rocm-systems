@@ -50,8 +50,6 @@
 #include <string>
 #include <vector>
 
-#include "core/inc/amd_aie_section.h"
-
 namespace rocr {
 namespace amd { namespace elf { class Image; } }
 namespace AMD {

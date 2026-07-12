@@ -124,8 +124,9 @@ bool AieCode::Parse() {
     if (e->insts_size == 0) return false;
     if (!in_section(e->insts_offset, e->insts_size)) return false;
     if (e->pdi_size != 0 && !in_section(e->pdi_offset, e->pdi_size)) return false;
+    if (e->pdi_size == 0 && e->pdi_offset != 0) return false;  // PDI absent iff both are 0
 
-    const uint64_t name_abs = hdr->string_table_offset + e->name_offset;
+    const uint64_t name_abs = static_cast<uint64_t>(hdr->string_table_offset) + e->name_offset;
     if (name_abs >= section_size_) return false;
     const char* nm = reinterpret_cast<const char*>(section_base_ + name_abs);
     const uint64_t max_len = section_size_ - name_abs;
