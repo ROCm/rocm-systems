@@ -1905,6 +1905,32 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 }
 
 // ================================================================================================
+bool Device::isExternalDeviceCompatible(uint flags, void* const gfxDevice[], void* gfxContext) {
+  bool success = true;
+
+#ifdef _WIN32
+  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
+    void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
+    success &= D3D10Interop::canInteropD3D10Device(
+        this, static_cast<ID3D10Device*>(d3d10Device), false);
+  }
+
+  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
+    void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
+    success &= D3D11Interop::canInteropD3D11Device(
+        this, static_cast<ID3D11Device*>(d3d11Device), false);
+  }
+#endif  // _WIN32
+
+  if (flags & amd::Context::Flags::GLDeviceKhr) {
+    void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    success &= GlInterop::glCanInterop(this, flags, gfxContext, glDevice);
+  }
+
+  return success;
+}
+
+// ================================================================================================
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext) {
   bool success = true;
 

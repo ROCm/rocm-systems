@@ -103,7 +103,10 @@ bool initGLInteropPrivateExt(void* GLdeviceContext) {
 }
 
 // ================================================================================================
-bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
+bool glCanInterop(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
+  static_cast<void>(flags); // unused
+  if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
+
   bool canInteroperate = false;
 
   LUID glAdapterLuid = {0, 0};
@@ -123,11 +126,7 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
 
 // ================================================================================================
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
-  static_cast<void>(flags); // unused
-
-  if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
-
-  if (!glCanInterop(device, GLplatformContext, GLdeviceContext)) {
+  if (!glCanInterop(device, flags, GLplatformContext, GLdeviceContext)) {
     return false;
   }
 

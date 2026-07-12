@@ -84,7 +84,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromDX9MediaAdapterKHR,
           external_device[devIdx] = d3d9_device[j];
 
           if (is_valid(device) && (media_adapters_type[j] == CL_ADAPTER_D3D9EX_KHR) &&
-              as_amd(device)->bindExternalDevice(context_flag, external_device, NULL)) {
+              as_amd(device)->isExternalDeviceCompatible(context_flag, external_device, NULL)) {
             compatible_devices.push_back(as_amd(device));
           }
         }

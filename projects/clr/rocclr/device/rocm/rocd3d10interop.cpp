@@ -25,20 +25,24 @@ namespace D3D10Interop {
 static std::unordered_map<const Device*, CachedExt> gExtCache;
 static std::mutex gExtCacheLock;
 
-bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
+bool canInteropD3D10Device(const Device* device, ID3D10Device* pd3d10Device, bool logFailures) {
   if (!device || !pd3d10Device) {
     return false;
   }
 
   if (!device->hasValidLUID()) {
-    LogError("ROCr device does not have valid LUID for D3D10 interop");
+    if (logFailures) {
+      LogError("ROCr device does not have valid LUID for D3D10 interop");
+    }
     return false;
   }
 
   IDXGIDevice* pDXGIDevice = nullptr;
   HRESULT hr = pd3d10Device->QueryInterface(__uuidof(IDXGIDevice), (void**)&pDXGIDevice);
   if (FAILED(hr) || !pDXGIDevice) {
-    LogError("Failed to query IDXGIDevice from D3D10 device");
+    if (logFailures) {
+      LogError("Failed to query IDXGIDevice from D3D10 device");
+    }
     return false;
   }
 
@@ -46,7 +50,9 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
   hr = pDXGIDevice->GetAdapter(&pDXGIAdapter);
   pDXGIDevice->Release();
   if (FAILED(hr) || !pDXGIAdapter) {
-    LogError("Failed to get DXGI adapter from D3D10 device");
+    if (logFailures) {
+      LogError("Failed to get DXGI adapter from D3D10 device");
+    }
     return false;
   }
 
@@ -59,7 +65,17 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
       (device->getDeviceLUID().LowPart == adapterDesc.AdapterLuid.LowPart);
 
   if (!canInteroperate) {
-    LogError("D3D10 device and ROCr device cannot interoperate (LUID mismatch)");
+    if (logFailures) {
+      LogError("D3D10 device and ROCr device cannot interoperate (LUID mismatch)");
+    }
+    return false;
+  }
+
+  return true;
+}
+
+bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
+  if (!canInteropD3D10Device(device, pd3d10Device)) {
     return false;
   }
 
@@ -83,7 +99,7 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device) {
   }
 
   IAmdDxExt* pExt = nullptr;
-  hr = AmdDxExtCreate(pd3d10Device, &pExt);
+  HRESULT hr = AmdDxExtCreate(pd3d10Device, &pExt);
   if (FAILED(hr) || !pExt) {
     return true;
   }

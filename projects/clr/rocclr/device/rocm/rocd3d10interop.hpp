@@ -26,9 +26,23 @@ class Memory;
 namespace D3D10Interop {
 
 /**
- * @brief Validate D3D10 device matches ROCr GPU device
+ * @brief Check whether D3D10 device matches ROCr GPU device without changing state
  *
- * Performs validation: LUID matching via DXGI adapter
+ * @param device ROCr device to validate against
+ * @param d3d10Device D3D10 device to validate
+ * @param logFailures true to log validation failures
+ * @return true if devices can interoperate, false otherwise
+ */
+bool canInteropD3D10Device(
+    const Device* device,
+    ID3D10Device* d3d10Device,
+    bool logFailures = true
+);
+
+/**
+ * @brief Associate D3D10 device with ROCr GPU device
+ *
+ * Performs validation and caches DXX extension state for resource interop.
  *
  * @param device ROCr device to validate against
  * @param d3d10Device D3D10 device to associate

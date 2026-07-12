@@ -859,7 +859,7 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
         for (cl_uint i = 0; i < num_gpu_devices; ++i) {
           cl_device_id device = gpu_devices[i];
           if (is_valid(device) &&
-              as_amd(device)->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_)) {
+              as_amd(device)->isExternalDeviceCompatible(info.flags_, info.hDev_, info.hCtx_)) {
             return amd::clGetInfo(device, param_value_size, param_value, param_value_size_ret);
           }
         }
@@ -885,7 +885,7 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
       for (cl_uint i = 0; i < total_devices; ++i) {
         cl_device_id device = devices[i];
         if (is_valid(device) &&
-            as_amd(device)->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_)) {
+            as_amd(device)->isExternalDeviceCompatible(info.flags_, info.hDev_, info.hCtx_)) {
           compatible_devices.push_back(as_amd(device));
         }
       }

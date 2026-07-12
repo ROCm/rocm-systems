@@ -282,6 +282,11 @@ class NullDevice : public amd::Device {
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
+  bool isExternalDeviceCompatible(uint flags, void* const pDevice[], void* pContext) override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext) override {
     ShouldNotReachHere();
     return false;
@@ -421,6 +426,9 @@ class Device : public NullDevice {
 
   virtual device::Signal* createSignal() const override;
   virtual device::Signal* createIpcSignal() const override;
+
+  //! Check external graphics API compatibility without performing a bind.
+  virtual bool isExternalDeviceCompatible(uint flags, void* const pDevice[], void* pContext) override;
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device

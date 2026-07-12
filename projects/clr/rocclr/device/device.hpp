@@ -1873,6 +1873,13 @@ class Device : public RuntimeObject {
   ///! Allocates an IPC-capable signal, or returns nullptr if unsupported
   virtual device::Signal* createIpcSignal() const { return nullptr; }
 
+  //! Return true if the external API device/context can interoperate without performing a bind.
+  virtual bool isExternalDeviceCompatible(
+      uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
+      void* const pDevice[],  //!< D3D device do D3D, HDC/Display handle of X Window for GL
+      void* pContext          //!< HGLRC/GLXContext handle
+      ) = 0;
+
   //! Return true if initialized external API interop, otherwise false
   virtual bool bindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.

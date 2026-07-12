@@ -281,7 +281,8 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
 
   for (unsigned int i = 0; i < hipDeviceCount; ++i) {
     const std::vector<amd::Device*>& devices = g_devices[i]->devices();
-    if (!devices.empty() && devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_)) {
+    if (!devices.empty() &&
+        devices[0]->isExternalDeviceCompatible(info.flags_, info.hDev_, info.hCtx_)) {
       pHipDevices[foundDeviceCount++] = i;
       if (findOnlyFirst) {
         break;

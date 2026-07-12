@@ -1876,6 +1876,46 @@ device::Memory* Device::createView(amd::Memory& owner, const device::Memory& par
   return gpuImage;
 }
 
+//! Check external graphics API compatibility without performing a bind.
+bool Device::isExternalDeviceCompatible(uint flags, void* const pDevice[], void* pContext) {
+  assert(pDevice);
+
+#ifdef _WIN32
+  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
+    if (!associateD3D10Device(pDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx])) {
+      return false;
+    }
+  }
+
+  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
+    if (!associateD3D11Device(pDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx])) {
+      return false;
+    }
+  }
+
+  if (flags & amd::Context::Flags::D3D9DeviceKhr) {
+    if (!associateD3D9Device(pDevice[amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx])) {
+      return false;
+    }
+  }
+
+  if (flags & amd::Context::Flags::D3D9DeviceEXKhr) {
+    if (!associateD3D9Device(pDevice[amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx])) {
+      return false;
+    }
+  }
+#endif  //_WIN32
+
+  if (flags & amd::Context::Flags::GLDeviceKhr) {
+    void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 //! Attempt to bind with external graphics API's device/context
 bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
   assert(pDevice);

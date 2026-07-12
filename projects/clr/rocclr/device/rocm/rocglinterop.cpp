@@ -162,7 +162,7 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 }
 
 // ================================================================================================
-bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
+bool glCanInterop(Device* device, uint flags, void* gfxContext, void* glDevice) {
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   MESA_INTEROP_KIND kind;
@@ -191,6 +191,11 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
          pcie.function == info.pci_function &&
          dev_info.vendorId_ == info.vendor_id &&
          dev_info.pcieDeviceId_ == info.device_id;
+}
+
+// ================================================================================================
+bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
+  return glCanInterop(device, flags, gfxContext, glDevice);
 }
 
 // ================================================================================================

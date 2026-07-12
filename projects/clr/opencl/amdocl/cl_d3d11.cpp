@@ -111,8 +111,8 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromD3D11KHR,
 
         cl_device_id device = gpu_devices[i];
         if (is_valid(device) &&
-            as_amd(device)->bindExternalDevice(amd::Context::Flags::D3D11DeviceKhr, external_device,
-                                               NULL)) {
+            as_amd(device)->isExternalDeviceCompatible(amd::Context::Flags::D3D11DeviceKhr,
+                                                       external_device, NULL)) {
           compatible_devices.push_back(as_amd(device));
         }
       }

@@ -90,6 +90,10 @@ class NullDevice : public amd::Device {
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
+  virtual bool isExternalDeviceCompatible(uint flags, void* const pDevice[], void* pContext) {
+    return true;
+  }
+
   virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
     return true;
   }
@@ -409,6 +413,9 @@ class Device : public NullDevice {
 
   //! Create the device program.
   virtual device::Program* createProgram(amd::Program& owner, amd::option::Options* options = NULL);
+
+  //! Check external graphics API compatibility without performing a bind.
+  virtual bool isExternalDeviceCompatible(uint flags, void* const pDevice[], void* pContext);
 
   //! Attempt to bind with external graphics API's device/context
   virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext);
