@@ -31,7 +31,7 @@ on:
       config:
         description: 'Config JSON path on TW cluster'
         required: false
-        default: '/it-share/rccl-ci/configs/ci_detect.json'
+        default: '/it-share/rccl-ci/configs/ci_detect_prod.json'
       build_rccl:
         description: 'Build librccl from PR source (1=yes, 0=use fixed lib)'
         required: false
@@ -83,7 +83,7 @@ jobs:
           BUILD_RCCL: ${{ github.event_name == 'pull_request' && steps.paths.outputs.rccl_changed || inputs.build_rccl || '0' }}
           CANDIDATE_SRC: ${{ github.workspace }}
           BASE_REF: origin/${{ github.base_ref || 'develop' }}
-          _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect.json' }}
+          _CONFIG: ${{ inputs.config || '/it-share/rccl-ci/configs/ci_detect_prod.json' }}
         run: |
           bash "${RCCL_CI_ROOT}/ci/submit_and_poll.sh" "${_CONFIG}"
 
