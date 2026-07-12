@@ -1,10 +1,10 @@
 .. meta::
    :description: Tutorial walking through direct-to-GPU I/O using the hipFile Python bindings, covering Driver, FileHandle, Buffer, read, write, and error handling.
-   :keywords: hipFile, Python, GPU I/O, tutorial, ROCm, direct I/O, hipMalloc, Buffer, Driver, FileHandle
+   :keywords: hipFile, Python, GPU I/O, tutorial, ROCm, direct I/O, Buffer, Driver, FileHandle
 
-****************************************
+*****************************************
 Perform GPU I/O with the Python bindings
-****************************************
+*****************************************
 
 This tutorial walks you through a complete example that uses the hipFile Python
 bindings to read data from a file directly into GPU memory and write it back to
@@ -12,7 +12,7 @@ a different file. You will learn how to:
 
 - Initialize the hipFile driver with the ``Driver`` context manager
 - Open and register files with ``FileHandle``
-- Allocate GPU memory with ``hipMalloc()`` and register it with ``Buffer``
+- Register GPU memory with ``Buffer``
 - Perform synchronous ``read()`` and ``write()`` operations
 - Handle errors with ``HipFileException``
 - Clean up resources automatically through context managers
@@ -21,7 +21,7 @@ This workflow is useful whenever you need to move large datasets between
 storage and GPU memory without an intermediate copy through host RAM.
 
 Prerequisites
-*************
+===============
 
 Verify you have:
 
@@ -33,7 +33,7 @@ Verify you have:
 See :doc:`/install/python-bindings` for installation.
 
 Complete example
-****************
+==================
 
 The following script reads a source file into GPU memory and writes its
 contents to a destination file. It uses the same API sequence as
@@ -49,7 +49,6 @@ with CLI arguments. Save it as ``gpu_copy.py``:
    import sys
 
    from hipfile import Buffer, Driver, FileHandle, HipFileException
-   from hipfile.hipMalloc import hipFree, hipMalloc
 
    CHUNK_SIZE = 64 * 1024  # 64 KiB per I/O operation
 
@@ -88,7 +87,7 @@ with CLI arguments. Save it as ``gpu_copy.py``:
            sys.exit(1)
 
 Step-by-step walkthrough
-************************
+==========================
 
 Import modules
 --------------
@@ -97,10 +96,8 @@ Import modules
 
    import os
    from hipfile import Buffer, Driver, FileHandle, HipFileException
-   from hipfile.hipMalloc import hipFree, hipMalloc
 
-The Python package name is ``hipfile``. ``hipMalloc()`` and ``hipFree()`` live in
-``hipfile.hipMalloc``, not the top-level package. For the full API, see
+The Python package name is ``hipfile``. For the full API, see
 :doc:`/reference/api-python`.
 
 Initialize the driver
@@ -171,8 +168,7 @@ Handle errors
 
 hipFile C API failures raise ``HipFileException``. ``FileHandle.read()`` and
 ``FileHandle.write()`` may also raise ``RuntimeError`` when the handle isn't open
-or ``OSError`` when the platform sets ``errno``. ``hipMalloc()`` and ``hipFree()``
-raise ``RuntimeError`` on HIP allocation failures.
+or ``OSError`` when the platform sets ``errno``.
 
 Clean up resources
 ------------------

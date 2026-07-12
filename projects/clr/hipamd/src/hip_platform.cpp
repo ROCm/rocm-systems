@@ -890,9 +890,9 @@ hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  // 1 per WGP (i.e. for a total number equal to half the number of CUs per Shader Engine)
+  // 1 per CU (the result is the number CUs on the smallest Shader Engine of the design)
   // Note that for devices not supporting clustered launches, clusterSize would be set
-  // to zero (but the function does not necessarily return an error)
+  // to one
   *clusterSize = device.info().clusterMaxSize_;
   HIP_RETURN(hipSuccess);
 }
@@ -959,7 +959,6 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
   hipFunction_t func;
   hipError_t hip_error = PlatformState::Instance().StatCO().GetFunc(&func, f, ihipGetDevice());
   const amd::device::Info& deviceInfo = device.info();
-
   if ((hip_error != hipSuccess) || (func == nullptr)) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
@@ -1009,7 +1008,8 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
   if (hip_error == hipSuccess) {
     // a maximum of 15 total clusters in flight per shader engine are possible (gfx1250)
     static constexpr int MaxClustersPerSE = 15;
-    int clustersPerSE = (numBlocks * deviceInfo.clusterMaxSize_) / totalClusterSize;
+    int computeUnitsPerSE = deviceInfo.maxComputeUnits_ / deviceInfo.numberOfShaderEngines_;
+    int clustersPerSE = (numBlocks * computeUnitsPerSE) / totalClusterSize;
 
     clustersPerSE = std::min(clustersPerSE, MaxClustersPerSE);
     *numClusters = clustersPerSE * deviceInfo.numberOfShaderEngines_;

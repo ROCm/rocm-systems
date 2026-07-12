@@ -372,6 +372,8 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_STOP(0);
     return ncclSuccess;
   }
+  *request = NULL;
+  return ncclSuccess;
 
 isendFail:
   ncclIbStatsFatalError(&comm->base.stats);

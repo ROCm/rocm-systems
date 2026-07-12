@@ -12,6 +12,7 @@
 // references ncclGinCtx / ncclGinDescriptorSmem; their primary declarations
 // live in gin_device_common.h, which must be included first.
 #include "nccl_device/coop.h"
+#include "nccl_device/impl/core__funcs.h" 
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
 #include "nccl_device/gin/proxy/gin_proxy.h"

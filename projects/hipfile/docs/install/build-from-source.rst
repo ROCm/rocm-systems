@@ -1,10 +1,10 @@
 .. meta::
-  :description: Step-by-step instructions for building hipFile from source using CMake on AMD ROCm platforms.
-  :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD
+   :description: Step-by-step instructions for building hipFile from source using CMake on AMD ROCm platforms.
+   :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD
 
-***************************************
+**************************************
 Build and install hipFile from source
-***************************************
+**************************************
 
 To build hipFile as part of the ROCm Core SDK, see `TheRock build instructions <https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
 TheRock is the supported path for full-stack ROCm source builds.
@@ -23,7 +23,7 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
   default is C++20.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
 - ``libmount`` from ``util-linux`` for mount metadata parsing
-- A Linux kernel that exposes the P2PDMA paths hipFile expects for peer
+- A Linux kernel that exposes the peer-to-peer DMA (P2PDMA) paths hipFile expects for peer
   transfers on AMD builds
 
 
@@ -115,7 +115,7 @@ exist for sanitizers, clang-tidy, and documentation generation. Inspect
      - Adds LLVM coverage instrumentation for Clang builds.
    * - ``BUILD_TESTING``
      - ``ON`` unless you pass ``-DBUILD_TESTING=OFF``
-     - Controls whether CTest registers the hipFile unit and system tests.
+     - Controls whether the hipFile test binaries are built.
    * - ``CMAKE_BUILD_TYPE``
      - ``RelWithDebInfo``
      - CMake build flavor. Other common values are ``Debug``, ``Release``,

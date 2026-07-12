@@ -196,7 +196,7 @@ pygments==2.20.0
     #   sphinx
 pyjson5==1.6.7
     # via doxysphinx
-pyjwt[crypto]==2.9.0
+pyjwt[crypto]==2.13.0
     # via pygithub
 pynacl==1.5.0
     # via pygithub
@@ -227,7 +227,7 @@ requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.35.0
+rocm-docs-core[api-reference]==1.36.0
     # via -r requirements.in
 rpds-py==0.22.3
     # via
@@ -239,7 +239,7 @@ smmap==5.0.1
     # via gitdb
 snowballstemmer==2.2.0
     # via sphinx
-soupsieve==2.6
+soupsieve==2.8.4
     # via beautifulsoup4
 sphinx==8.0.2
     # via
@@ -306,6 +306,7 @@ typing-extensions==4.15.0
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
 urllib3==2.7.0

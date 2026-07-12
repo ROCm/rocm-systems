@@ -367,14 +367,11 @@ static int ncclTopoCountXGMI(struct ncclTopoSystem* system, struct ncclTopoGraph
       if (j<ngpus) {
         node = system->nodes[GPU].nodes+j;
         for (int k = 0; k<system->nodes[GPU].count; k++) {
-          if (node->paths[GPU][k].count == 1) {
-            struct ncclTopoLink* link = node->paths[GPU][k].list[0];
-            struct ncclTopoNode* remNode = link->remNode;
-            if (remNode->gpu.rank == n) {
-              if (link->type == LINK_NVL)
-                count ++;
-            }
-          }
+          // Direct XGMI link: post NCCL-2.30 a direct GPU->GPU path is GPU-DEV-DEV-GPU (count<=3).
+          struct ncclTopoLinkList* path = node->paths[GPU] + k;
+          if (path->type == PATH_NVL && path->count <= 3
+              && system->nodes[GPU].nodes[k].gpu.rank == n)
+            count ++;
         }
       }
     }

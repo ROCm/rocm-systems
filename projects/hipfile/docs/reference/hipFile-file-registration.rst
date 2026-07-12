@@ -2,13 +2,13 @@
    :description: File registration in hipFile
    :keywords: hipFile, ROCm, registration, file handle, buffer, hipFileHandleRegister
 
-****************************
+**************************
 hipFile file registration
-****************************
+**************************
 
-Before performing any I/O on a file, the file must be registered with hipFile through ``hipFileHandleRegister()``. 
+Before performing any I/O on a file, the file must be registered with hipFile through ``hipFileHandleRegister()``.
 
-File registration is required before any call to ``hipFileRead()`` or ``hipFileWrite()``. ``hipFileHandleRegister()`` takes a descriptor of type ``hipFileDescr_t`` that specifies the handle type. It returns a file handle that is then passed to ``hipFileRead()`` and ``hipFileWrite()``.  
+File registration is required before any call to ``hipFileRead()`` or ``hipFileWrite()``. ``hipFileHandleRegister()`` takes a descriptor of type ``hipFileDescr_t`` that specifies the handle type. It returns a file handle that is then passed to ``hipFileRead()`` and ``hipFileWrite()``.
 
 For example, the |roundtrip_verify|_  example first calls ``open_file()`` from |examples_common|_ before calling ``hipFileWrite()``:
 
@@ -18,14 +18,14 @@ For example, the |roundtrip_verify|_  example first calls ``open_file()`` from |
         S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &fd, &handle)) {
       goto deregister_buf;
 
-      [...] 
+      [...]
 
       nbytes = hipFileWrite(handle, devbuf, alloc_size, /*file_offset=*/0, /*buf_offset=*/0);
 
 ``open_file()`` calls ``hipFileHandleRegister()``:
 
 .. code:: cpp
- 
+
   int open_file(const char *path, int flags, mode_t mode, int *fd, hipFileHandle_t *handle)
   {
     *fd = open(path, flags, mode);
@@ -50,7 +50,7 @@ For example, the |roundtrip_verify|_  example first calls ``open_file()`` from |
 
 Two file descriptors, a buffered file descriptor and an unbuffered file descriptor, are kept for the registered file. The unbuffered descriptor is used by the fastpath backend and the buffered descriptor is used by the fallback backend.
 
-If the file doesn't support direct I/O and was not opened with ``O_DIRECT``, the unbuffered descriptor will not be available and fastpath will decline the I/O request. For more information on backend selection, see :doc:`/reference/hipFile-io-backends`. 
+If the file doesn't support direct I/O and was not opened with ``O_DIRECT``, the unbuffered descriptor will not be available and fastpath will decline the I/O request. For more information on backend selection, see :doc:`/reference/hipFile-io-backends`.
 
 When the file handle is no longer needed, ``hipFileHandleDeregister()`` must be called to release the associated resources.
 

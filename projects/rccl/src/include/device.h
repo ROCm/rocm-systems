@@ -417,7 +417,7 @@ struct alignas(16) ncclDevWorkColl {
   uint32_t channelLo:8, channelHi:8;
 #endif
   uint32_t nWarps:8;
-  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, cheapPostSendFenceOff:1;
+  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1;
   uint32_t root:30, connIndex:2;
   uint16_t pivotA2ANumBiRings:15, profilerEnabled:1;
   void* recvbuff;
@@ -603,6 +603,7 @@ struct ncclKernelComm {
   bool p2pCrossClique;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 

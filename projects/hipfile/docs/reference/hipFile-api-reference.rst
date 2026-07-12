@@ -1,10 +1,10 @@
 .. meta::
-  :description: hipFile API reference
-  :keywords: hipFile, API, ROCm
+   :description: hipFile API reference
+   :keywords: hipFile, API, ROCm
 
-**********************************
-hipFile API reference 
-**********************************
+**********************
+hipFile API reference
+**********************
 
 * :doc:`./api-synchronous-io`
 * :doc:`./api-driver`

@@ -63,6 +63,7 @@
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
 #include "team_reduction_tester.hpp"
+#include "team_reduce_scatter_tester.hpp"
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
@@ -78,6 +79,7 @@
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
 #include "host_team_sync_barrier_tester.hpp"
+#include "broadcast_wave_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -100,6 +102,7 @@ Tester::Tester(TesterArguments args) : args(args) {
     case WAVEGetNBITestType:
     case WAVEPutTestType:
     case WAVEPutNBITestType:
+    case BroadcastWaveTestType:
       num_timers = args.num_wgs * num_warps;
       break;
     default:
@@ -147,7 +150,9 @@ Tester::Tester(TesterArguments args) : args(args) {
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case TeamBroadcastTestType:
+      case BroadcastWaveTestType:
       case TeamReductionTestType:
+      case TeamReduceScatterTestType:
       case TeamFCollectTestType:
       case CollectTestType:
       case TeamAllToAllTestType:
@@ -291,6 +296,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
                                                    std::to_string(n_pes));
           }));
       break;
+    case TeamReduceScatterTestType:
+      test_name = "Team-based Reduce-Scatter";
+      testers.push_back(new TeamReduceScatterTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 0;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
+      break;
     case TeamBroadcastTestType:
       test_name = "Team Broadcast Test";
       testers.push_back(new TeamBroadcastTester<int64_t>(args));
@@ -300,6 +321,13 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       testers.push_back(new TeamBroadcastTester<double>(args));
       testers.push_back(new TeamBroadcastTester<char>(args));
       testers.push_back(new TeamBroadcastTester<unsigned char>(args));
+      break;
+    case BroadcastWaveTestType:
+      test_name = "Broadcast Wave Test";
+      testers.push_back(new BroadcastWaveTester<int>(args));
+      testers.push_back(new BroadcastWaveTester<long long>(args));
+      testers.push_back(new BroadcastWaveTester<float>(args));
+      testers.push_back(new BroadcastWaveTester<double>(args));
       break;
     case TeamAllToAllTestType:
       test_name = "Alltoall Test";
@@ -384,6 +412,66 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case HostAmoSelfTestType:
       test_name = "Host_Amo_Self";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostAmoAddTestType:
+      test_name = "Host_Amo_Add";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilTestType:
+      test_name = "Host_Wait_Until";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostTestTestType:
+      test_name = "Host_Test";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllTestType:
+      test_name = "Host_Wait_Until_All";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyTestType:
+      test_name = "Host_Wait_Until_Any";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeTestType:
+      test_name = "Host_Wait_Until_Some";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllVectorTestType:
+      test_name = "Host_Wait_Until_All_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyVectorTestType:
+      test_name = "Host_Wait_Until_Any_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeVectorTestType:
+      test_name = "Host_Wait_Until_Some_Vector";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAllStatusTestType:
+      test_name = "Host_Wait_Until_All_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilAnyStatusTestType:
+      test_name = "Host_Wait_Until_Any_Status";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostWaitUntilSomeStatusTestType:
+      test_name = "Host_Wait_Until_Some_Status";
       if (BackendType::IPC_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
@@ -906,6 +994,7 @@ bool Tester::peLaunchesKernel() {
   switch (_type) {
     case ReduceOnStreamTestType:
     case TeamReductionTestType:
+    case TeamReduceScatterTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
     case TeamCtxInfraSingleTestType:
@@ -961,6 +1050,7 @@ bool Tester::peLaunchesKernel() {
     case TileAllgatherTestType:
     case TileAllgatherWaveTestType:
     case TileAllgatherWGTestType:
+    case BroadcastWaveTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:
@@ -973,6 +1063,17 @@ bool Tester::peLaunchesKernel() {
     case HostIntAmoFCswapTestType:
     case HostAmoAllPesTestType:
     case HostAmoSelfTestType:
+    case HostWaitUntilTestType:
+    case HostTestTestType:
+    case HostWaitUntilAllTestType:
+    case HostWaitUntilAnyTestType:
+    case HostWaitUntilSomeTestType:
+    case HostWaitUntilAllVectorTestType:
+    case HostWaitUntilAnyVectorTestType:
+    case HostWaitUntilSomeVectorTestType:
+    case HostWaitUntilAllStatusTestType:
+    case HostWaitUntilAnyStatusTestType:
+    case HostWaitUntilSomeStatusTestType:
       is_launcher = true;
       break;
     default:

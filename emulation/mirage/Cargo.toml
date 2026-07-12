@@ -11,13 +11,45 @@ path = "src/main.rs"
 mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
 mirage_host = { workspace = true }
-mirage_daemon = { workspace = true }
-mirage_rocjitsu = { workspace = true }
-mirage_hotswap = { workspace = true }
+# The web UI server (HTTP/WebSocket dashboard). Optional and off by
+# default — pulled in by the `daemon` feature (and transitively by
+# `webui`, which also enables the bundled SPA).
+mirage_daemon = { workspace = true, optional = true }
+# Emulator backends. Each is an optional, link-only dependency pulled in
+# by its matching feature below; the binary never references them
+# directly — they register themselves into the emulator registry via
+# `inventory` at link time (see `src/main.rs`). Toggle a backend on or
+# off with its feature flag.
+mirage_noop = { workspace = true, optional = true }
+mirage_rocjitsu = { workspace = true, optional = true }
+mirage_hotswap = { workspace = true, optional = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[features]
+# All backends are compiled in by default. Disable a backend by
+# building with `--no-default-features` and selecting the subset you
+# want, e.g. `cargo build --no-default-features --features rocjitsu`.
+#
+# The web UI is OFF by default. Enable just the HTTP API server with
+# `--features daemon`, or the full dashboard (API + bundled SPA, needs
+# the Node.js toolchain) with `--features webui`.
+default = ["rocjitsu"]
+noop = ["dep:mirage_noop"]
+rocjitsu = ["dep:mirage_rocjitsu"]
+hotswap = ["dep:mirage_hotswap"]
+# Compile in the `mirage webui` server (the cross-session HTTP/WS
+# daemon over the control plane). No SPA, no Node.js.
+daemon = ["dep:mirage_daemon"]
+# Everything in `daemon` plus the embedded dashboard SPA and its
+# client-side routing (via `mirage_daemon/webui` ->
+# `mirage_dashboard/webui`).
+webui = ["daemon", "mirage_daemon/webui"]
+
+[build-dependencies]
+serde_json = "1.0"
 
 [dev-dependencies]
 mirage_builtin = { workspace = true }
@@ -36,7 +68,19 @@ libc = { workspace = true }
 nix = { workspace = true }
 
 [workspace]
-members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
+members = [
+    "builtin",
+    "core",
+    "container",
+    "ctl",
+    "daemon",
+    "dashboard",
+    "host",
+    "hotswap",
+    "noop",
+    "rocjitsu",
+    "rocjitsu_sys",
+]
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -49,12 +93,20 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 futures = "0.3"
-nix = { version = "0.29", features = ["fs", "signal", "process", "term", "user"] }
+nix = { version = "0.29", features = [
+    "fs",
+    "signal",
+    "process",
+    "term",
+    "user",
+] }
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 once_cell = "1"
+inventory = "0.3.24"
+libloading = "0.8"
 
 mirage_core = { path = "core" }
 mirage_ctl = { path = "ctl" }
@@ -63,4 +115,6 @@ mirage_host = { path = "host" }
 mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
+mirage_noop = { path = "noop" }
 mirage_container = { path = "container" }
+rocjitsu_sys = { path = "rocjitsu_sys" }
