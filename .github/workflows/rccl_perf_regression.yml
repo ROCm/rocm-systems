@@ -101,6 +101,7 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@f3bbb8300013c686241004a1c1b5d4045b10bc30  # v2
         with:
           header: rccl-perf-gate
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           path: ${{ runner.temp }}/rccl_report.md
 
       - name: Upload artifacts
