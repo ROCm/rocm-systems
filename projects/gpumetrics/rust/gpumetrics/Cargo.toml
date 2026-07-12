@@ -1,0 +1,16 @@
+[package]
+name = "gpumetrics"
+description = "Safe, idiomatic Rust interface to the gpumetrics GPU-metrics collector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["gpu", "metrics", "amd", "rocm", "telemetry"]
+
+[dependencies]
+gpumetrics-sys = { path = "../gpumetrics-sys", version = "0.1.0" }
+
+[[example]]
+name = "discover"
+path = "examples/discover.rs"

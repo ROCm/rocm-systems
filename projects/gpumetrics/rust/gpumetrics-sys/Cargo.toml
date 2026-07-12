@@ -1,0 +1,15 @@
+[package]
+name = "gpumetrics-sys"
+description = "Raw FFI bindings to the gpumetrics C API (libgpumetrics)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+links = "gpumetrics"
+
+[lib]
+name = "gpumetrics_sys"
+path = "src/lib.rs"
+
+[build-dependencies]
+bindgen = "0.70.1"

@@ -1,0 +1,7 @@
+build/
+build-*/
+*.o
+*.so
+*.so.*
+.cache/
+rust/target/

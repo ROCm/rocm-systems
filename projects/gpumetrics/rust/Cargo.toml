@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["gpumetrics-sys", "gpumetrics"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ROCm/rocm-systems/tree/develop/projects/gpumetrics/rust"
