@@ -68,6 +68,19 @@ AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t
       bdf_(bdf),
       drm_(drm) {
   populate_ifoe_fabric_bdf_list();
+}
+
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
+  if (check_if_drm_is_supported()) this->get_drm_data();
+
+  populate_ifoe_fabric_bdf_list();
+}
+
+// Open the IFoE/UALoE generic-netlink session for this device. Called lazily
+// (see get_ualoe_handle) so a wedged IFoE driver cannot hang amdsmi_init() or
+// any query that does not need fabric data.
+void AMDSmiGPUDevice::open_ualoe_session() {
   if (has_ifoe_related_bdf() && device_has_ualink()) {
     auto ifoe_bdf_str = get_ifoe_bdf_string();
     if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
@@ -76,17 +89,9 @@ AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t
   }
 }
 
-AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
-    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
-  if (check_if_drm_is_supported()) this->get_drm_data();
-
-  populate_ifoe_fabric_bdf_list();
-  if (has_ifoe_related_bdf() && device_has_ualink()) {
-    auto ifoe_bdf_str = get_ifoe_bdf_string();
-    if (auto ualoe_status = ualoe_open(ifoe_bdf_str.c_str(), &ualoe_handle_); ualoe_status != 0) {
-      ualoe_handle_ = (-1);
-    }
-  }
+ualoe_handle_t AMDSmiGPUDevice::get_ualoe_handle() {
+  std::call_once(ualoe_open_once_, [this]() { open_ualoe_session(); });
+  return ualoe_handle_;
 }
 
 AMDSmiGPUDevice::~AMDSmiGPUDevice() {
