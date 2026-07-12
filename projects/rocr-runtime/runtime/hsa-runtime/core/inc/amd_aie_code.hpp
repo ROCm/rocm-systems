@@ -50,125 +50,41 @@
 #include <string>
 #include <vector>
 
-namespace rocr {
-namespace amd {
-namespace elf {
-class Image;
-class Section;
-class Symbol;
-}  // namespace elf
-}  // namespace amd
+#include "core/inc/amd_aie_section.h"
 
+namespace rocr {
+namespace amd { namespace elf { class Image; } }
 namespace AMD {
 
-/// @brief Information about an AIE kernel extracted from the ELF.
 struct AieKernelInfo {
   std::string name;
-
-  /// Offset into instruction data where this kernel starts.
-  uint64_t instr_offset = 0;
-
-  /// Size of instruction data for this kernel.
-  uint64_t instr_size = 0;
-
-  /// Offset into control packet data.
-  uint64_t ctrl_packet_offset = 0;
-
-  /// Size of control packet data.
-  uint64_t ctrl_packet_size = 0;
-
-  /// Kernel argument buffer size.
+  const uint8_t* insts_data = nullptr;  // into ELF buffer; never null after parse
+  uint64_t insts_size = 0;              // > 0
+  const uint8_t* pdi_data = nullptr;    // null if no PDI
+  uint64_t pdi_size = 0;                // 0 if no PDI
   uint32_t kernarg_size = 0;
-
-  /// Number of columns used by this kernel.
   uint32_t num_cols = 0;
 };
 
-/// @brief Parser for NPU/AIE ELF code objects.
-///
-/// This class parses NPU ELF files to extract kernel metadata, instruction
-/// buffers, and control packet data.
-///
-/// NPU ELF files contain:
-/// - .ctrltext section: Control/instruction data for the NPU
-/// - .ctrldata section: Control packet data
-/// - Symbol table: Kernel names and metadata
-/// - Notes: Additional metadata (kernel arguments, column counts, etc.)
 class AieCode {
  public:
-  /// @brief Creates an AieCode instance from a memory buffer.
-  ///
-  /// @param data Pointer to the ELF data.
-  /// @param size Size of the ELF data in bytes.
-  /// @return Unique pointer to AieCode on success, nullptr on failure.
   static std::unique_ptr<AieCode> Create(const void* data, size_t size);
-
-  /// @brief Checks if the given ELF data is an AIE code object.
-  ///
-  /// @param data Pointer to the ELF data.
-  /// @param size Size of the ELF data in bytes.
-  /// @return true if this is an AIE ELF, false otherwise.
   static bool IsAieCodeObject(const void* data, size_t size);
 
-  /// @brief Returns the instruction buffer data.
-  const uint8_t* GetInstructionData() const;
-
-  /// @brief Returns the size of the instruction buffer.
-  size_t GetInstructionSize() const;
-
-  /// @brief Returns the control packet data.
-  const uint8_t* GetCtrlPacketData() const;
-
-  /// @brief Returns the size of the control packet buffer.
-  size_t GetCtrlPacketSize() const;
-
-  /// @brief Returns kernel info by name.
-  ///
-  /// @param name The kernel name.
-  /// @return Pointer to kernel info if found, nullptr otherwise.
-  const AieKernelInfo* GetKernel(const std::string& name) const;
-
-  /// @brief Returns a list of all kernel names in this code object.
+  const std::string& GetArchSectionName() const { return arch_section_name_; }
   std::vector<std::string> GetKernelNames() const;
-
-  /// @brief Returns the number of kernels in this code object.
+  const AieKernelInfo* GetKernel(const std::string& name) const;
   size_t GetKernelCount() const { return kernels_.size(); }
-
-  /// @brief Returns the raw ELF data.
-  const void* GetElfData() const { return elf_data_; }
-
-  /// @brief Returns the raw ELF size.
-  size_t GetElfSize() const { return elf_size_; }
 
  private:
   AieCode() = default;
-
-  /// @brief Parses the ELF and extracts kernel metadata.
   bool Parse();
 
-  /// @brief Extracts kernel symbols from the symbol table.
-  bool ExtractKernelSymbols();
-
-  /// @brief Loads section data into memory.
-  bool LoadSectionData(amd::elf::Section* section, std::vector<uint8_t>& dest);
-
-  /// Internal ELF image.
   std::unique_ptr<amd::elf::Image> elf_;
-
-  /// Raw ELF data pointer (not owned).
-  const void* elf_data_ = nullptr;
-
-  /// Size of raw ELF data.
-  size_t elf_size_ = 0;
-
-  /// Parsed kernel metadata.
+  const uint8_t* section_base_ = nullptr;  // start of arch section in ELF buffer
+  uint64_t section_size_ = 0;
+  std::string arch_section_name_;
   std::map<std::string, AieKernelInfo> kernels_;
-
-  /// Instruction buffer data (from .ctrltext section).
-  std::vector<uint8_t> instr_data_;
-
-  /// Control packet data (from .ctrldata section).
-  std::vector<uint8_t> ctrl_packet_data_;
 };
 
 }  // namespace AMD

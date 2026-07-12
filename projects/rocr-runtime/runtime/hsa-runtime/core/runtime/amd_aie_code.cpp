@@ -45,228 +45,116 @@
 #include <cstring>
 #include <elf.h>
 
+#include "core/inc/amd_aie_section.h"
 #include "core/inc/amd_elf_image.hpp"
 
 namespace rocr {
 namespace AMD {
 
 namespace {
+constexpr const char* kArchSectionNames[] = {"aie2", "aie2p"};
 
-// Section names used in NPU ELF files.
-constexpr const char* kInstrSectionName = ".ctrltext";
-constexpr const char* kCtrlPacketSectionName = ".ctrldata";
-constexpr const char* kGroupSectionPrefix = ".group";
-
-// NPU ELF uses a distinct OS ABI or machine type to distinguish from GPU code.
-// AIE ELF files typically use EM_NONE or a specific AIE machine type.
-// For now, we detect based on section presence.
-constexpr uint16_t kAieMachine = 0;  // EM_NONE - AIE ELF files use this
-
-// Symbol types for AIE kernels
-constexpr uint8_t kAieKernelSymbolType = STT_FUNC;
-
+// Returns the arch section (by name) if present, else nullptr, and sets out_name.
+amd::elf::Section* FindArchSection(amd::elf::Image* elf, std::string* out_name) {
+  for (size_t i = 0; i < elf->sectionCount(); ++i) {
+    amd::elf::Section* sec = elf->section(i);
+    if (!sec) continue;
+    const std::string name = sec->Name();
+    for (const char* arch : kArchSectionNames) {
+      if (name == arch) {
+        *out_name = name;
+        return sec;
+      }
+    }
+  }
+  return nullptr;
+}
 }  // namespace
 
 bool AieCode::IsAieCodeObject(const void* data, size_t size) {
-  if (!data || size < sizeof(Elf64_Ehdr)) {
-    return false;
-  }
-
+  if (!data || size < sizeof(Elf64_Ehdr)) return false;
   const auto* ehdr = static_cast<const Elf64_Ehdr*>(data);
+  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) return false;
 
-  // Check ELF magic
-  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0) {
-    return false;
-  }
-
-  // AIE code objects typically use EM_NONE (0) as the machine type,
-  // or they have specific NPU-related sections. Check both.
-  if (ehdr->e_machine == kAieMachine) {
-    return true;
-  }
-
-  // Also check for presence of .ctrltext section which is specific to NPU code.
-  // This requires parsing the section headers.
-  // For a quick check, we verify machine type != EM_AMDGPU (224) to avoid
-  // treating GPU code as NPU code.
-  constexpr uint16_t kEmAmdgpu = 224;
-  if (ehdr->e_machine == kEmAmdgpu) {
-    return false;  // This is GPU code, not NPU
-  }
-
-  // If machine type is something else, we need to verify by looking at sections.
-  // For now, accept any non-AMDGPU ELF as potentially AIE and let Parse() verify.
-  return true;
+  auto img = std::unique_ptr<amd::elf::Image>(amd::elf::NewElf64Image());
+  if (!img || !img->initAsBuffer(data, size)) return false;
+  std::string name;
+  return FindArchSection(img.get(), &name) != nullptr;
 }
 
 std::unique_ptr<AieCode> AieCode::Create(const void* data, size_t size) {
-  if (!data || size == 0) {
-    return nullptr;
-  }
-
+  if (!data || size == 0) return nullptr;
   auto code = std::unique_ptr<AieCode>(new AieCode());
-  code->elf_data_ = data;
-  code->elf_size_ = size;
-
-  // Create ELF image and parse
   code->elf_.reset(amd::elf::NewElf64Image());
-  if (!code->elf_) {
-    return nullptr;
-  }
-
-  if (!code->elf_->initFromBuffer(data, size)) {
-    return nullptr;
-  }
-
-  if (!code->Parse()) {
-    return nullptr;
-  }
-
+  // initAsBuffer keeps a pointer into the caller's buffer (no copy), which is
+  // required since AieKernelInfo::insts_data/pdi_data point into that buffer.
+  if (!code->elf_ || !code->elf_->initAsBuffer(data, size)) return nullptr;
+  if (!code->Parse()) return nullptr;
   return code;
 }
 
 bool AieCode::Parse() {
-  // Find and load instruction section (.ctrltext)
-  amd::elf::Section* instr_section = nullptr;
-  amd::elf::Section* ctrl_packet_section = nullptr;
+  amd::elf::Section* sec = FindArchSection(elf_.get(), &arch_section_name_);
+  if (!sec) return false;
 
-  for (size_t i = 0; i < elf_->sectionCount(); ++i) {
-    amd::elf::Section* sec = elf_->section(i);
-    if (!sec) continue;
+  section_size_ = sec->size();
+  if (section_size_ < sizeof(aie_section_header)) return false;
+  // Section has no direct data() accessor; compute the pointer into the ELF
+  // buffer from the section's file offset.
+  section_base_ = reinterpret_cast<const uint8_t*>(elf_->data()) + sec->offset();
+  if (!section_base_) return false;
 
-    std::string name = sec->Name();
-
-    if (name == kInstrSectionName) {
-      instr_section = sec;
-    } else if (name == kCtrlPacketSectionName) {
-      ctrl_packet_section = sec;
-    }
-  }
-
-  // Load instruction data if present
-  if (instr_section) {
-    if (!LoadSectionData(instr_section, instr_data_)) {
-      return false;
-    }
-  }
-
-  // Load control packet data if present
-  if (ctrl_packet_section) {
-    if (!LoadSectionData(ctrl_packet_section, ctrl_packet_data_)) {
-      return false;
-    }
-  }
-
-  // Extract kernel symbols
-  if (!ExtractKernelSymbols()) {
-    // If no kernels found but we have instruction data, create a default kernel
-    if (!instr_data_.empty()) {
-      AieKernelInfo default_kernel;
-      default_kernel.name = "_default_";
-      default_kernel.instr_offset = 0;
-      default_kernel.instr_size = instr_data_.size();
-      default_kernel.ctrl_packet_offset = 0;
-      default_kernel.ctrl_packet_size = ctrl_packet_data_.size();
-      default_kernel.kernarg_size = 0;
-      default_kernel.num_cols = 1;
-      kernels_["_default_"] = default_kernel;
-    }
-  }
-
-  // Verify we have at least instruction data
-  return !instr_data_.empty();
-}
-
-bool AieCode::ExtractKernelSymbols() {
-  amd::elf::SymbolTable* symtab = elf_->symtab();
-  if (!symtab) {
+  const auto* hdr = reinterpret_cast<const aie_section_header*>(section_base_);
+  if (hdr->magic != kAieSectionMagic) return false;
+  if (hdr->version_major != kAieSectionVersionMajor) return false;
+  if (hdr->header_size + static_cast<uint64_t>(hdr->kernel_count) * hdr->kernel_entry_size >
+      section_size_) {
     return false;
   }
+  if (hdr->kernel_entry_size < sizeof(aie_kernel_entry)) return false;
 
-  bool found_kernel = false;
+  auto in_section = [&](uint64_t off, uint64_t len) {
+    return len == 0 ? off <= section_size_ : (off < section_size_ && off + len <= section_size_);
+  };
 
-  for (size_t i = 0; i < symtab->symbolCount(); ++i) {
-    amd::elf::Symbol* sym = symtab->symbol(i);
-    if (!sym) continue;
+  for (uint32_t i = 0; i < hdr->kernel_count; ++i) {
+    const auto* e = reinterpret_cast<const aie_kernel_entry*>(
+        section_base_ + hdr->header_size + static_cast<uint64_t>(i) * hdr->kernel_entry_size);
 
-    // Look for function symbols (potential kernels)
-    if (sym->type() != kAieKernelSymbolType) {
-      continue;
-    }
+    if (e->insts_size == 0) return false;
+    if (!in_section(e->insts_offset, e->insts_size)) return false;
+    if (e->pdi_size != 0 && !in_section(e->pdi_offset, e->pdi_size)) return false;
 
-    // Skip local/undefined symbols
-    if (sym->binding() == STB_LOCAL || sym->value() == 0) {
-      continue;
-    }
+    const uint64_t name_abs = hdr->string_table_offset + e->name_offset;
+    if (name_abs >= section_size_) return false;
+    const char* nm = reinterpret_cast<const char*>(section_base_ + name_abs);
+    const uint64_t max_len = section_size_ - name_abs;
+    if (::strnlen(nm, max_len) == max_len) return false;  // unterminated
 
-    amd::elf::Section* sec = sym->section();
-    if (!sec) continue;
-
-    // Check if symbol is in instruction section
-    std::string sec_name = sec->Name();
-    if (sec_name != kInstrSectionName) {
-      continue;
-    }
-
-    AieKernelInfo kernel;
-    kernel.name = sym->name();
-    kernel.instr_offset = sym->value();
-    kernel.instr_size = sym->size();
-    kernel.ctrl_packet_offset = 0;
-    kernel.ctrl_packet_size = ctrl_packet_data_.size();
-    kernel.kernarg_size = 0;  // TODO: Extract from metadata/notes
-    kernel.num_cols = 1;      // TODO: Extract from metadata/notes
-
-    kernels_[kernel.name] = kernel;
-    found_kernel = true;
+    AieKernelInfo info;
+    info.name = nm;
+    info.insts_data = section_base_ + e->insts_offset;
+    info.insts_size = e->insts_size;
+    info.pdi_data = e->pdi_size ? section_base_ + e->pdi_offset : nullptr;
+    info.pdi_size = e->pdi_size;
+    info.kernarg_size = e->kernarg_size;
+    info.num_cols = e->num_cols;
+    if (kernels_.count(info.name)) return false;  // duplicate within one object
+    kernels_[info.name] = info;
   }
-
-  return found_kernel;
-}
-
-bool AieCode::LoadSectionData(amd::elf::Section* section,
-                              std::vector<uint8_t>& dest) {
-  if (!section) {
-    return false;
-  }
-
-  uint64_t size = section->size();
-  if (size == 0) {
-    return true;  // Empty section is valid
-  }
-
-  dest.resize(size);
-  return section->getData(0, dest.data(), size);
-}
-
-const uint8_t* AieCode::GetInstructionData() const {
-  return instr_data_.empty() ? nullptr : instr_data_.data();
-}
-
-size_t AieCode::GetInstructionSize() const {
-  return instr_data_.size();
-}
-
-const uint8_t* AieCode::GetCtrlPacketData() const {
-  return ctrl_packet_data_.empty() ? nullptr : ctrl_packet_data_.data();
-}
-
-size_t AieCode::GetCtrlPacketSize() const {
-  return ctrl_packet_data_.size();
-}
-
-const AieKernelInfo* AieCode::GetKernel(const std::string& name) const {
-  auto it = kernels_.find(name);
-  return (it != kernels_.end()) ? &it->second : nullptr;
+  return !kernels_.empty();
 }
 
 std::vector<std::string> AieCode::GetKernelNames() const {
   std::vector<std::string> names;
   names.reserve(kernels_.size());
-  for (const auto& kv : kernels_) {
-    names.push_back(kv.first);
-  }
+  for (const auto& kv : kernels_) names.push_back(kv.first);
   return names;
+}
+
+const AieKernelInfo* AieCode::GetKernel(const std::string& name) const {
+  auto it = kernels_.find(name);
+  return it == kernels_.end() ? nullptr : &it->second;
 }
 
 }  // namespace AMD
