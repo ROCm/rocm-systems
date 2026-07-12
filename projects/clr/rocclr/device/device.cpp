@@ -336,7 +336,7 @@ Context* Device::glb_ctx_ = nullptr;
 std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
-cl_int Device::gpu_error_ = CL_SUCCESS;
+std::atomic<cl_int> Device::gpu_error_{CL_SUCCESS};
 
 std::shared_mutex MemObjMap::AllocatedLock_ ROCCLR_INIT_PRIORITY(101);
 std::map<uintptr_t, amd::Memory*> MemObjMap::MemObjMap_ ROCCLR_INIT_PRIORITY(101);
@@ -393,6 +393,29 @@ amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
     *offset = result.offset;
   }
   return result.memory;
+}
+
+amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
+  if (size == 0) {
+    return nullptr;
+  }
+  std::shared_lock lock(AllocatedLock_);
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t end = start + size;  // exclusive
+
+  auto it = MemObjMap_.upper_bound(end - 1);
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if ((it->first + mem_size) > start) {
+      return mem;
+    }
+  }
+  return nullptr;
 }
 
 amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {

@@ -351,6 +351,9 @@ memory:
     # Does not play well with ASAN
     disabled: [asan]
     tags: []
+  Unit_hipMemcpy_DynamicQueueChurn_StagedCopies:
+    <<: *level_2
+    tags: [multigpu, transfer]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111
@@ -394,6 +397,12 @@ memory:
     <<: *level_2
     # Tests behaviour after free which throws off the sanitizer
     disabled: [asan]
+  Unit_hipHostRegister_DuplicateAndDisjoint:
+    <<: *level_2
+    tags: [alloc]
+  Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained:
+    <<: *level_2
+    tags: [alloc]
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
@@ -544,6 +553,9 @@ memory:
   Unit_hipMemset_2AsyncOperations:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemset_UnalignedKernelCornerCases:
+    <<: *level_2
+    tags: [memset, fillBuffer, unaligned]
   Unit_hipMemset_Capture: *level_2
   Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional:
@@ -784,6 +796,18 @@ memory:
   Unit_hipMemsetD8Async_KernelBuffer:
     <<: *level_2
     tags: [memset]
+  Unit_hipMemsetD16_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD32_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD16Async_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
+  Unit_hipMemsetD32Async_UnalignedPatternFill:
+    <<: *level_2
+    tags: [memset]
   Unit_hipMemcpy2DArrayToArray_Negative:
     <<: *level_2
     tags: [transfer, image]
@@ -801,12 +825,33 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
-  Unit_hipMemcpyBatchAsync_NegativeTsts:
+  Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_2
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Attrs_Negative:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Attrs_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2D_Pageable_DuringApiCall_SourceAccess:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_H2D_Pageable_Stream_SourceAccess:
+    <<: *level_2
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_Mixed_Functional:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Stream:
+    <<: *level_2
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Functional:
+    <<: *level_2
+    tags: [transfer, multigpu]
   Unit_hipMemsetD2D8_BasicFunctional:
     <<: *level_2
     disabled: [amd_wsl]
@@ -1941,6 +1986,9 @@ memory:
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
+  Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable:
+    <<: *level_2
+    tags: [query]
   Unit_hipMemDiscardBatchAsync_NegativeTests:
     <<: *level_2
     tags: [query]
@@ -2232,7 +2280,8 @@ memory:
   Unit_hipStreamAttachMemAsync_Negative_Parameters:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23
-    disabled: [amd_wsl]
+    # Asan test disabled temporarily until PR #5287 is merged
+    disabled: [amd_wsl, asan]
     tags: [query]
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2

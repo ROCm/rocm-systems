@@ -261,7 +261,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     // here which is the per batch maximum.
     if (tid < nPacks) {
       int srcWork = fnsOfBitset[dstWork]; // find n'th set bit in batch.offsetBitset
-      ulong2 tmp;
+      ulonglong2 tmp;
       // The loads done in these two cases must be kept separate since we are
       // relying on the compiler to use "ld.param" in the first one. The parameter
       // space is not generically addressable, so any attempt to load through
@@ -282,15 +282,15 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
       // memcpy(dst, src, n);
       if (ncclShmem.args.workStorageType == ncclDevWorkStorageTypeArgs) {
         char* src = (char*)args + (batch.offsetBase + srcWork*workSize + packInWork*16);
-        tmp = *(ulong2*)src; // becomes ld.param.v2.u64
+        tmp = *(ulonglong2*)src; // becomes ld.param.v2.u64
       }
       if (ncclShmem.args.workStorageType != ncclDevWorkStorageTypeArgs) {
         char* src = (char*)ncclShmem.args.workBuf + ((batch.offsetBase + srcWork*workSize + packInWork*16) & ncclShmem.args.workMask);
-        tmp = *(ulong2*)src; // becomes ld.v2.u64
+        tmp = *(ulonglong2*)src; // becomes ld.v2.u64
       }
       char* dst = ncclShmem.workStorage;
       dst += (workCursor + dstWork)*workSize + packInWork*16;
-      *(ulong2*)dst = tmp;
+      *(ulonglong2*)dst = tmp;
     }
     workCursor += nWorks;
 
@@ -301,7 +301,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     } else {
       if (tid == 0) {
         ncclShmem.batchIx = batchIx;
-        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : batchIx + batch.nextJump;
+        ncclShmem.nextBatchIx = (batch.nextJump == 0) ? -1 : (int)(batchIx + batch.nextJump);
         ncclShmem.workType = (enum ncclDevWorkType)batch.workType;
         ncclShmem.nWorks = workCursor;
         ncclShmem.funcId = batch.funcId;
@@ -560,7 +560,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#ifndef RCCL_DEVICE_TABLE_OMIT
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
@@ -575,7 +574,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-#endif
 #endif
     }
 
@@ -606,14 +604,15 @@ __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRI
 #define DEFINE_ncclDevKernel_nop(suffix, coll, redop, ty, algo, proto, specializedFnId) \
   __global__ void ncclDevKernel_##suffix(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {}
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
+// noinline iff RCCL_DEVICE_LINKER (each devfunc is a standalone shard).
+#ifdef RCCL_DEVICE_LINKER
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ void ncclDevFunc_##suffix() { \
+  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #else
 #define DEFINE_ncclDevFunc(suffix, coll, redop, ty, algo, proto, acc, pipeline, unroll) \
-  __device__ __attribute__((noinline)) void ncclDevFunc_##suffix() { \
+  __device__ void ncclDevFunc_##suffix() { \
     RunWorkBatch<coll, ty, redop<ty>, algo, proto, acc, unroll, pipeline>().run(); \
   }
 #endif

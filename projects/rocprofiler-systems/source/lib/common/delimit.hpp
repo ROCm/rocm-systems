@@ -14,48 +14,44 @@ inline namespace common
 namespace
 {
 template <typename ContainerT, typename... Args>
+concept has_emplace_back = requires(ContainerT& _c, Args&&... _args) {
+    _c.emplace_back(std::forward<Args>(_args)...);
+};
+
+template <typename ContainerT, typename... Args>
+    requires has_emplace_back<ContainerT, Args...>
 inline auto
-emplace_impl(ContainerT& _c, int,
-             Args&&... _args) -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace_back(std::forward<Args>(_args)...);
 }
 
 template <typename ContainerT, typename... Args>
+    requires(!has_emplace_back<ContainerT, Args...>)
 inline auto
-emplace_impl(ContainerT& _c, long,
-             Args&&... _args) -> decltype(_c.emplace(std::forward<Args>(_args)...))
+emplace(ContainerT& _c, Args&&... _args)
 {
     return _c.emplace(std::forward<Args>(_args)...);
 }
 
-template <typename ContainerT, typename... Args>
-inline auto
-emplace(ContainerT& _c, Args&&... _args)
-{
-    return emplace_impl(_c, 0, std::forward<Args>(_args)...);
-}
+template <typename ContainerT, typename ArgT>
+concept has_reserve = requires(ContainerT& _c, ArgT _arg) { _c.reserve(_arg); };
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT& _c, int, ArgT _arg) -> decltype(_c.reserve(_arg), bool())
+    requires has_reserve<ContainerT, ArgT>
+inline bool
+reserve(ContainerT& _c, ArgT _arg)
 {
     _c.reserve(_arg);
     return true;
 }
 
 template <typename ContainerT, typename ArgT>
-inline auto
-reserve_impl(ContainerT&, long, ArgT)
+    requires(!has_reserve<ContainerT, ArgT>)
+inline bool
+reserve(ContainerT&, ArgT)
 {
     return false;
-}
-
-template <typename ContainerT, typename ArgT>
-inline auto
-reserve(ContainerT& _c, ArgT _arg)
-{
-    return reserve_impl(_c, 0, _arg);
 }
 
 template <typename ContainerT = std::vector<std::string>>

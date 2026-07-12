@@ -1428,15 +1428,21 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         }
     }
     sps_ptr->pic_width_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
+    // Maximum picture width in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
+    CHECK_ALLOWED_RANGE("pic_width_in_luma_samples", sps_ptr->pic_width_in_luma_samples, 1u, 16888u);
     sps_ptr->pic_height_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
+    // Maximum picture height in luma samples is 16888 for HEVC Level 6.2 (Annex A.4 Sqrt(MaxLumaPs * 8))
+    CHECK_ALLOWED_RANGE("pic_height_in_luma_samples", sps_ptr->pic_height_in_luma_samples, 1u, 16888u);
+    // Maximum picture size in luma samples is 35651584 for HEVC Level 6.2 (Annex A.4 MaxLumaPs.)
+    CHECK_ALLOWED_MAX("pic_width_in_luma_samples * pic_height_in_luma_samples", static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) * sps_ptr->pic_height_in_luma_samples, 35651584u);
     sps_ptr->conformance_window_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->conformance_window_flag) {
         sps_ptr->conf_win_left_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_top_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_MAX("SubWidthC * (conf_win_left_offset + conf_win_right_offset)", sub_width_c_ * (sps_ptr->conf_win_left_offset + sps_ptr->conf_win_right_offset), sps_ptr->pic_width_in_luma_samples - 1);
-        CHECK_ALLOWED_MAX("SubHeightC * (conf_win_top_offset + conf_win_bottom_offset)", sub_height_c_ * (sps_ptr->conf_win_top_offset + sps_ptr->conf_win_bottom_offset), sps_ptr->pic_width_in_luma_samples - 1);
+        CHECK_ALLOWED_MAX("SubWidthC * (conf_win_left_offset + conf_win_right_offset)", static_cast<uint64_t>(sub_width_c_) * (static_cast<uint64_t>(sps_ptr->conf_win_left_offset) + sps_ptr->conf_win_right_offset), static_cast<uint64_t>(sps_ptr->pic_width_in_luma_samples) - 1);
+        CHECK_ALLOWED_MAX("SubHeightC * (conf_win_top_offset + conf_win_bottom_offset)", static_cast<uint64_t>(sub_height_c_) * (static_cast<uint64_t>(sps_ptr->conf_win_top_offset) + sps_ptr->conf_win_bottom_offset), static_cast<uint64_t>(sps_ptr->pic_height_in_luma_samples) - 1);
     }
     sps_ptr->bit_depth_luma_minus8 = Parser::ExpGolomb::ReadUe(nalu, offset);
     if ( sps_ptr->bit_depth_luma_minus8 != 0 && sps_ptr->bit_depth_luma_minus8 != 2) {

@@ -28,7 +28,8 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
 TEST(ToHipFile, hipFileOpError_t)
 {
-    ASSERT_THROW(toHipFileOpError(invalidEnum<CUfileOpError>(CU_FILE_SUCCESS - 1)), std::invalid_argument);
+    ASSERT_THROW(toHipFileOpError(invalidEnum<CUfileOpError>(maxEnum<CUfileOpError>())),
+                 std::invalid_argument);
     ASSERT_THROW(toHipFileOpError(invalidEnum<CUfileOpError>(CU_FILE_SUCCESS + 1)), std::invalid_argument);
 
     ASSERT_THROW(toHipFileOpError(invalidEnum<CUfileOpError>(CUFILEOP_BASE_ERR)), std::invalid_argument);
@@ -82,9 +83,9 @@ TEST(ToHipFile, hipFileOpError_t)
 
 TEST(ToHipFile, hipFileError_t)
 {
-    ASSERT_THROW(
-        (void)toHipFileError(CUfileError_t{invalidEnum<CUfileOpError>(CU_FILE_SUCCESS - 1), CUDA_SUCCESS}),
-        std::invalid_argument);
+    ASSERT_THROW((void)toHipFileError(
+                     CUfileError_t{invalidEnum<CUfileOpError>(maxEnum<CUfileOpError>()), CUDA_SUCCESS}),
+                 std::invalid_argument);
 
     ASSERT_EQ(toHipFileError(CUfileError_t{CU_FILE_SUCCESS, CUDA_SUCCESS}), HIPFILE_SUCCESS);
     ASSERT_EQ(toHipFileError(CUfileError_t{CU_FILE_CUDA_DRIVER_ERROR, CUDA_ERROR_INVALID_VALUE}),
@@ -164,7 +165,7 @@ TEST(ToHipFile, hipFileIOEvents_t)
 TEST(ToCufile, CUFileSizeTConfigParameter_t)
 {
     ASSERT_THROW(toCUFileSizeTConfigParameter(
-                     invalidEnum<hipFileSizeTConfigParameter_t>(hipFileParamProfileStats - 1)),
+                     invalidEnum<hipFileSizeTConfigParameter_t>(maxEnum<hipFileSizeTConfigParameter_t>())),
                  std::invalid_argument);
 
 #define h2c(H, C) ASSERT_EQ(toCUFileSizeTConfigParameter((H)), (C))
@@ -191,7 +192,7 @@ TEST(ToCufile, CUFileSizeTConfigParameter_t)
 TEST(ToCufile, CUFileBoolConfigParameter_t)
 {
     ASSERT_THROW(toCUFileBoolConfigParameter(
-                     invalidEnum<hipFileBoolConfigParameter_t>(hipFileParamPropertiesUsePollMode - 1)),
+                     invalidEnum<hipFileBoolConfigParameter_t>(maxEnum<hipFileBoolConfigParameter_t>())),
                  std::invalid_argument);
 
 #define h2c(H, C) ASSERT_EQ(toCUFileBoolConfigParameter((H)), (C))
@@ -217,7 +218,7 @@ TEST(ToCufile, CUFileBoolConfigParameter_t)
 TEST(ToCufile, CUFileStringConfigParameter_t)
 {
     ASSERT_THROW(toCUFileStringConfigParameter(
-                     invalidEnum<hipFileStringConfigParameter_t>(hipFileParamLoggingLevel - 1)),
+                     invalidEnum<hipFileStringConfigParameter_t>(maxEnum<hipFileStringConfigParameter_t>())),
                  std::invalid_argument);
 
 #define h2c(H, C) ASSERT_EQ(toCUFileStringConfigParameter((H)), (C))
@@ -308,7 +309,8 @@ TEST(ToCufile, CUfileBatchMode_t)
 
 TEST(ToCufile, CUfileOpcode_t)
 {
-    ASSERT_THROW(toCUfileOpcode(invalidEnum<hipFileOpcode_t>(hipFileBatchRead - 1)), std::invalid_argument);
+    ASSERT_THROW(toCUfileOpcode(invalidEnum<hipFileOpcode_t>(maxEnum<hipFileOpcode_t>())),
+                 std::invalid_argument);
 
 #define h2c(H, C) ASSERT_EQ(toCUfileOpcode((H)), (C))
     h2c(hipFileBatchRead, CUFILE_READ);

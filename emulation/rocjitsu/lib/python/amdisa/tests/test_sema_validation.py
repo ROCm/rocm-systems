@@ -155,6 +155,12 @@ class TestVectorBinopValidation:
         assert new_props['reads_lane']
         assert new_props['writes_lane']
 
+    def test_legacy_i24_mul_uses_unsigned_helper(self):
+        old = gen_vector_binop(['vdst'], ['src0', 'vsrc1'], 'mul', 'i24')
+
+        assert '::rocjitsu::amdgpu::mul_i24_u32' in old
+        assert 'sv0 * sv1' not in old
+
 
 class TestVectorTernaryValidation:
     def test_fma_f32(self):

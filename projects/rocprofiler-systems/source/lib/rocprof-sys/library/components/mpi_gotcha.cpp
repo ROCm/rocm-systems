@@ -3,6 +3,7 @@
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
+#include "common/env_vars.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/mpi.hpp"
@@ -396,7 +397,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             {
                 static thread_local int _num_updates = 0;
                 static int              _disable_after =
-                    rocprofsys::get_env<int>("ROCPROFSYS_MPI_MAX_COMM_UPDATES", 4);
+                    rocprofsys::get_env<int>(env_vars::MPI_MAX_COMM_UPDATES, 4);
                 if(_num_updates++ < _disable_after) update();
             }
         }

@@ -39,7 +39,7 @@ There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.
 * Memory chart: Shows memory transactions and throughput on each cache hierarchical level.
-* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth (on L1/LDS/L2/HBM). When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
+* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth. When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
 
 **System Speed-of-Light:**
 
@@ -156,7 +156,7 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
@@ -239,7 +239,7 @@ There are three high-level GPU analysis views:
       --------------------------------------------------------------------------------
       2. System Speed-of-Light
       ╒═════════╤═══════════════════════════╤═══════════════════════╤══════════════════╤════════════════════╤════════════════════════╕
-      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ PoP                    │
+      │ Index   │ Metric                    │ Value                 │ Unit             │ Peak               │ Percent of Peak        │
       ╞═════════╪═══════════════════════════╪═══════════════════════╪══════════════════╪════════════════════╪════════════════════════╡
       │ 2.1.0   │ VALU FLOPs                │ 0.0                   │ Gflop            │ 22630.4            │ 0.0                    │
       ├─────────┼───────────────────────────┼───────────────────────┼──────────────────┼────────────────────┼────────────────────────┤
@@ -496,6 +496,13 @@ Roofline HTML plots are generated during analyze mode. Profile mode creates
 ``roofline.csv`` containing microbenchmark data, and analyze mode uses this
 data to produce interactive HTML roofline charts.
 
+.. note::
+   Matrix multiplication performance data will vary depending on which architecture is profiled:
+   * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
+   * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
+
+   Additionally, the cache level data available for analysis is dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+
 Two-step workflow:
 
 .. code-block:: shell-session
@@ -509,14 +516,31 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
+   * Multiple data types can be provided with this option in order to isolate and visualize said types in a single plot.
+   * Note: layering more than one data type could create a cluttered plot
 
-Example with multiple options:
+Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --sort dispatches --mem-level HBM L2 --roofline-data-type FP32 FP16
+
+Interactive Roofline HTML:
+
+* HTML plots have the ability to select/deselect specific rooflines and cache-level-specific kernels. In the right-hand legend of the plot, click on individual items in the legend once to display or remove the item from the plot. Double-click on an item to make it the only displayed item in the plot; double-click on any item in the legend to reset the plot to display all items.
+* Hovering your mouse on the plot displays a menu in the top right-hand corner of the page which has tools for the following:
+   * Saving the plot as a .png
+   * Zoom, pan, reset scale
+* Zooming in a specific area of the plot can also be done with click-and-drag box selection with your mouse to isolate the area you would like to see closer. Resetting the view can be done through the hover menu in the top right-hand corner of the page (described in the above bullet point)
+
+Below is an example of HTML plot interactivity, with L2 kernel points, L2-FP32 empirical bandwidth, and Peak VALU-FP32 empirical roofline toggled on:
+
+.. image:: ../../data/analyze/cli/roofline_html_interact.png
+   :align: center
+   :alt: HTML interactive plot
+   :width: 800
 
 .. _analysis-baseline-comparison:
 
@@ -657,7 +681,7 @@ Analysis database example
    WARNING Created file: test.db
 
 
-PyTorch Operator Analysis
+PyTorch operator analysis
 =========================
 
 .. warning::
@@ -667,18 +691,18 @@ PyTorch Operator Analysis
 
    These options require ``--experimental``. After profiling with
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
-   use ``rocprof-compute --experimental analyze ...`` with
+   use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
 
-Listing All Operators
+List all operators
 ---------------------
 
 Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
+   $ rocprof-compute analyze --experimental --list-torch-operators --path ./workload
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
@@ -709,7 +733,7 @@ Display all PyTorch operators captured during profiling:
 
 Output is grouped by source location (``file:line``) and shows full operator
 hierarchy (``/``-separated) and kernel stats. A consolidated CSV
-(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+(``ml_api_trace/consolidated.csv``) is written with all operator/kernel data;
 see :ref:`torch-operator-profiling` for details.
 
 The flat **Operator summary** table below the call tree has one row per
@@ -735,6 +759,8 @@ milliseconds and microseconds per cell; missing values render as ``N/A``.
 When no operator has any recorded dispatches, the table is replaced by the
 line ``Operator summary: (no operators with recorded dispatches)``.
 
+.. _operator-filtering:
+
 Filtering by Operator
 ---------------------
 
@@ -751,17 +777,84 @@ operators. Operator hierarchies are ``/``-separated (e.g.
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
+   $ rocprof-compute analyze --experimental --torch-operator "*relu" --path ./workload
 
    # Exact match
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
+   $ rocprof-compute analyze --experimental --torch-operator torch.nn.functional.relu --path ./workload
 
    # Match all operators (no arguments)
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+   $ rocprof-compute analyze --experimental --torch-operator --path ./workload
 
 **Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "*relu,*conv*,*linear"
+   $ rocprof-compute analyze --experimental \
+       --torch-operator "*relu,*conv*,*linear" --path ./workload
+
+
+Triton operator analysis
+========================
+
+.. warning::
+
+   Triton operator analysis is currently available only in CLI mode and
+   requires ``--experimental``. After profiling with
+   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
+   ``rocprof-compute analyze ... --experimental`` with
+   ``--list-triton-operators`` or ``--triton-operator`` as needed.
+
+Triton kernels can be analyzed similar to PyTorch operators. You can use the
+``--list-triton-operators`` and ``--triton-operator`` options. Both options read the
+same ``ml_api_trace/consolidated.csv`` and select rows where the ``Backend`` column is
+``triton``. As a result, Triton kernels are reported independently even if PyTorch
+operators appear in the same run.
+
+List all captured Triton kernels
+---------------------------------
+
+Display all Triton kernels captured during profiling:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
+
+   ================================================================================
+   Triton Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
+   ================================================================================
+
+   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
+   └─ torch.compile.fused (calls: 1)
+      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
+         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+
+   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
+   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
+   │ 0                                                                        │         │              │         │           │             │         │         │         │
+   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+
+Filter the Triton kernels
+-------------------------
+
+``--triton-operator`` uses the same shell-style glob matching as
+``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+
+.. code-block:: shell-session
+
+   # Wildcard match
+   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+
+   # Filter multiple kernels (space or comma separated)
+   $ rocprof-compute analyze --experimental \
+       --triton-operator "*matmul*,*softmax*" --path ./workload
+
+.. note::
+
+   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
+   one operator filter per analysis run.

@@ -22,11 +22,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <utility>
 #include <vector>
-#ifdef SQTT_LOGGING
-#    include <iostream>
-#endif
 #include "gfx10wave.h"
 #include "gfx11/gfx11wave.h"
 #include "gfx12/gfx12wave.h"
@@ -40,16 +39,10 @@ typedef gfx10::Token Token;
 
 #define MAX_ACCUM_RECORDS 65536
 
-#ifdef SQTT_LOGGING
-#    define DEBUGPRINT(_decoded)                                                                                       \
-        do {                                                                                                           \
-            auto _d = (_decoded);                                                                                      \
-            std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;                  \
-        }                                                                                                              \
-        while (0)
-#else
-#    define DEBUGPRINT(_decoded)
-#endif
+const bool SQTT_LOGGING = std::getenv("SQTT_LOGGING") ? (*std::getenv("SQTT_LOGGING") != '0') : false;
+
+#define DEBUGPRINT(_d)                                                                                                 \
+    if (SQTT_LOGGING) std::cout << token.time << " " << _d.typestr() << " - " << _d.print().str() << std::endl;
 
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
@@ -74,6 +67,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         stitch.sendOccupancy(occupancy);
     };
 
+    auto consume_launch_cluster = [&]() -> uint8_t
+    {
+        auto cluster_id = active_cluster_id;
+        if (cluster_end_pending)
+        {
+            active_cluster_id = 0;
+            cluster_end_pending = false;
+        }
+        return cluster_id;
+    };
+
     while (generator.nextValid())
     {
         Token token = generator.next();
@@ -92,9 +96,18 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     mi400::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
                     fields.raw = (uint8_t) misc.fields;
+                    fields.tt5_shift();
 
-                    if (misc.CLF) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BEGIN, misc.CLID);
-                    if (misc.CLL) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_END, misc.CLID);
+                    if (misc.CLF)
+                    {
+                        active_cluster_id = static_cast<uint8_t>(misc.CLID);
+                        cluster_end_pending = false;
+                    }
+                    if (misc.CLL)
+                    {
+                        active_cluster_id = static_cast<uint8_t>(misc.CLID);
+                        cluster_end_pending = true;
+                    }
                 }
                 else
                 {
@@ -135,6 +148,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::HEADER:
             {
                 tt_version = header_type{.raw = token.contents}.version;
+                csregister.tt_version = tt_version;
 
                 if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
 
@@ -280,6 +294,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0
                     });
                 }
+                auto cluster_id = consume_launch_cluster();
                 running_waves[start.getGPULocation()] = wave_addr;
 
                 occupancy.push_back(
@@ -292,7 +307,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                      (uint64_t) start.me,
                      (uint64_t) start.pipe,
                      start.isExt,
-                     (uint64_t) start.wgid}
+                     (uint64_t) start.wgid,
+                     cluster_id}
                 );
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
 
@@ -314,7 +330,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         exclude_barrier_wait,
                         (uint8_t) start.me,
                         (uint8_t) start.pipe,
-                        (uint8_t) start.wgid
+                        (uint8_t) start.wgid,
+                        cluster_id
                     ));
                 }
                 break;
@@ -513,12 +530,14 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::REG_INIT:
             {
                 gfx10::reg_init_type reg{.raw = token.contents};
+                DEBUGPRINT(reg);
                 if (reg.type == 2 && (reg.data & 1) == 1) stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe);
                 break;
             }
             case RdnaType::EVENT:
             {
                 gfx10::event_type event{.raw = token.contents};
+                DEBUGPRINT(event);
 
                 rocprofiler_thread_trace_decoder_event_type_t type{};
 

@@ -17,26 +17,26 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
-  if (cache_.lookup(addr))
+  if (cache_.lookup(addr, nullptr, vmid))
     return;
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, &evicted, evicted_data);
+  cache_.allocate(addr, vmid, &evicted, evicted_data);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   uint8_t line_buf[LINE_SIZE];
   l2_->fetch_line(line_addr, line_buf, vmid);
-  cache_.fill_line(addr, line_buf);
+  cache_.fill_line(addr, line_buf, vmid);
 }
 
 // Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
 // management before dispatch N+1 begins execution, so no blanket invalidation
 // at dispatch boundaries is needed.
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
-                               bool non_temporal, uint32_t vmid) {
+                               bool non_temporal, bool request_l1_bypass, uint32_t vmid) {
   Mtype inst_mtype = mtype;
   Mtype effective = mtype;
   if (memory_)
@@ -65,21 +65,22 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
     if (memory_)
       chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
-    if (chunk_mtype == Mtype::UC || non_temporal) {
+    if (chunk_mtype == Mtype::UC || non_temporal || request_l1_bypass) {
+      cache_.invalidate(ea, vmid);
       l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
     }
 
     if (chunk_mtype == Mtype::CC) {
-      cache_.invalidate(ea);
+      cache_.invalidate(ea, vmid);
       l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
     }
 
     ensure_line(ea, vmid);
-    cache_.read_line(ea, dst + copied, line_offset, chunk);
+    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     copied += chunk;
   }
 }
@@ -117,13 +118,14 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
     if (chunk_mtype == Mtype::UC || non_temporal) {
+      cache_.invalidate(ea, vmid);
       l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
       copied += chunk;
       continue;
     }
 
     ensure_line(ea, vmid);
-    cache_.write_line(ea, src + copied, line_offset, chunk);
+    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
 
     // Write through to L2 for all cacheable stores. This ensures partial writes
     // from different CUs sharing the same L2 are properly merged at byte
@@ -132,7 +134,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
     l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
 
     simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag);
+    cache_.lookup(ea, &tag, vmid);
     assert(tag != nullptr && "ensure_line must guarantee hit");
 
     // L1 line stays clean since L2 has the authoritative copy.
@@ -145,7 +147,7 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t vmid) {
   uint32_t stride = num_elems * elem_size;
   uint64_t remaining = lane_mask;
   while (remaining) {
@@ -154,7 +156,8 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
     uint64_t base = addrs[lane];
     for (uint32_t e = 0; e < num_elems; ++e) {
       uint64_t ea = base + e * elem_size;
-      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal, vmid);
+      read_bytes(ea, dst + lane * stride + e * elem_size, elem_size, mtype, non_temporal,
+                 request_l1_bypass, vmid);
     }
   }
 }

@@ -28,7 +28,7 @@ namespace rocjitsu {
 /// Fully event-driven: the VM is a structural container. Its descendants
 /// (command processors) schedule and handle events through the engine.
 /// The Driver injects external work as async events.
-class SimulatedDriver;
+class SimulatedKfd;
 
 class VirtualMachine : public simdojo::CompositeComponent {
 public:
@@ -53,12 +53,12 @@ public:
   const amdgpu::GpuMemory *memory() const { return soc_->memory(); }
   const Config &config() const { return config_; }
 
-  SimulatedDriver *driver() { return driver_.get(); }
+  SimulatedKfd *driver() { return driver_.get(); }
 
 private:
   Config config_;
   SoC *soc_ = nullptr;
-  std::unique_ptr<SimulatedDriver> driver_;
+  std::unique_ptr<SimulatedKfd> driver_;
 };
 
 } // namespace rocjitsu

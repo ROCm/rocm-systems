@@ -53,6 +53,8 @@ subtrees:
   entries:
   - file: conceptual/partition.md
     title: GPU partitioning
+  - file: conceptual/gpu-reset-behavior.md
+    title: GPU reset behavior
   - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism

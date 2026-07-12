@@ -49,4 +49,4 @@ To build the Docker image and run the container, follow these steps.
 
       mpirun --allow-run-as-root -np 8 --mca pml ucx --mca btl ^openib -x NCCL_DEBUG=VERSION -x HSA_NO_SCRATCH_RECLAIM=1 /workspace/rccl-tests/build/all_reduce_perf -b 1 -e 16G -f 2 -g 1
 
-For more information on the rccl-tests options, see the `Usage guidelines <https://github.com/ROCm/rccl-tests#usage>`_ in the GitHub repository.
+For more information on the rccl-tests options, see the `Usage guidelines <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl-tests#usage>`_ in the GitHub repository.
