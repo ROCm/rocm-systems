@@ -9,3 +9,6 @@
 build/
 cmake/build/
 .cache/
+
+# claude output directory
+.claude/output/

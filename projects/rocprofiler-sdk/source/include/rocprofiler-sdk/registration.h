@@ -40,8 +40,8 @@ ROCPROFILER_EXTERN_C_INIT
  * pointer to this data structure is provided to the client tool initialization function. The name
  * member can be set by the client to assist with debugging (e.g. rocprofiler cannot start your
  * context because there is a conflicting context started by `<name>` -- at least that is the plan).
- * The handle member is a unique identifer assigned by rocprofiler for the client and the client can
- * store it and pass it to the ::rocprofiler_client_finalize_t function to force finalization
+ * The handle member is a unique identifier assigned by rocprofiler for the client and the client
+ * can store it and pass it to the ::rocprofiler_client_finalize_t function to force finalization
  * (i.e. deactivate all of it's contexts) for the client.
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_client_id_t

@@ -218,10 +218,23 @@ Pass `ROCSHMEM_TEAM_WORLD` (`0`) as the team handle for world-scope collectives.
 | Function | Description |
 |---|---|
 | `rocshmem_barrier_all()` | Barrier across all PEs |
-| `rocshmem_barrier_all_on_stream(stream)` | Stream-ordered barrier |
+| `rocshmem_barrier_all_on_stream(stream)` | Stream-ordered barrier across all PEs |
+| `rocshmem_barrier(team)` | Blocking barrier across all PEs in `team` |
+| `rocshmem_barrier_on_stream(team, stream)` | Stream-ordered team barrier; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_team_sync(team)` | Team member rendezvous plus local-store visibility (lighter than barrier) |
+| `rocshmem_team_sync_on_stream(team, stream)` | Stream-ordered team sync; `ROCSHMEM_TEAM_INVALID` is a no-op |
+| `rocshmem_sync_all()` | World-scope sync (local-store visibility) |
+| `rocshmem_sync_all_on_stream(stream)` | Stream-ordered world sync |
 | `rocshmem_fence()` | Ordering fence |
 | `rocshmem_quiet()` | Wait for all outstanding operations |
 | `hip_device_synchronize()` | Synchronize the current HIP device |
+
+Team-scoped calls use the same `team` handle conventions as collectives
+(`ROCSHMEM_TEAM_WORLD` or a handle from `rocshmem_team_split_strided`).
+Non-members of a child team should pass `ROCSHMEM_TEAM_INVALID` (`-1`); the
+runtime returns without enqueueing work. If RMA was issued on a HIP stream,
+synchronize that stream before a *blocking* `rocshmem_barrier(team)`; use
+`rocshmem_barrier_on_stream` on the same stream as the RMA for overlap.
 
 ### Atomic Operations
 

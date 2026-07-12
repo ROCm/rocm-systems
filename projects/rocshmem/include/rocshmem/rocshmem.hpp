@@ -317,6 +317,41 @@ __host__ int rocshmem_buffer_unregister(void *addr);
 __host__ void rocshmem_buffer_unregister_all();
 
 /**
+ * @brief Registers a symmetric user buffer so it can be used as the remote
+ * target of RMA operations.
+ *
+ * Unlike rocshmem_buffer_register(), this is a *collective* operation that
+ * must be called by all PEs with a buffer of the same length. The call maps
+ * the user's buffer to a fresh rocSHMEM-managed virtual address and returns
+ * it; that returned address (not @p addr) is what the caller must use as the
+ * symmetric target for RMA routines and must pass to
+ * rocshmem_buffer_unregister_symmetric().
+ *
+ * @note This routine is currently restricted to memory allocated through the
+ *       HIP Virtual Memory Management (VMM) APIs (ROCm 7.0 or newer). Passing
+ *       a non-VMM pointer returns nullptr.
+ *
+ * @param[in] addr   Pointer to previously allocated VMM memory.
+ * @param[in] length Length of addr in bytes.
+ *
+ * @return The rocSHMEM-managed symmetric address on success, nullptr otherwise.
+ */
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length);
+
+/**
+ * @brief Deregisters a previously registered symmetric user buffer.
+ *
+ * This is a collective operation that must be called by all PEs that
+ * participated in the matching rocshmem_buffer_register_symmetric() call.
+ *
+ * @param[in] addr The symmetric address returned by
+ *                 rocshmem_buffer_register_symmetric().
+ *
+ * @return ROCSHMEM_SUCCESS on success, ROCSHMEM_ERROR otherwise.
+ */
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr);
+
+/**
  * @brief Query for the number of PEs.
  *
  * @return Number of PEs.
@@ -527,11 +562,37 @@ __host__ void rocshmem_quiet_on_stream(hipStream_t stream);
 __host__ void rocshmem_barrier_all();
 
 /**
+ * @brief perform a collective barrier across all PEs in \p team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the barrier.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier(rocshmem_team_t team);
+
+/**
  * @brief enqueues a collective barrier on given stream.
  *
  * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a collective barrier across all PEs in \p team on given
+ * stream.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team    Team participating in the barrier.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream);
 
 /**
  * @brief enqueues a sync_all operation on given stream.
@@ -541,6 +602,23 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
  * @return void
  */
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
+
+/**
+ * @brief enqueues a team-scoped sync across all PEs in \p team on given stream.
+ *
+ * In contrast with rocshmem_barrier_on_stream, rocshmem_team_sync_on_stream
+ * only ensures completion and visibility of previously issued memory stores and
+ * does not ensure completion of remote memory updates issued via OpenSHMEM
+ * routines. The sync is stream-ordered. Passing ROCSHMEM_TEAM_INVALID is a
+ * no-op (nothing is enqueued).
+ *
+ * @param[in] team    Team participating in the sync.
+ * @param[in] stream  HIP stream on which to enqueue the operation.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream);
 
 /**
  * @brief enqueues an alltoall collective operation on given stream.
@@ -665,6 +743,22 @@ __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
  * @return void
  */
 __host__ void rocshmem_sync_all();
+
+/**
+ * @brief registers the arrival of a PE at a team-scoped sync.
+ * The caller is blocked until synchronization is resolved across \p team.
+ *
+ * In contrast with rocshmem_barrier, rocshmem_team_sync only ensures
+ * completion and visibility of previously issued memory stores and does not
+ * ensure completion of remote memory updates issued via OpenSHMEM routines.
+ *
+ * Passing ROCSHMEM_TEAM_INVALID is a no-op.
+ *
+ * @param[in] team Team participating in the sync.
+ *
+ * @return void
+ */
+__host__ void rocshmem_team_sync(rocshmem_team_t team);
 
 /**
  * @brief allows any PE to force the termination of an entire program.

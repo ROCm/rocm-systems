@@ -240,7 +240,7 @@ resolve_attach_tid(pid_t pid)
 rocattach_status_t
 setup(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
                << pid;
@@ -296,10 +296,15 @@ setup(int pid)
         return status;
     }
 
-    // Build and write tool library path to target process
-    auto tool_lib_path_env =
-        rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY", "librocprofiler-sdk-tool.so");
-    const char* tool_lib_path = tool_lib_path_env.c_str();
+    // Build and write tool library path to target process. Do not honor the
+    // user-controllable ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution
+    // context (setuid/setgid, file capabilities, etc.), so an unprivileged user
+    // cannot cause a privileged attach helper to inject an arbitrary library.
+    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
+                                        ? std::string{"librocprofiler-sdk-tool.so"}
+                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
+                                                                "librocprofiler-sdk-tool.so");
+    const char* tool_lib_path     = tool_lib_path_env.c_str();
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
 
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
@@ -398,7 +403,7 @@ collect_process_tree(pid_t root_pid)
 rocattach_status_t
 teardown(int pid)
 {
-    // Setup attachement for rocprofiler
+    // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_detach function called "
                   "for pid "
                << pid;

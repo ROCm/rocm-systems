@@ -189,7 +189,7 @@ public:
         return info;
     }
 
-    // Return block info foor a given event
+    // Return block info for a given event
     const GpuBlockInfo* GetBlockInfo(const event_t* event) const
     {
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
@@ -278,7 +278,7 @@ private:
     {
         bool operator()(const AgentInfo& a, const AgentInfo& b) const
         {
-            // using name instead of gfxip due to backward compatability with rocprofv2,
+            // using name instead of gfxip due to backward compatibility with rocprofv2,
             // as in newer api which rocprofv3 uses both name and gfxip strings are same for a
             // agent.
             int cmp = strcmp(a.name, b.name);

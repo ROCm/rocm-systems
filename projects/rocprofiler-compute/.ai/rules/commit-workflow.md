@@ -76,7 +76,7 @@ EOF
 
 ## Branch safety
 
-- Never commit directly to `develop`
+- Never commit directly to `develop` and `rocprofiler-compute-develop`
 - Always check current branch and apply commit over there, unless user specifies another branch
 - If a commit was accidentally made on the wrong branch, move it:
   1. `git branch <correct-branch>` (create branch at current HEAD)

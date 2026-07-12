@@ -30,6 +30,15 @@ use crate::session::SessionId;
 /// Environment variable carrying a node's rank (0 = head). Always set
 /// on every node process, containerised or not.
 pub const ENV_RANK: &str = "MIRAGE_RANK";
+/// `torch.distributed` global rank: the process's index across the whole
+/// job, in `0..WORLD_SIZE`. Distinct from [`ENV_RANK`] (`MIRAGE_RANK`),
+/// which identifies the *node*: with `--nproc-per-node > 1` several
+/// processes share a node (and thus a `MIRAGE_RANK`) but each gets a
+/// unique `RANK`. With the default of one process per node it equals
+/// `MIRAGE_RANK`. Set so PyTorch's `env://` init method (and `torchrun`)
+/// can read the rank under its standard name without the workload having
+/// to translate mirage's own variables.
+pub const ENV_TORCH_RANK: &str = "RANK";
 
 /// Environment variable carrying the head node's address. Set on every
 /// node, including the head (rank 0), which gets `localhost`.
@@ -38,6 +47,42 @@ pub const ENV_HEAD_ADDR: &str = "MIRAGE_HEAD_ADDR";
 /// Environment variable carrying the port the head node may listen on.
 /// Always set on every node process.
 pub const ENV_HEAD_PORT: &str = "MIRAGE_HEAD_PORT";
+
+/// `torch.distributed` rendezvous address. Aliases [`ENV_HEAD_ADDR`] so
+/// PyTorch's `env://` init method (and `torchrun --rdzv-endpoint`) work
+/// out of the box on every node without the workload having to translate
+/// mirage's own variables.
+pub const ENV_MASTER_ADDR: &str = "MASTER_ADDR";
+
+/// `torch.distributed` rendezvous port. Aliases [`ENV_HEAD_PORT`].
+pub const ENV_MASTER_PORT: &str = "MASTER_PORT";
+
+/// `torch.distributed` world size: the total number of ranks in the
+/// job, i.e. `num_nodes * nproc_per_node`. With the default of one
+/// workload process per node this is just the session's node count. Set
+/// on every process so PyTorch's `env://` init method works without a
+/// launcher like `torchrun`.
+pub const ENV_WORLD_SIZE: &str = "WORLD_SIZE";
+
+/// `torch.distributed` local rank: the process's index *within* its
+/// node, in `0..nproc_per_node`. With the default of one workload
+/// process per node this is always `0`. Set on every process so
+/// PyTorch's `env://` init method works without a launcher like
+/// `torchrun`.
+pub const ENV_LOCAL_RANK: &str = "LOCAL_RANK";
+
+/// RCCL/NCCL host identifier. Normally NCCL derives this from the real
+/// machine's hostname to group ranks that share a host (so it can use
+/// fast intra-host transports and reject two ranks claiming the same
+/// physical GPU). In mirage's non-containerised multi-node mode every
+/// emulated node runs on the *same* real host and is synthesised from an
+/// identical per-node config, so each rank's GPU reports the same
+/// `location_id`. NCCL then aborts with "Duplicate GPU detected: rank X
+/// and rank Y both on CUDA device …". Setting a distinct `NCCL_HOSTID`
+/// per emulated node makes NCCL treat them as separate hosts, which is
+/// the correct model here (one emulated GPU per node). Ranks sharing a
+/// node keep the same value and disambiguate by local GPU index.
+pub const ENV_NCCL_HOSTID: &str = "NCCL_HOSTID";
 
 /// Deterministic container name for a node of a session.
 ///

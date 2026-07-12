@@ -155,6 +155,8 @@ device:
     tags: [query]
   Unit_hipDeviceGetUuid_From_RocmInfo:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
     <<: *level_2

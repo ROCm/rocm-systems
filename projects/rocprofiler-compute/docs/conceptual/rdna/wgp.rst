@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler - RDNA3.5 WGP / roofline metrics
-   :keywords: ROCm Compute Profiler, RDNA, gfx1151, WGP, roofline
+   :keywords: ROCm Compute Profiler, RDNA, gfx115x, WGP, roofline
 
 .. _rdna-wgp:
 
@@ -8,13 +8,13 @@
 Workgroup processor (WGP)
 =========================
 
-Within each shader engine, **Workgroup Processors (WGPs)** pair two **Compute Units (CUs)** that share resources and execute dispatched waves after the SPI workgroup manager hands off work.
-On RDNA3-class GPUs (including discrete Ryzen APU 3x and RDNA3.5 / gfx1151 integrations), compute kernels are typically tracked with wave32-oriented waves; the gfx1151 **WGP** panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
+Within each shader engine, Workgroup Processors (WGPs) pair two Compute Units (CUs) that share resources and execute dispatched waves after the Workgroup Manager (SPI) hands off work.
+On RDNA3.5 architecture-based GPUs/APUs, compute kernels are typically tracked with wave32-oriented waves; the gfx115x WGP panels cover occupancy, dispatch, instruction mix, and local caches at that WGP/CU-pair granularity.
 
-The sections below list RDNA3.5 (gfx1151) metric descriptions.
+The sections below list RDNA3.5 (gfx115x) metric descriptions.
 
 .. Note::
-   AMD Instinct (CDNA) GPUs use a different execution hierarchy and panel grouping.
+   The CDNA architecture-based AMD Instinct GPUs use a different execution hierarchy and panel grouping.
    For Instinct-only pipeline metrics (for example, VALU / VMEM / MFMA-style tables), see :doc:`../cdna/cdna-performance-model`-without assuming RDNA WGPs or CUs map directly to those layouts.
 
 Roofline
@@ -25,10 +25,10 @@ Roofline performance rates
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-roofline-performance-rates-gfx1151
+      .. jinja:: rdna115x-roofline-performance-rates-gfx115x
          :file: _templates/metrics_table.j2
 
 Roofline plot points
@@ -36,10 +36,10 @@ Roofline plot points
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-roofline-plot-points-gfx1151
+      .. jinja:: rdna115x-roofline-plot-points-gfx115x
          :file: _templates/metrics_table.j2
 
 WGP block metrics
@@ -50,10 +50,10 @@ WGP utilization
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wgp-utilization-gfx1151
+      .. jinja:: rdna115x-wgp-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
 Wavefront launch stats
@@ -61,10 +61,10 @@ Wavefront launch stats
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wavefront-launch-stats-gfx1151
+      .. jinja:: rdna115x-wavefront-launch-stats-gfx115x
          :file: _templates/metrics_table.j2
 
 Wave dispatch
@@ -72,10 +72,10 @@ Wave dispatch
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wave-dispatch-gfx1151
+      .. jinja:: rdna115x-wave-dispatch-gfx115x
          :file: _templates/metrics_table.j2
 
 Wave life
@@ -83,10 +83,10 @@ Wave life
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wave-life-gfx1151
+      .. jinja:: rdna115x-wave-life-gfx115x
          :file: _templates/metrics_table.j2
 
 Wave instruction mix
@@ -94,21 +94,31 @@ Wave instruction mix
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wave-instruction-mix-gfx1151
+      .. jinja:: rdna115x-wave-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
+
+.. note::
+
+   The **Instructions - Dual VALU (VOPD)** row counts ``SQ_INSTS_DUAL_VALU_WAVE32`` —
+   the number of VOPD-encoded wave32 instructions issued per normalization unit.
+   Each unit corresponds to one dual-issue VALU slot consumed; kernels that use VOPD
+   heavily typically show a large value relative to the **Instructions - VALU** row.
+   The exact ratio depends on ISA counting semantics for paired operations, so treat
+   the two rows as complementary signals rather than a fixed ceiling relationship.
+   For peak-rate theory and FLOPs ceilings see :ref:`rdna-dual-issue-valu`.
 
 VMEM instruction mix
 --------------------
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-vmem-instruction-mix-gfx1151
+      .. jinja:: rdna115x-vmem-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
 LDS instruction mix
@@ -116,10 +126,10 @@ LDS instruction mix
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-lds-instruction-mix-gfx1151
+      .. jinja:: rdna115x-lds-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
 Wait state analysis
@@ -127,10 +137,10 @@ Wait state analysis
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wait-state-analysis-gfx1151
+      .. jinja:: rdna115x-wait-state-analysis-gfx115x
          :file: _templates/metrics_table.j2
 
 WGP instruction cache
@@ -138,10 +148,10 @@ WGP instruction cache
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wgp-instruction-cache-gfx1151
+      .. jinja:: rdna115x-wgp-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
 
 WGP scalar data cache
@@ -149,8 +159,8 @@ WGP scalar data cache
 
 .. tab-set::
 
-   .. tab-item:: RDNA 3.5 (gfx1151)
+   .. tab-item:: RDNA3.5 (gfx115x)
       :selected:
 
-      .. jinja:: rdna1151-wgp-scalar-data-cache-gfx1151
+      .. jinja:: rdna115x-wgp-scalar-data-cache-gfx115x
          :file: _templates/metrics_table.j2

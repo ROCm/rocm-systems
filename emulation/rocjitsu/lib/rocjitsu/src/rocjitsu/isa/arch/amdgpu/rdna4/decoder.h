@@ -550,6 +550,7 @@ private:
   static std::unique_ptr<Instruction> decodeSClauseSopp(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeSDelayAluSopp(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeSWaitAluSopp(const MachineInst *opcode);
+  static std::unique_ptr<Instruction> decodeSWaitcntSopp(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeSWaitIdleSopp(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeSWaitEventSopp(const MachineInst *opcode);
   static std::unique_ptr<Instruction> decodeSTrapSopp(const MachineInst *opcode);

@@ -97,6 +97,10 @@ class ROContext : public Context {
   __device__ int reduce(rocshmem_team_t team, T *dest, const T *source,
                         int nreduce);
 
+  template <typename T, ROCSHMEM_OP Op>
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
+                                   int nreduce);
+
   template <typename T>
   __device__ void put(T *dest, const T *source, size_t nelems, int pe);
 
@@ -146,13 +150,23 @@ class ROContext : public Context {
   __device__ void amo_xor(void *dst, T value, int pe);
 
   template <typename T>
-  __device__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
+  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
                             int nelems, int pe_root);
 
   template <typename T>
-  __device__ void broadcast(T *dest, const T *source, int nelems, int pe_root,
+  __device__ void broadcast_wg(T *dest, const T *source, int nelems, int pe_root,
                             int pe_start, int log_pe_stride, int pe_size,
                             long *p_sync);  // NOLINT(runtime/int)
+
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
+                            int nelems, int pe_root);
+                            
+  template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                  void *dest, const void* source, int nelement, int PE_root);
 
   template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
