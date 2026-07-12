@@ -90,13 +90,11 @@ class NullDevice : public amd::Device {
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
-  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly) {
+  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
     return true;
   }
 
-  virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                    bool validateOnly) {
+  virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
     return true;
   }
 
@@ -413,12 +411,10 @@ class Device : public NullDevice {
   virtual device::Program* createProgram(amd::Program& owner, amd::option::Options* options = NULL);
 
   //! Attempt to bind with external graphics API's device/context
-  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly);
+  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext);
 
   //! Attempt to unbind with external graphics API's device/context
-  virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                    bool validateOnly);
+  virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext);
 
   //! Free resource cache on device if OCL context was destroyed.
   //! @note: Backend device doesn't track resources per context and releases all resources,
