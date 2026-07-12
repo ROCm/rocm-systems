@@ -830,6 +830,14 @@ typedef enum hsa_amd_agent_info_s {
    */
   HSA_AMD_AGENT_INFO_MEMORY_AVAIL = 0xA015,
   /**
+   * Queries the graphics-aware amount of memory available in bytes across the
+   * agent's local VRAM. On discrete GPUs this includes DRM graphics allocations
+   * (Vulkan/GL/display) in the accounting and is intended for capacity planning,
+   * not for synchronous compute allocation accounting.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_AGENT_INFO_MEMORY_AVAIL_GRAPHICS_AWARE = 0xA017,
+  /**
    * Timestamp value increase rate, in Hz. The timestamp (clock) frequency is
    * in the range 1-400MHz.
    * The type of this attribute is uint64_t.

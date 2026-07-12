@@ -78,6 +78,7 @@ groups:
     - rocrtstFunc.Concurrent_Shutdown
     - rocrtstFunc.Reference_Count
     - rocrtstFunc.Max_Reference_Count
+    - rocrtstFunc.MemoryAvailGraphicsAware_NotOverReported
     - rocrtstFunc.Signal_Destroy_Concurrently
     - rocrtstFunc.Signal_Max_Consumer
     - rocrtstFunc.Signal_Create_Concurrently

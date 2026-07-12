@@ -82,6 +82,7 @@
 // libdrm headers
 #include <xf86drm.h>
 #include <amdgpu.h>
+#include <amdgpu_drm.h>
 #endif
 
 #ifdef HSA_ENABLE_AMDCUID_SUPPORT
@@ -2493,6 +2494,25 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
       *((uint64_t*)value) = availableBytes;
       break;
+    }
+    case HSA_AMD_AGENT_INFO_MEMORY_AVAIL_GRAPHICS_AWARE: {
+#if defined(__linux__)
+      // ldrm_dev_ is initialized unconditionally by InitLibDrm() in the ctor
+      // (which throws on failure), so a live GpuAgent always has a valid handle;
+      // Integrated == 0 (discrete) is the meaningful gate here.
+      if (properties_.Integrated == 0) {
+        struct amdgpu_heap_info heap = {};
+        // heap_size == 0 is pathological (query succeeded but reported no VRAM);
+        // treat it as unsupported and fall through to HSA_STATUS_ERROR_INVALID_ARGUMENT.
+        if (amdgpu_query_heap_info(ldrm_dev_, AMDGPU_GEM_DOMAIN_VRAM, 0, &heap) == 0 &&
+            heap.heap_size > 0) {
+          *((uint64_t*)value) =
+              (heap.heap_size > heap.heap_usage) ? (heap.heap_size - heap.heap_usage) : 0;
+          break;
+        }
+      }
+#endif
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
     case HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY:
       *((uint64_t*)value) = wallclock_frequency_;
