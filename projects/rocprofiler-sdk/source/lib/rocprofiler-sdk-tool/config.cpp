@@ -261,6 +261,19 @@ config::config()
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {
+    // SECURITY: ROCPROF_ATT_LIBRARY_PATH selects the directory from which the
+    // advanced-thread-trace decoder library (librocprof-trace-decoder.so) is
+    // dlopen'd. Do not honor this user-controllable environment variable in a
+    // secure-execution context (setuid/setgid binaries, file capabilities, etc.),
+    // otherwise an unprivileged local user could inject an arbitrary shared
+    // library into a privileged process. Fall back to the default library search.
+    if(common::is_at_secure() && !att_library_path.empty())
+    {
+        ROCP_WARNING << "[ROCPROF_ATT_LIBRARY_PATH] ignoring environment variable because the "
+                        "process is running in a secure-execution context (AT_SECURE)";
+        att_library_path.clear();
+    }
+
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 
     std::unordered_map<std::string_view, rocprofiler_pc_sampling_unit_t> pc_sampling_unit_map = {

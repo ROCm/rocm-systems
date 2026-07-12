@@ -1,5 +1,7 @@
 {
-  "iree": [],
+  "iree": [
+    "iree.gfx1201.e2e.pack_i8.static_pack_vnni_lhs_large"
+  ],
   "cts": [
     "cts.gfx1201.fpsan.fpsan_atomic_test",
     "cts.gfx1201.fpsan.fpsan_classify_test",
