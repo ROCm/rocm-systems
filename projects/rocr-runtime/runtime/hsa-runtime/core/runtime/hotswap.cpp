@@ -43,6 +43,7 @@
 #include "core/inc/hotswap.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstdint>
@@ -69,7 +70,7 @@ namespace {
 std::mutex g_retained_rewritten_elf_buffers_mutex;
 std::unordered_map<uint64_t, std::vector<OwnedElfBuffer>> g_retained_rewritten_elf_buffers;
 #ifdef ROCR_HOTSWAP_TESTING
-bool g_force_retarget_code_object_failure_for_testing = false;
+std::atomic<bool> g_force_retarget_code_object_failure_for_testing{false};
 #endif
 
 constexpr char kGfx1250[] = "gfx1250";
@@ -302,6 +303,9 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
+    // Keep A0 retargeting on COMGR's legacy rewrite path. The B0 source and A0
+    // target ISA features select the required instruction patches without
+    // strict mode; B0 strict rewrites use hotswap_rewrite_with_options().
     RewriteDecision decision;
     decision.source_isa =
         WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0);
@@ -497,7 +501,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
 
   bool rewritten = false;
 #ifdef ROCR_HOTSWAP_TESTING
-  if (g_force_retarget_code_object_failure_for_testing) {
+  if (g_force_retarget_code_object_failure_for_testing.load(std::memory_order_relaxed)) {
     HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
   } else
 #endif
@@ -612,7 +616,7 @@ bool HotswapRewriteWithOptionsAvailableForTesting() {
 }
 
 void ForceRetargetCodeObjectFailureForTesting(bool force) {
-  g_force_retarget_code_object_failure_for_testing = force;
+  g_force_retarget_code_object_failure_for_testing.store(force, std::memory_order_relaxed);
 }
 #endif
 
