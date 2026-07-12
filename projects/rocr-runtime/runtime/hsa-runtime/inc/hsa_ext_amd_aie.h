@@ -100,10 +100,12 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t reserved2;
 
   /**
-   * Address of the instruction sequence.
+   * Opaque kernel object handle obtained from
+   * HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT. Occupies the two 32-bit words that
+   * previously held the instruction-sequence address.
    */
-  uint32_t insts_addr_low;
-  uint32_t insts_addr_high;
+  uint32_t kernel_object_low;
+  uint32_t kernel_object_high;
 
   /**
    * Number of kernel arguments. Must be 0 if ::kernarg_address is NULL, and must be greater than 0
@@ -131,14 +133,16 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Size of the instruction sequence in bytes.
+   * Reserved. Must be 0. (Formerly the instruction sequence size; now carried in
+   * the kernel descriptor referenced by kernel_object.)
    */
-  uint64_t insts_size;
+  uint64_t reserved_insts_size;
 
   /**
-   * PDI address.
+   * Reserved. Must be 0. (Formerly the PDI address; now carried in the kernel
+   * descriptor referenced by kernel_object.)
    */
-  void* pdi_addr;
+  void* reserved_pdi_addr;
 
   /**
    * Reserved. Must be 0.
