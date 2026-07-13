@@ -174,6 +174,11 @@ struct pmc_info_t
     std::optional<size_t> is_derived{};
     std::string           extdata{};
 
+    // True when more than one rocpd_pmc_event row shares the same (event_id, pmc_id) —
+    // a legacy producer bug where two distinct physical quantities were written under one
+    // pmc_id. Consumers should treat values for this pmc as unreliable / interleaved.
+    bool ambiguous{ false };
+
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
 };
@@ -303,10 +308,10 @@ enum class track_type_t
     memory_activity       ///< agent_info populated. Scalar track of cumulative bytes
                           ///< allocated per agent over time, keyed (nid, pid, agent_id),
                           ///< computed from rocpd_memory_allocate (ALLOC +size / FREE
-                     ///< -size; FREE agent_id and size recovered via address self-join
-                     ///< to the prior ALLOC; REALLOC/RECLAIM no-op). Mirrors Optiq's
-                     ///< GetRocprofMemoryActivity* synthesis (load_id 7). Use
-                     ///< get_scalar_track(); interval read returns empty.
+    ///< -size; FREE agent_id and size recovered via address self-join
+    ///< to the prior ALLOC; REALLOC/RECLAIM no-op). Mirrors Optiq's
+    ///< GetRocprofMemoryActivity* synthesis (load_id 7). Use
+    ///< get_scalar_track(); interval read returns empty.
 };
 
 /**

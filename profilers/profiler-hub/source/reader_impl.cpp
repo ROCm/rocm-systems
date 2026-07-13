@@ -1285,6 +1285,11 @@ reader_t::impl::get_all_pmc_infos()
         const auto& statement     = m_read_statements->pmc_info_statement();
         const auto  pmc_info_list = statement().to_vector();
 
+        // Build a set of pmc_ids that have >1 rocpd_pmc_event row per event_id.
+        std::unordered_set<size_t> ambiguous_ids;
+        for(const auto& row : m_read_statements->ambiguous_pmc_ids()().to_vector())
+            ambiguous_ids.insert(row.pmc_id);
+
         m_pmc_info_list.reserve(pmc_info_list.size());
         for(const auto& pmc_info : pmc_info_list)
         {
@@ -1327,6 +1332,8 @@ reader_t::impl::get_all_pmc_infos()
                     pmc_info_ptr->agent_info = agent_it->second;
                 }
             }
+
+            pmc_info_ptr->ambiguous = (ambiguous_ids.count(pmc_info.id) > 0);
 
             m_pmc_info_list.push_back(pmc_info_ptr);
             m_pmc_info_utility.emplace(pmc_info.id, pmc_info_ptr);

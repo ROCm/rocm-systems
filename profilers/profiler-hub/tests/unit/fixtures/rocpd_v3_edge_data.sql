@@ -24,9 +24,10 @@
 --   names, and because there is NO rocpd_timestamp table it selects the v3
 --   backend (reader_impl.cpp version dispatch).
 --
--- TRACK MATRIX (what get_all_tracks() must return -- 8 tracks total):
---   COUNTER tracks come from rocpd_track (a track is a counter iff a rocpd_sample
---   references it -- reader_impl.cpp v3 classification). Non-counter rocpd_track
+-- TRACK MATRIX (what get_all_tracks() must return):
+--   COUNTER tracks come from rocpd_track (a track is a counter iff a PMC-backed
+--   rocpd_sample references it -- i.e. a sample row whose event_id joins
+--   rocpd_pmc_event; reader_impl.cpp v3 classification). Non-counter rocpd_track
 --   rows are NOT tracks: cpu_thread/region tracks are synthesized from rocpd_region
 --   instead (v3 rocpd_track is an unreliable grab-bag). So tracks 1, 4, 5 below are
 --   deliberately IGNORED by discovery, proving the skip path.
@@ -39,8 +40,14 @@
 --                                                (re-homes the NULL-pid/NULL-tid
 --                                                schema-branch coverage that used to
 --                                                live on a cpu_thread rocpd_track row)
---   From rocpd_track rows -> IGNORED (non-counter, no sample ref):
---     track 1 (pid+tid), track 4 (pid, no tid), track 5 (no pid) -- not returned.
+--   From rocpd_track rows -> IGNORED (not returned):
+--     track 1 (pid+tid), track 4 (pid, no tid), track 5 (no pid) -- non-counter,
+--       no sample ref.
+--     track 7 (pid, no tid) -- HAS a rocpd_sample (sample 7) but NO rocpd_pmc_event,
+--       so it is a non-PMC sample track: NOT a counter, and (no rocpd_region row) not
+--       a cpu_thread track either. Regression guard for the pmc_event join in
+--       distinct_sample_track_ids() -- a bare "DISTINCT track_id FROM rocpd_sample"
+--       would over-include it as an empty counter (rocpd-transpose.db 21-vs-18 bug).
 --   Synthesized from rocpd_region:
 --     1 cpu_thread track (the sole (nid,pid,tid)=(1,1,1) thread; all regions are
 --       "main" -- none of their events carry a sample -- so a single main track).
@@ -136,6 +143,16 @@ INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
 VALUES (5, 1, NULL, NULL, NULL);   -- non-counter, no pid -> IGNORED by discovery
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
 VALUES (6, 1, NULL, NULL, NULL);   -- counter, no pid/tid -> process/thread_info NULL
+INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
+VALUES (7, 1, 1,    NULL, NULL);   -- sampled but NOT pmc-backed -> NOT a counter
+                                   --   (regression guard: sample 7 references event 14,
+                                   --    which has NO rocpd_pmc_event. A bare
+                                   --    "DISTINCT track_id FROM rocpd_sample" would
+                                   --    mis-classify this as a counter; the pmc_event
+                                   --    join in distinct_sample_track_ids() excludes it.
+                                   --    Mirrors rocpd-transpose.db region timer-sample
+                                   --    tracks. NO rocpd_region row, so it also does not
+                                   --    become a cpu_thread track -> not returned at all.)
 
 -- Events --------------------------------------------------------------------
 -- Flows key on stack_id (Q4): a region flows to a GPU-side event sharing the
@@ -158,7 +175,8 @@ VALUES (1, 100),
        (10, NULL),
        (11, NULL),
        (12, NULL),
-       (13, NULL);   -- sample event for the NULL-pid counter (track 6)
+       (13, NULL),   -- sample event for the NULL-pid counter (track 6)
+       (14, NULL);   -- sample event for the non-pmc sample track (track 7); no pmc_event
 
 -- Regions (cpu_thread interval track for track 1, tid=1) ----------------------
 -- Row-id order deliberately != start order so ORDER BY start is proven:
@@ -229,10 +247,14 @@ VALUES (1, 8,  1, 30.5),
        (5, 12, 2, 15.0),
        (6, 13, 3, 42.0);
 
+-- Track 7 (sample 7, event 14) is deliberately NOT pmc-backed: there is no
+-- rocpd_pmc_event row for event 14, so this sample track must NOT classify as a
+-- counter (regression guard for the distinct_sample_track_ids() pmc_event join).
 INSERT INTO "rocpd_sample{{uuid}}" (id, track_id, timestamp, event_id)
 VALUES (1, 2, 3000, 8),
        (2, 2, 1000, 9),
        (3, 2, 2000, 10),
        (4, 3, 500,  11),
        (5, 3, 1500, 12),
-       (6, 6, 700,  13);
+       (6, 6, 700,  13),
+       (7, 7, 800,  14);

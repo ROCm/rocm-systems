@@ -52,6 +52,7 @@ struct track_query_info_t
     std::optional<size_t>      agent_id;   // gpu_queue, memory; dma (dst_agent_id)
     std::optional<size_t>      queue_id;   // gpu_queue, memory, dma
     std::optional<size_t>      stream_id;  // stream
+    std::optional<size_t>      pmc_id;     // kernel_dispatch_pmc
     size_t real_track_id{};                // counter: rocpd_track id for sample.track_id
     bool   region_is_sample{};             // cpu_thread: true => sample-kind region track
 };

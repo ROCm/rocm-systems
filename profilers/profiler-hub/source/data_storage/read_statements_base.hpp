@@ -492,6 +492,14 @@ struct max_track_id_result
     std::optional<size_t> max_id;
 };
 
+/// pmc_id that has more than one rocpd_pmc_event row for the same event_id — a
+/// legacy producer bug where two quantities were stamped with one pmc_id. One row
+/// per ambiguous pmc_id.
+struct ambiguous_pmc_id_result
+{
+    size_t pmc_id{};
+};
+
 /// Maps a counter track_id to its PMC id and name (rocpd_info_pmc). One row per
 /// counter track.
 struct counter_track_name_result
@@ -661,6 +669,9 @@ struct read_statements_base
     using scalar_detail_func_t =
         std::function<sqlite_backend::result_set<scalar_detail_result>(size_t)>;
 
+    using ambiguous_pmc_ids_func_t =
+        std::function<sqlite_backend::result_set<ambiguous_pmc_id_result>()>;
+
     // ----- set structs (shared) -----
     struct timeline_event_statement_set
     {
@@ -699,8 +710,9 @@ struct read_statements_base
     [[nodiscard]] virtual kernel_symbol_info_statement_func_t
     kernel_symbol_info_statement() const = 0;
     [[nodiscard]] virtual code_object_info_statement_func_t code_object_info_statement()
-        const                                                                  = 0;
-    [[nodiscard]] virtual pmc_info_statement_func_t pmc_info_statement() const = 0;
+        const                                                                        = 0;
+    [[nodiscard]] virtual pmc_info_statement_func_t       pmc_info_statement() const = 0;
+    [[nodiscard]] virtual const ambiguous_pmc_ids_func_t& ambiguous_pmc_ids() const  = 0;
 
     [[nodiscard]] virtual const sample_track_id_func_t& distinct_sample_track_ids()
         const = 0;

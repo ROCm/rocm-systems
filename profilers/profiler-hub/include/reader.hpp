@@ -187,8 +187,13 @@ struct reader_t
      * @brief Get all causal links between events across all tracks (post-hoc pass)
      * @param filter Optional time-window filter applied to the SOURCE event's start.
      *               pagination/sort/types are ignored.
-     * @return Every (source_opaque_id -> dest_opaque_id) pair derivable from a shared
-     *         stack_id. May be one-to-many.
+     * @return Every (source -> dest) pair derivable from a shared non-zero stack_id,
+     *         forming the full stack-clique. Each endpoint carries its event_type
+     *         (source_type/dest_type) because the opaque ids are per-type-table row ids
+     *         and collide across types. Emitted edge categories: region->region,
+     *         region->{kernel_dispatch, memory_copy, memory_allocate}, and same-type
+     *         siblings (kernel_dispatch->kernel_dispatch, memory_copy->memory_copy,
+     *         memory_allocate->memory_allocate). May be one-to-many.
      */
     [[nodiscard]] reader_types::flow_list_t get_flows(
         const reader_types::event_filter_t& filter = {}) const;

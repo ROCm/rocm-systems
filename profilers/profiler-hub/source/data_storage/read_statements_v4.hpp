@@ -66,6 +66,7 @@ struct read_statements : public read_statements_base
         initialize_track_stats_statements();
         initialize_scalar_track_statements();
         initialize_scalar_detail_statement();
+        initialize_ambiguous_pmc_ids_statement();
         initialize_flow_statements();
 
         initialize_timeline_event_statements();
@@ -189,6 +190,10 @@ struct read_statements : public read_statements_base
     [[nodiscard]] const scalar_detail_func_t& pmc_event_detail() const override
     {
         return m_pmc_event_detail;
+    }
+    [[nodiscard]] const ambiguous_pmc_ids_func_t& ambiguous_pmc_ids() const override
+    {
+        return m_ambiguous_pmc_ids;
     }
 
     // ----- flow accessors (same stack_id semantics as v3) -----
@@ -1093,6 +1098,18 @@ private:
                 &scalar_detail_result::event_id);
     }
 
+    void initialize_ambiguous_pmc_ids_statement()
+    {
+        const auto& u = m_uuid;
+        m_ambiguous_pmc_ids =
+            m_backend->create_read_statement_executor<ambiguous_pmc_id_result>(
+                fmt::format("SELECT DISTINCT pmc_id "
+                            "FROM rocpd_pmc_event_{u} "
+                            "GROUP BY event_id, pmc_id HAVING COUNT(*) > 1",
+                            fmt::arg("u", u)),
+                &ambiguous_pmc_id_result::pmc_id);
+    }
+
     void initialize_flow_statements()
     {
         const auto& u = m_uuid;
@@ -1768,9 +1785,10 @@ private:
     stats_track_3_func_t m_stream_stats_track;
     stats_track_1_func_t m_scalar_stats;
 
-    scalar_track_func_t  m_scalar_track;
-    scalar_detail_func_t m_scalar_detail;
-    scalar_detail_func_t m_pmc_event_detail;
+    scalar_track_func_t      m_scalar_track;
+    scalar_detail_func_t     m_scalar_detail;
+    scalar_detail_func_t     m_pmc_event_detail;
+    ambiguous_pmc_ids_func_t m_ambiguous_pmc_ids;
 
     flow_statement_set m_region_to_kernel_dispatch_flows;
     flow_statement_set m_region_to_memory_copy_flows;
