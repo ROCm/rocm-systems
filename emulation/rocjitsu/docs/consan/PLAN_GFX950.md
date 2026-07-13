@@ -315,6 +315,11 @@ Full gfx950 support means:
   portable gfx950 LDS binary passes both guarded SuperCollider rows: the clean
   marker stays zero and the racy marker is published, with patch emission
   required in both runs.
+- 2026-07-13: `T2RR` is `DONE`; `T2SA` is now `ACTIVE`. Eleven focused rows
+  pass: dynamic record fields, native and Group-FLAT race positives, same-wave
+  and barrier-ordered negatives, same/wrong-address atomic handoff, typed
+  unsupported DS disposition, diagnostic capacity exhaustion, dropped or
+  unsupported access records, and dropped barrier records.
 
 ## DAG Overview
 
@@ -525,8 +530,8 @@ flowchart LR
   T1A["T1A: Target-Aware Test Registration"]:::done
   T1B["T1B: Workload And Tier Selection"]:::done
   T2SC["T2SC: SuperCollider Focused Tier"]:::done
-  T2RR["T2RR: Record/Replay Focused Tier"]:::active
-  T2SA["T2SA: Sampled Focused Tier"]:::todo
+  T2RR["T2RR: Record/Replay Focused Tier"]:::done
+  T2SA["T2SA: Sampled Focused Tier"]:::active
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::todo
   T2R["T2R: Resource And Spill Tier"]:::todo
   T2G{"T2G: Focused gfx950 Accepted"}:::target
@@ -1683,7 +1688,7 @@ Result: both target-aware gfx950 CTest rows pass. Instrumentation is mandatory;
 the clean row retains a zero report marker and the racy row publishes the
 expected marker.
 
-### T2RR: gfx950 Record/Replay Focused Tier - ACTIVE
+### T2RR: gfx950 Record/Replay Focused Tier - DONE
 
 Required rows:
 
@@ -1695,7 +1700,12 @@ Done criteria:
 - Positive rows require records and diagnostics; ordered rows forbid conflict
   diagnostics.
 
-### T2SA: gfx950 Sampled Focused Tier - TODO
+Result: all 11 selected CTests pass. Positive native and Group-FLAT races each
+produce one replay conflict; program/barrier ordering and same-address atomic
+handoff remain clean; wrong-address handoff reports. Capacity, drop, and
+unsupported outcomes are independently typed and bounded.
+
+### T2SA: gfx950 Sampled Focused Tier - ACTIVE
 
 Required rows:
 
