@@ -6,6 +6,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
 
+### Changed
+
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
 ### Removed
 
 - Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
@@ -84,7 +88,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
-- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 
