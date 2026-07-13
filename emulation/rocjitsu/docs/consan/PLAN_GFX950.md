@@ -394,7 +394,7 @@ Full gfx950 support means:
   state now snapshots the correctly flattened gfx950 wave owner and epoch at
   both hardware entries, keeps persistent and ephemeral private slots
   disjoint, and never rederives owner from mutable `v0` at a probe. The focused
-  ConSan/resource/placement filter passes 225/225.
+  ConSan/resource/placement filter passes 231/231.
 - 2026-07-13: all 14 residual SuperCollider family rows still fail when run
   one process at a time. Seven produce the expected mismatch trap, while seven
   produce wrong numerical results instead. One logged MXFP4 row selects
@@ -403,6 +403,14 @@ Full gfx950 support means:
 - 2026-07-13: `D2A` is `DONE`. The present-facing design, usage, tutorial, and
   spilling documents now cover gfx950/CDNA4 capability and workspace runtime
   contracts. Final per-tier results remain separated in `D2B`.
+- 2026-07-13: `T4SV` is `DONE`; `T3IA` is now `ACTIVE` in parallel with the
+  remaining `T3IR` live diagnosis. SuperCollider now bounds scratch below a
+  nonzero CDNA4 accumulator window, retries lower dead runs, and reports a
+  typed skip when none exists. Its former MXFP4 silent-corruption reproducer
+  passes on gfx950. Record/replay uses the new private owner/epoch layout and
+  all 231 focused tests pass, but that same live row still raises a memory
+  aperture exception, so `T3IR` remains open until the separate private-ABI
+  fault is reduced.
 
 ## DAG Overview
 
@@ -625,10 +633,10 @@ flowchart LR
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Private Record/Sampled State"]:::active
-  T3IA["T3IA: Private-State Atomic Ordering"]:::todo
+  T3IA["T3IA: Private-State Atomic Ordering"]:::active
   T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
-  T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::active
+  T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
   T4SC["T4SC: SuperCollider Broad IREE"]:::active
   T4RR["T4RR: Record/Replay Broad IREE"]:::active
   T4SA["T4SA: Sampled Broad IREE"]:::todo
@@ -1964,7 +1972,7 @@ zero epoch, spill/restore both temporaries, restore the dispatch-pointer ABI,
 and preserve paired kernarg-preload entries. Inline access and barrier probes
 load the snapshotted state. Exact-boundary, overlap, multiple-owner, invalid
 descriptor, shared-layout, and paired-entry regressions pass; the complete
-focused filter is 225/225.
+focused filter is 231/231.
 
 ### T3IR: Private Record/Replay And Sampled State - ACTIVE
 
@@ -1987,7 +1995,7 @@ Done criteria:
 - Record/replay and sampled emit non-vacuous private-state records without
   touching accumulator VGPRs, and the isolated MXFP4 row passes.
 
-### T3IA: Private-State Atomic Ordering - TODO
+### T3IA: Private-State Atomic Ordering - ACTIVE
 
 Goal: retain release/acquire epoch handoff when owner and epoch live in private
 state.
@@ -2036,7 +2044,7 @@ Done criteria:
 
 `T3G` is reached only when all four T3 profile nodes pass.
 
-### T4SV: SuperCollider Accumulator-Safe Scratch - ACTIVE
+### T4SV: SuperCollider Accumulator-Safe Scratch - DONE
 
 Goal: keep redundant-read scratch out of the CDNA4 accumulator alias window.
 
@@ -2053,6 +2061,12 @@ Trigger: after the wave64 VCC fix, an isolated MXFP4 run patched a B64 store
 with `v132` in a 136-VGPR MFMA kernel and silently produced zero results. This
 is not a typed SuperCollider mismatch and must be fixed before accepting the
 remaining family outcomes.
+
+Result: CDNA4 scratch selection decodes a nonzero accumulator boundary,
+accepts an exact-end placement below it, retries a lower liveness-dead run,
+and rejects explicit overlap with typed skip evidence. Four focused boundary
+regressions pass, and the isolated gfx950 MXFP4 reproducer now passes under
+SuperCollider.
 
 ### T4SC: SuperCollider Broad IREE - ACTIVE
 
