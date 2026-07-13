@@ -177,7 +177,7 @@ The implementation boundary is:
   future targets rather than inheriting assumptions from either implemented
   architecture.
 - **Test parity.** The current focused ConSan/resource/placement filter covers
-  241 tests. The gfx950 matrix also covers 49 hip-moi controls, 10 selected
+  242 tests. The gfx950 matrix also covers 49 hip-moi controls, 10 selected
   IREE tests per profile, and a 259-test broad IREE inventory. The broader
   rocjitsu-test-corpus has
   separate local dependency limitations documented in `LOCAL_TESTING.md`.

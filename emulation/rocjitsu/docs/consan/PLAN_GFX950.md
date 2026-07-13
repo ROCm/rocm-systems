@@ -431,6 +431,11 @@ Full gfx950 support means:
   private entry prologue is present (and passes with explicit identity and no
   prologue), while SC #1836 still leaks through a second patch-time failure.
   Both reductions are active in parallel.
+- 2026-07-13: the focused filter is 242/242 and the actual SC #1836 loader
+  reproducer passes. Decoder exceptions are contained during inventory, and
+  every later SuperCollider admission/build loop now excludes preflight-skipped
+  kernels so an invalid suffix cannot re-enter whole-text decoding. `T4SC`
+  remains `ACTIVE` pending a fresh broad sweep.
 
 ## DAG Overview
 
