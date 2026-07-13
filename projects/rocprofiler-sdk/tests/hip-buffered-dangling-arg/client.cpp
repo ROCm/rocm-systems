@@ -56,7 +56,7 @@ namespace
 {
 std::atomic<uint64_t> g_hip_records{0};
 std::atomic<uint64_t> g_args_stringified{0};
-std::atomic<uint64_t> g_kname_args_seen{0};
+std::atomic<uint64_t> g_busid_args_seen{0};
 
 rocprofiler_client_finalize_t client_fini_func = nullptr;
 rocprofiler_context_id_t      client_ctx       = {};
@@ -83,11 +83,11 @@ hip_api_args_callback(rocprofiler_buffer_tracing_kind_t /* kind */,
         (void) len;
         g_args_stringified.fetch_add(1, std::memory_order_relaxed);
 
-        // The kernel name handed to hipModuleGetFunction is the argument this
+        // The PCI bus-id handed to hipDeviceGetByPCIBusId is the argument this
         // test exists to exercise; count it so we can assert we actually hit it.
-        if(arg_name != nullptr && std::strcmp(arg_name, "kname") == 0)
+        if(arg_name != nullptr && std::strcmp(arg_name, "pciBusId") == 0)
         {
-            g_kname_args_seen.fetch_add(1, std::memory_order_relaxed);
+            g_busid_args_seen.fetch_add(1, std::memory_order_relaxed);
         }
     }
     return 0;
@@ -133,7 +133,7 @@ tool_fini(void* /* tool_data */)
     std::cout << "\n=== HIP Buffered Dangling-Arg Test Results ===\n";
     std::cout << "HIP API records processed:  " << g_hip_records.load() << "\n";
     std::cout << "Arguments stringified:      " << g_args_stringified.load() << "\n";
-    std::cout << "kname arguments seen:       " << g_kname_args_seen.load() << "\n";
+    std::cout << "pciBusId arguments seen:    " << g_busid_args_seen.load() << "\n";
     std::cout << "==============================================\n";
 
     if(g_hip_records.load() == 0)
@@ -142,13 +142,13 @@ tool_fini(void* /* tool_data */)
         std::abort();
     }
 
-    if(g_kname_args_seen.load() == 0)
+    if(g_busid_args_seen.load() == 0)
     {
-        std::cerr << "ERROR: hipModuleGetFunction kname argument was never traced!\n";
+        std::cerr << "ERROR: hipDeviceGetByPCIBusId pciBusId argument was never traced!\n";
         std::abort();
     }
 
-    std::cout << "Test PASSED: buffered HIP API kernel-name arguments stringified safely!\n";
+    std::cout << "Test PASSED: buffered HIP API string arguments stringified safely!\n";
 }
 
 int

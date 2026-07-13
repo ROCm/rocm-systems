@@ -56,12 +56,6 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-# Find hiprtc for runtime compilation
-find_library(
-    HIPRTC_LIBRARY
-    NAMES hiprtc
-    HINTS ${ROCM_PATH}/lib ENV ROCM_PATH /opt/rocm/lib)
-
 set_source_files_properties(test_hip_buffered_dangling_arg.cpp PROPERTIES LANGUAGE HIP)
 
 add_executable(hip-buffered-dangling-arg-testapp)
@@ -71,8 +65,3 @@ target_compile_options(hip-buffered-dangling-arg-testapp PRIVATE -W -Wall -Wextr
 
 find_package(Threads REQUIRED)
 target_link_libraries(hip-buffered-dangling-arg-testapp PRIVATE Threads::Threads)
-
-# Link hiprtc for runtime kernel compilation
-if(HIPRTC_LIBRARY)
-    target_link_libraries(hip-buffered-dangling-arg-testapp PRIVATE ${HIPRTC_LIBRARY})
-endif()

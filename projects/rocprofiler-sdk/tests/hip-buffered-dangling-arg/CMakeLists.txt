@@ -54,7 +54,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     PASS_REGULAR_EXPRESSION
-        "Test PASSED: buffered HIP API kernel-name arguments stringified safely!"
+        "Test PASSED: buffered HIP API string arguments stringified safely!"
     FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}|SEGFAULT|Failed to \.*|Context is not valid|ERROR: \.*"
     )
