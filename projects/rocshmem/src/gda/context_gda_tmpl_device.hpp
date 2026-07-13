@@ -928,7 +928,7 @@ __device__ int GDAContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
           qps[i].quiet(wf_info);
         }
       }
-    sync_wave(team);
+      sync_wave(team);
     }
   }
 
