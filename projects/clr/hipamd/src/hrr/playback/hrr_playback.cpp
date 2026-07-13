@@ -37,6 +37,7 @@
 
 #include "hrr_reader.h"
 #include "hip_playback.h"
+#include "hrr_suballoc.h"  // HRR_SUBALLOC_SNAPSHOT
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
@@ -384,7 +385,7 @@ static bool is_special(uint16_t etype) {
     case HRR_API_HIPPEEKATLASTERROR:
       return true;
     default:
-      return false;
+      return etype == HRR_SUBALLOC_SNAPSHOT || etype == HRR_SUBALLOC_TIMELINE;
   }
 }
 
@@ -431,6 +432,35 @@ static hipError_t handle_special(PlaybackContext& ctx, const hrr::Event& ev) {
     case HRR_API_HIPGETLASTERROR:
     case HRR_API_HIPPEEKATLASTERROR:
       return hipSuccess;  // skip silently
+
+    case HRR_SUBALLOC_SNAPSHOT: {
+      // Load the latest caching-allocator block layout and install it as the
+      // current sub-allocation map. Failure here is non-fatal — it only
+      // disables the sub-alloc diagnostics, not the replay itself.
+      if (ev.raw_payload.size() < sizeof(hrr_args_suballoc_snapshot))
+        return hipSuccess;
+      const auto* a = reinterpret_cast<const hrr_args_suballoc_snapshot*>(
+          ev.raw_payload.data());
+      size_t sz = 0;
+      const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &sz);
+      if (blob && sz) {
+        ctx.apply_suballoc_snapshot(static_cast<const uint8_t*>(blob), sz);
+        if (ctx.verbose)
+          fprintf(stderr,
+                  "[HRR] sub-alloc map updated: %llu segments, %llu active "
+                  "blocks (snapshot #%llu)\n",
+                  (unsigned long long)ctx.suballoc_seg_bases.size(),
+                  (unsigned long long)ctx.suballoc_active_blocks,
+                  (unsigned long long)ctx.suballoc_snapshots);
+      }
+      return hipSuccess;
+    }
+
+    case HRR_SUBALLOC_TIMELINE:
+      // Timeline batches are ingested in a pre-pass before replay (a batch is
+      // recorded with a later sequence id than the kernels it describes), so
+      // there is nothing to do as the event streams by during replay.
+      return hipSuccess;
 
     default: return hipSuccess;
   }
@@ -1075,6 +1105,54 @@ int main(int argc, char** argv) {
   const bool use_mt = !single_thread && archive.threads.size() > 1;
   printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
 
+  // Sub-alloc timeline pre-pass: a timeline batch is recorded with a later
+  // sequence id than the kernels it describes, so the precise per-kernel layout
+  // can only be reconstructed if every batch is loaded up front. Merge them all
+  // into one timestamp-sorted stream now; replay then advances a cursor by each
+  // kernel's timestamp. Only needed for the (single-threaded) block guard.
+  if (std::getenv("HIP_HRR_BLOCK_GUARD") && !use_mt) {
+    uint64_t batches = 0;
+    uint64_t seed_lo = 0, seed_hi = 0;
+    bool have_seed = false;
+    for (const auto& ev : archive.events) {
+      uint16_t t = ev.header().event_type;
+      if (t == HRR_SUBALLOC_TIMELINE) {
+        if (ev.raw_payload.size() < sizeof(hrr_args_suballoc_snapshot)) continue;
+        const auto* a = reinterpret_cast<const hrr_args_suballoc_snapshot*>(
+            ev.raw_payload.data());
+        size_t sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &sz);
+        if (blob && sz) {
+          ctx.ingest_suballoc_timeline(static_cast<const uint8_t*>(blob), sz);
+          ++batches;
+        }
+      } else if (t == HRR_SUBALLOC_SNAPSHOT && !have_seed) {
+        // Remember the earliest full snapshot; used as the t=0 baseline below.
+        if (ev.raw_payload.size() < sizeof(hrr_args_suballoc_snapshot)) continue;
+        const auto* a = reinterpret_cast<const hrr_args_suballoc_snapshot*>(
+            ev.raw_payload.data());
+        seed_lo = a->blob_hash_lo;
+        seed_hi = a->blob_hash_hi;
+        have_seed = true;
+      }
+    }
+    // Sort the full merged timeline, then seed the t=0 baseline from the
+    // earliest snapshot (covers blocks that predate history recording).
+    ctx.finalize_suballoc_timeline();
+    if (have_seed) {
+      size_t sz = 0;
+      const void* blob = ctx.load_blob(seed_lo, seed_hi, &sz);
+      if (blob && sz)
+        ctx.seed_timeline_from_snapshot(static_cast<const uint8_t*>(blob), sz);
+    }
+    if (!ctx.suballoc_timeline.empty())
+      printf("[HRR] SubAlloc: timeline %llu events from %llu batches, "
+             "%zu baseline blocks (precise per-kernel block map)\n",
+             (unsigned long long)ctx.suballoc_timeline.size(),
+             (unsigned long long)batches,
+             ctx.tl_active_blocks.size());
+  }
+
   // Module pre-pass: process fat binary and explicit module load events in
   // global sequence order, single-threaded, before the parallel replay begins.
   // Without this, a timing delay on one thread (e.g. hipEventSynchronize) can
@@ -1166,6 +1244,18 @@ int main(int argc, char** argv) {
          ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),
          ctx.d2h_fail.load(),
          ctx.d2h_attempted.load() - ctx.d2h_pass.load() - ctx.d2h_fail.load());
+  if (ctx.suballoc_snapshots > 0) {
+    printf("[HRR]   Sub-alloc map  : %llu snapshots, latest %zu segments / "
+           "%llu active blocks\n",
+           (unsigned long long)ctx.suballoc_snapshots,
+           ctx.suballoc_seg_bases.size(),
+           (unsigned long long)ctx.suballoc_active_blocks);
+  }
+  if (!ctx.suballoc_timeline.empty()) {
+    printf("[HRR]   Sub-alloc tl   : %llu timeline events, %zu blocks live at end\n",
+           (unsigned long long)ctx.suballoc_timeline.size(),
+           ctx.tl_active_blocks.size());
+  }
 
   bool ok = (ctx.d2h_fail == 0);
   if (ctx.d2h_pass == 0 && ctx.d2h_fail == 0) {

@@ -699,3 +699,12 @@ global:
 local:
     *;
 } hip_7.2;
+
+hip_hrr {
+global:
+    hipHrrCaptureActive;
+    hipHrrCaptureSubAllocSnapshot;
+    hipHrrCaptureSubAllocTimeline;
+local:
+    *;
+} hip_7.14;

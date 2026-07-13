@@ -8,6 +8,7 @@
 
 #include <hip/hip_runtime.h>
 #include <unordered_map>
+#include <map>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -178,6 +179,66 @@ struct PlaybackContext {
     std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
+
+    // ---- Caching-allocator sub-allocation map ----
+    // Captured from the framework allocator (PyTorch torch.cuda.memory) and
+    // delivered as HRR_SUBALLOC_SNAPSHOT events. HRR only sees the large
+    // hipMalloc *segments*; this map records the per-tensor *block* layout
+    // inside each segment. The replay allocation model is unchanged — each
+    // recorded segment is still one hipMalloc, so the contiguous layout mirrors
+    // the original run — but the map lets the replayer resolve a recorded
+    // address to its owning tensor block, which the block-level guard uses to
+    // relocate that block behind an unmapped guard page. Guarded by map_mutex.
+    struct SubBlock { uint64_t off; uint64_t size; uint8_t active; };
+    struct SubSeg   { uint64_t total; std::vector<SubBlock> blocks; };
+    std::unordered_map<uint64_t, SubSeg> suballoc_segments;  // rec seg base -> layout
+    std::vector<uint64_t>                suballoc_seg_bases;  // sorted, for range search
+    uint64_t suballoc_snapshots     = 0;  // snapshots applied so far
+    uint64_t suballoc_active_blocks = 0;  // active blocks in the latest snapshot
+
+    // Replace the sub-allocation layout with a freshly parsed snapshot blob
+    // (binary format defined in hrr_suballoc.h). Thread-safe.
+    void apply_suballoc_snapshot(const uint8_t* blob, size_t len);
+
+    // Classify a recorded device address against the latest sub-alloc map:
+    //   0 = no captured segment contains it (not framework-pool memory),
+    //   1 = inside an active tensor block (owning block returned via out-params),
+    //   2 = inside a segment but outside every active block (gap/freed/OOB).
+    int classify_suballoc(uint64_t rec_addr,
+                          uint64_t* blk_base, uint64_t* blk_size) const;
+
+    // ---- Precise alloc/free timeline (HRR_SUBALLOC_TIMELINE) ----
+    // The snapshot map above is only as fresh as the last sample, so a tensor
+    // allocated and used between two samples is invisible to classify_suballoc.
+    // The timeline records every alloc/free with an absolute CLOCK_MONOTONIC
+    // timestamp (same clock as hrr_event_header.timestamp_ns), so the replayer
+    // can replay events up to a given kernel's timestamp and know the *exact*
+    // set of live tensor blocks at that instant. All timeline events are loaded
+    // up front (pre-pass) because a batch is recorded with a later sequence id
+    // than the kernels it describes; classification then advances a cursor by
+    // kernel timestamp. Single-replay-thread (default) ordering assumed.
+    struct TlEvent { int64_t mono_ns; uint8_t action; uint64_t addr; uint64_t size; };
+    std::vector<TlEvent> suballoc_timeline;        // sorted by mono_ns after load
+    std::map<uint64_t, uint64_t> tl_active_blocks; // addr -> size (live tensors)
+    std::map<uint64_t, uint64_t> tl_segments;      // addr -> size (mapped segments)
+    size_t   tl_cursor      = 0;   // next unapplied timeline event
+    int64_t  tl_last_ts     = 0;   // last kernel timestamp advanced to
+
+    // Append one timeline batch blob (hrr_suballoc.h layout) to the pending list.
+    void ingest_suballoc_timeline(const uint8_t* blob, size_t len);
+    // Sort the merged timeline once all batches are ingested.
+    void finalize_suballoc_timeline();
+    // Seed the live block/segment set from a full snapshot blob (the earliest
+    // sample) as the t=0 baseline, so persistent blocks allocated before the
+    // capture shim enabled history (model weights, RNG state) are not seen as
+    // OOB. The timeline is then replayed on top (idempotent for any overlap).
+    void seed_timeline_from_snapshot(const uint8_t* blob, size_t len);
+    // Apply all timeline events with mono_ns <= ts (monotonically advancing).
+    void advance_timeline_to(int64_t ts);
+    // Classify rec_addr against the timeline-reconstructed live set (same codes
+    // as classify_suballoc). Call after advance_timeline_to for the kernel.
+    int classify_timeline(uint64_t rec_addr,
+                          uint64_t* blk_base, uint64_t* blk_size) const;
 
     // Translate a recorded VA (from AddressReserve) to the live replay VA.
     // Returns nullptr if not found or if rec is 0.

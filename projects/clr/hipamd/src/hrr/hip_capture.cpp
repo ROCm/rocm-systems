@@ -33,6 +33,7 @@
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
 #include "hrr_api_args.h"
+#include "hrr_suballoc.h"  // HRR_SUBALLOC_SNAPSHOT + sub-alloc capture API
 
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
@@ -1498,4 +1499,59 @@ void hip_capture_shutdown() {
                static_cast<unsigned long long>(hrr_cap::writer::event_count()),
                static_cast<unsigned long long>(hrr_cap::writer::blob_count()),
                hip_capture_output_dir());
+}
+
+// ---------------------------------------------------------------------------
+// Sub-allocation map capture — exported C API
+//
+// HRR sees only the large hipMalloc *segments*; PyTorch's caching allocator
+// sub-allocates per-tensor *blocks* inside them, invisible to the HIP layer.
+// An in-process Python shim (sitecustomize, loaded via PYTHONPATH) records the
+// allocator's segment->block layout and its alloc/free timeline via
+// torch.cuda.memory and pushes the compact binary blobs (format in
+// hrr_suballoc.h) through these symbols.
+//
+// Each blob rides the normal crash-safe writer: write_blob() stores the
+// (potentially large) layout via temp-file + atomic rename, and a small event
+// (HRR_SUBALLOC_SNAPSHOT / HRR_SUBALLOC_TIMELINE) referencing the blob hash
+// goes through write_event_raw(), so the existing periodic-checkpoint +
+// emergency_finalize machinery preserves the map across a capture-time crash
+// with no separate signal handler. All three symbols are listed in
+// hip_hcc.map.in and forced to default visibility so the shim can dlsym them
+// from libamdhip64.
+// ---------------------------------------------------------------------------
+
+extern "C" __attribute__((visibility("default")))
+int hipHrrCaptureActive() {
+  return (hip_capture_enabled() && hrr_cap::writer::is_open()) ? 1 : 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+void hipHrrCaptureSubAllocSnapshot(const void* data, uint64_t len) {
+  if (!data || len == 0) return;
+  if (!hrr_cap::writer::is_open()) return;
+  hrr_cap::Hash128 h = hrr_cap::writer::write_blob(data, static_cast<size_t>(len));
+  hrr_args_suballoc_snapshot rec;
+  memset(&rec, 0, sizeof(rec));
+  rec.blob_hash_lo = h.lo;
+  rec.blob_hash_hi = h.hi;
+  rec.length       = len;
+  hrr_cap::writer::write_event_raw(HRR_SUBALLOC_SNAPSHOT, &rec.hdr,
+                                   static_cast<uint16_t>(sizeof(rec)));
+}
+
+// Incremental alloc/free timeline batch (precise per-kernel layout source).
+// Same crash-safe blob+event path as the snapshot; only the event type differs.
+extern "C" __attribute__((visibility("default")))
+void hipHrrCaptureSubAllocTimeline(const void* data, uint64_t len) {
+  if (!data || len == 0) return;
+  if (!hrr_cap::writer::is_open()) return;
+  hrr_cap::Hash128 h = hrr_cap::writer::write_blob(data, static_cast<size_t>(len));
+  hrr_args_suballoc_snapshot rec;  // identical payload shape (blob hash + length)
+  memset(&rec, 0, sizeof(rec));
+  rec.blob_hash_lo = h.lo;
+  rec.blob_hash_hi = h.hi;
+  rec.length       = len;
+  hrr_cap::writer::write_event_raw(HRR_SUBALLOC_TIMELINE, &rec.hdr,
+                                   static_cast<uint16_t>(sizeof(rec)));
 }

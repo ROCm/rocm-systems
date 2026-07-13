@@ -13,6 +13,20 @@ hrr-playback ./my_capture.hrr
 hrr-playback ./my_capture.hrr --info [--events]
 ```
 
+For framework workloads (e.g. PyTorch), also capture the caching-allocator
+sub-allocation map by putting the shim on `PYTHONPATH`, then reproduce an
+intra-segment out-of-bounds write at replay with block-level guard pages:
+
+```bash
+# Capture with the sub-alloc map (PYTHONPATH points at hrr/shim/)
+PYTHONPATH=<rocm>/projects/clr/hipamd/src/hrr/shim \
+HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr  python train.py
+
+# Replay and reproduce the faulting kernel's overrun as a real GPU fault
+HIP_HRR_BLOCK_GUARD=1 HIP_HRR_BLOCK_GUARD_KERNEL=<kernel-substr> HIP_LAUNCH_BLOCKING=1 \
+  hrr-playback ./my_capture.hrr --single-thread
+```
+
 ---
 
 ## Implementation Summary
@@ -196,8 +210,17 @@ hipamd/src/hrr/
   hip_capture_writer.h/.cpp       — streaming event serialization to events.bin / blobs/
   hip_capture_handles.h/.cpp      — stream/event/module ID maps (mutex-guarded)
   hip_capture_generated.cpp       — AUTO-GENERATED: ~502 capture shims + build_table()
+  hrr_suballoc.h                  — caching-allocator sub-alloc map: HRR_SUBALLOC_SNAPSHOT
+                                    / HRR_SUBALLOC_TIMELINE synthetic events + blob layouts
+                                    (single authority; the shim must match it byte-for-byte)
   CMakeLists.txt                  — adds hrr/ sources to amdhip64 target;
                                     add_subdirectory(playback) to build tools
+
+  shim/
+    sitecustomize.py              — caching-allocator sub-alloc map capture shim (canonical
+                                    copy). Auto-loaded via PYTHONPATH in the captured Python
+                                    workload; pushes snapshot/timeline blobs through the
+                                    exported hipHrrCapture* API. Runtime-only (not compiled).
 
   playback/
     hrr_reader.h/.cpp             — archive loader, v3 format
@@ -305,6 +328,11 @@ HRR_VERSION = 3
             eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
           Absent => capture was interrupted (crash); reader recovers the tail.
 ```
+
+Three `event_type` values are sentinels *outside* the `hrr_api_id_t` range
+(0..528): `HRR_EOF_MARKER` (0xFFFF, the clean-shutdown trailer) and the two
+caching-allocator map events `HRR_SUBALLOC_SNAPSHOT` (0xFFFE) and
+`HRR_SUBALLOC_TIMELINE` (0xFFFD) — see "Caching-Allocator Sub-Allocation Map".
 
 ### `hrr_args_*` Struct Layout Rules
 
@@ -505,6 +533,11 @@ This detector is a value-based heuristic with three deliberate properties:
   (`(value & 0xFFFFFFFF) < 0x10000`) — these are typically two packed 32-bit
   values mistaken for one 64-bit VA, a non-deterministic false positive that
   previously caused occasional replay faults on ATen elementwise kernels.
+  The replay-side packed-integer guard makes one exception: a page-aligned
+  value (`value & 0xFFF == 0`) is accepted even when its low 32 bits are small,
+  because a genuine device pointer near a segment boundary can have small low
+  bits yet is always page-aligned, whereas the packed-int/stride false
+  positives it targets essentially never are.
   `HIP_HRR_PTR_RELAX=1` disables the replay-side guard for debugging.
 
 **Scope:** only `hipMemoryTypeDevice`/`Unified` words are flagged. A pinned/host
@@ -540,6 +573,140 @@ args translating correctly indicates a **data** divergence (a buffer's *contents
 differ at replay so the kernel computes an out-of-bounds index), not an argument
 capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` that the nulls are genuine
 before suspecting the `<<<>>>` / kernarg capture path.
+
+## Caching-Allocator Sub-Allocation Map
+
+HRR hooks at the HIP API level, so it only ever sees the large `hipMalloc`
+**segments** that a framework allocator (e.g. PyTorch's HIP caching allocator)
+carves up into many per-tensor **blocks**. Without the block layout the replayer
+cannot tell where one tensor ends and the next begins inside a shared segment, so
+an intra-segment out-of-bounds write is invisible at replay — it lands in a
+neighbouring live tensor instead of faulting. The sub-allocation map recovers that
+block layout so replay can reproduce an intra-segment overrun as a real GPU fault
+(block-level guard pages, below).
+
+### Exported Capture API
+
+The capturing process pushes the allocator's layout into HRR through three C
+symbols implemented in `hip_capture.cpp`:
+
+```c
+int  hipHrrCaptureActive(void);                                  // is a capture session open?
+void hipHrrCaptureSubAllocSnapshot(const void* blob, uint64_t len); // coarse point-in-time layout
+void hipHrrCaptureSubAllocTimeline(const void* blob, uint64_t len); // incremental alloc/free events
+```
+
+These are non-public extensions, so they are hidden by the version script's
+`local: *;` unless explicitly exported. They are listed in a dedicated `hip_hrr`
+version node in `hipamd/src/hip_hcc.map.in`, which is what lets the Python shim
+`dlsym` them at run time.
+
+### Synthetic Events and Blob Formats
+
+Two synthetic `event_type` sentinels are used (outside the `hrr_api_id_t` range,
+like `HRR_EOF_MARKER`), defined in `hrr_suballoc.h`:
+
+| Event | Sentinel | Blob magic | Contents |
+|-------|----------|------------|----------|
+| `HRR_SUBALLOC_SNAPSHOT` | `0xFFFE` | `HSAB` | full segment->block layout at one instant |
+| `HRR_SUBALLOC_TIMELINE` | `0xFFFD` | `HSTL` | a batch of alloc/free/segment events, each with an absolute `CLOCK_MONOTONIC` timestamp |
+
+Both blobs are compact little-endian binary (NOT JSON) so the C++ replayer parses
+them with no JSON dependency. The exact record layouts (`hrr_suballoc_blob_header`
+/ `_seg_rec` / `_blk_rec` and `hrr_suballoc_tl_header` / `_tl_rec`, with action
+codes `HRR_TL_ALLOC`/`HRR_TL_FREE`/`HRR_TL_SEGMENT_ALLOC`/`HRR_TL_SEGMENT_FREE`)
+are the single authority in `hrr_suballoc.h`; the shim must emit byte-for-byte the
+same layout. The snapshot blob rides the normal content-addressed `write_blob`
+(temp-file + rename) and the small referencing event rides `write_event_raw`, so
+the existing checkpoint / `emergency_finalize` crash machinery preserves the map
+**for free** — even when the captured run dies on a GPU fault — with no extra
+signal handler.
+
+### The Python Shim (`hrr/shim/sitecustomize.py`)
+
+The producer is a Python shim auto-loaded via CPython's `sitecustomize`
+mechanism: putting its directory on `PYTHONPATH` makes the interpreter import it
+at startup, where it spawns one daemon thread. It is **canonical in-tree** at
+`hrr/shim/sitecustomize.py`; the `hrr-testing/` harness keeps a synced copy.
+
+The shim is defensive — it logs and goes inert unless all three prerequisites
+hold, and never lets an exception kill the workload:
+
+1. **PyTorch present** (it waits up to ~10 min for `torch`/`torch.cuda` to import)
+   and exposing `torch.cuda.memory._snapshot()` / `_record_memory_history(...)`.
+2. **The patched `libamdhip64`** exporting the three `hipHrr*` symbols (it
+   `dlopen`s `libamdhip64.so.7/.so/.so.6` and `dlsym`s them). A stock runtime
+   without the `hip_hrr` exports leaves the shim inert.
+3. **An active capture** — it polls `hipHrrCaptureActive()` and does nothing until
+   it returns 1. The shim only *produces* map blobs; it does not start capture.
+
+Once active it enables PyTorch's memory history, then:
+
+- **Baseline seeding.** Blocks allocated *before* history was enabled (model
+  weights, persistent buffers, RNG state) are absent from `device_traces`, so the
+  replayer would see kernel pointers into them as "inside a segment but no live
+  block" = false OOB. The shim seeds the timeline with the current live layout
+  stamped at `mono_ns=0` so it precedes every real event.
+- **Timeline deltas.** Every `HRR_SUBALLOC_INTERVAL_S` it reads new
+  `device_traces` entries past a watermark, converts each `time_us`
+  (`CLOCK_REALTIME` µs) to the `CLOCK_MONOTONIC` ns used by HRR event headers via
+  a measured clock offset, and pushes a delta batch.
+- **Coarse snapshots.** It also pushes a full `_snapshot()` layout (content-deduped
+  back-to-back) as a fallback for archives without a timeline.
+
+Env knobs (read once at start): `HRR_SUBALLOC_TIMELINE` (default 1; `0` =
+snapshots only), `HRR_SUBALLOC_INTERVAL_S` (default 2.0), `HRR_SUBALLOC_TL_MAX_ENTRIES`
+(default 1e6; PyTorch trace ring depth — must exceed events between two polls),
+`HRR_SUBALLOC_VERBOSE` (log each push).
+
+**Deployment gotcha:** `PYTHONPATH` must reach the *actual* interpreter running
+the model. Launchers that re-exec, spawn subprocesses, or scrub the environment
+(`torchrun`, Ray, systemd) can drop it — set it in the innermost launch step or
+drop a `.pth` into the interpreter's `site-packages` instead.
+
+### Playback Consumption
+
+The reader retains both synthetic events. `is_special` / `handle_special` apply
+the latest snapshot via `apply_suballoc_snapshot`. When the timeline is present a
+single-threaded pre-pass ingests all timeline batches, seeds the baseline from the
+earliest snapshot, and finalizes a time-sorted event list; during replay
+`advance_timeline_to(kernel_ts)` advances a cursor so `classify_timeline(ptr)`
+reflects the *exact* live block set at each kernel's capture timestamp (falling
+back to the coarse snapshot via `classify_suballoc` when no timeline was
+captured).
+
+### Block-Level Guard Pages
+
+To reproduce an intra-segment overrun as a *real* fault at replay, set
+`HIP_HRR_BLOCK_GUARD=1`. For each matching kernel launch, every pointer arg that
+resolves to a live tensor block (via the timeline/sub-alloc map) is relocated into
+a fresh VMM-backed buffer placed flush against a trailing **unmapped** guard page,
+so a write one byte past the block's end traps.
+
+The key trick works around VMM's 2 MiB map/unmap granularity (you cannot drop an
+unmapped page at an arbitrary 512 B-aligned block tail): the block is
+**right-aligned** within its mapping so `block_end == mapped_end == guard_start`.
+Any over-run then hits the unmapped guard regardless of granularity; the handed
+pointer is aligned down (default 256 B) so the kernel still receives a properly
+aligned buffer (blind spot < align bytes). Per launch the block is copied in,
+launched, synchronized, and — if it did not fault — copied back to the real block
+and the guard torn down, so an in-bounds run stays byte-identical to an unguarded
+replay. If it faults, the GPU Memory Fault on the guarded kernel is the
+reproduction signal (the HSA fault handler aborts before the playback diagnostic
+can flush).
+
+Env knobs:
+
+```
+HIP_HRR_BLOCK_GUARD=1                  enable
+HIP_HRR_BLOCK_GUARD_KERNEL=<substr>    only guard kernels whose name matches (else every kernel, slow)
+HIP_HRR_BLOCK_GUARD_ARGS=<csv idx>     only these pointer args (default: all block-resolving pointer args)
+HIP_HRR_BLOCK_GUARD_ALIGN=<bytes>      relocated-pointer alignment (power of two, default 256)
+```
+
+Requires `--single-thread` (the timeline is applied in capture order) and benefits
+from `HIP_LAUNCH_BLOCKING=1` so the fault is surfaced synchronously on the
+offending launch.
 
 ## Fat Binary Registration
 
@@ -625,6 +792,17 @@ hrr-playback <capture.hrr> [options]
 Several options have `HIP_HRR_REPLAY_*` environment-variable equivalents (e.g.
 `HIP_HRR_REPLAY_TRACE_KERNELS`, `HIP_HRR_REPLAY_PROGRESS_KERNELS`,
 `HIP_HRR_REPLAY_PROGRESS_SECONDS`, `HIP_HRR_REPLAY_SYNC_WATCHDOG_MS`).
+
+**Caching-allocator sub-alloc env vars** (see "Caching-Allocator Sub-Allocation Map"):
+
+```
+HIP_HRR_BLOCK_GUARD=1             block-level guard pages: relocate matching kernels' block-
+                                  resolving pointer args behind an unmapped guard to fault on
+                                  an intra-segment overrun (single-thread; pair with HIP_LAUNCH_BLOCKING=1)
+HIP_HRR_BLOCK_GUARD_KERNEL=<substr>   restrict block-guard to kernels whose name matches
+HIP_HRR_BLOCK_GUARD_ARGS=<csv idx>    restrict block-guard to specific pointer arg indices
+HIP_HRR_BLOCK_GUARD_ALIGN=<bytes>     relocated-pointer alignment (power of two, default 256)
+```
 
 **Replay `hipMalloc` padding:** `hip_playback.cpp` replays each device allocation at
 `max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1** for
