@@ -488,6 +488,14 @@ Full gfx950 support means:
   spills, but four later candidates have dead seven-VGPR windows; automatic
   inline selection nevertheless patches the first four spill sites. `T3IL`
   remains `ACTIVE` and now includes safe-candidate ranking before live rerun.
+- 2026-07-13: `T3IWS` is `DONE` in commits `324f39b022` and
+  `878e45ef1b`. Sampled slots and the immediate checker use exact bounded
+  mixed-radix `(x,y,z)` partitions, including default-extent rejection of
+  nonzero groups, typed overflow, exact 4-GiB carry, shared-helper identity,
+  caller-owned ABI validation, and partition-local replay. A live run exposed
+  and fixed the low/high publication order before acceptance. The authoritative
+  focused gate passes 258/258; the omitted-coordinate clean baseline and
+  sampled row pass 2/2, and both sampled race/non-vacuity rows pass 2/2.
 
 ## DAG Overview
 
@@ -711,7 +719,7 @@ flowchart LR
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Accumulator-Safe Scalar State"]:::done
   T3IWA["T3IWA: Complete Entry Workgroup ABI"]:::done
-  T3IWS["T3IWS: Sampled Workgroup Partitions"]:::active
+  T3IWS["T3IWS: Sampled Workgroup Partitions"]:::done
   T3IWE["T3IWE: Inline Workgroup Partitions"]:::active
   T3IWL["T3IWL: Omitted-Coordinate Live Gate"]:::active
   T3IW{"T3IW: Workgroup Identity Accepted"}:::target
@@ -2137,24 +2145,28 @@ Current result: commit `7da1e9e7b6` implements the complete CDNA4 descriptor
 and entry-ABI transaction. Synthetic coverage exercises all eight original
 workgroup-ID masks, paired entries, existing/missing dispatch-pointer inputs,
 system-input followers, shared helpers, and both successful and fail-closed
-persistent-state allocation. The Clang-21 build and focused suite pass 251/251.
-Live omitted-coordinate multi-workgroup coverage for all three engines is in
-progress, so this node remains `ACTIVE`.
+persistent-state allocation. Commits `324f39b022` and `878e45ef1b` complete
+sampled workgroup-local storage. The Clang-21 build and authoritative focused
+suite pass 258/258. Live omitted-coordinate raw, record/replay, and sampled
+coverage passes; inline-shadow partitioning remains in progress, so this node
+remains `ACTIVE`.
 
 The remaining work is deliberately split so neither compact engine becomes a
 single long-running node:
 
 - `T3IWA: Complete Entry Workgroup ABI - DONE`: request/snapshot x/y/z and
   restore every original guest ABI shape; 251/251 focused tests pass.
-- `T3IWS: Sampled Workgroup Partitions - ACTIVE`: make static watchpoint slots
-  and immediate checks workgroup-local, with checked finite-capacity behavior.
+- `T3IWS: Sampled Workgroup Partitions - DONE`: static watchpoint slots and
+  immediate checks are workgroup-local under exact bounded mixed-radix
+  partitioning. Focused tests pass 258/258; live clean-isolation baseline plus
+  sampled pass 2/2, and sampled race/non-vacuity rows pass 2/2.
 - `T3IWE: Inline Workgroup Partitions - ACTIVE`: make exact-shadow cells
   workgroup-local, with checked finite-capacity behavior and no probabilistic
   aliasing.
-- `T3IWL: Omitted-Coordinate Live Gate - ACTIVE`: the raw and record/replay
-  omitted-coordinate rows pass. The new clean-isolation control intentionally
-  remains red for sampled and inline until `T3IWS` and `T3IWE` land; it proves
-  the current false cross-group conflicts are non-vacuous.
+- `T3IWL: Omitted-Coordinate Live Gate - ACTIVE`: the raw, record/replay, and
+  sampled omitted-coordinate rows pass. The clean-isolation control is green
+  for sampled and remains red only for inline until `T3IWE` lands; it proves
+  the remaining false cross-group conflict is non-vacuous.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
