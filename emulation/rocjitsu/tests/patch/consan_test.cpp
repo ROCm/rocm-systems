@@ -186,21 +186,32 @@ size_t count_subsequence(std::span<const uint32_t> haystack, std::span<const uin
 }
 
 std::vector<uint32_t> expected_vgpr_spill_words(uint16_t base, uint16_t count, bool restore,
-                                                uint32_t slot_base = 0) {
+                                                uint32_t slot_base = 0,
+                                                rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   std::vector<uint32_t> words;
   for (uint16_t i = 0; i < count; ++i) {
-    const auto instruction =
-        restore
-            ? build_address_free_scratch_load_b32(static_cast<uint16_t>(base + i),
-                                                  slot_base + 4u * i, ROCJITSU_CODE_ARCH_RDNA4)
-            : build_address_free_scratch_store_b32(static_cast<uint16_t>(base + i),
-                                                   slot_base + 4u * i, ROCJITSU_CODE_ARCH_RDNA4);
-    if (!instruction)
-      return {};
-    words.insert(words.end(), instruction->begin(), instruction->end());
+    const uint16_t vgpr = static_cast<uint16_t>(base + i);
+    const uint32_t offset = slot_base + 4u * i;
+    const auto append_instruction = [&](const auto &instruction) {
+      if (!instruction)
+        return false;
+      words.insert(words.end(), instruction->begin(), instruction->end());
+      return true;
+    };
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (!append_instruction(restore
+                                  ? build_cdna4_address_free_scratch_load_b32(vgpr, offset, arch)
+                                  : build_cdna4_address_free_scratch_store_b32(vgpr, offset, arch)))
+        return {};
+    } else {
+      if (!append_instruction(restore ? build_address_free_scratch_load_b32(vgpr, offset, arch)
+                                      : build_address_free_scratch_store_b32(vgpr, offset, arch)))
+        return {};
+    }
   }
-  const auto wait = restore ? build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_RDNA4)
-                            : build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto wait = arch == ROCJITSU_CODE_ARCH_CDNA4
+                        ? build_cdna4_s_wait_vmcnt0(arch)
+                        : (restore ? build_s_wait_loadcnt0(arch) : build_s_wait_storecnt0(arch));
   if (!wait)
     return {};
   words.push_back(*wait);
@@ -2728,6 +2739,63 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
   EXPECT_EQ(
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
       1u);
+}
+
+TEST(ConSanMoi, Gfx950ForcedSpillPatchHasTransactionalSaveProbeRestoreShape) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_forced_spill",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    descriptor.private_segment_fixed_size = 32;
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+  EXPECT_EQ(patch.scratch_vgpr, 1u);
+  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch.required_private_segment_size, 44u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  std::vector<uint32_t> trampoline(patch.trampoline_size / sizeof(uint32_t));
+  std::memcpy(trampoline.data(), patched.text_sections().front()->data() + patch.trampoline_offset,
+              patch.trampoline_size);
+  const std::vector<uint32_t> save = expected_vgpr_spill_words(
+      1, 3, /*restore=*/false, /*slot_base=*/32, ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint32_t> restore =
+      expected_vgpr_spill_words(1, 3, /*restore=*/true, /*slot_base=*/32, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(save.empty());
+  ASSERT_FALSE(restore.empty());
+  ASSERT_GT(trampoline.size(), save.size() + text_words.size() + restore.size());
+  EXPECT_TRUE(std::equal(save.begin(), save.end(), trampoline.begin()));
+  const auto access = std::search(trampoline.begin() + save.size(), trampoline.end(),
+                                  text_words.begin(), text_words.begin() + 2);
+  ASSERT_NE(access, trampoline.end());
+  const size_t restore_offset = trampoline.size() - restore.size() - 1u;
+  EXPECT_LT(static_cast<size_t>(access - trampoline.begin()) + 2u, restore_offset);
+  EXPECT_TRUE(std::equal(restore.begin(), restore.end(), trampoline.begin() + restore_offset));
+  EXPECT_EQ(trampoline.back() & 0xffff0000u,
+            build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4) & 0xffff0000u);
 }
 
 TEST(ConSanMoi, FirstLightProbeSupportsZeroToNonzeroDispatchScratch) {

@@ -129,6 +129,12 @@ Full gfx950 support means:
   descriptor, AMDGPU MessagePack metadata, and dispatch packet; covers zero
   and nonzero existing private sizes; and proves rejected descriptor or
   metadata growth leaves the input unchanged.
+- 2026-07-13: `S5` is `DONE`. The integrated spill path dispatches to the
+  RDNA4 three-word scratch operations or CDNA4 two-word FLAT_SCRATCH
+  operations and their distinct waits while retaining stable four-byte slots,
+  cave-size preflight, and rollback. Synthetic gfx1201 and gfx950 patches now
+  prove the required save, original access, probe, restore, and return order;
+  the focused 190-test resource/builder/MOI/spill suite passes.
 
 ## DAG Overview
 
@@ -197,7 +203,7 @@ flowchart LR
   S2["S2: Scratch Encoders And Decode Tests"]:::done
   S3["S3: Private-Segment Transaction Audit"]:::done
   S4["S4: Standalone Live VGPR Round Trip"]:::done
-  S5["S5: Target-Dispatched Spill Backend"]:::active
+  S5["S5: Target-Dispatched Spill Backend"]:::done
   RR1A["RR1A: Access Record Emission"]:::done
   S6["S6: Forced-Spill Record/Replay"]:::todo
   SA1C["SA1C: Sampled Host Oracle"]:::todo
@@ -681,7 +687,7 @@ Done criteria:
 - Repeated serial runs preserve every active-lane value with no trap, hang, or
   memory fault.
 
-### S5: Target-Dispatched Spill Backend - ACTIVE
+### S5: Target-Dispatched Spill Backend - DONE
 
 Goal: integrate CDNA4 emission beneath the existing `SpillManager` contract.
 
