@@ -148,7 +148,7 @@ ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture)
   }
   if (architecture == ROCJITSU_CODE_ARCH_CDNA4) {
     capabilities.lds_access = ConSanNativeSupport::NativeEmission;
-    capabilities.group_flat_access = ConSanNativeSupport::InventoryOnly;
+    capabilities.group_flat_access = ConSanNativeSupport::NativeEmission;
     capabilities.barrier = ConSanNativeSupport::InventoryOnly;
     capabilities.atomic = ConSanNativeSupport::NativeEmission;
     capabilities.workgroup_identity = ConSanNativeSupport::NativeEmission;

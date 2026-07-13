@@ -284,6 +284,12 @@ Full gfx950 support means:
   unknown at their local decode scope. An explicit CDNA4 `SRC_SHARED_BASE`
   construction is strongly classified Group, so the bounded zero-offset
   B32/B64/B128 forms must proceed through `FL1B`, not `FL1X`.
+- 2026-07-13: `FL1B` synthetic emission is implemented and remains `ACTIVE`
+  (orange) pending its live gfx950 race proof. Record/replay and inline-shadow
+  now admit only strongly classified, generic-segment, zero-offset CDNA4 FLAT
+  dword/dwordx2/dwordx4 loads and stores. Unknown forms remain inventory-only;
+  the synthetic Group fixture emits both probe families over the same low
+  address VGPR and shared exact-shadow cell semantics.
 
 ## DAG Overview
 
@@ -1503,6 +1509,15 @@ Work:
 - Retain `strict` versus `likely` provenance and visible exclusions.
 - Reuse native LDS cell-range semantics rather than creating another shadow
   layout.
+
+Progress:
+
+- Synthetic record/replay and inline-shadow emission is complete for the
+  bounded CDNA4 dword/dwordx2/dwordx4 form set. The CDNA4 gate additionally
+  requires raw generic segment 0 and immediate offset 0; strict provenance
+  still excludes unknown/global/private pointers before emission.
+- Live record/replay versus inline-shadow agreement remains to close this node,
+  so its Mermaid box stays `active`/orange.
 
 Done criteria:
 

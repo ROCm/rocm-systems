@@ -146,7 +146,7 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.non_scratch_wait, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.report_publication, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.record_replay, ConSanNativeSupport::NativeEmission);
-  EXPECT_EQ(gfx950.group_flat_access, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.group_flat_access, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.barrier, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::NativeEmission);
@@ -5938,6 +5938,79 @@ TEST(ConSanMoi, Gfx950ClassifiesExplicitSharedBaseFlatLoadAsGroup) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
   EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
+}
+
+std::vector<uint8_t> make_gfx950_padded_group_flat_code_object() {
+  const auto load =
+      build_flat_load_b32_vaddr_vdst(/*vaddr=*/0, /*vdst=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  if (!load)
+    return {};
+  std::vector<uint32_t> text_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA4),
+      (*load)[0],
+      (*load)[1],
+  };
+  text_words.resize(180, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  return make_rdna4_lds_code_object(text_words, "gfx950_flat_group_emission",
+                                    /*vgpr_granulated=*/0, /*wave32=*/false,
+                                    /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+}
+
+TEST(ConSanMoi, Gfx950RecordReplayEmitsStronglyClassifiedGroupFlatAccess) {
+  const std::vector<uint8_t> bytes = make_gfx950_padded_group_flat_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 11;
+  options.moi_epoch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_dword");
+  EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
+  EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 0);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
+  EXPECT_GE(result.patches.front().original_size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size % sizeof(uint32_t), 0u);
+}
+
+TEST(ConSanMoi, Gfx950InlineShadowEmitsStronglyClassifiedGroupFlatAccess) {
+  const std::vector<uint8_t> bytes = make_gfx950_padded_group_flat_code_object();
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 24;
+  options.moi_epoch_vgpr = 25;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_dword");
+  EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
+  EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 0);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
+  EXPECT_GE(result.patches.front().original_size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(result.patches.front().original_size % sizeof(uint32_t), 0u);
 }
 
 TEST(ConSanMoi, Gfx950AtomicRecordPatchEmitsReleaseAndAcquireRecords) {

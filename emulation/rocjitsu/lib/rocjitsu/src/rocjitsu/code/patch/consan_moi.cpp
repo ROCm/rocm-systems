@@ -1022,7 +1022,10 @@ candidate_access_ranges(const ConSanMoiCandidate &candidate) {
   if (candidate.source != ConSanMoiCandidateSource::FlatGroup &&
       candidate.source != ConSanMoiCandidateSource::FlatMaybeGroup)
     return false;
-  if (candidate.size != 3u * sizeof(uint32_t))
+  const bool rdna4_encoding = candidate.size == 3u * sizeof(uint32_t);
+  const bool cdna4_encoding =
+      candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
+  if (!rdna4_encoding && !cdna4_encoding)
     return false;
   if (!candidate.raw_ioffset || *candidate.raw_ioffset != 0)
     return false;
@@ -1030,7 +1033,10 @@ candidate_access_ranges(const ConSanMoiCandidate &candidate) {
     return false;
   if (candidate.mnemonic != "flat_load_b32" && candidate.mnemonic != "flat_load_b64" &&
       candidate.mnemonic != "flat_load_b128" && candidate.mnemonic != "flat_store_b32" &&
-      candidate.mnemonic != "flat_store_b64" && candidate.mnemonic != "flat_store_b128")
+      candidate.mnemonic != "flat_store_b64" && candidate.mnemonic != "flat_store_b128" &&
+      candidate.mnemonic != "flat_load_dword" && candidate.mnemonic != "flat_load_dwordx2" &&
+      candidate.mnemonic != "flat_load_dwordx4" && candidate.mnemonic != "flat_store_dword" &&
+      candidate.mnemonic != "flat_store_dwordx2" && candidate.mnemonic != "flat_store_dwordx4")
     return false;
   return true;
 }
