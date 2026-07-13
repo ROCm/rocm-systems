@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <spdlog/fmt/fmt.h>
-
 #include <timemory/log/color.hpp>
 #include <timemory/utility/backtrace.hpp>
 
@@ -66,7 +64,7 @@ join_va(Args&&... args)
 {
     std::ostringstream oss;
     oss << std::boolalpha;  // render bool args as "true"/"false", not 1/0
-    const char*        sep = "";
+    const char* sep = "";
     ((oss << sep << args, sep = " "), ...);
     return oss.str();
 }
