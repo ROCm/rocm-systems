@@ -54,41 +54,51 @@ VALUES (1, 1, 4242, 4242),
 INSERT INTO "rocpd_info_agent{{uuid}}" (id, nid, pid, type, absolute_index, type_index, name)
 VALUES (1, 1, 4242, 'GPU', 0, 0, 'Synthetic GPU');
 
--- Performance counter definition; its name is the counter track's display name (Q9)
+-- Performance counter definition; its name is the counter track's display name (Q9).
+-- PMC 99 has an intentionally empty name: the empty-name guard in reader_impl.cpp
+-- (!nit->second.empty()) prevents it from overwriting rocpd_track.name -> fallback.
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
-VALUES (1, 1, 4242, 1, 'GRBM_COUNT', 'GRBM_COUNT');
+VALUES (1,  1, 4242, 1, 'GRBM_COUNT', 'GRBM_COUNT'),
+       (99, 1, 4242, 1, '',           '');           -- empty name -> display-name fallback
 
 INSERT INTO "rocpd_string{{uuid}}" (id, string)
-VALUES (1, 'GRBM_COUNT');
+VALUES (1, 'GRBM_COUNT'),
+       (2, 'FallbackCounterV4');  -- track 3 rocpd_track.name; pmc_id 99 absent
 
 -- Tracks --------------------------------------------------------------------
 -- track 1: COUNTER (agent_id set, referenced by samples below)
 -- track 2: CPU_THREAD (tid only, never referenced by a sample)
+-- track 3: COUNTER, pmc_id 99 absent from rocpd_info_pmc -> display-name fallback (F7)
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, agent_id)
 VALUES (1, 1, 1, 1, 1);
 INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid)
 VALUES (2, 1, 1, 2);
+INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, name_id)
+VALUES (3, 1, 1, 2);    -- name_id=2 -> 'FallbackCounterV4'; agent_id NULL
 
 -- Events (one per sample; scalar path joins rocpd_pmc_event on event_id) ----
-INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2), (3);
+INSERT INTO "rocpd_event{{uuid}}" (id) VALUES (1), (2), (3), (4);
 
 -- Timestamp spine (row-id order deliberately != value order) ----------------
 INSERT INTO "rocpd_timestamp{{uuid}}" (id, value, track_id)
 VALUES (1, 3000, 1),
        (2, 1000, 1),
-       (3, 2000, 1);
+       (3, 2000, 1),
+       (4, 500,  3);  -- track 3 fallback counter
 
 -- PMC event values (paired with events) -------------------------------------
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
-VALUES (1, 1, 1, 30.5),
-       (2, 2, 1, 10.5),
-       (3, 3, 1, 20.5);
+VALUES (1, 1, 1,  30.5),
+       (2, 2, 1,  10.5),
+       (3, 3, 1,  20.5),
+       (4, 4, 99, 7.0);   -- pmc_id 99 absent from rocpd_info_pmc -> fallback
 
--- Counter samples on track 1 ------------------------------------------------
+-- Counter samples on track 1 + track 3 -------------------------------------
 INSERT INTO "rocpd_sample{{uuid}}" (id, track_id, name_id, timestamp_id, event_id)
 VALUES (1, 1, 1, 1, 1),
        (2, 1, 1, 2, 2),
-       (3, 1, 1, 3, 3);
+       (3, 1, 1, 3, 3),
+       (4, 3, 2, 4, 4);  -- track 3: pmc_id 99 absent -> name falls back to track name
 
 -- Schema-version metadata (self-documenting; not read by the reader) ---------
 INSERT INTO "rocpd_metadata{{uuid}}" (tag, value)

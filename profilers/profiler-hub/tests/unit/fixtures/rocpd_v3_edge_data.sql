@@ -31,15 +31,19 @@
 --   rows are NOT tracks: cpu_thread/region tracks are synthesized from rocpd_region
 --   instead (v3 rocpd_track is an unreliable grab-bag). So tracks 1, 4, 5 below are
 --   deliberately IGNORED by discovery, proving the skip path.
---   From rocpd_track rows -> counters (3):
+--   From rocpd_track rows -> counters (4):
 --     track 2 = counter, pid set, tid NULL    -> thread_info NULL, agent_info NULL
 --     track 3 = counter, pid + tid set        -> thread_info SET  (the edge #147
 --                                                guards: a v3 counter CAN carry a
 --                                                tid; agent_info still NULL in v3)
---     track 6 = counter, pid NULL, tid NULL    -> process_info NULL, thread_info NULL
+--     track 6 = counter, pid NULL, tid NULL   -> process_info NULL, thread_info NULL
 --                                                (re-homes the NULL-pid/NULL-tid
 --                                                schema-branch coverage that used to
 --                                                live on a cpu_thread rocpd_track row)
+--     track 8 = counter, pmc_id 99 has empty name in rocpd_info_pmc -> the empty-name
+--                                                guard (!nit->second.empty()) in
+--                                                reader_impl.cpp prevents overwriting
+--                                                rocpd_track.name -> fallback fires (F7)
 --   From rocpd_track rows -> IGNORED (not returned):
 --     track 1 (pid+tid), track 4 (pid, no tid), track 5 (no pid) -- non-counter,
 --       no sample ref.
@@ -59,7 +63,7 @@
 --                          tracks -- the same events also appear there):
 --       stream 1 (1,1,1): 3 kernel_dispatch + 2 memory_copy + 1 memory_allocate = 6
 --       stream 2 (1,1,2): 0 kernel_dispatch + 1 memory_copy + 0 memory_allocate = 1
---   => by type: cpu_thread=1, counter=3, gpu_queue=2, dma=2, stream=2.
+--   => by type: cpu_thread=1, counter=4, gpu_queue=2, dma=2, stream=2.
 -- =============================================================================
 
 -- Bare alias views ----------------------------------------------------------
@@ -107,10 +111,14 @@ VALUES (1, 1, 1, 'Stream-X'),
        (2, 1, 1, 'Stream-Y');
 
 -- Three distinct PMCs so the three counter tracks get DIFFERENT display names (Q9).
+-- PMC 99 has an intentionally empty name: ranked_pmc_resolver includes it in
+-- counter_track_names (FK satisfied), but the empty-name guard (!nit->second.empty())
+-- prevents it from overwriting rocpd_track.name -> the fallback path fires for track 8.
 INSERT INTO "rocpd_info_pmc{{uuid}}" (id, nid, pid, agent_id, name, symbol)
-VALUES (1, 1, 1, 1, 'GRBM_COUNT', 'GRBM_COUNT'),
-       (2, 1, 1, 1, 'SQ_WAVES',   'SQ_WAVES'),
-       (3, 1, 1, 1, 'CPU_CYCLES', 'CPU_CYCLES');
+VALUES (1,  1, 1, 1, 'GRBM_COUNT', 'GRBM_COUNT'),
+       (2,  1, 1, 1, 'SQ_WAVES',   'SQ_WAVES'),
+       (3,  1, 1, 1, 'CPU_CYCLES', 'CPU_CYCLES'),
+       (99, 1, 1, 1, '',           '');           -- empty name -> display-name fallback
 
 -- Code object + kernel symbol (gpu_queue per-event label = kernel display name).
 INSERT INTO "rocpd_info_code_object{{uuid}}" (id, nid, pid, agent_id)
@@ -126,7 +134,8 @@ VALUES (1, 'CPU Thread 1001'),
        (3, 'RegionBeta'),
        (4, 'RegionGamma'),
        (5, 'RegionDelta'),
-       (6, 'copyHtoD');
+       (6, 'copyHtoD'),
+       (7, 'FallbackCounter');  -- track 8 rocpd_track.name; pmc_id 99 absent from rocpd_info_pmc
 
 -- Tracks --------------------------------------------------------------------
 -- (id, nid, pid, tid, name_id). Counter classification is by sample reference,
@@ -153,6 +162,10 @@ VALUES (7, 1, 1,    NULL, NULL);   -- sampled but NOT pmc-backed -> NOT a counte
                                    --    Mirrors rocpd-transpose.db region timer-sample
                                    --    tracks. NO rocpd_region row, so it also does not
                                    --    become a cpu_thread track -> not returned at all.)
+INSERT INTO "rocpd_track{{uuid}}" (id, nid, pid, tid, name_id)
+VALUES (8, 1, 1,    NULL, 7);      -- counter, pmc_id 99 has empty name in rocpd_info_pmc
+                                   --   -> empty-name guard prevents PMC name overwrite
+                                   --   -> display name falls back to rocpd_track.name
 
 -- Events --------------------------------------------------------------------
 -- Flows key on stack_id (Q4): a region flows to a GPU-side event sharing the
@@ -176,7 +189,8 @@ VALUES (1, 100),
        (11, NULL),
        (12, NULL),
        (13, NULL),   -- sample event for the NULL-pid counter (track 6)
-       (14, NULL);   -- sample event for the non-pmc sample track (track 7); no pmc_event
+       (14, NULL),   -- sample event for the non-pmc sample track (track 7); no pmc_event
+       (15, NULL);   -- sample event for the fallback counter (track 8); pmc_id 99 absent
 
 -- Regions (cpu_thread interval track for track 1, tid=1) ----------------------
 -- Row-id order deliberately != start order so ORDER BY start is proven:
@@ -239,13 +253,17 @@ VALUES (1, 1, 1, 1, 'ALLOC', 'REAL', 6100, 6200, 4096, 1, 7);
 --   sample 5 -> ts 1500 -> value 15.0
 --   => get_scalar_track(track 3) = [(4,500,5.0),(5,1500,15.0)]
 -- Track 6 (counter, NULL pid/tid) -- pmc 3 CPU_CYCLES, one sample (event 13).
+-- Track 8 (counter, fallback) -- pmc_id 99 has empty name in rocpd_info_pmc;
+--   ranked_pmc_resolver includes this track in counter_track_names but with name="";
+--   the empty-name guard prevents the PMC name from overwriting rocpd_track.name.
 INSERT INTO "rocpd_pmc_event{{uuid}}" (id, event_id, pmc_id, value)
-VALUES (1, 8,  1, 30.5),
-       (2, 9,  1, 10.5),
-       (3, 10, 1, 20.5),
-       (4, 11, 2, 5.0),
-       (5, 12, 2, 15.0),
-       (6, 13, 3, 42.0);
+VALUES (1, 8,  1,  30.5),
+       (2, 9,  1,  10.5),
+       (3, 10, 1,  20.5),
+       (4, 11, 2,  5.0),
+       (5, 12, 2,  15.0),
+       (6, 13, 3,  42.0),
+       (7, 15, 99, 1.0);   -- pmc_id 99 has empty name -> display-name fallback fires
 
 -- Track 7 (sample 7, event 14) is deliberately NOT pmc-backed: there is no
 -- rocpd_pmc_event row for event 14, so this sample track must NOT classify as a
@@ -257,4 +275,5 @@ VALUES (1, 2, 3000, 8),
        (4, 3, 500,  11),
        (5, 3, 1500, 12),
        (6, 6, 700,  13),
-       (7, 7, 800,  14);
+       (7, 7, 800,  14),
+       (8, 8, 900,  15);   -- track 8: pmc_id 99 has empty name -> name falls back to track name
