@@ -10,7 +10,8 @@
 #
 # Compute-node orchestrator for the RCCL/rocSHMEM GIN CI job (baremetal
 # translation of docker_build_test.bash + dockerfile-gin-fast-path), invoked
-# from .github/workflows/rccl-gin.yml via `sbatch --wait`. On one 8-GPU node:
+# from .github/workflows/rccl-suite.yml (suite=gin) via submit_slurm_job.py.
+# On one 8-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env

@@ -10,7 +10,8 @@
 #SBATCH --propagate=NONE
 #
 # Compute-node orchestrator for the RCCL device-API CI job, invoked from
-# .github/workflows/rccl-device-api.yml via `sbatch --wait`. On one 8-GPU node:
+# .github/workflows/rccl-suite.yml (suite=device-api) via submit_slurm_job.py.
+# On one 8-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. lib/build-ompi.sh     build OpenMPI (--with-rocm) -> ompi.env
 #   3. projects/rccl/install.sh   build RCCL (in-tree, release)
