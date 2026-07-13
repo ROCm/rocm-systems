@@ -858,6 +858,10 @@ uint64_t AieLoadedCodeObjectImpl::getElfSize() const { return elf_size; }
 
 uint64_t AieLoadedCodeObjectImpl::getStorageOffset() const { return 0; }
 
+// Unlike the GPU path (one contiguous load segment), an AIE object is placed as
+// N independent XDNA BOs (per-kernel insts/PDI), so there is no single load
+// base/size/delta to report. Keep these 0; per-kernel device addresses live in
+// each AieKernelDescriptor if a consumer ever needs them.
 uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return 0; }
 
 uint64_t AieLoadedCodeObjectImpl::getLoadSize() const { return 0; }
