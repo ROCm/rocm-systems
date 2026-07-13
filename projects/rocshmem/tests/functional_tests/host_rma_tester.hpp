@@ -62,6 +62,14 @@ class HostRmaTester : public Tester {
 
   /* Symmetric int counter/flag for int AMO tests (exercises 32-bit kernel path) */
   int *amo_int_buf{nullptr};
+
+  /* Symmetric array of longs for wait_until_all/any/some/vector tests */
+  static constexpr size_t WAIT_NELEMS = 4;
+  long *wait_buf{nullptr};
+
+  /* Local storage for results from _any / _some variants (non-symmetric) */
+  size_t p2p_result_idx{SIZE_MAX};
+  size_t p2p_result_ncompleted{0};
 };
 
 #endif  // _HOST_RMA_TESTER_HPP_

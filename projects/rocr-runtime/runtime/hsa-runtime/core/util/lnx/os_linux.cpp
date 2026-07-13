@@ -880,9 +880,25 @@ bool MapMemory(void* va, size_t size, MemProt perms, int fd, uint64_t cpu_addr) 
   return true;
 }
 
-hsa_status_t DmaBufClose(int dmabuf) {
-  if (dmabuf < 0) return HSA_STATUS_SUCCESS;
-  return ::close(dmabuf) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_RESOURCE_FREE;
+hsa_status_t DmaBufClose(int* dmabuf) {
+  if (dmabuf == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (*dmabuf < 0) return HSA_STATUS_SUCCESS;
+  if (::close(*dmabuf) != 0) {
+    *dmabuf = -1;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+  }
+  /* Set to -1 even on close failure: the fd is no longer valid regardless of errno. */
+  *dmabuf = -1;
+  return HSA_STATUS_SUCCESS;
+}
+
+int DmaBufDup(int dmabuf) {
+  if (dmabuf < 0) return -1;
+  int dup_fd = ::dup(dmabuf);
+  if (dup_fd < 0) {
+    return -1;
+  }
+  return dup_fd;
 }
 
 void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {

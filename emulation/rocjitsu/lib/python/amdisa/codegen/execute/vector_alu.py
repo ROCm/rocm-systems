@@ -12,11 +12,26 @@ vop3_modifiers helpers.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
     vop3_dst_mod_f64,
 )
+
+
+def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
+    return (
+        f'::rocjitsu::amdgpu::read_vop3_true16_src'
+        f'({opnd}, wf, lane, {opsel}, {src_idx})'
+    )
+
+
+def _write_vop3_true16_dst(opnd: str, opsel: str, value: str) -> str:
+    return (
+        f'::rocjitsu::amdgpu::write_vop3_true16_dst'
+        f'({opnd}, wf, lane, {opsel}, {value}, true);'
+    )
 
 
 def gen_vector_unary(
@@ -26,10 +41,13 @@ def gen_vector_unary(
     dtype: str | None,
     is_vop3: bool = False,
     has_abs: bool = False,
+    arch_name: str = '',
 ) -> str:
     """Generate vector unary operation body."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if is_vop3 and dtype == 'f16':
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -187,36 +205,32 @@ def gen_vector_unary(
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_fp8':
+        conv = fp8_helper_name(arch_name, 'util::fp8_e4m3_to_f32')
         L.append(
-            f'    float r = util::fp8_e4m3_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+            f'    float r = {conv}(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_f32_bf8':
+        conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
         L.append(
-            f'    float r = util::bf8_e5m2_to_f32(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
+            f'    float r = {conv}(static_cast<uint8_t>({src[0]}.read_lane(wf, lane) & 0xFF));'
         )
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(r));')
     elif op == 'cvt_pk_f32_fp8':
         # Unpack two FP8 values into two F32s in dst[0] and dst[0]+1
+        conv = fp8_helper_name(arch_name, 'util::fp8_e4m3_to_f32')
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(
-            f'    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFF));'
-        )
-        L.append(
-            f'    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
-        )
+        L.append(f'    float lo = {conv}(static_cast<uint8_t>(raw & 0xFF));')
+        L.append(f'    float hi = {conv}(static_cast<uint8_t>((raw >> 8) & 0xFF));')
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
         L.append(
             f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
         )
     elif op == 'cvt_pk_f32_bf8':
+        conv = fp8_helper_name(arch_name, 'util::bf8_e5m2_to_f32')
         L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-        L.append(
-            f'    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFF));'
-        )
-        L.append(
-            f'    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFF));'
-        )
+        L.append(f'    float lo = {conv}(static_cast<uint8_t>(raw & 0xFF));')
+        L.append(f'    float hi = {conv}(static_cast<uint8_t>((raw >> 8) & 0xFF));')
         L.append(f'    {dst[0]}.write_lane(wf, lane, std::bit_cast<uint32_t>(lo));')
         L.append(
             f'    wf.cu().write_vgpr(wf.vgpr_alloc().base + {dst[0]}.encoding_value_ + 1, lane, std::bit_cast<uint32_t>(hi));'
@@ -349,9 +363,12 @@ def gen_vector_unary(
                 f'    {dst[0]}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));'
             )
     elif dtype == 'f16':
-        L.append(
-            f'    float s = util::f16_to_f32(static_cast<uint16_t>({src[0]}.read_lane(wf, lane)));'
+        s_read = (
+            _read_vop3_true16_src(src[0], 'opsel', 0)
+            if is_vop3
+            else f'{src[0]}.read_lane(wf, lane)'
         )
+        L.append('    float s = util::f16_to_f32(static_cast<uint16_t>(' f'{s_read}));')
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f16 = {
@@ -374,7 +391,8 @@ def gen_vector_unary(
         if is_vop3:
             L.append(f'    float result = {expr};')
             L.extend(vop3_dst_mod('result'))
-            L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16(result));')
+            L.append('    uint32_t result_bits = util::f32_to_f16(result);')
+            L.append(_write_vop3_true16_dst(dst[0], 'opsel', 'result_bits'))
         else:
             L.append(f'    {dst[0]}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     else:
@@ -432,6 +450,8 @@ def gen_vector_binop(
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if is_vop3 and dtype == 'f16':
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -507,17 +527,29 @@ def gen_vector_binop(
         else:
             L.append(f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>({expr}));')
     elif dtype == 'f16':
+        s0_read = (
+            _read_vop3_true16_src(s0, 'opsel', 0)
+            if is_vop3
+            else f'{s0}.read_lane(wf, lane)'
+        )
+        s1_read = (
+            _read_vop3_true16_src(s1, 'opsel', 1)
+            if is_vop3
+            else f'{s1}.read_lane(wf, lane)'
+        )
         L.append(
-            f'    float sv0 = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));'
+            '    float sv0 = util::f16_to_f32(static_cast<uint16_t>(' f'{s0_read}));'
         )
         if op == 'ldexp':
             # src1 is a 16-bit integer exponent, not an f16 value.
             L.append(
-                f'    int32_t sv1_i = static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>({s1}.read_lane(wf, lane))));'
+                '    int32_t sv1_i = static_cast<int32_t>(static_cast<int16_t>(static_cast<uint16_t>('
+                f'{s1_read})));'
             )
         else:
             L.append(
-                f'    float sv1 = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));'
+                '    float sv1 = util::f16_to_f32(static_cast<uint16_t>('
+                f'{s1_read}));'
             )
         if is_vop3:
             L.extend(vop3_src_mod('sv0', 0, has_abs))
@@ -539,7 +571,8 @@ def gen_vector_binop(
         if is_vop3:
             L.append(f'    float result = {expr};')
             L.extend(vop3_dst_mod('result'))
-            L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
+            L.append('    uint32_t result_bits = util::f32_to_f16(result);')
+            L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:
             L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     elif dtype == 'i24':
@@ -710,6 +743,8 @@ def gen_vector_ternary(
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if is_vop3 and dtype == 'f16':
+        L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -885,14 +920,29 @@ def gen_vector_ternary(
                 f'    {d}.write_lane64(wf, lane, std::bit_cast<uint64_t>({expr}));'
             )
     elif dtype == 'f16':
-        L.append(
-            f'    float a = util::f16_to_f32(static_cast<uint16_t>({s0}.read_lane(wf, lane)));'
+        s0_read = (
+            _read_vop3_true16_src(s0, 'opsel', 0)
+            if is_vop3
+            else f'{s0}.read_lane(wf, lane)'
+        )
+        s1_read = (
+            _read_vop3_true16_src(s1, 'opsel', 1)
+            if is_vop3
+            else f'{s1}.read_lane(wf, lane)'
+        )
+        s2_read = (
+            _read_vop3_true16_src(s2, 'opsel', 2)
+            if is_vop3
+            else f'{s2}.read_lane(wf, lane)'
         )
         L.append(
-            f'    float b = util::f16_to_f32(static_cast<uint16_t>({s1}.read_lane(wf, lane)));'
+            '    float a = util::f16_to_f32(static_cast<uint16_t>(' f'{s0_read}));'
         )
         L.append(
-            f'    float c = util::f16_to_f32(static_cast<uint16_t>({s2}.read_lane(wf, lane)));'
+            '    float b = util::f16_to_f32(static_cast<uint16_t>(' f'{s1_read}));'
+        )
+        L.append(
+            '    float c = util::f16_to_f32(static_cast<uint16_t>(' f'{s2_read}));'
         )
         if is_vop3:
             L.extend(vop3_src_mod('a', 0, has_abs))
@@ -917,7 +967,8 @@ def gen_vector_ternary(
         if is_vop3:
             L.append(f'    float result = {expr};')
             L.extend(vop3_dst_mod('result'))
-            L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16(result));')
+            L.append('    uint32_t result_bits = util::f32_to_f16(result);')
+            L.append(_write_vop3_true16_dst(d, 'opsel', 'result_bits'))
         else:
             L.append(f'    {d}.write_lane(wf, lane, util::f32_to_f16({expr}));')
     elif dtype in ('i16',):

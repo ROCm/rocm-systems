@@ -276,7 +276,7 @@ enum kfd_dbg_trap_mask {
 	KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH = 128,
 	KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION = 256,
 	KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START = (1 << 30),
-	KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = (1 << 31)
+	KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = (1U << 31)
 };
 
 /* Wave launch modes */
@@ -1031,7 +1031,7 @@ struct kfd_ioctl_acquire_vm_args {
 #define KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL	(1 << 3)
 #define KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP	(1 << 4)
 /* Allocation flags: attributes/access options */
-#define KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE	(1 << 31)
+#define KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE	(1U << 31)
 #define KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE	(1 << 30)
 #define KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC		(1 << 29)
 #define KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE	(1 << 28)

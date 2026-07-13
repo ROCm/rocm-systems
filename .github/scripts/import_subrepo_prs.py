@@ -4,19 +4,21 @@ import subprocess
 from github import Github
 from git import Repo
 
+
 def run(cmd, **kwargs):
     print(f">> {cmd}")
     subprocess.check_call(cmd, shell=True, **kwargs)
 
+
 def main():
     # 1) Read and validate env vars
-    token    = os.getenv("GITHUB_TOKEN")
-    repo_full= os.getenv("GITHUB_REPOSITORY")
-    prefix   = os.getenv("SUBPREFIX")
-    subrepo  = os.getenv("SUBREPO")
+    token = os.getenv("GITHUB_TOKEN")
+    repo_full = os.getenv("GITHUB_REPOSITORY")
+    prefix = os.getenv("SUBPREFIX")
+    subrepo = os.getenv("SUBREPO")
     upstream = os.getenv("UPSTREAM")
-    target   = os.getenv("TARGET", "develop")
-    pr_list  = os.getenv("PR_LIST", "")
+    target = os.getenv("TARGET", "develop")
+    pr_list = os.getenv("PR_LIST", "")
 
     if not all([token, repo_full, prefix, subrepo, upstream, pr_list]):
         print("ERROR: Missing one or more required environment variables.")
@@ -33,7 +35,7 @@ def main():
     # 3) Init GitHub clients
     gh = Github(token)
     super_repo = gh.get_repo(repo_full)
-    sub_repo   = gh.get_repo(upstream)
+    sub_repo = gh.get_repo(upstream)
 
     # 4) Ensure target branch is checked out
     run(f"git fetch origin {target}")
@@ -47,16 +49,16 @@ def main():
         print(f"\n=== Importing PR #{pr_num} ===")
         pr = sub_repo.get_pull(int(pr_num))
 
-        title    = pr.title
-        body     = pr.body or ""
+        title = pr.title
+        body = pr.body or ""
         head_ref = pr.head.ref
         head_url = pr.head.repo.clone_url
         is_draft = pr.draft
-        author   = pr.user.login
+        author = pr.user.login
 
-        tclean   = target.replace("/", "_")
-        src_clean= subrepo.replace("/", "_")
-        branch   = f"import/{tclean}/{src_clean}/pr-{pr_num}"
+        tclean = target.replace("/", "_")
+        src_clean = subrepo.replace("/", "_")
+        branch = f"import/{tclean}/{src_clean}/pr-{pr_num}"
 
         try:
             run(f"git checkout -b {branch}")

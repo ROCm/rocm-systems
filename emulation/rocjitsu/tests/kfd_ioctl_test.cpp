@@ -3,7 +3,7 @@
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
-#include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "embedded_schema.h"
@@ -25,7 +25,7 @@
 
 namespace {
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_cdna4.json";
 constexpr uint32_t kGpuId = 38144;
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
@@ -70,6 +70,7 @@ protected:
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
+    soc_ = soc;
     auto num_xcds = soc->num_xcds();
 
     loaded_.engine_config.max_ticks = 0;
@@ -98,7 +99,8 @@ protected:
 
   rocjitsu::config::LoadedConfig loaded_;
   std::unique_ptr<simdojo::SimulationEngine> engine_;
-  rocjitsu::SimulatedDriver *driver_ = nullptr;
+  rocjitsu::SoC *soc_ = nullptr;
+  rocjitsu::SimulatedKfd *driver_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -190,7 +192,8 @@ TEST_F(KfdIoctlTest, GetTileConfigRejectsUnknownGpuId) {
 }
 
 TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
-  rocjitsu::SimulatedDriver daemon_driver(*loaded_.soc(), true);
+  ASSERT_NE(soc_, nullptr);
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, true);
   uint32_t process_id = daemon_driver.open_process();
   ASSERT_NE(process_id, 0u);
 
@@ -215,12 +218,10 @@ TEST_F(KfdIoctlTest, GetTileConfigReturnsUnsupportedInDaemonMode) {
 }
 
 TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
-  EXPECT_EQ(
-      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna3_gfx1100_w7900_kmd.json", 7019),
-      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
-  EXPECT_EQ(
-      query_gb_addr_config(std::string(CONFIG_DIR) + "/amdgpu_rdna4_gfx1201_r9700_kmd.json", 8716),
-      rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1100_w7900.json", 7019),
+            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
+  EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1201_r9700.json", 8716),
+            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
 }
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {

@@ -154,7 +154,7 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.dtype
     )
     DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
-        c.dst_ops, c.src_ops, c.dtype
+        c.dst_ops, c.src_ops, c.dtype, c.is_vop3
     )
     DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -212,6 +212,8 @@ def _register_handlers() -> None:
             if c.is_vop3 and 'opsel' in c.enc_field_names
             else 'inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u'
         ),
+        dtype=c.dtype,
+        is_vop3=c.is_vop3,
         fp8_format_select=(
             'inst_.clamp'
             if c.cls == 'vector_cvt_pk'
@@ -220,9 +222,10 @@ def _register_handlers() -> None:
             and c.arch_name == 'gfx1250'
             else None
         ),
+        arch_name=c.arch_name,
     )
     DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op
+        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
     )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
     DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)

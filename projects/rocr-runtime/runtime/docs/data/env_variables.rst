@@ -93,6 +93,24 @@
       - | 0: Disable debug mode.
         | 1: Enable debug mode with additional validation and logging.
 
+    * - | ``HSA_HOTSWAP_DISABLE``
+        | Disables HotSwap code object rewriting. HotSwap is enabled by default on supported GPU and ASIC revisions.
+      - ``0``
+      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Allow HotSwap on supported GPU and ASIC revisions.
+        | Any other non-empty value: Disable HotSwap and use the original code object load path.
+
+    * - | ``HSA_HOTSWAP_VERBOSE``
+        | Enables HotSwap diagnostic logging to stderr.
+      - ``0``
+      - | 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable HotSwap diagnostic logging.
+        | Any other non-empty value: Enable HotSwap diagnostic logging.
+
+    * - | ``AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES``
+        | Controls whether ROCr requests COMGR entry-trampoline HotSwap rewriting for gfx12.5 targets. Disabled by default.
+      - ``0``
+      - | ``1``, ``true``, ``on``, ``yes``, or any other truthy value: Enable entry-trampoline rewrites for gfx125* and ``gfx12-5-generic`` targets.
+        | Unset, empty, 0, ``false``, ``off``, ``no``, ``n``, or ``f``: Disable entry-trampoline rewrites.
+
     * - | ``HSA_ENABLE_DXG_DETECTION``
         | Controls detection of the DXG driver (/dev/dxg) on WSL2.
       - ``1``

@@ -55,8 +55,14 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -153,6 +159,16 @@ int64_t read_kernel_descriptor_entry_offset(const void *descriptor) {
   int64_t entry_offset = 0;
   std::memcpy(&entry_offset, bytes + kKernelDescriptorEntryOffset, sizeof(entry_offset));
   return entry_offset;
+}
+
+TestKernelDescriptor read_kernel_descriptor_for_test(const void *descriptor) {
+  TestKernelDescriptor kd{};
+  std::memcpy(&kd, descriptor, sizeof(kd));
+  return kd;
+}
+
+void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescriptor &kd) {
+  std::memcpy(descriptor, &kd, sizeof(kd));
 }
 
 std::vector<uint8_t> make_kernel_descriptor_bytes(int64_t entry_offset) {
@@ -504,10 +520,11 @@ bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kin
                      });
 }
 
-std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
+std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+    const std::vector<uint32_t> &text_words = {0xBF810000u, 0xBF810000u}) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
-  constexpr uint64_t text_size = 8;
+  const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t load_align = 0x1000;
   constexpr uint64_t rodata_size = 2 * kKernelDescriptorSize;
 
@@ -572,8 +589,6 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors() {
   phdrs[1].p_align = load_align;
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
-  const std::array<uint32_t, 2> text_words = {kCdna4SEndpgm, kCdna4SEndpgm};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   std::vector<uint8_t> descriptors(rodata_size, 0);
@@ -822,7 +837,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
 
   std::vector<uint32_t> text_words(text_size / sizeof(uint32_t),
                                    build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
-  text_words[0] = pack_sopp(12, 0); // CDNA4 s_waitcnt 0 expands on RDNA4.
+  text_words[0] = pack_sopp(cdna4::kSWaitcntSopp, 0); // CDNA4 s_waitcnt 0 expands on RDNA4.
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -917,18 +932,19 @@ TEST(EncodingTranslator, Sop1PreservesRegisters) {
   cdna4::Sop1MachineInst src{};
   src.ssrc0 = 42;
   src.sdst = 17;
-  src.op = 3;
-  src.encoding = 0x17D;
+  src.op = cdna4::kSCmovB64Sop1;
+  src.encoding = cdna4::encoding::kSop1;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP1, w0, 0, 0, 5);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP1, w0, 0, 0, rdna4::kSBrevB64Sop1);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop1MachineInst>(result.words[0]);
   EXPECT_EQ(dst.ssrc0, 42);
   EXPECT_EQ(dst.sdst, 17);
-  EXPECT_EQ(dst.op, 5);
-  EXPECT_EQ(dst.encoding, 0x17D);
+  EXPECT_EQ(dst.op, rdna4::kSBrevB64Sop1);
+  EXPECT_EQ(dst.encoding, rdna4::encoding::kSop1);
 }
 
 TEST(EncodingTranslator, Sop2PreservesRegisters) {
@@ -936,18 +952,19 @@ TEST(EncodingTranslator, Sop2PreservesRegisters) {
   src.ssrc0 = 10;
   src.ssrc1 = 20;
   src.sdst = 30;
-  src.op = 7;
+  src.op = cdna4::kSMinU32Sop2;
   src.encoding = 0x2;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP2, w0, 0, 0, 7);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOP2, w0, 0, 0, rdna4::kSMinU32Sop2);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop2MachineInst>(result.words[0]);
   EXPECT_EQ(dst.ssrc0, 10);
   EXPECT_EQ(dst.ssrc1, 20);
   EXPECT_EQ(dst.sdst, 30);
-  EXPECT_EQ(dst.op, 7);
+  EXPECT_EQ(dst.op, rdna4::kSMinU32Sop2);
 }
 
 TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
@@ -958,16 +975,17 @@ TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
 TEST(EncodingTranslator, SoppPreservesSimm16) {
   cdna4::SoppMachineInst src{};
   src.simm16 = 0xABCD;
-  src.op = 12;
-  src.encoding = 0x17F;
+  src.op = cdna4::kSWaitcntSopp;
+  src.encoding = cdna4::encoding::kSopp;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOPP, w0, 0, 0, 12);
+  auto result =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SOPP, w0, 0, 0, rdna4::kSWaitcntSopp);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::SoppMachineInst>(result.words[0]);
   EXPECT_EQ(dst.simm16, 0xABCD);
-  EXPECT_EQ(dst.op, 12);
+  EXPECT_EQ(dst.op, rdna4::kSWaitcntSopp);
 }
 
 TEST(EncodingTranslator, SmemRemapsCoherency) {
@@ -976,15 +994,15 @@ TEST(EncodingTranslator, SmemRemapsCoherency) {
   src.sdata = 3;
   src.glc = 1;
   src.nv = 0;
-  src.op = 0;
+  src.op = cdna4::kSLoadDwordSmem;
   src.offset = 0x100;
   src.soffset = 0x7F;
   src.encoding = 0x3D;
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result =
-      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0, 0);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, words[0], words[1], 0,
+                                                                  rdna4::kSLoadB32Smem);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::SmemMachineInst dst{};
@@ -1007,13 +1025,13 @@ TEST(EncodingTranslator, Vop3PreservesModifiers) {
   src.omod = 2;
   src.neg = 5;
   src.abs = 3;
-  src.op = 100;
+  src.op = cdna4::kVCmpGtF64Vop3;
   src.encoding = 0x35;
   uint32_t words[2];
   std::memcpy(words, &src, sizeof(src));
 
-  auto result =
-      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0, 100);
+  auto result = cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_VOP3, words[0], words[1], 0,
+                                                                  rdna4::kVCmpGtF64Vop3);
 
   ASSERT_EQ(result.word_count, 2);
   rdna4::Vop3MachineInst dst{};
@@ -1033,18 +1051,19 @@ TEST(EncodingTranslator, Cdna4ToCdna3Vop2VectorAddPreservesOperands) {
   src.src0 = 3;
   src.vsrc1 = 4;
   src.vdst = 5;
-  src.op = 1;       // V_ADD_F32 on CDNA3 and CDNA4.
+  src.op = cdna4::kVAddF32Vop2;
   src.encoding = 0; // GFX9-family VOP2 prefix.
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
-  auto result = cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3(kEnc_VOP2, w0, 0, 0, 1);
+  auto result =
+      cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3(kEnc_VOP2, w0, 0, 0, cdna3::kVAddF32Vop2);
 
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<cdna3::Vop2MachineInst>(result.words[0]);
   EXPECT_EQ(dst.src0, 3);
   EXPECT_EQ(dst.vsrc1, 4);
   EXPECT_EQ(dst.vdst, 5);
-  EXPECT_EQ(dst.op, 1);
+  EXPECT_EQ(dst.op, cdna3::kVAddF32Vop2);
   EXPECT_EQ(dst.encoding, 0);
 }
 
@@ -1057,21 +1076,21 @@ TEST(EncodingTranslator, DecodeEncodeRoundTrip) {
   cdna4::Sop1MachineInst src{};
   src.ssrc0 = 55;
   src.sdst = 33;
-  src.op = 4;
-  src.encoding = 0x17D;
+  src.op = cdna4::kSNotB32Sop1;
+  src.encoding = cdna4::encoding::kSop1;
   uint32_t w0 = std::bit_cast<uint32_t>(src);
 
   auto fields = cdna4_to_rdna4::decode_sop1_cdna4(w0);
   EXPECT_EQ(fields.ssrc0, 55u);
   EXPECT_EQ(fields.sdst, 33u);
-  EXPECT_EQ(fields.op, 4u);
+  EXPECT_EQ(fields.op, cdna4::kSNotB32Sop1);
 
-  auto result = cdna4_to_rdna4::encode_sop1_rdna4(fields, 4);
+  auto result = cdna4_to_rdna4::encode_sop1_rdna4(fields, rdna4::kSBrevB32Sop1);
   ASSERT_EQ(result.word_count, 1);
   auto dst = std::bit_cast<rdna4::Sop1MachineInst>(result.words[0]);
   EXPECT_EQ(dst.ssrc0, 55);
   EXPECT_EQ(dst.sdst, 33);
-  EXPECT_EQ(dst.op, 4);
+  EXPECT_EQ(dst.op, rdna4::kSBrevB32Sop1);
 }
 
 TEST(LegalizationLookup, FindsKnownInstruction) {
@@ -1190,9 +1209,9 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
       return std::nullopt;
 
     const auto patched_image = patcher.emit();
-    const auto *kd = reinterpret_cast<const kernel_descriptor_t *>(
-        patched_image.data() + translation.descriptor_file_offset);
-    return kd->compute_pgm_rsrc1;
+    const auto kd =
+        read_kernel_descriptor_for_test(patched_image.data() + translation.descriptor_file_offset);
+    return kd.compute_pgm_rsrc1;
   };
 
   const auto cdna3_rsrc1 = patched_rsrc1(ROCJITSU_CODE_ARCH_CDNA3);
@@ -1412,9 +1431,9 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   ASSERT_NE(source_rodata, nullptr);
   ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
 
-  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   const auto *source_text = source_layout.text_sections()[0];
   auto *source_words = reinterpret_cast<uint32_t *>(image.data() + source_text->sectionOffset());
@@ -1454,9 +1473,9 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindow) {
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
   ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
-  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      translated.image_data() + target_rodata->sectionOffset());
-  EXPECT_EQ(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+  const auto target_kd =
+      read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
+  EXPECT_EQ(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
       << "the descriptor is redirected to the synthesized compatibility entry; compatible "
          "firmware still reaches the synthesized +256 entry by adding the ABI skip";
 }
@@ -1486,12 +1505,12 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   ASSERT_NE(source_rodata, nullptr);
   ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
 
-  auto *source_kd = reinterpret_cast<rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      image.data() + source_rodata->sectionOffset());
-  AMDHSA_BITS_SET(source_kd->kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
-  source_kd->kernel_code_entry_byte_offset =
+  auto source_kd = read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  source_kd.kernel_code_entry_byte_offset =
       static_cast<int64_t>(source_text->vaddr() + kSourceEntryBytes) -
       static_cast<int64_t>(source_rodata->vaddr());
+  write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(), source_kd);
 
   AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
@@ -1532,15 +1551,15 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
   const auto *target_rodata = find_section(translated, ".rodata");
   ASSERT_NE(target_rodata, nullptr);
   ASSERT_GE(target_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
-  const auto *target_kd = reinterpret_cast<const rocr::llvm::amdhsa::kernel_descriptor_t *>(
-      translated.image_data() + target_rodata->sectionOffset());
+  const auto target_kd =
+      read_kernel_descriptor_for_test(translated.image_data() + target_rodata->sectionOffset());
   const int64_t target_entry_text_offset = static_cast<int64_t>(target_rodata->vaddr()) +
-                                           target_kd->kernel_code_entry_byte_offset -
+                                           target_kd.kernel_code_entry_byte_offset -
                                            static_cast<int64_t>(text->vaddr());
   EXPECT_EQ(target_entry_text_offset, 0)
       << "the descriptor must be redirected from the moved source entry to the synthesized "
          "compatibility launch stub";
-  EXPECT_NE(target_kd->kernel_code_entry_byte_offset, source_kd->kernel_code_entry_byte_offset)
+  EXPECT_NE(target_kd.kernel_code_entry_byte_offset, source_kd.kernel_code_entry_byte_offset)
       << "the source descriptor entry is deliberately nonzero, so this assertion proves the "
          "descriptor was repointed rather than passing because both entries were zero";
 }
@@ -1590,6 +1609,10 @@ TEST(InstructionBuilder, PatchPcrelBranchOffsetRejectsMisalignedDelta) {
 
 } // namespace
 } // namespace rocjitsu
+
+namespace cdna3 = rocjitsu::cdna3;
+namespace cdna4 = rocjitsu::cdna4;
+namespace rdna4 = rocjitsu::rdna4;
 
 // --- WaitcntTranslator tests ---
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
@@ -1643,9 +1666,9 @@ TEST(WaitcntTranslator, EncodeVmcnt0EmitsLoadcntAndStorecnt) {
   bool has_storecnt_dscnt = false;
   for (auto w : words) {
     uint8_t op = (w >> 16) & 0x7F;
-    if (op == 64)
+    if (op == rdna4::kSWaitLoadcntSopp)
       has_loadcnt = true;
-    if (op == 73)
+    if (op == rdna4::kSWaitStorecntDscntSopp)
       has_storecnt_dscnt = true;
   }
   EXPECT_TRUE(has_loadcnt);
@@ -1740,20 +1763,21 @@ ExpectedCdna3Inst expect_sopp(uint16_t op) {
 std::vector<ExpectedCdna3Inst> expected_cdna3_bitop3_sequence(bool b16) {
   // Truth table 0xde lowers to S2 ^ S1 ^ (S1 & S2) ^ S0 ^ (S0 & S1).
   std::vector<ExpectedCdna3Inst> expected = {
-      expect_vop3(321), // v_mov_b32
-      expect_vop3(277), // v_xor_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(277), // v_xor_b32
-      expect_vop3(277), // v_xor_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(277), // v_xor_b32
+      expect_vop3(cdna3::kVMovB32Vop3), // v_mov_b32
+      expect_vop3(cdna3::kVXorB32Vop3), // v_xor_b32
+      expect_vop3(cdna3::kVAndB32Vop3), // v_and_b32
+      expect_vop3(cdna3::kVXorB32Vop3), // v_xor_b32
+      expect_vop3(cdna3::kVXorB32Vop3), // v_xor_b32
+      expect_vop3(cdna3::kVAndB32Vop3), // v_and_b32
+      expect_vop3(cdna3::kVXorB32Vop3), // v_xor_b32
   };
   if (b16) {
-    expected.push_back(expect_vop3(274)); // v_lshlrev_b32
-    expected.push_back(expect_vop3(272)); // v_lshrrev_b32
+    expected.push_back(expect_vop3(cdna3::kVLshlrevB32Vop3)); // v_lshlrev_b32
+    expected.push_back(expect_vop3(cdna3::kVLshrrevB32Vop3)); // v_lshrrev_b32
   }
-  expected.push_back(expect_vop3(321)); // v_mov_b32 copy scratch accumulator to vdst.
-  expected.push_back(expect_sopp(2));   // s_branch back to original fallthrough.
+  expected.push_back(
+      expect_vop3(cdna3::kVMovB32Vop3)); // v_mov_b32 copy scratch accumulator to vdst.
+  expected.push_back(expect_sopp(cdna3::kSBranchSopp)); // s_branch back to original fallthrough.
   return expected;
 }
 
@@ -1762,113 +1786,114 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_mfma_sequence(uint16_t narrow_op,
   return {
       expect_mfma(narrow_op, 0, 1, 256, 260, src2),
       expect_mfma(narrow_op, 0, 1, 258, 262, 256),
-      expect_sopp(2),
+      expect_sopp(cdna3::kSBranchSopp),
   };
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_buffer_load_lds_sequence(uint16_t mubuf_op,
                                                                        uint16_t ds_op) {
   return {
-      expect_sop1(1),         // s_mov_b64 save EXEC.
-      expect_sop1(0),         // s_mov_b32 exec_lo, -1.
-      expect_sop1(0),         // s_mov_b32 exec_hi, -1.
-      expect_vop3(652),       // v_mbcnt_lo_u32_b32
-      expect_vop3(653),       // v_mbcnt_hi_u32_b32
-      expect_vop3(274),       // v_lshlrev_b32 lane_id, 4
-      expect_vop3(308),       // v_add_u32 m0, lane_offset
-      expect_sop1(1),         // s_mov_b64 restore EXEC.
-      expect_mubuf(mubuf_op), // buffer_load_dwordx{3,4} into scratch VGPRs.
-      expect_sopp(12),        // s_waitcnt 0 before consuming VMEM data.
-      expect_ds(ds_op),       // ds_write_b96/b128
-      expect_sopp(12),        // s_waitcnt lgkmcnt(0) for the explicit DS write.
-      expect_sopp(2),         // s_branch back to original fallthrough.
+      expect_sop1(cdna3::kSMovB64),            // s_mov_b64 save EXEC.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, -1.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, -1.
+      expect_vop3(cdna3::kVMbcntLoU32B32Vop3), // v_mbcnt_lo_u32_b32
+      expect_vop3(cdna3::kVMbcntHiU32B32Vop3), // v_mbcnt_hi_u32_b32
+      expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32 lane_id, 4
+      expect_vop3(cdna3::kVAddU32Vop3),        // v_add_u32 m0, lane_offset
+      expect_sop1(cdna3::kSMovB64),            // s_mov_b64 restore EXEC.
+      expect_mubuf(mubuf_op),                  // buffer_load_dwordx{3,4} into scratch VGPRs.
+      expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt 0 before consuming VMEM data.
+      expect_ds(ds_op),                        // ds_write_b96/b128
+      expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0) for the explicit DS write.
+      expect_sopp(cdna3::kSBranchSopp),        // s_branch back to original fallthrough.
   };
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_permlane32_swap_sequence() {
   return {
-      expect_sop1(1),   // s_mov_b64 save EXEC.
-      expect_sop1(0),   // s_mov_b32 exec_lo, -1.
-      expect_sop1(0),   // s_mov_b32 exec_hi, -1.
-      expect_vop3(652), // v_mbcnt_lo_u32_b32
-      expect_vop3(653), // v_mbcnt_hi_u32_b32
-      expect_vop3(277), // v_xor_b32 lane, 32.
-      expect_vop3(274), // v_lshlrev_b32 byte address.
-      expect_ds(63),    // ds_bpermute_b32 from old vdst high half.
-      expect_ds(63),    // ds_bpermute_b32 from old src low half.
-      expect_sopp(12),  // s_waitcnt lgkmcnt(0).
-      expect_sop1(0),   // s_mov_b32 exec_lo, low-half mask.
-      expect_sop1(0),   // s_mov_b32 exec_hi, low-half mask.
-      expect_vop3(321), // v_mov_b32 src <- old vdst high.
-      expect_sop1(0),   // s_mov_b32 exec_lo, high-half mask.
-      expect_sop1(0),   // s_mov_b32 exec_hi, high-half mask.
-      expect_vop3(321), // v_mov_b32 vdst <- old src low.
-      expect_sop1(1),   // s_mov_b64 restore EXEC.
-      expect_sopp(2),   // s_branch back to original fallthrough.
+      expect_sop1(cdna3::kSMovB64),            // s_mov_b64 save EXEC.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, -1.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, -1.
+      expect_vop3(cdna3::kVMbcntLoU32B32Vop3), // v_mbcnt_lo_u32_b32
+      expect_vop3(cdna3::kVMbcntHiU32B32Vop3), // v_mbcnt_hi_u32_b32
+      expect_vop3(cdna3::kVXorB32Vop3),        // v_xor_b32 lane, 32.
+      expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32 byte address.
+      expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32 from old vdst high half.
+      expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32 from old src low half.
+      expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0).
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, low-half mask.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, low-half mask.
+      expect_vop3(cdna3::kVMovB32Vop3),        // v_mov_b32 src <- old vdst high.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, high-half mask.
+      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, high-half mask.
+      expect_vop3(cdna3::kVMovB32Vop3),        // v_mov_b32 vdst <- old src low.
+      expect_sop1(cdna3::kSMovB64),            // s_mov_b64 restore EXEC.
+      expect_sopp(cdna3::kSBranchSopp),        // s_branch back to original fallthrough.
   };
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_raw_b16_pack_sequence() {
   return {
-      expect_vop3(321), // v_mov_b32 -1
-      expect_vop3(272), // v_lshrrev_b32 16, mask
-      expect_vop3(275), // v_and_b32 low half
-      expect_vop3(275), // v_and_b32 high half
-      expect_vop3(274), // v_lshlrev_b32 16, high half
-      expect_vop3(276), // v_or_b32
+      expect_vop3(cdna3::kVMovB32Vop3),     // v_mov_b32 -1
+      expect_vop3(cdna3::kVLshrrevB32Vop3), // v_lshrrev_b32 16, mask
+      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 low half
+      expect_vop3(cdna3::kVAndB32Vop3),     // v_and_b32 high half
+      expect_vop3(cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 16, high half
+      expect_vop3(cdna3::kVOrB32Vop3),      // v_or_b32
   };
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_f16_f32_sequence() {
   return {
-      expect_vop3(330), // v_cvt_f16_f32 low half into scratch.
-      expect_vop3(330), // v_cvt_f16_f32 high half into scratch.
-      expect_vop3(274), // v_lshlrev_b32 16, high half.
-      expect_vop3(276), // v_or_b32 pack low/high halves into vdst.
-      expect_sopp(2),   // s_branch back to original fallthrough.
+      expect_vop3(cdna3::kVCvtF16F32Vop3),  // v_cvt_f16_f32 low half into scratch.
+      expect_vop3(cdna3::kVCvtF16F32Vop3),  // v_cvt_f16_f32 high half into scratch.
+      expect_vop3(cdna3::kVLshlrevB32Vop3), // v_lshlrev_b32 16, high half.
+      expect_vop3(cdna3::kVOrB32Vop3),      // v_or_b32 pack low/high halves into vdst.
+      expect_sopp(cdna3::kSBranchSopp),     // s_branch back to original fallthrough.
   };
 }
 
 std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
   std::vector<ExpectedCdna3Inst> expected = {
-      expect_ds(118),   // ds_read_b64
-      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
-      expect_vop3(652), // v_mbcnt_lo_u32_b32
-      expect_vop3(653), // v_mbcnt_hi_u32_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(275), // v_and_b32
-      expect_vop3(276), // v_or_b32
-      expect_vop3(308), // v_add_u32
-      expect_vop3(274), // v_lshlrev_b32
-      expect_vop3(276), // v_or_b32
-      expect_ds(63),    // ds_bpermute_b32
-      expect_ds(63),    // ds_bpermute_b32
-      expect_sopp(12),  // s_waitcnt lgkmcnt(0)
-      expect_vop3(493), // v_perm_b32
-      expect_vop3(308), // v_add_u32
-      expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493),
+      expect_ds(cdna3::kDsReadB64Ds),          // ds_read_b64
+      expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0)
+      expect_vop3(cdna3::kVMbcntLoU32B32Vop3), // v_mbcnt_lo_u32_b32
+      expect_vop3(cdna3::kVMbcntHiU32B32Vop3), // v_mbcnt_hi_u32_b32
+      expect_vop3(cdna3::kVAndB32Vop3),        // v_and_b32
+      expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32
+      expect_vop3(cdna3::kVAndB32Vop3),        // v_and_b32
+      expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32
+      expect_vop3(cdna3::kVAndB32Vop3),        // v_and_b32
+      expect_vop3(cdna3::kVOrB32Vop3),         // v_or_b32
+      expect_vop3(cdna3::kVAddU32Vop3),        // v_add_u32
+      expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32
+      expect_vop3(cdna3::kVOrB32Vop3),         // v_or_b32
+      expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32
+      expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32
+      expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0)
+      expect_vop3(cdna3::kVPermB32Vop3),       // v_perm_b32
+      expect_vop3(cdna3::kVAddU32Vop3),        // v_add_u32
+      expect_ds(cdna3::kDsBpermuteB32Ds),      expect_ds(cdna3::kDsBpermuteB32Ds),
+      expect_sopp(cdna3::kSWaitcntSopp),       expect_vop3(cdna3::kVPermB32Vop3),
   };
 
   auto first_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), first_pack.begin(), first_pack.end());
   expected.insert(expected.end(), {
-                                      expect_vop3(308),
-                                      expect_ds(63),
-                                      expect_ds(63),
-                                      expect_sopp(12),
-                                      expect_vop3(493),
-                                      expect_vop3(308),
-                                      expect_ds(63),
-                                      expect_ds(63),
-                                      expect_sopp(12),
-                                      expect_vop3(493),
+                                      expect_vop3(cdna3::kVAddU32Vop3),
+                                      expect_ds(cdna3::kDsBpermuteB32Ds),
+                                      expect_ds(cdna3::kDsBpermuteB32Ds),
+                                      expect_sopp(cdna3::kSWaitcntSopp),
+                                      expect_vop3(cdna3::kVPermB32Vop3),
+                                      expect_vop3(cdna3::kVAddU32Vop3),
+                                      expect_ds(cdna3::kDsBpermuteB32Ds),
+                                      expect_ds(cdna3::kDsBpermuteB32Ds),
+                                      expect_sopp(cdna3::kSWaitcntSopp),
+                                      expect_vop3(cdna3::kVPermB32Vop3),
                                   });
   auto second_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), second_pack.begin(), second_pack.end());
-  expected.push_back(expect_sopp(2));
+  expected.push_back(expect_sopp(cdna3::kSBranchSopp));
   return expected;
 }
 
@@ -1900,7 +1925,7 @@ std::array<uint32_t, 2> make_cdna4_bitop3_words(uint16_t opcode, uint8_t vdst) {
 std::array<uint32_t, 2> make_cdna4_bitop3_b16_unsupported_op_sel_words() {
   rocjitsu::cdna4::Vop3MachineInst inst{};
   inst.encoding = 0x34;
-  inst.op = 563;
+  inst.op = cdna4::kVBitop3B16Vop3;
   inst.vdst = 8;
   inst.src0 = 256 + 9;
   inst.src1 = 256 + 10;
@@ -1913,7 +1938,7 @@ std::array<uint32_t, 2> make_cdna4_bitop3_b16_unsupported_op_sel_words() {
 std::array<uint32_t, 2> make_cdna4_cvt_pk_f16_f32_words() {
   rocjitsu::cdna4::Vop3MachineInst inst{};
   inst.encoding = 0x34;
-  inst.op = 615;
+  inst.op = cdna4::kVCvtPkF16F32Vop3;
   inst.vdst = 0;
   inst.src0 = 256 + 1;
   inst.src1 = 256 + 2;
@@ -1928,17 +1953,17 @@ std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_i
   // VDST[7:6] in bits 24:23.  Keep the real VOP1 selector at 0x3f and vary
   // VDST's high bits to exercise each generated semantic rule.
   inst.encoding = 0x3f;
-  inst.op = 90;
-  inst.vdst = static_cast<uint8_t>((encoding_id - 0xFCu) << 6);
+  inst.op = cdna4::kVPermlane32SwapB32Vop1;
+  inst.vdst = static_cast<uint8_t>((encoding_id - cdna4::encoding::kVop1) << 6);
   inst.src0 = 256 + 1;
   return encode_two_word_inst(inst);
 }
 
-std::array<uint32_t, 2> make_cdna4_mfma_words(uint8_t opcode, uint8_t vdst, uint16_t src0,
+std::array<uint32_t, 2> make_cdna4_mfma_words(uint16_t opcode, uint8_t vdst, uint16_t src0,
                                               uint16_t src1, uint16_t src2 = 128) {
   rocjitsu::cdna4::Vop3pMfmaMachineInst inst{};
-  inst.encoding = 0x1A7;
-  inst.op = opcode;
+  inst.encoding = cdna4::encoding::kVop3pMfma;
+  inst.op = opcode & 0x7F;
   inst.vdst = vdst;
   inst.acc_cd = 1;
   inst.src0 = src0;
@@ -1949,8 +1974,8 @@ std::array<uint32_t, 2> make_cdna4_mfma_words(uint8_t opcode, uint8_t vdst, uint
 
 std::array<uint32_t, 2> make_cdna4_mfma_vgpr_dst_alias_words() {
   rocjitsu::cdna4::Vop3pMfmaMachineInst inst{};
-  inst.encoding = 0x1A7;
-  inst.op = 84;
+  inst.encoding = cdna4::encoding::kVop3pMfma;
+  inst.op = cdna4::kVMfmaF3216x16x32F16Vop3pMfma;
   inst.vdst = 0;
   inst.acc_cd = 0;
   // Ordinary-VGPR destination v[0:3] overlaps the first wide source window.
@@ -1972,16 +1997,16 @@ std::array<uint32_t, 2> make_cdna4_dot2c_unimplemented_expand_words() {
 std::array<uint32_t, 2> make_cdna4_ds_read_b64_tr_b16_words() {
   rocjitsu::cdna4::DsMachineInst inst{};
   inst.encoding = 0x36;
-  inst.op = 227;
+  inst.op = cdna4::kDsReadB64TrB16Ds;
   inst.addr = 2;
   inst.vdst = 0;
   return encode_two_word_inst(inst);
 }
 
-std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint8_t op) {
+std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint16_t op) {
   rocjitsu::cdna4::MubufMachineInst inst{};
   inst.encoding = 0x38;
-  inst.op = op;
+  inst.op = op & 0x7F;
   inst.lds = 1;
   inst.offen = 1;
   inst.vaddr = 2;
@@ -1993,34 +2018,48 @@ std::array<uint32_t, 2> make_cdna4_buffer_load_lds_words(uint8_t op) {
 
 std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
   return {
-      {"VBitop3B16", 0x1A4, 563, make_cdna4_bitop3_words(563, 8),
-       expected_cdna3_bitop3_sequence(true)},
-      {"VBitop3B32", 0x1A4, 564, make_cdna4_bitop3_words(564, 16),
-       expected_cdna3_bitop3_sequence(false)},
-      {"VCvtPkF16F32", 0x1A4, 615, make_cdna4_cvt_pk_f16_f32_words(),
-       expected_cdna3_cvt_pk_f16_f32_sequence()},
-      {"VPermlane32SwapB32E32", 0xFC, 90, make_cdna4_permlane32_swap_b32_words(0xFC),
+      {"VBitop3B16", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B16Vop3,
+       make_cdna4_bitop3_words(cdna4::kVBitop3B16Vop3, 8), expected_cdna3_bitop3_sequence(true)},
+      {"VBitop3B32", cdna4::encoding::kVop3OpHi4, cdna4::kVBitop3B32Vop3,
+       make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16), expected_cdna3_bitop3_sequence(false)},
+      {"VCvtPkF16F32", cdna4::encoding::kVop3OpHi4, cdna4::kVCvtPkF16F32Vop3,
+       make_cdna4_cvt_pk_f16_f32_words(), expected_cdna3_cvt_pk_f16_f32_sequence()},
+      {"VPermlane32SwapB32E32", cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1,
+       make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1),
        expected_cdna3_permlane32_swap_sequence()},
-      {"VPermlane32SwapB32E32Hi1", 0xFD, 90, make_cdna4_permlane32_swap_b32_words(0xFD),
+      {"VPermlane32SwapB32E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVPermlane32SwapB32Vop1,
+       make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi1),
        expected_cdna3_permlane32_swap_sequence()},
-      {"VPermlane32SwapB32E32Hi2", 0xFE, 90, make_cdna4_permlane32_swap_b32_words(0xFE),
+      {"VPermlane32SwapB32E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVPermlane32SwapB32Vop1,
+       make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi2),
        expected_cdna3_permlane32_swap_sequence()},
-      {"VPermlane32SwapB32E32Hi3", 0xFF, 90, make_cdna4_permlane32_swap_b32_words(0xFF),
+      {"VPermlane32SwapB32E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVPermlane32SwapB32Vop1,
+       make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi3),
        expected_cdna3_permlane32_swap_sequence()},
-      {"MfmaF32_16x16x32F16", 0x1A7, 84, make_cdna4_mfma_words(84, 0, 256, 260),
-       expected_cdna3_mfma_sequence(77)},
-      {"MfmaF32_32x32x16F16", 0x1A7, 85, make_cdna4_mfma_words(85, 0, 256, 260),
-       expected_cdna3_mfma_sequence(76)},
-      {"MfmaF32_16x16x32F16AccumVgpr", 0x1A7, 84, make_cdna4_mfma_words(84, 0, 256, 260, 272),
-       expected_cdna3_mfma_sequence(77, 272)},
-      {"MfmaF32_32x32x16F16AccumVgpr", 0x1A7, 85, make_cdna4_mfma_words(85, 0, 256, 260, 272),
-       expected_cdna3_mfma_sequence(76, 272)},
-      {"DsReadB64TrB16", 0x1B3, 227, make_cdna4_ds_read_b64_tr_b16_words(),
-       expected_cdna3_ds_read_b64_tr_b16_sequence()},
-      {"BufferLoadDwordx3Lds", 0x1C0, 22, make_cdna4_buffer_load_lds_words(22),
-       expected_cdna3_buffer_load_lds_sequence(22, 222)},
-      {"BufferLoadDwordx4Lds", 0x1C0, 23, make_cdna4_buffer_load_lds_words(23),
-       expected_cdna3_buffer_load_lds_sequence(23, 223)},
+      {"MfmaF32_16x16x32F16", cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32F16Vop3pMfma, 0, 256, 260),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16F16Vop3pMfma)},
+      {"MfmaF32_32x32x16F16", cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16F16Vop3pMfma, 0, 256, 260),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma)},
+      {"MfmaF32_16x16x32F16AccumVgpr", cdna4::encoding::kVop3pMfma,
+       cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32F16Vop3pMfma, 0, 256, 260, 272),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16F16Vop3pMfma, 272)},
+      {"MfmaF32_32x32x16F16AccumVgpr", cdna4::encoding::kVop3pMfma,
+       cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
+       make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16F16Vop3pMfma, 0, 256, 260, 272),
+       expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma, 272)},
+      {"DsReadB64TrB16", cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16Ds,
+       make_cdna4_ds_read_b64_tr_b16_words(), expected_cdna3_ds_read_b64_tr_b16_sequence()},
+      {"BufferLoadDwordx3Lds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3Mubuf,
+       make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx3Mubuf),
+       expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx3Mubuf,
+                                               cdna3::kDsWriteB96Ds)},
+      {"BufferLoadDwordx4Lds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx4Mubuf,
+       make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx4Mubuf),
+       expected_cdna3_buffer_load_lds_sequence(cdna3::kBufferLoadDwordx4Mubuf,
+                                               cdna3::kDsWriteB128Ds)},
   };
 }
 
@@ -2072,14 +2111,14 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
   case ExpectedCdna3Kind::Sop1: {
     rocjitsu::cdna3::Sop1MachineInst actual{};
     std::memcpy(&actual, raw, sizeof(actual));
-    EXPECT_EQ(actual.encoding, 0x17Du);
+    EXPECT_EQ(actual.encoding, cdna3::encoding::kSop1);
     EXPECT_EQ(actual.op, expected.op);
     break;
   }
   case ExpectedCdna3Kind::Vop3pMfma: {
     rocjitsu::cdna3::Vop3pMfmaMachineInst actual{};
     std::memcpy(&actual, raw, sizeof(actual));
-    EXPECT_EQ(actual.encoding, 0x1A7u);
+    EXPECT_EQ(actual.encoding, cdna3::encoding::kVop3pMfma);
     EXPECT_EQ(actual.op, expected.op);
     expect_field_matches(expected.vdst, static_cast<uint16_t>(actual.vdst), "vdst");
     expect_field_matches(expected.acc_cd, static_cast<uint16_t>(actual.acc_cd), "acc_cd");
@@ -2107,7 +2146,7 @@ void expect_cdna3_instruction_matches(const rocjitsu::Instruction &inst,
   case ExpectedCdna3Kind::Sopp: {
     rocjitsu::cdna3::SoppMachineInst actual{};
     std::memcpy(&actual, raw, sizeof(actual));
-    EXPECT_EQ(actual.encoding, 0x17Fu);
+    EXPECT_EQ(actual.encoding, cdna3::encoding::kSopp);
     EXPECT_EQ(actual.op, expected.op);
     break;
   }
@@ -2156,6 +2195,82 @@ void expect_cdna3_translated_descriptor_vgprs_at_least(const std::vector<uint8_t
                                             rocjitsu::KernelDescriptorTranslationOptions{});
   ASSERT_EQ(infos.size(), 1u);
   EXPECT_GE(infos[0].target_vgpr_count, expected_minimum);
+}
+
+uint32_t build_s_getpc_b64(uint16_t sdst, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x47, sdst, 0);
+  default:
+    return rocjitsu::pack_sop1(0x1c, sdst, 0);
+  }
+}
+
+uint32_t build_s_setpc_b64(uint16_t ssrc0, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x48, 0, ssrc0);
+  default:
+    return rocjitsu::pack_sop1(0x1d, 0, ssrc0);
+  }
+}
+
+uint32_t build_s_swappc_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rocjitsu::pack_sop1(0x49, sdst, ssrc0);
+  default:
+    return rocjitsu::pack_sop1(0x1e, sdst, ssrc0);
+  }
+}
+
+uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
+  constexpr uint32_t kSopkEncodingPrefix = 0xb;
+  constexpr uint32_t kSCallB64Opcode = 0x15;
+  return (kSopkEncodingPrefix << 28) | (kSCallB64Opcode << 23) | ((sdst & 0x7fu) << 16) |
+         static_cast<uint16_t>(simm16);
+}
+
+uint32_t build_s_trap(uint16_t simm16) {
+  // CDNA1-4 encode S_TRAP at SOPP opcode 0x12. This helper is intentionally
+  // local to the CDNA4->CDNA3 tests below; RDNA3+ uses a different SOPP opcode.
+  constexpr uint32_t kCdnaSoppTrapOpcode = 0x12;
+  return rocjitsu::pack_sopp(kCdnaSoppTrapOpcode, simm16);
+}
+
+uint32_t build_s_add_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return rocjitsu::pack_sop2(0, sdst, ssrc0, ssrc1);
+}
+
+uint32_t build_s_addc_u32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return rocjitsu::pack_sop2(4, sdst, ssrc0, ssrc1);
+}
+
+std::vector<std::unique_ptr<rocjitsu::Instruction>>
+decode_text_instructions(const rocjitsu::Section &text, rj_code_arch_t arch) {
+  std::vector<std::unique_ptr<rocjitsu::Instruction>> decoded;
+  auto decoder = rocjitsu::Decoder::create(arch);
+  if (!decoder)
+    return decoded;
+
+  const auto *words = reinterpret_cast<const rj_code_binary_inst_t *>(text.data());
+  const size_t word_count = text.size() / sizeof(rj_code_binary_inst_t);
+  size_t word_offset = 0;
+  while (word_offset < word_count) {
+    std::unique_ptr<rocjitsu::Instruction> inst(
+        decoder->decode(words + word_offset, word_offset * sizeof(rj_code_binary_inst_t)));
+    if (!inst)
+      break;
+    word_offset += static_cast<size_t>(inst->size()) / sizeof(rj_code_binary_inst_t);
+    decoded.push_back(std::move(inst));
+  }
+  return decoded;
 }
 
 // --- Synthetic BinaryTranslator integration tests ---
@@ -2223,6 +2338,48 @@ TEST(BinaryTranslatorE2E, TranslatesMultiKernelCodeObject) {
   EXPECT_EQ(translated_descriptor_offsets, original_descriptor_offsets);
 }
 
+TEST(BinaryTranslatorE2E, DuplicatesSharedReachableBlocksPerKernel) {
+  constexpr uint32_t kCdna4SEndpgm = rocjitsu::pack_sopp(cdna4::kSEndpgmSopp, 0);
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // kernel0: 0x00 -> helper 0x08.
+      rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA4), // kernel1: 0x04 -> helper 0x08.
+      kCdna4SEndpgm,                                         // Shared source helper.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_two_kernel_descriptors(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *text = translated.text_sections()[0];
+
+  rocjitsu::KernelDescriptorTranslator parser(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto infos = parser.translate_image(result.elf_bytes, text->sectionOffset(), text->size(),
+                                            rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(infos.size(), 2u);
+  std::vector<uint64_t> translated_entries;
+  for (const auto &info : infos)
+    translated_entries.push_back(info.entry_text_offset);
+  std::ranges::sort(translated_entries);
+  ASSERT_EQ(translated_entries[0], 0u);
+  ASSERT_GT(translated_entries[1], 2 * sizeof(uint32_t));
+  ASSERT_LE(translated_entries[1] + 2 * sizeof(uint32_t), text->size());
+
+  const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
+  const uint64_t second_entry_word = translated_entries[1] / sizeof(uint32_t);
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], kCdna4SEndpgm);
+  EXPECT_EQ(target_words[second_entry_word], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[second_entry_word + 1], kCdna4SEndpgm);
+}
+
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3SemanticExpandRulesHaveTranslationFixtures) {
   const auto test_cases = cdna4_to_cdna3_semantic_rule_cases();
   const auto rules = rocjitsu::semantic_expand_rules_cdna4_to_cdna3();
@@ -2279,7 +2436,7 @@ INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTe
 
 TEST(BinaryTranslatorE2E, Cdna4ToCdna3Bitop3ScratchGrowsDescriptor) {
   constexpr uint16_t kScratchFloor = 120;
-  const auto words = make_cdna4_bitop3_words(564, 16);
+  const auto words = make_cdna4_bitop3_words(cdna4::kVBitop3B32Vop3, 16);
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1]});
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
@@ -2318,8 +2475,10 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3MfmaPartialScratchGrowsDescriptor) {
   expect_cdna3_translated_descriptor_vgprs_at_least(result.elf_bytes, kScratchFloor + 4);
 }
 
-TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) {
-  constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget = rocjitsu::pack_sopp(5, 4);
+TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches) {
+  constexpr uint32_t kCdna4SEndpgm = rocjitsu::pack_sopp(cdna4::kSEndpgmSopp, 0);
+  constexpr uint32_t kCdna4SCbranchScc1ToSourceTarget =
+      rocjitsu::pack_sopp(cdna4::kSCbranchScc1Sopp, 4);
   const std::vector<uint32_t> words = {
       rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> source 0x0c.
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable.
@@ -2346,15 +2505,15 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsEntryWindowAndPatchesBranches) 
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  // Without kernarg preload, the relocated body keeps only reachable blocks.
-  // Explicit branches are retargeted in that compact body while unreachable
-  // source gaps are removed.
+  // This kernel does not use the kernarg-preload compatibility entry path, so
+  // relocation emits only the reachable CFG body. Source gaps disappear and
+  // branch immediates are patched against the compact target layout.
   const std::vector<uint32_t> expected = {
       rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::pack_sopp(5, 1),
+      rocjitsu::pack_sopp(cdna3::kSCbranchScc1Sopp, 1),
       rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3),
       rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3),
-      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3),
+      kCdna4SEndpgm,
   };
   for (size_t i = 0; i < expected.size(); ++i) {
     SCOPED_TRACE(i);
@@ -2369,6 +2528,17 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   words[72] = rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);    // Reachable target.
 
   auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source_layout(image.data(), image.size());
+  ASSERT_TRUE(source_layout.is_valid());
+  const auto *source_rodata = rocjitsu::find_section(source_layout, ".rodata");
+  ASSERT_NE(source_rodata, nullptr);
+  ASSERT_GE(source_rodata->size(), sizeof(rocr::llvm::amdhsa::kernel_descriptor_t));
+  auto source_kd =
+      rocjitsu::read_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset());
+  AMDHSA_BITS_SET(source_kd.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  rocjitsu::write_kernel_descriptor_for_test(image.data() + source_rodata->sectionOffset(),
+                                             source_kd);
+
   rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
@@ -2384,19 +2554,350 @@ TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBlocksAfterEntry) {
   ASSERT_GE(text->size(), words.size() * sizeof(uint32_t));
 
   const auto *target_words = reinterpret_cast<const uint32_t *>(text->data());
-  // The final ELF section is tail-padded back to the original size, but the
-  // relocated body starts at the descriptor entry and keeps only reachable
-  // blocks. The source 0x100 and 0x120 targets therefore land immediately after
-  // their predecessor branches instead of remaining at the original words 64
-  // and 72.
-  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[1], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_EQ(target_words[64], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+  // The synthesized preload launch window occupies words 0 and 64. The compact
+  // relocated body starts after that protected window, and the source 0x120
+  // target lands immediately after the source 0x100 branch instead of remaining
+  // at the original word 72.
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(64, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[64], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[65], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[66], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[67], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
   EXPECT_EQ(target_words[72], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
 }
 
-TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
+TEST(BinaryTranslatorE2E, RewritesRecoveredSetpcTargetAfterRelocation) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 20;
+  constexpr uint32_t kRelocatedGetpcDelta = 16;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),      // 0x04.
+      kOriginalGetpcDelta,                                     // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x10.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),      // 0x14 unreachable.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),      // 0x18 target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  // The recovered source target is 0x18, but the unreachable 0x14 word is not
+  // emitted in the compact body. The old PC builder must therefore be rewritten
+  // from getpc+20 to getpc+16 while preserving the indirect setpc consumer.
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RewritesRecoveredSwappcTargetAfterRelocation) {
+  constexpr uint16_t kPcSreg = 10;
+  constexpr uint16_t kReturnSreg = 20;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 24;
+  constexpr uint32_t kRelocatedGetpcDelta = 20;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),               // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),                 // 0x04.
+      kOriginalGetpcDelta,                                                // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0),            // 0x0c.
+      build_s_swappc_b64(kReturnSreg, kPcSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x10.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x14 fallthrough.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                 // 0x18 unreachable.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                 // 0x1c target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], build_s_swappc_b64(kReturnSreg, kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[7], rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, TranslatesDirectSCallWithSetpcReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x0c.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable gap.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable gap.
+      build_s_call_b64(kReturnSreg, 2),                         // 0x0c -> callee at 0x18.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 call continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x14 unreachable gap.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x18 callee return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1))
+      << "the direct call target must be recomputed after unreachable source gaps are compacted";
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[3], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 4u);
+  ASSERT_EQ(decoded[1]->mnemonic(), "s_call_b64");
+  ASSERT_TRUE(decoded[1]->branch_offset_bytes().has_value());
+  EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4)
+      << "translated call should branch from word 1 to the relocated return block at word 3";
+}
+
+TEST(BinaryTranslatorE2E, TranslatesDirectSCallWhenCalleeBranchesToSetpcReturn) {
+  constexpr uint16_t kReturnSreg = 30;
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(2, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x0c.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable gap.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable gap.
+      build_s_call_b64(kReturnSreg, 2),                         // 0x0c -> callee at 0x18.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 call continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x14 unreachable gap.
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 callee -> return.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x1c unreachable gap.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x20 callee return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1));
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[3], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[4], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, TranslatesSwappcCallWhenCalleeSetpcBranchesToReturn) {
+  constexpr uint16_t kCallTargetSreg = 10;
+  constexpr uint16_t kReturnTargetSreg = 12;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalCallTargetDelta = 28;
+  constexpr uint32_t kOriginalReturnTargetDelta = 20;
+  constexpr uint32_t kRelocatedCallTargetDelta = 20;
+  constexpr uint32_t kRelocatedReturnTargetDelta = 16;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA4),               // 0x00.
+      build_s_add_u32(kCallTargetSreg, kCallTargetSreg, kLiteralOperand),         // 0x04.
+      kOriginalCallTargetDelta,                                                   // 0x08.
+      build_s_addc_u32(kCallTargetSreg + 1, kCallTargetSreg + 1, kInlineInt0),    // 0x0c.
+      build_s_swappc_b64(kReturnSreg, kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x10.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),                     // 0x14 continuation.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                     // 0x18 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),                     // 0x1c unreachable.
+      build_s_getpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA4),         // 0x20 callee.
+      build_s_add_u32(kReturnTargetSreg, kReturnTargetSreg, kLiteralOperand), // 0x24.
+      kOriginalReturnTargetDelta,                                             // 0x28.
+      build_s_addc_u32(kReturnTargetSreg + 1, kReturnTargetSreg + 1, kInlineInt0), // 0x2c.
+      build_s_setpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x30 -> return.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),             // 0x34 unreachable.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4),       // 0x38 return.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[2], kRelocatedCallTargetDelta)
+      << "the swappc call target should relocate to the compact callee body";
+  EXPECT_EQ(target_words[4],
+            build_s_swappc_b64(kReturnSreg, kCallTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[5], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], build_s_getpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[8], kRelocatedReturnTargetDelta)
+      << "the callee's recovered setpc edge is what reaches the return block";
+  EXPECT_EQ(target_words[10], build_s_setpc_b64(kReturnTargetSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[11], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RewritesOneRecoveredBuilderUsedByTwoSetpcConsumers) {
+  constexpr uint16_t kPcSreg = 12;
+  constexpr uint32_t kLiteralOperand = 255;
+  constexpr uint32_t kInlineInt0 = 128;
+  constexpr uint32_t kOriginalGetpcDelta = 28;
+  constexpr uint32_t kRelocatedGetpcDelta = 24;
+  const std::vector<uint32_t> words = {
+      build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00.
+      build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand),      // 0x04.
+      kOriginalGetpcDelta,                                     // 0x08.
+      build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0), // 0x0c.
+      rocjitsu::pack_sopp(5, 1),                               // 0x10 -> second consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x14 first consumer.
+      build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 carried consumer.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),      // 0x1c unreachable gap.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),      // 0x20 shared target.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], build_s_getpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_add_u32(kPcSreg, kPcSreg, kLiteralOperand));
+  EXPECT_EQ(target_words[2], kRelocatedGetpcDelta);
+  EXPECT_EQ(target_words[3], build_s_addc_u32(kPcSreg + 1, kPcSreg + 1, kInlineInt0));
+  EXPECT_EQ(target_words[4], rocjitsu::pack_sopp(5, 1));
+  EXPECT_EQ(target_words[5], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[6], build_s_setpc_b64(kPcSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[7], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+}
+
+TEST(BinaryTranslatorE2E, RelocatesDirectCallReturnAcrossShiftedOffsets) {
+  constexpr uint16_t kReturnSreg = 28;
+  std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(4, ROCJITSU_CODE_ARCH_CDNA4),    // 0x00 -> call block at 0x14.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x04 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x08 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x0c unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x10 unreachable.
+      build_s_call_b64(kReturnSreg, 6),                         // 0x14 -> callee at 0x30.
+      rocjitsu::build_s_branch(6, ROCJITSU_CODE_ARCH_CDNA4),    // 0x18 continuation -> 0x34.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x1c unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x20 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x24 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x28 unreachable.
+      rocjitsu::build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),       // 0x2c unreachable.
+      build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA4), // 0x30 callee return.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),       // 0x34 final continuation.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_EQ(target_words[0], rocjitsu::build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[1], build_s_call_b64(kReturnSreg, 1))
+      << "source call target 0x30 should relocate to compact word 3";
+  EXPECT_EQ(target_words[2], rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA3))
+      << "the call continuation branch should relocate to compact word 4";
+  EXPECT_EQ(target_words[3], build_s_setpc_b64(kReturnSreg, ROCJITSU_CODE_ARCH_CDNA3));
+  EXPECT_EQ(target_words[4], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 5u);
+  ASSERT_TRUE(decoded[1]->branch_offset_bytes().has_value());
+  EXPECT_EQ(*decoded[1]->branch_offset_bytes(), 4);
+}
+
+TEST(BinaryTranslatorE2E, TrapTerminatesCfgBeforeFollowingFunction) {
+  const std::vector<uint32_t> words = {
+      rocjitsu::build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4), // 0x00 -> trap block.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x04 unreachable gap.
+      build_s_trap(2),                                       // 0x08 terminates.
+      build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),       // 0x0c next function body.
+      rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),    // 0x10 unreachable.
+  };
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  ASSERT_FALSE(translated.text_sections().empty());
+
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_GE(decoded.size(), 2u);
+  EXPECT_EQ(decoded[0]->mnemonic(), "s_branch");
+  EXPECT_EQ(decoded[1]->mnemonic(), "s_trap");
+  // The real regression this covers is a bogus CFG fallthrough from S_TRAP into
+  // the following ELF function/padding bytes. If that edge is present, the
+  // unrecovered S_SETPC_B64 below the trap becomes reachable and translation
+  // fails with an indirect-branch diagnostic.
+  EXPECT_TRUE(std::none_of(decoded.begin(), decoded.end(),
+                           [](const auto &inst) { return inst->mnemonic() == "s_setpc_b64"; }));
+}
+
+TEST(BinaryTranslatorE2E, RejectsUnrecoveredIndirectBranchInstructions) {
   struct Case {
     const char *name;
     std::vector<uint32_t> words;
@@ -2404,9 +2905,12 @@ TEST(BinaryTranslatorE2E, RejectsIndirectBranchAndCallInstructions) {
   };
 
   const std::array<Case, 3> cases = {{
-      {"Setpc", {0xBE801D00u, 0x00000000u}, "s_setpc_b64"},
+      {"SetpcS0", {0xBE801D00u, 0x00000000u}, "s_setpc_b64"},
+      {"SetpcS30WithoutCall",
+       {build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA4),
+        rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)},
+       "s_setpc_b64"},
       {"Swappc", {0xBE801E00u, 0x00000000u}, "s_swappc_b64"},
-      {"Call", {0xBA800000u, 0x00000000u}, "s_call_b64"},
   }};
 
   for (const auto &test_case : cases) {

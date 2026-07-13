@@ -12,9 +12,8 @@
 ///   - v_cndmask_b32_vop3: per-lane select from a 64-bit selector read out of
 ///     the SGPR-pair `src2` (instead of fixed VCC); routes through the new
 ///     try_execute_cndmask_vop3_simd glue.
-///   - v_pack_b32_f16_vop3: pack low-16 of src0 and low-16 of src1 into a
-///     b32 dst — pure integer bit-pack, routed through the existing VOP3 int
-///     binary path.
+///   - v_pack_b32_f16_vop3: pack the OPSEL-selected 16-bit halves of src0/src1
+///     into a b32 dst.
 
 #include "util/simd_test_hooks.h"
 
@@ -56,9 +55,12 @@ constexpr void vop3_tern_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint3
 
 // VOP3 binary encoding (cndmask uses ternary; pack uses this). word0 = vdst |
 // op<<16 | 0x34<<26; word1 = src0 | src1<<9.
+constexpr uint16_t low16(uint32_t value) { return static_cast<uint16_t>(value); }
+constexpr uint16_t high16(uint32_t value) { return static_cast<uint16_t>(value >> 16); }
+
 constexpr void vop3_bin_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
-                               uint32_t words[2]) {
-  words[0] = (vdst & 0xFF) | ((op & 0x3FF) << 16) | (0x34u << 26);
+                               uint32_t words[2], uint32_t op_sel = 0) {
+  words[0] = (vdst & 0xFF) | ((op_sel & 0xFu) << 11) | ((op & 0x3FF) << 16) | (0x34u << 26);
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9);
 }
 
@@ -244,6 +246,49 @@ void check_pack_one(uint64_t exec) {
   }
 }
 
+void check_pack_opsel_high_halves(uint64_t exec) {
+  ForceScalarGuard gate_guard;
+  constexpr uint32_t kOpSelSrc0Src1High = 0x3u;
+  constexpr uint32_t kRot = 5;
+
+  auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
+    util::set_force_scalar_for_testing(force_scalar);
+    Fixture fx;
+    EXPECT_NE(fx.cu, nullptr);
+    EXPECT_NE(fx.wf, nullptr);
+    uint32_t words[4] = {0u, 0u, 0u, 0u};
+    vop3_bin_encode(/*op=*/672, /*vdst=*/kDstVgpr, /*src0=*/256, /*src1=*/257, words,
+                    kOpSelSrc0Src1High);
+    Instruction *inst = fx.decoder->decode(words);
+    EXPECT_NE(inst, nullptr) << "v_pack_b32_f16_vop3 decode failed";
+    auto out = fx.run(inst, kRot, exec);
+    delete inst;
+    return out;
+  };
+
+  const auto scalar_out = run_mode(/*force_scalar=*/true);
+  const auto simd_out = run_mode(/*force_scalar=*/false);
+  bool saw_distinguishing_lane = false;
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const bool active = (exec >> lane) & 1ULL;
+    if (!active) {
+      EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "scalar clobbered inactive lane " << lane;
+      EXPECT_EQ(simd_out[lane], DST_SENTINEL) << "simd clobbered inactive lane " << lane;
+      continue;
+    }
+    const uint16_t lo = high16(kSrcA[lane % kSrcA.size()]);
+    const uint16_t hi = high16(kSrcB[(lane + kRot) % kSrcB.size()]);
+    const uint32_t want = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
+    EXPECT_EQ(scalar_out[lane], want) << "scalar lane " << lane;
+    EXPECT_EQ(simd_out[lane], want) << "simd lane " << lane;
+    const uint32_t low_half_result =
+        static_cast<uint32_t>(low16(kSrcA[lane % kSrcA.size()])) |
+        (static_cast<uint32_t>(low16(kSrcB[(lane + kRot) % kSrcB.size()])) << 16);
+    saw_distinguishing_lane |= want != low_half_result;
+  }
+  EXPECT_TRUE(saw_distinguishing_lane) << "test input must distinguish low and high source halves";
+}
+
 TEST(Vop3CndmaskPackSimdCorrectness, Cndmask_FullExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
@@ -276,6 +321,14 @@ TEST(Vop3CndmaskPackSimdCorrectness, Pack_PartialExec) {
     return;
   }
   check_pack_one(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3CndmaskPackSimdCorrectness, Pack_OpSelHighHalves) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  check_pack_opsel_high_halves(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
 } // namespace
