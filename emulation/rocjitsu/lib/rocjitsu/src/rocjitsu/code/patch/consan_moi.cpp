@@ -2350,6 +2350,34 @@ resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate
   return &result.resource_plans[index];
 }
 
+[[nodiscard]] uint32_t moi_resource_preference(const ConSanResult &result,
+                                               const ConSanMoiCandidate &candidate) {
+  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+  if (plan == nullptr)
+    return 4u;
+  switch (plan->source) {
+  case ConSanRegisterAllocationSource::Explicit:
+  case ConSanRegisterAllocationSource::LivenessDead:
+    return 0u;
+  case ConSanRegisterAllocationSource::DescriptorGrowth:
+    return 1u;
+  case ConSanRegisterAllocationSource::SpillRequired:
+    return 2u;
+  case ConSanRegisterAllocationSource::Unsupported:
+    return 3u;
+  }
+  return 4u;
+}
+
+void prefer_spill_free_scalar_candidates(std::vector<const ConSanMoiCandidate *> &candidates,
+                                         const ConSanResult &result, const ConSanOptions &options) {
+  if (!options.automatic_moi_scalar_identity)
+    return;
+  std::stable_sort(candidates.begin(), candidates.end(), [&](const auto *lhs, const auto *rhs) {
+    return moi_resource_preference(result, *lhs) < moi_resource_preference(result, *rhs);
+  });
+}
+
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_site(const ConSanResult &result, ConSanResourceSiteKind site_kind,
                        uint64_t text_offset) {
@@ -2687,8 +2715,23 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     options.moi_init_owner_epoch = true;
     uint32_t scalar_base = 0;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      if (!plan.owner_descriptor_file_offsets.empty())
+      if (!plan.owner_descriptor_file_offsets.empty()) {
         scalar_base = std::max<uint32_t>(scalar_base, plan.max_referenced_sgpr_count + 2u);
+        // Persistent state lives for the whole kernel, not merely around the
+        // selected patch site. Keep it above every owner's original scalar
+        // allocation instead of trusting instruction-level reference scans
+        // to prove that descriptor padding is globally dead. In particular,
+        // CDNA4 instructions that are only partially decoded must not make an
+        // apparently unused in-allocation SGPR window look safe.
+        for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+          if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset)
+            continue;
+          KD descriptor{};
+          std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+          scalar_base = std::max<uint32_t>(scalar_base,
+                                           moi_descriptor_sgpr_allocation_count(descriptor, arch));
+        }
+      }
     }
     constexpr uint16_t kScalarIdentityCount = 5u;
     while (scalar_base + kScalarIdentityCount <= moi_max_ordinary_sgprs(arch)) {
@@ -4835,11 +4878,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  uint32_t sampled_filter_candidate_count = 0;
+  std::vector<const ConSanMoiCandidate *> sampled_candidates;
+  sampled_candidates.reserve(candidates.size());
   for (uint32_t i = 0; i < candidates.size(); ++i) {
     if (i % options.moi_sample_stride == options.moi_sample_offset)
-      ++sampled_filter_candidate_count;
+      sampled_candidates.push_back(candidates[i]);
   }
+  prefer_spill_free_scalar_candidates(sampled_candidates, result, options);
+
+  const uint32_t sampled_filter_candidate_count = static_cast<uint32_t>(sampled_candidates.size());
 
   struct PlannedSampledPatch {
     const ConSanMoiCandidate *candidate = nullptr;
@@ -4855,13 +4902,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   const uint64_t original_text_size =
       code_object.text_sections().size() == 1 ? code_object.text_sections().front()->size() : 0;
   DbiPatchPlacementPlanner placement_planner(arch, original_text_size);
-  uint32_t sampled_candidate_index = 0;
   MoiSpillManagers spill_managers;
-  for (const ConSanMoiCandidate *candidate_ptr : candidates) {
-    const uint32_t current_sample_index = sampled_candidate_index++;
-    if (current_sample_index % options.moi_sample_stride != options.moi_sample_offset)
-      continue;
-
+  for (const ConSanMoiCandidate *candidate_ptr : sampled_candidates) {
     const ConSanMoiCandidate &candidate = *candidate_ptr;
     const auto resources =
         resolve_moi_scratch(result, candidate, options, options.moi_sampled_check ? 7u : 5u);
@@ -5230,6 +5272,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                  "flat load/store candidate");
     return;
   }
+  prefer_spill_free_scalar_candidates(candidates, result, options);
 
   struct PlannedAccessRecordPatch {
     const ConSanMoiCandidate *candidate = nullptr;

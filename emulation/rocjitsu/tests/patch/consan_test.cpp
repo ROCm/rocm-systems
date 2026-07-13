@@ -5231,6 +5231,10 @@ TEST(ConSanMoi, Gfx950AccumOverlapUsesScalarStateForRecordReplayAndSampled) {
 
     EXPECT_TRUE(result.resolved_moi_state_owner_sgpr);
     EXPECT_TRUE(result.resolved_moi_state_epoch_sgpr);
+    ASSERT_FALSE(result.resource_plans.empty());
+    EXPECT_GE(*result.resolved_moi_state_owner_sgpr,
+              result.resource_plans.front().current_sgpr_count)
+        << "persistent scalar state must grow above the guest SGPR allocation";
   }
 }
 
