@@ -139,8 +139,7 @@ bool glValidateInterop(Device* device, uint flags, void* GLplatformContext,
                        void* GLdeviceContext) {
   static_cast<void>(flags); // unused
 
-  // Compatibility probe only: resolve the AMD interop extensions and check the
-  // adapter match, but do not call wglBeginCLInteropAMD (no session started).
+  // Probe: adapter match only, no wglBeginCLInteropAMD (no session started).
   if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
   return glCanInterop(device, GLplatformContext, GLdeviceContext);

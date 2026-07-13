@@ -1910,8 +1910,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   bool success = true;
 
 #ifdef _WIN32
-  // Handle D3D10 device binding. In validateOnly mode the query path only needs
-  // the LUID compatibility check, so the DXX extension caching is skipped.
+  // Handle D3D10 device binding
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
     void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
     if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device),
@@ -1936,8 +1935,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   }
 #endif  // _WIN32
 
-  // Handle GL device binding. Query paths pass validateOnly to probe interop
-  // compatibility without starting a GL interop session.
+  // Handle GL device binding (existing code)
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
     const bool bound = validateOnly

@@ -122,8 +122,7 @@ bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_I
 
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
-// Validate GL interop compatibility only, without starting a GL interop session
-// (no wglBeginCLInteropAMD side effect). Used by device-enumeration queries.
+// Check GL interop compatibility without starting a session (no wglBeginCLInteropAMD).
 bool glValidateInterop(Device* device, uint flags, void* GLplatformContext,
                        void* GLdeviceContext);
 bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle,

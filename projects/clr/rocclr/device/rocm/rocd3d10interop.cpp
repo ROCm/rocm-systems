@@ -83,8 +83,7 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
     return false;
   }
 
-  // Query paths only need the compatibility result; skip creating and caching
-  // the DXX extension objects (a real context bind will populate the cache).
+  // Probe: compatibility only, skip DXX ext caching (a real bind populates it).
   if (validateOnly) {
     return true;
   }

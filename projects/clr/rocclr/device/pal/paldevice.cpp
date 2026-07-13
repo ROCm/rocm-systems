@@ -1923,9 +1923,7 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
     if (validateOnly) {
-      // Query paths (e.g. clGetGLContextInfoKHR) only need a compatibility
-      // probe. Load the AMD interop extensions and check adapter match without
-      // starting a GL interop session (no wglBeginCLInteropAMD side effect).
+      // Probe: check compatibility without starting a GL interop session.
       if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
         return false;
       }
