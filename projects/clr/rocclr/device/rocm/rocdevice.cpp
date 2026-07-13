@@ -54,6 +54,8 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -2784,8 +2786,57 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle, amd::Memory::Handl
 }
 
 // ================================================================================================
+namespace {
+// KFD can't tell an explicit SetAccessedBy(CPU) apart from managed memory's
+// default host access, so track the CPU advice ourselves (per page).
+constexpr size_t kSvmPageSize = 4096;
+std::mutex g_cpuAccessedByLock;
+std::set<uintptr_t> g_cpuAccessedByPages;
+
+inline uintptr_t SvmPageBase(const void* ptr) {
+  return reinterpret_cast<uintptr_t>(ptr) & ~(kSvmPageSize - 1);
+}
+inline uintptr_t SvmPageEnd(const void* ptr, size_t count) {
+  return (reinterpret_cast<uintptr_t>(ptr) + count + kSvmPageSize - 1) & ~(kSvmPageSize - 1);
+}
+
+void UpdateCpuAccessedBy(const void* ptr, size_t count, bool set) {
+  const uintptr_t base = SvmPageBase(ptr);
+  const uintptr_t end = SvmPageEnd(ptr, count);
+  std::lock_guard<std::mutex> lock(g_cpuAccessedByLock);
+  for (uintptr_t p = base; p < end; p += kSvmPageSize) {
+    if (set) {
+      g_cpuAccessedByPages.insert(p);
+    } else {
+      g_cpuAccessedByPages.erase(p);
+    }
+  }
+}
+
+// True only if the whole range has the CPU advice (mixed ranges report nothing,
+// like KFD does for GPUs).
+bool QueryCpuAccessedByUniform(const void* ptr, size_t count) {
+  const uintptr_t base = SvmPageBase(ptr);
+  const uintptr_t end = SvmPageEnd(ptr, count);
+  if (end <= base) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_cpuAccessedByLock);
+  for (uintptr_t p = base; p < end; p += kSvmPageSize) {
+    if (g_cpuAccessedByPages.find(p) == g_cpuAccessedByPages.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
 bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
                                  bool first_alloc, bool use_cpu, int numa_id) const {
+  // Fresh allocation: drop any stale CPU advice from a reused address.
+  if (first_alloc) {
+    UpdateCpuAccessedBy(dev_ptr, count, false);
+  }
   if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
@@ -2821,6 +2872,10 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
         const uint64_t attrib = (first_alloc) ? HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE
                                               : HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE;
         if (use_cpu) {
+          // first_alloc is default access, not an explicit advice.
+          if (!first_alloc) {
+            UpdateCpuAccessedBy(dev_ptr, count, true);
+          }
           attr.push_back({attrib, getCpuAgent().handle});
         } else {
           if (first_alloc) {
@@ -2840,6 +2895,9 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
         break;
       }
       case amd::MemoryAdvice::UnsetAccessedBy:
+        if (use_cpu) {
+          UpdateCpuAccessedBy(dev_ptr, count, false);
+        }
         // When unsetting we should use HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE for the agent
         attr.push_back({HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE, getBackendDevice().handle});
         break;
@@ -3046,6 +3104,11 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
             }
           }
           rocr_attr += accessed_by;
+          // Add the CPU from our own tracking (KFD doesn't report it).
+          if (QueryCpuAccessedByUniform(dev_ptr, count) && entry < device_count) {
+            reinterpret_cast<int32_t*>(data[idx])[entry] = static_cast<int32_t>(amd::CpuDeviceId);
+            ++entry;
+          }
           for (uint32_t i = entry; i < device_count; ++i) {
             reinterpret_cast<int32_t*>(data[idx])[i] = static_cast<int32_t>(amd::InvalidDeviceId);
           }
