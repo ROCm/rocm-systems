@@ -453,10 +453,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
       send_fd = static_cast<int>(dbg->enable.dbg_fd);
   }
   if (send_fd >= 0) {
-    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0)
-      return -1;
+    if (rpc_send_msg(sock_, buf.data(), buf.size(), &send_fd, 1) <= 0) {
+      // Preserve the transport errno — e.g. EBADF when the client handed us a
+      // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
+      // interposer would surface as EPERM (-EPERM == -1).
+      int err = errno;
+      return err > 0 ? -err : -1;
+    }
   } else if (!rpc_send_exact(sock_, buf.data(), buf.size())) {
-    return -1;
+    int err = errno;
+    return err > 0 ? -err : -1;
   }
 
   // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.

@@ -1095,4 +1095,33 @@ TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) 
   server.join();
 }
 
+// A closed but positive notifier fd cannot be transferred over SCM_RIGHTS:
+// sendmsg() rejects it with EBADF at the client. send_ioctl() must surface that
+// errno so the interposer reports EBADF, not the EPERM a bare -1 becomes
+// (-EPERM == -1).
+TEST(RemoteDriverDbgNotifierTest, EnableWithClosedNotifierFdPreservesEbadf) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  // A positive fd number that is already closed: a valid-looking dbg_fd the
+  // SCM_RIGHTS send must reject. Allocated after the driver so its fd number is
+  // not reused by the driver's internal eventfd before the send.
+  int dead_fd = ::eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(dead_fd, 0);
+  ASSERT_EQ(::close(dead_fd), 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = 4242;
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(dead_fd);
+
+  // The transport rejects the closed fd; the caller must see EBADF, not the bare
+  // -1 that would surface as EPERM.
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &en), -EBADF);
+
+  ::close(sv[1]);
+}
+
 } // namespace
