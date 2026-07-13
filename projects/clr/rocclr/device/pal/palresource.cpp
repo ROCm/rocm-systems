@@ -6,6 +6,7 @@
 
 #include "platform/program.hpp"
 #include "platform/kernel.hpp"
+#include "platform/context.hpp"
 #include "os/os.hpp"
 #include "device/device.hpp"
 #include "utils/flags.hpp"
@@ -1156,7 +1157,16 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
       createInfo.pReservedGpuVaOwner = nullptr;
     }
     createInfo.flags.interprocess = desc_.interprocess_;
-    if (!dev().settings().svmFineGrainSystem_) {
+    // Multi-GPU fine-grain SVM requires the exact same canonical virtual address
+    // on every device that shares the allocation. The per-device buddy
+    // suballocator picks an intra-chunk sub-offset independently on each device,
+    // so the resulting VA diverges across devices and can silently alias a live
+    // allocation in the global MemObjMap. For cross-device SVM, bypass
+    // suballocation and give the buffer its own dedicated reserved-VA chunk at
+    // offset 0, so chunkBase == canonical VA stays identical on all devices.
+    const bool multiDeviceSvm = (params != nullptr) && (params->owner_ != nullptr) &&
+                                (params->owner_->getContext().svmDevices().size() > 1);
+    if (!dev().settings().svmFineGrainSystem_ && !multiDeviceSvm) {
       memRef_ = dev().resourceCache().findGpuMemory(&desc_, createInfo.size, createInfo.alignment,
                                                     createInfo.pReservedGpuVaOwner, &subOffset_);
     }
