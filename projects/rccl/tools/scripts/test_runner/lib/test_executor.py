@@ -1357,9 +1357,34 @@ class TestExecutor:
             os.close(fd)
             cmd += f" --gtest_output=json:{shlex.quote(gtest_json_path)}"
 
+        # RDMA connection setup (ibv_create_qp / ibv_create_cq) pins memory and
+        # fails with "Cannot allocate memory" when the locked-memory soft rlimit
+        # is too low. Under SLURM the soft limit is inherited from the submit
+        # host (often a couple of GB), while compute nodes allow an unlimited
+        # hard limit. Launch each MPI rank through a shell that raises the soft
+        # limit to the hard maximum first. `set -f` keeps gtest filter globs
+        # (e.g. "*Foo*") literal; harmless where the limit is already unlimited.
+        if num_ranks > 1:
+            mpi_prefix = f"{mpi_cmd} {mpi_args} "
+            if cmd.startswith(mpi_prefix):
+                program = cmd[len(mpi_prefix):]
+                inner = f"ulimit -l unlimited 2>/dev/null; set -f; exec {program}"
+                cmd = f"{mpi_prefix}bash -c {shlex.quote(inner)}"
+
+        # Working directory: gtest binaries live in <build_dir>/test, but a
+        # prebuilt/custom lib dir (RCCL_BUILD_DIR / test_binary_dir) may have no
+        # "test" subdir. cwd only needs to exist (perf binaries are invoked by
+        # absolute path), so fall back gracefully to keep prebuilt runs working.
+        run_cwd = os.path.join(self.build_dir, "test")
+        if not os.path.isdir(run_cwd):
+            if os.path.isdir(self.build_dir):
+                run_cwd = self.build_dir
+            else:
+                run_cwd = os.path.dirname(test_binary_path) or os.getcwd()
+
         if self.args.verbose:
             print(f"\n  Command: {cmd}")
-            print(f"  Working directory: {os.path.join(self.build_dir, 'test')}")
+            print(f"  Working directory: {run_cwd}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
@@ -1384,7 +1409,7 @@ class TestExecutor:
             wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
             proc = subprocess.Popen(
                 ["bash", "-c", wrapped],
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
@@ -1392,7 +1417,7 @@ class TestExecutor:
             proc = subprocess.Popen(
                 cmd,
                 shell=True,
-                cwd=os.path.join(self.build_dir, "test"),
+                cwd=run_cwd,
                 env=env,
                 start_new_session=True,
             )
