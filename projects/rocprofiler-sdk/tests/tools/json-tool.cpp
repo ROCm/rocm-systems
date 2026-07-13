@@ -267,6 +267,23 @@ save_args(rocprofiler_callback_tracing_kind_t domain_idx,
                  arg_dereference_count);
 }
 
+// Argument iterator for buffer tracing records (e.g. the *_EXT records that embed their
+// call arguments), mirroring save_args but with the buffer-record callback signature.
+int
+save_buffer_args(rocprofiler_buffer_tracing_kind_t /*kind*/,
+                 rocprofiler_tracing_operation_t /*operation*/,
+                 uint32_t /*arg_number*/,
+                 const void* const /*arg_value_addr*/,
+                 int32_t /*arg_indirection_count*/,
+                 const char* /*arg_type*/,
+                 const char* arg_name,
+                 const char* arg_value_str,
+                 void*       data)
+{
+    static_cast<callback_arg_array_t*>(data)->emplace_back(arg_name, arg_value_str);
+    return 0;
+}
+
 struct code_object_callback_record_t
 {
     uint64_t                                             timestamp = 0;
@@ -3206,14 +3223,14 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             if(enable_debug_annotations)
             {
-                auto ritr = std::find_if(rocshmem_api_cb_records.begin(),
-                                         rocshmem_api_cb_records.end(),
-                                         [&itr](const auto& citr) {
-                                             return (citr.record.correlation_id.internal ==
-                                                         itr.correlation_id.internal &&
-                                                     !citr.args.empty());
-                                         });
-                if(ritr != rocshmem_api_cb_records.end()) _args = ritr->args;
+                // The ext buffer record embeds the call arguments, so read them directly from
+                // the record instead of correlating against the callback records.
+                auto _record = rocprofiler_record_header_t{};
+                _record.hash = rocprofiler_record_header_compute_hash(
+                    ROCPROFILER_BUFFER_CATEGORY_TRACING, itr.kind);
+                _record.payload =
+                    const_cast<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t*>(&itr);
+                rocprofiler_iterate_buffer_tracing_record_args(_record, save_buffer_args, &_args);
             }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocshmem_api>::name,
