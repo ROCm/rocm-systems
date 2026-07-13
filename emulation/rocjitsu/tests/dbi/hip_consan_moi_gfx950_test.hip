@@ -362,6 +362,69 @@ __global__ __launch_bounds__(64) void gfx950_moi_same_wave_program_order(uint32_
   }
 }
 
+__global__ __launch_bounds__(64) void gfx950_moi_same_wave_v0_clobber(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (tid == 0u) {
+    const uint32_t first = 0x950b0000u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(first)
+                 : "memory");
+    // The entry prologue must have snapshotted the logical Wave64 owner. An
+    // access probe that re-derives it from mutable guest v0 observes owner two
+    // here and falsely conflicts with the first access from owner zero.
+    asm volatile("v_mov_b32 v0, 0x80\n\t" : : : "v0");
+    const uint32_t second = 0x950b0001u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(second)
+                 : "memory");
+    out[0] = second;
+  }
+}
+
+__global__ __launch_bounds__(64) void gfx950_moi_inline_multidim_same_wave(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t local =
+      static_cast<uint32_t>(threadIdx.x) +
+      static_cast<uint32_t>(blockDim.x) *
+          (static_cast<uint32_t>(threadIdx.y) +
+           static_cast<uint32_t>(blockDim.y) * static_cast<uint32_t>(threadIdx.z));
+  const uint32_t second_local = blockDim.z == 1u ? static_cast<uint32_t>(blockDim.x)
+                                                 : static_cast<uint32_t>(blockDim.x * blockDim.y);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (local == 0u) {
+    const uint32_t first = 0x950c0000u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(first)
+                 : "memory");
+  }
+  if (local == second_local) {
+    const uint32_t second = 0x950c0001u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(second)
+                 : "memory");
+  }
+  if (local == 0u)
+    out[0] = 0x950c0002u;
+}
+
 __global__ __launch_bounds__(128) void gfx950_moi_static_sampled_selection(uint32_t *out) {
   __shared__ uint32_t lds[2];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -788,6 +851,45 @@ TEST(ConSanMoiGfx950Test, SameWaveProgramOrderCompletes) {
   HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_out));
   EXPECT_EQ(out, 0x95070001u);
+}
+
+TEST(ConSanMoiGfx950Test, SameWaveV0ClobberCompletes) {
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, sizeof(uint32_t)));
+  gfx950_moi_same_wave_v0_clobber<<<1, 64>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out, 0x950b0001u);
+}
+
+TEST(ConSanMoiGfx950Test, InlinePrivateTwoDimensionalIdentityIsClean) {
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, sizeof(uint32_t)));
+  gfx950_moi_inline_multidim_same_wave<<<1, dim3(8, 8, 1)>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out, 0x950c0002u);
+}
+
+TEST(ConSanMoiGfx950Test, InlinePrivateThreeDimensionalIdentityIsClean) {
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, sizeof(uint32_t)));
+  gfx950_moi_inline_multidim_same_wave<<<1, dim3(4, 4, 4)>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out, 0x950c0002u);
 }
 
 TEST(ConSanMoiGfx950Test, StaticSampledSelectionCompletes) {

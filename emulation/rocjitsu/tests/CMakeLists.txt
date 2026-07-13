@@ -2681,6 +2681,54 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.SameWaveV0ClobberCompletes"
+            NAME "ConSanMoiGfx950Test.InlinePrivateSameWaveV0ClobberIsClean"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_same_wave_v0_clobber"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlinePrivateSameWaveV0ClobberIsClean"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        foreach(_dim IN ITEMS Two Three)
+            rj_add_hip_test_case(
+                hip_consan_moi_gfx950_test
+                "ConSanMoiGfx950Test.InlinePrivate${_dim}DimensionalIdentityIsClean"
+                NAME "ConSanMoiGfx950Test.InlinePrivate${_dim}DimensionalIdentityIsClean"
+                TIMEOUT 30
+                ENVIRONMENT
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                    "RJ_CONSAN_FLAVOR=moi"
+                    "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                    "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                    "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_inline_multidim_same_wave"
+                    "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                    "RJ_CONSAN_LOG=1"
+                    "RJ_CONSAN_MAX_PATCHES=2"
+                    "RJ_CONSAN_REQUIRE_PATCH=1"
+            )
+            set_tests_properties(
+                "ConSanMoiGfx950Test.InlinePrivate${_dim}DimensionalIdentityIsClean"
+                PROPERTIES
+                    PASS_REGULAR_EXPRESSION
+                        "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+            )
+        endforeach()
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.BarrierOrderedTwoWaveCompletes"
             NAME "ConSanMoiGfx950Test.RecordReplayKeepsBarrierOrderedTwoWaveClean"
             TIMEOUT 30
@@ -2816,6 +2864,54 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         set_tests_properties(
             "ConSanMoiGfx950Test.InlineAtomicHandoffWrongAddressReports"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.AtomicHandoffSameAddressCompletes"
+            NAME "ConSanMoiGfx950Test.InlinePrivateAtomicHandoffSameAddressIsClean"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_atomic_handoff"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlinePrivateAtomicHandoffSameAddressIsClean"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.AtomicHandoffWrongAddressCompletes"
+            NAME "ConSanMoiGfx950Test.InlinePrivateAtomicHandoffWrongAddressReports"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_atomic_handoff"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlinePrivateAtomicHandoffWrongAddressReports"
             PROPERTIES
                 PASS_REGULAR_EXPRESSION
                     "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"
