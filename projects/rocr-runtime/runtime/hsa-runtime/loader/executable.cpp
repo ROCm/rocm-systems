@@ -56,6 +56,7 @@
 #include <iostream>
 #include <atomic>
 #include <fstream>
+#include <map>
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
 #include "core/inc/amd_aie_code.hpp"
