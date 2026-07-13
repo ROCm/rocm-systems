@@ -523,6 +523,30 @@ TEST(InstructionBuilder, BuildSCbranchVccz) {
   EXPECT_EQ(*backwards, 0xBFA3FFFFu);
 }
 
+TEST(InstructionBuilder, BuildCdna4BarrierKeepsMemoryWaitSeparate) {
+  const auto barrier = build_s_barrier(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier);
+  EXPECT_EQ(*barrier, 0xBF8A0000u);
+
+  const auto sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(sequence);
+  EXPECT_EQ((*sequence)[0], 0xBF8C0070u);
+  EXPECT_EQ((*sequence)[1], *barrier);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> wait_inst(decoder->decode(&(*sequence)[0]));
+  std::unique_ptr<Instruction> barrier_inst(decoder->decode(&(*sequence)[1]));
+  ASSERT_NE(wait_inst, nullptr);
+  ASSERT_NE(barrier_inst, nullptr);
+  EXPECT_EQ(std::string_view(wait_inst->mnemonic()), "s_waitcnt");
+  EXPECT_TRUE(wait_inst->is_waitcnt());
+  EXPECT_EQ(std::string_view(barrier_inst->mnemonic()), "s_barrier");
+  EXPECT_TRUE(barrier_inst->is_barrier());
+  EXPECT_FALSE(build_s_barrier(ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 TEST(InstructionBuilder, BuildFlatStoreB32) {
   const auto words =
       build_flat_store_b32_vaddr_vsrc(/*vaddr=*/8, /*vsrc=*/10, ROCJITSU_CODE_ARCH_RDNA4);

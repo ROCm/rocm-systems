@@ -825,6 +825,20 @@ build_s_wait_flat_load0(rj_code_arch_t arch) {
   return std::nullopt;
 }
 
+/// @brief Encode the conservative CDNA4 memory-wait and workgroup-barrier pair.
+///
+/// `s_barrier` does not drain memory counters. A probe that introduces memory
+/// traffic before re-emitting the barrier must separately drain both counters
+/// used by general FLAT operations before executing the barrier.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna4_s_barrier_with_memory_wait(rj_code_arch_t arch) {
+  const auto wait = build_s_wait_flat_load0(arch);
+  const auto barrier = build_s_barrier(arch);
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || !wait || !barrier)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{*wait, *barrier};
+}
+
 /// @brief Encode gfx12 `s_wait_storecnt 0`.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_storecnt0(rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4)

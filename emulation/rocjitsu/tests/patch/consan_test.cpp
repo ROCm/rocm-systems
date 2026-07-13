@@ -2708,6 +2708,32 @@ TEST(ConSanMoi, Gfx950BasicFixtureInventoriesNativeInstructionFamilies) {
   EXPECT_EQ(kernel.atomic_sites.size(), 1u);
 }
 
+TEST(ConSanMoi, Gfx950BarrierFixtureSeparatesWaitAndBarrierInventory) {
+  const auto barrier_sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier_sequence);
+  const std::array<uint32_t, 3> text_words = {
+      (*barrier_sequence)[0],
+      (*barrier_sequence)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_barrier_contract", /*vgpr_granulated=*/0, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.wait_count, 1u);
+  EXPECT_EQ(kernel.stats.barrier_count, 1u);
+  ASSERT_EQ(kernel.barrier_sites.size(), 1u);
+  EXPECT_EQ(kernel.barrier_sites.front().mnemonic, "s_barrier");
+  EXPECT_EQ(kernel.barrier_sites.front().text_offset, sizeof(uint32_t));
+}
+
 TEST(ConSanMoi, Gfx950ExtendedLdsFormsNormalizeRegistersAndScaledRanges) {
   struct Expected {
     const char *mnemonic;

@@ -29,7 +29,7 @@ standalone CDNA4 scratch tests use the same TheRock distribution under
 | `consan.cpp`: descriptor VGPR helpers | wave size and VGPR allocation granularity | target; CDNA4 is wave64 with groups of 8 | R1A |
 | `consan.cpp`: `record_flat_site` | RDNA4 `VflatMachineInst` raw fields | CDNA4 FLAT layout or typed exclusion | FL1A/FL1B/FL1X |
 | `consan.cpp`: `record_atomic_site` and raw fillers | RDNA4 DS/FLAT/GLOBAL/BUFFER layouts and TH/SCOPE | DS sites now retain CDNA4 raw fields and typed non-access dispositions; atomic emission remains per admitted family | D1C done; AT1A |
-| `consan.cpp`: trap, VCC branch, DS wait, compare helpers | gfx12 SOPP/VOP encodings and counters | CDNA4 scalar/vector/wait builders | P1A/P1B/W1 |
+| `consan.cpp`: trap, VCC branch, DS wait, compare, barrier helpers | gfx12 SOPP/VOP encodings and counters | CDNA4 scalar/vector/wait builders plus distinct VM/LGKM-zero pre-barrier wait and `s_barrier` | P1A/P1B/W1/B1A done |
 | `consan.cpp`: DS store-to-load conversion | RDNA4 VDS opcode/layout | CDNA4 DS form-specific conversion | D1A/D1B/SC1 |
 | `consan.cpp`: LDS check/trap backend | blanket RDNA4 gate | target capability after CDNA4 DS primitives | SC1 |
 | `consan.cpp`: report-buffer mismatch action | RDNA4 FLAT stores | CDNA4 publication backend | P1C |

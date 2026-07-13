@@ -191,6 +191,12 @@ Full gfx950 support means:
   control performs two same-cell writes in one wave and requires two processed
   records with zero diagnostics, proving same-owner program order remains
   clean. Both guarded CTests require two patches and visible records.
+- 2026-07-13: `B1A` is `DONE`. LLVM confirms gfx950 admits the no-operand
+  `s_barrier` form and rejects gfx12-style signal/wait forms. Exact builder and
+  decoder tests keep `s_waitcnt vmcnt(0) lgkmcnt(0)` as a distinct conservative
+  precondition before `s_barrier`; an inventory fixture counts one wait and one
+  barrier at separate offsets, preventing the false assumption that the
+  barrier drains memory counters.
 
 ## DAG Overview
 
@@ -315,7 +321,7 @@ flowchart LR
   I1B["I1B: Stable Wave64 Owner"]:::done
   I1C["I1C: Optional HW_ID Experiment"]:::done
   W1["W1: Non-Scratch Wait Semantics"]:::done
-  B1A["B1A: Barrier Decode And Emission"]:::todo
+  B1A["B1A: Barrier Decode And Emission"]:::done
   B1B["B1B: Engine Barrier Semantics"]:::todo
   SC1["SC1: SuperCollider Native LDS"]:::todo
   RR1A["RR1A: Access Record Emission"]:::done
@@ -1068,7 +1074,7 @@ Done criteria:
 - Focused producer/consumer smokes prove each admitted non-scratch wait
   sequence.
 
-### B1A: CDNA4 Barrier Decode And Emission - TODO
+### B1A: CDNA4 Barrier Decode And Emission - DONE
 
 Goal: decode and re-emit supported gfx950 barriers independently of engine
 semantics.
@@ -1078,6 +1084,14 @@ Work:
 - Inventory compiler-emitted barrier forms and operands.
 - Prove exact `S_BARRIER` emission and the required pre-barrier memory wait;
   the barrier itself does not drain counters.
+
+Result:
+
+- The exact gfx950 barrier word round-trips as `s_barrier`; unsupported target
+  requests fail closed.
+- A separate two-word helper and decode fixture prove the conservative
+  VM/LGKM-zero wait precedes the barrier and remains a separately classified
+  instruction.
 
 Done criteria:
 
