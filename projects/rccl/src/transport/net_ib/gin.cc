@@ -33,6 +33,7 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
                                 ncclIbGdrSupport() == ncclSuccess;
   if (peerMemSupport) return ncclSuccess;
 
+#if !defined(__HIP_PLATFORM_AMD__)
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
   int dmaBufSupportOnDevice = 1;
@@ -41,6 +42,12 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 
   WARN("Unable to use GIN: Peermem is not supported, and device %d does not support DMA-BUF.", cudaDev);
   return ncclInvalidUsage;
+#else
+  if (ncclIbDmaBufSupport(0) == ncclSuccess) return ncclSuccess;
+
+  WARN("Unable to use GIN: Peermem is not supported, nor DMA-BUF.");
+  return ncclInvalidUsage;
+#endif
 }
 
 NCCL_PARAM(GinType, "GIN_TYPE", -1);
