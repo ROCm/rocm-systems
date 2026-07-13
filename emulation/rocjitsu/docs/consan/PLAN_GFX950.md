@@ -423,6 +423,14 @@ Full gfx950 support means:
   while at least one residual data-tiled object now fails during replacement
   executable creation after patching begins. `T4SC` therefore remains
   `ACTIVE`; loader failures are not accepted as mismatch diagnostics.
+- 2026-07-13: the focused filter is 241/241 after bounding all MOI temporary
+  windows below nonzero CDNA4 `ACCUM_OFFSET` and containing one unsupported
+  decoder opcode synthetically. Five new private-inline live controls pass for
+  physical `v0` clobber, 2D/3D wave identity, and atomic same/wrong-address
+  handoff. Live qualification remains open: RR #1853 still faults when the
+  private entry prologue is present (and passes with explicit identity and no
+  prologue), while SC #1836 still leaks through a second patch-time failure.
+  Both reductions are active in parallel.
 
 ## DAG Overview
 
@@ -684,10 +692,16 @@ flowchart LR
   T3SC --> T3G
   T3RR --> T3G
   T3SA --> T3G
-  T3IS --> T3IO --> T3IR --> T3IA --> T3IL --> T3G
+  T3IS --> T3IO
+  T3IO --> T3IR
+  T3IO --> T3IA
+  T3IR --> T3IL
+  T3IA --> T3IL --> T3G
   T3SC --> T4SV --> T4SC
   T3RR --> T4RR
   T3SA --> T4SA
+  T3IR --> T4RR
+  T3IR --> T4SA
   T3IL --> T4IS
   T4SC --> T4G
   T4RR --> T4G
