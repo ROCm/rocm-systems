@@ -1099,26 +1099,30 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.wgp_mode = arch_supports_wgp_mode(arch) &&
                 AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE) != 0;
 
-  uint64_t lds_capacity = 0;
+  uint64_t addressable_lds_limit = 0;
+  for (const auto *cu : cus_)
+    addressable_lds_limit = std::max<uint64_t>(
+        addressable_lds_limit, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
+
+  uint64_t placement_lds_capacity = addressable_lds_limit;
   if (dp.wgp_mode) {
+    placement_lds_capacity = 0;
     for (const auto *spi : spis_)
-      lds_capacity = std::max<uint64_t>(lds_capacity, spi->max_wgp_lds_bytes());
-  } else {
-    for (const auto *cu : cus_)
-      lds_capacity =
-          std::max<uint64_t>(lds_capacity, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
+      placement_lds_capacity = std::max<uint64_t>(placement_lds_capacity, spi->max_wgp_lds_bytes());
   }
   const uint64_t aligned_lds =
       (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
-  if (dp.wgp_mode && lds_capacity == 0) {
+  if (dp.wgp_mode && placement_lds_capacity == 0) {
     throw std::runtime_error(
         "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured");
   }
-  if (aligned_lds > lds_capacity) {
+  if (aligned_lds > addressable_lds_limit) {
     throw std::runtime_error(std::format(
         "kernel dispatch requests {} bytes of LDS ({} bytes after alignment) in {} mode, but "
-        "the simulator topology provides at most {} bytes",
-        dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", lds_capacity));
+        "the per-workgroup addressable LDS limit is {} bytes ({} bytes aggregate for "
+        "placement)",
+        dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", addressable_lds_limit,
+        placement_lds_capacity));
   }
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.

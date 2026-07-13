@@ -76,7 +76,8 @@ struct DispatchEntry {
   uint32_t private_segment_fixed_size = 0;
   uint32_t group_segment_fixed_size = 0;
   /// GFX10+ COMPUTE_PGM_RSRC1.WGP_MODE. When set, the workgroup is placed on
-  /// a sibling-CU pair and sees the pair's combined LDS capacity.
+  /// a sibling-CU pair and draws from the pair's aggregate LDS pool. A single
+  /// workgroup remains limited to one CU's addressable LDS size.
   bool wgp_mode = false;
 
   uint32_t total_wgs = 0;

@@ -514,13 +514,13 @@ TEST(RdnaDispatchTest, PackedTidInitializesV0WithWorkitemTuple) {
   }
 }
 
-TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
+TEST(RdnaDispatchTest, WgpModeUsesCombinedLdsPoolForPlacement) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
   constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
   const uint32_t code[] = {SOPP_S_ENDPGM};
 
   VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, kWgpLdsBytes,
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, kPerCuLdsBytes,
                                /*wgp_mode=*/true);
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
@@ -541,8 +541,6 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   }
   ASSERT_NE(wf, nullptr);
   EXPECT_EQ(wf->lds().size_bytes(), kWgpLdsBytes);
-  wf->lds().write32(kPerCuLdsBytes + 4, 0xC001D00Du);
-  EXPECT_EQ(wf->lds().read32(kPerCuLdsBytes + 4), 0xC001D00Du);
 }
 
 TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
@@ -560,14 +558,17 @@ TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
     EXPECT_NE(std::string(error.what())
                   .find("requests 65537 bytes of LDS (65792 bytes after alignment) in CU mode"),
               std::string::npos);
-    EXPECT_NE(std::string(error.what()).find("at most 65536 bytes"), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("addressable LDS limit is 65536 bytes"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("65536 bytes aggregate for placement"),
+              std::string::npos);
   }
 }
 
-TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
+TEST(RdnaDispatchTest, WgpModeRejects128KiBPerWorkgroupRequest) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
-  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 128 * 1024 + 1,
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 128 * 1024,
                                /*wgp_mode=*/true);
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
@@ -577,9 +578,12 @@ TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
     FAIL() << "oversized WGP-mode LDS request should fail";
   } catch (const std::runtime_error &error) {
     EXPECT_NE(std::string(error.what())
-                  .find("requests 131073 bytes of LDS (131328 bytes after alignment) in WGP mode"),
+                  .find("requests 131072 bytes of LDS (131072 bytes after alignment) in WGP mode"),
               std::string::npos);
-    EXPECT_NE(std::string(error.what()).find("at most 131072 bytes"), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("addressable LDS limit is 65536 bytes"),
+              std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("131072 bytes aggregate for placement"),
+              std::string::npos);
   }
 }
 
