@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -144,6 +145,9 @@ struct ConSanOptions {
   std::string test_kernel_name_filter;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
+  /// Internal marker set when the persistent set also snapshots CDNA4
+  /// workgroup identity at kernel entry.
+  bool automatic_moi_identity_vgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
@@ -159,6 +163,10 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_owner_sgpr;
   std::optional<uint16_t> moi_owner_vgpr;
   std::optional<uint16_t> moi_epoch_vgpr;
+  std::array<std::optional<uint16_t>, 3> moi_workgroup_vgprs;
+  /// Internal two-SGPR window used to unpack AQL workgroup dimensions in the
+  /// CDNA4 kernel-entry identity prologue.
+  std::optional<uint16_t> moi_identity_sgpr;
   std::optional<uint64_t> report_buffer_address;
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
@@ -467,6 +475,8 @@ struct ConSanResult {
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
+  std::array<std::optional<uint16_t>, 3> resolved_moi_workgroup_vgprs;
+  std::optional<uint16_t> resolved_moi_identity_sgpr;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;
   std::optional<uint16_t> resolved_moi_owner_sgpr;
   bool moi_persistent_vgprs_automatic = false;

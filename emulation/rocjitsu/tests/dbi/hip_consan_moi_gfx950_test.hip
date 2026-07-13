@@ -69,6 +69,32 @@ __global__ __launch_bounds__(64) void gfx950_standalone_report_publication(uint3
                : "memory");
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_identity_grid(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t local =
+      static_cast<uint32_t>(threadIdx.x) +
+      static_cast<uint32_t>(blockDim.x) *
+          (static_cast<uint32_t>(threadIdx.y) +
+           static_cast<uint32_t>(blockDim.y) * static_cast<uint32_t>(threadIdx.z));
+  const uint32_t group = static_cast<uint32_t>(blockIdx.x) +
+                         static_cast<uint32_t>(gridDim.x) *
+                             (static_cast<uint32_t>(blockIdx.y) +
+                              static_cast<uint32_t>(gridDim.y) * static_cast<uint32_t>(blockIdx.z));
+  if ((local & 63u) == 0u) {
+    const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+    const uint32_t value = 0x95050000u | (group << 4u) | (local >> 6u);
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 0u)
+    out[group] = 0x95050000u | group;
+}
+
 TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
@@ -118,6 +144,22 @@ TEST(ConSanMoiGfx950Test, StandaloneReportPublication) {
   HIP_ASSERT(hipFree(device_out));
   for (uint32_t tid = 0; tid < kThreads; ++tid)
     EXPECT_EQ(out[tid], 0x95040000u ^ tid) << "tid=" << tid;
+}
+
+TEST(ConSanMoiGfx950Test, StableThreeDimensionalIdentity) {
+  constexpr uint32_t kGroups = 8;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kGroups * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kGroups * sizeof(uint32_t)));
+  gfx950_moi_identity_grid<<<dim3(2, 2, 2), dim3(8, 4, 4)>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kGroups);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t group = 0; group < kGroups; ++group)
+    EXPECT_EQ(out[group], 0x95050000u | group) << "group=" << group;
 }
 
 } // namespace

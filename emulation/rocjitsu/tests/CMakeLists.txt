@@ -2278,6 +2278,29 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableThreeDimensionalIdentity"
+            NAME "ConSanMoiGfx950Test.StableThreeDimensionalIdentityRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_identity_grid"
+                "RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS=8"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableThreeDimensionalIdentityRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto identity reader=[0-9]+ workgroups=8 multi_owner_workgroups=8"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.SingleLdsStoreCompletes"
             NAME "ConSanMoiGfx950Test.SingleLdsStoreRecordReplay"
             TIMEOUT 30

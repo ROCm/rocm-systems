@@ -149,8 +149,8 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.group_flat_access, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.barrier, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::InventoryOnly);
-  EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::InventoryOnly);
-  EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::InventoryOnly);
@@ -301,37 +301,35 @@ std::vector<uint32_t> make_expected_vgpr_load_words(uint64_t address, uint16_t v
   return words;
 }
 
-std::vector<uint32_t> make_expected_scalar_store_words(uint64_t address, uint16_t scalar_src,
-                                                       uint16_t scratch_vgpr,
-                                                       bool shift_right_16 = false,
-                                                       bool mask_low_16 = false) {
+std::vector<uint32_t>
+make_expected_scalar_store_words(uint64_t address, uint16_t scalar_src, uint16_t scratch_vgpr,
+                                 bool shift_right_16 = false, bool mask_low_16 = false,
+                                 rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
   std::vector<uint32_t> words;
-  words.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, ROCJITSU_CODE_ARCH_RDNA4));
+  words.push_back(build_v_mov_b32_e32(value_vgpr, scalar_src, arch));
   if (mask_low_16) {
-    const auto shift_left = build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                                    value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
-    const auto shift_right = build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                                     value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto shift_left =
+        build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
+    const auto shift_right =
+        build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
     if (!shift_left || !shift_right)
       return words;
     words.push_back(*shift_left);
     words.push_back(*shift_right);
   }
   if (shift_right_16) {
-    const auto shift = build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16),
-                                               value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto shift =
+        build_v_lshrrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
     if (!shift)
       return words;
     words.push_back(*shift);
   }
-  const auto mov_address_lo = build_v_mov_b32_e64_literal(
-      scratch_vgpr, static_cast<uint32_t>(address), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto mov_address_hi =
-      build_v_mov_b32_e64_literal(static_cast<uint16_t>(scratch_vgpr + 1u),
-                                  static_cast<uint32_t>(address >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
-  const auto store =
-      build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_address_lo =
+      build_v_mov_b32_e64_literal(scratch_vgpr, static_cast<uint32_t>(address), arch);
+  const auto mov_address_hi = build_v_mov_b32_e64_literal(
+      static_cast<uint16_t>(scratch_vgpr + 1u), static_cast<uint32_t>(address >> 32u), arch);
+  const auto store = build_flat_store_b32_vaddr_vsrc(scratch_vgpr, value_vgpr, arch);
   if (!mov_address_lo || !mov_address_hi || !store)
     return words;
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
@@ -406,6 +404,10 @@ std::vector<uint8_t> make_rdna4_lds_code_object(
   kernel_descriptor.kernel_code_entry_byte_offset = entry_offset;
   AMDHSA_BITS_SET(kernel_descriptor.compute_pgm_rsrc1,
                   kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, vgpr_granulated);
+  if (machine == EF_AMDGPU_MACH_AMDGCN_GFX950) {
+    AMDHSA_BITS_SET(kernel_descriptor.compute_pgm_rsrc2,
+                    kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1u);
+  }
   const uint32_t wave32_value = wave32 ? 1u : 0u;
   AMDHSA_BITS_SET(kernel_descriptor.kernel_code_properties,
                   kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32_value);
@@ -720,6 +722,10 @@ make_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &o
                     kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, vgpr_granulated);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                     private_bytes != 0 ? 1u : 0u);
+    if (options.arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2,
+                      kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1u);
+    }
     const uint32_t wave32_value = wave32 ? 1u : 0u;
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave32_value);
@@ -1931,8 +1937,16 @@ TEST(ConSanMoi, Gfx950SharedHelperSpillUsesEveryOwnerResourceAndPrivateLayout) {
   EXPECT_EQ(plan.scratch_vgpr, 1u);
   EXPECT_EQ(plan.original_private_segment_size, 20u);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
-  ASSERT_EQ(result.patches.size(), 1u);
-  const ConSanPatchInfo &patch = result.patches.front();
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
+                          [](const ConSanPatchInfo &patch) {
+                            return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+                          }),
+            2);
+  const ConSanPatchInfo &patch = *access_patch;
   EXPECT_EQ(patch.spilled_vgpr_count, 3u);
   EXPECT_EQ(patch.required_private_segment_size, 44u);
   EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
@@ -1980,8 +1994,11 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
 
   ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
   ASSERT_TRUE(result.modified);
-  ASSERT_EQ(result.patches.size(), 1u);
-  const ConSanPatchInfo &patch = result.patches.front();
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access_patch, result.patches.end());
+  const ConSanPatchInfo &patch = *access_patch;
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 20u);
   ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
@@ -2952,8 +2969,16 @@ TEST(ConSanMoi, Gfx950ForcedSpillPatchHasTransactionalSaveProbeRestoreShape) {
   ASSERT_TRUE(result.modified);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
-  ASSERT_EQ(result.patches.size(), 1u);
-  const ConSanPatchInfo &patch = result.patches.front();
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access_patch, result.patches.end());
+  EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
+                          [](const ConSanPatchInfo &patch) {
+                            return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+                          }),
+            1);
+  const ConSanPatchInfo &patch = *access_patch;
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.scratch_vgpr, 1u);
   EXPECT_EQ(patch.spilled_vgpr_count, 3u);
@@ -3878,9 +3903,13 @@ TEST(ConSanMoi, FirstLightProbeStoresDescriptorWorkgroupIds) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
 
-  std::vector<uint32_t> rewritten_words(result.patches.front().original_size / sizeof(uint32_t));
-  std::memcpy(rewritten_words.data(),
-              result.elf_bytes.data() + result.patches.front().anchor_offset,
+  const ConSanPatchInfo &patch = result.patches.front();
+  const uint64_t rewritten_offset =
+      patch.trampoline_size != 0 ? patch.trampoline_offset : patch.anchor_offset;
+  const uint32_t rewritten_size =
+      patch.trampoline_size != 0 ? patch.trampoline_size : patch.original_size;
+  std::vector<uint32_t> rewritten_words(rewritten_size / sizeof(uint32_t));
+  std::memcpy(rewritten_words.data(), result.elf_bytes.data() + rewritten_offset,
               rewritten_words.size() * sizeof(uint32_t));
 
   const uint64_t access_record_base =
@@ -3898,7 +3927,262 @@ TEST(ConSanMoi, FirstLightProbeStoresDescriptorWorkgroupIds) {
       /*shift_right_16=*/true);
   EXPECT_TRUE(contains_subsequence(rewritten_words, expected_x));
   EXPECT_TRUE(contains_subsequence(rewritten_words, expected_y));
-  EXPECT_TRUE(contains_subsequence(rewritten_words, expected_z));
+  EXPECT_TRUE(contains_subsequence(rewritten_words, expected_z))
+      << "expected=" << testing::PrintToString(expected_z)
+      << " actual=" << testing::PrintToString(rewritten_words);
+}
+
+TEST(ConSanMoi, Gfx950FirstLightUsesStableEntrySnapshotsForWorkgroupAndWaveIdentity) {
+  std::array<uint32_t, 220> text_words{};
+  text_words[0] = 0xD81A0000u;
+  text_words[1] = 0x00000000u; // ds_write_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_identity", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 5u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO,
+                    1u);
+  });
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  const auto prologue_patch =
+      std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+      });
+  ASSERT_NE(access_patch, result.patches.end());
+  ASSERT_NE(prologue_patch, result.patches.end());
+  ASSERT_TRUE(result.resolved_moi_owner_vgpr);
+  ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
+  ASSERT_TRUE(result.resolved_moi_identity_sgpr);
+  for (const auto vgpr : result.resolved_moi_workgroup_vgprs)
+    ASSERT_TRUE(vgpr);
+
+  const uint32_t rewritten_size = access_patch->trampoline_size != 0 ? access_patch->trampoline_size
+                                                                     : access_patch->original_size;
+  std::vector<uint32_t> rewritten_words(rewritten_size / sizeof(uint32_t));
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const uint64_t rewritten_offset = access_patch->trampoline_size != 0
+                                        ? access_patch->trampoline_offset
+                                        : access_patch->anchor_offset;
+  std::memcpy(rewritten_words.data(), patched.text_sections().front()->data() + rewritten_offset,
+              rewritten_words.size() * sizeof(uint32_t));
+
+  const uint64_t access_record_base =
+      *options.moi_report_buffer_address + sizeof(ConSanMoiReportHeader);
+  const auto expected_x = make_expected_scalar_store_words(
+      access_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
+      vector_source_vgpr(*result.resolved_moi_workgroup_vgprs[0]), *options.scratch_vgpr, false,
+      false, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto expected_y = make_expected_scalar_store_words(
+      access_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
+      vector_source_vgpr(*result.resolved_moi_workgroup_vgprs[1]), *options.scratch_vgpr, false,
+      false, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto expected_z = make_expected_scalar_store_words(
+      access_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
+      vector_source_vgpr(*result.resolved_moi_workgroup_vgprs[2]), *options.scratch_vgpr, false,
+      false, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_TRUE(contains_subsequence(rewritten_words, expected_x));
+  EXPECT_TRUE(contains_subsequence(rewritten_words, expected_y));
+  EXPECT_TRUE(contains_subsequence(rewritten_words, expected_z))
+      << "expected=" << testing::PrintToString(expected_z)
+      << " actual=" << testing::PrintToString(rewritten_words);
+
+  std::vector<uint32_t> prologue_words(prologue_patch->trampoline_size / sizeof(uint32_t));
+  std::memcpy(prologue_words.data(),
+              patched.text_sections().front()->data() + prologue_patch->trampoline_offset,
+              prologue_patch->trampoline_size);
+  const auto dispatch_load =
+      build_s_load_dword(*result.resolved_moi_identity_sgpr,
+                         /*dispatch_sgpr=*/0, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(dispatch_load);
+  EXPECT_TRUE(contains_subsequence(
+      prologue_words, std::vector<uint32_t>(dispatch_load->begin(), dispatch_load->end())));
+  const std::vector<uint32_t> expected_snapshots = {
+      build_v_mov_b32_e32(*result.resolved_moi_workgroup_vgprs[0], /*shifted s5=*/7,
+                          ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(*result.resolved_moi_workgroup_vgprs[1], /*shifted s6=*/8,
+                          ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(*result.resolved_moi_workgroup_vgprs[2], /*shifted s7=*/9,
+                          ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  EXPECT_TRUE(contains_subsequence(prologue_words, expected_snapshots));
+
+  const uint16_t owner_vgpr = *result.resolved_moi_owner_vgpr;
+  const uint16_t epoch_vgpr = *result.resolved_moi_epoch_vgpr;
+  const uint16_t size_x_sgpr = *result.resolved_moi_identity_sgpr;
+  const uint16_t size_y_sgpr = static_cast<uint16_t>(size_x_sgpr + 1u);
+  const auto z = build_v_lshrrev_b32_e32(owner_vgpr, scalar_positive_inline_u32(20), 0,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto y = build_v_lshrrev_b32_e32(epoch_vgpr, scalar_positive_inline_u32(10), 0,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mask_y =
+      build_v_and_b32_e32_literal(epoch_vgpr, 0x3ffu, epoch_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto yz = build_v_mad_u32_u24(owner_vgpr, size_y_sgpr, owner_vgpr, epoch_vgpr,
+                                      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto x = build_v_and_b32_e32_literal(epoch_vgpr, 0x3ffu, 0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto flat = build_v_mad_u32_u24(owner_vgpr, size_x_sgpr, owner_vgpr, epoch_vgpr,
+                                        ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wave = build_v_lshrrev_b32_e32(owner_vgpr, scalar_positive_inline_u32(6), owner_vgpr,
+                                            ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(z && y && mask_y && yz && x && flat && wave);
+  std::vector<uint32_t> expected_owner = {*z, *y};
+  expected_owner.insert(expected_owner.end(), mask_y->begin(), mask_y->end());
+  expected_owner.insert(expected_owner.end(), yz->begin(), yz->end());
+  expected_owner.insert(expected_owner.end(), x->begin(), x->end());
+  expected_owner.insert(expected_owner.end(), flat->begin(), flat->end());
+  expected_owner.push_back(*wave);
+  expected_owner.push_back(
+      build_v_mov_b32_e32(epoch_vgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(contains_subsequence(prologue_words, expected_owner));
+
+  std::vector<uint32_t> expected_restore;
+  for (uint16_t destination = 0; destination < 9; ++destination) {
+    expected_restore.push_back(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u),
+                                               ROCJITSU_CODE_ARCH_CDNA4));
+  }
+  EXPECT_TRUE(contains_subsequence(prologue_words, expected_restore));
+
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
+            7u);
+}
+
+TEST(ConSanMoi, Gfx950StableOwnerTransactionEnablesDispatchPtrWithoutWorkgroupInfo) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_missing_owner", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO,
+                    0u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                            kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO),
+            0u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
+            2u);
+}
+
+TEST(ConSanMoi, Gfx950StableOwnerTransactionPreservesExistingDispatchPtrAbi) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_existing_dispatch", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 5u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
+                            kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR),
+            1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
+            5u);
+}
+
+TEST(ConSanMoi, Gfx950StableOwnerTransactionRejectsSaturatedUserSgprAbi) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_saturated_user_sgprs", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 30u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("cannot insert a dispatch pointer into the user-SGPR ABI") !=
+           std::string::npos;
+  })) << testing::PrintToString(result.errors);
 }
 
 std::vector<uint32_t> make_padded_moi_first_light_text(uint32_t word0, uint32_t word1) {

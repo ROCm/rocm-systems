@@ -657,6 +657,26 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
   EXPECT_FALSE(build_v_add_nc_u32_words(10, vector_source_vgpr(2), 256, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(*bit_and, 0x26140687u);
 
+  const auto mad = build_v_mad_u32_u24(/*vdst=*/10, /*src0=*/20, /*vsrc1=*/3, /*vsrc2=*/4,
+                                       ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(mad);
+  EXPECT_EQ(*mad, (std::array<uint32_t, 2>{0xd1c3000au, 0x04120614u}));
+  EXPECT_FALSE(build_v_mad_u32_u24(256, 20, 3, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_mad_u32_u24(10, 512, 3, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_mad_u32_u24(10, 20, 256, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_mad_u32_u24(10, 20, 3, 256, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_mad_u32_u24(10, 20, 3, 4, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto dispatch_load =
+      build_s_load_dword(/*sdst=*/20, /*sbase=*/0, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(dispatch_load);
+  EXPECT_EQ(*dispatch_load, (std::array<uint32_t, 2>{0xc0020500u, 0x00000004u}));
+  EXPECT_FALSE(build_s_load_dword(102, 0, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_load_dword(20, 1, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_load_dword(20, 102, 4, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_load_dword(20, 0, 0x100000u, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_s_load_dword(20, 0, 4, ROCJITSU_CODE_ARCH_RDNA4));
+
   const auto literal = build_v_mov_b32_e64_literal(10, 0x12345678u, ROCJITSU_CODE_ARCH_CDNA4);
   const auto store = build_flat_store_b32_vaddr_vsrc(2, 4, ROCJITSU_CODE_ARCH_CDNA4);
   const auto load = build_flat_load_b32_vaddr_vdst(2, 4, ROCJITSU_CODE_ARCH_CDNA4);

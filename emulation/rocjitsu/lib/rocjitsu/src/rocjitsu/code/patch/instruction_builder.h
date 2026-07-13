@@ -568,6 +568,25 @@ build_v_add_nc_u32_words(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_a
   return std::vector<uint32_t>{*word};
 }
 
+/// @brief Encode CDNA4 `v_mad_u32_u24 vdst, src0, vsrc1, vsrc2`.
+///
+/// @details The operation is `vdst = (src0[23:0] * vsrc1[23:0]) + vsrc2`.
+/// @p src0 is a VOP source operand encoding; the other sources are VGPR
+/// numbers. This VOP3 form does not write VCC and is therefore suitable for
+/// entry-prologue identity arithmetic.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_v_mad_u32_u24(uint16_t vdst, uint16_t src0, uint16_t vsrc1, uint16_t vsrc2,
+                    rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vdst > 255 || src0 > 511 || vsrc1 > 255 || vsrc2 > 255)
+    return std::nullopt;
+  constexpr uint32_t kCdna4VMadU32U24Vop3 = 451u;
+  const uint32_t word0 = 0xD0000000u | (kCdna4VMadU32U24Vop3 << 16u) | vdst;
+  const uint32_t word1 = static_cast<uint32_t>(src0) |
+                         (static_cast<uint32_t>(vector_source_vgpr(vsrc1)) << 9u) |
+                         (static_cast<uint32_t>(vector_source_vgpr(vsrc2)) << 18u);
+  return std::array<uint32_t, 2>{word0, word1};
+}
+
 /// @brief Encode VOP2 `v_and_b32 vdst, src0, vsrc1`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_and_b32_e32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
@@ -905,6 +924,21 @@ build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
     return std::nullopt;
   const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSMovB64Sop1 : rdna4::kSMovB64Sop1;
   return pack_sop1(op, sdst, ssrc0);
+}
+
+/// @brief Encode CDNA4 `s_load_dword sdst, s[sbase:sbase+1], offset`.
+///
+/// @details This is the immediate-offset SMEM form used by the gfx950 entry
+/// prologue to read the AQL dispatch packet. The scalar base must be an even
+/// ordinary SGPR pair and the byte offset must fit the 20-bit immediate.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_s_load_dword(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || sdst > 101 || sbase > 100 || sbase % 2u != 0 ||
+      byte_offset > 0xFFFFFu)
+    return std::nullopt;
+  return std::array<uint32_t, 2>{0xC0020000u | (static_cast<uint32_t>(sdst) << 6u) |
+                                     (static_cast<uint32_t>(sbase) >> 1u),
+                                 byte_offset};
 }
 
 /// @brief Encode RDNA4/CDNA4 `s_and_saveexec_b64`.

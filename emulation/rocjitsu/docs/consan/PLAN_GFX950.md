@@ -162,6 +162,17 @@ Full gfx950 support means:
   gfx950 kernel publishes 64 known global words with `flat_store_dword` and the
   required zero VM/LGKM wait, proving report visibility independently of an
   access probe.
+- 2026-07-13: `I1A`, `I1B`, and `I1C` are `DONE`. The standard gfx950 path now
+  performs a reversible entry-time dispatch-pointer ABI transaction, snapshots
+  workgroup X/Y/Z before compiler SGPR reuse, derives the logical wave64 owner
+  from packed workitem coordinates and AQL workgroup dimensions, and restores
+  every original ABI SGPR before guest entry. LLVM-matched SMEM/VOP3 fixtures
+  and synthetic descriptor/patch-shape tests pass, as do all 153 focused
+  builder/capability/MOI CPU tests. The live 3D control records 16 accesses
+  across eight distinct workgroups and requires exact owners `{0,1}` in every
+  group; all six gfx950 MOI hardware tests pass after reboot. TTMP sources read
+  as zero in ordinary compute and the ISA marks physical `HW_ID` as
+  migration-unsafe, so the optional HW_ID experiment is closed as rejected.
 
 ## DAG Overview
 
@@ -282,9 +293,9 @@ flowchart LR
   P1A["P1A: Scalar Control Primitives"]:::done
   P1B["P1B: Vector And Address Primitives"]:::done
   P1C["P1C: Report Publication Primitives"]:::done
-  I1A["I1A: Workgroup Identity"]:::todo
-  I1B["I1B: Stable Wave64 Owner"]:::todo
-  I1C["I1C: Optional HW_ID Experiment"]:::todo
+  I1A["I1A: Workgroup Identity"]:::done
+  I1B["I1B: Stable Wave64 Owner"]:::done
+  I1C["I1C: Optional HW_ID Experiment"]:::done
   W1["W1: Non-Scratch Wait Semantics"]:::done
   B1A["B1A: Barrier Decode And Emission"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
@@ -918,7 +929,7 @@ Done criteria:
 
 - One guarded GPU test publishes a known report without an LDS probe.
 
-### I1A: gfx950 Workgroup Identity - TODO
+### I1A: gfx950 Workgroup Identity - DONE
 
 Goal: produce stable 1D/2D/3D workgroup identity from descriptor-enabled system
 SGPRs.
@@ -928,12 +939,24 @@ Work:
 - Use descriptor-enabled workgroup ID SGPRs for 1D/2D/3D identity.
 - Preserve compatible assignments across shared helpers.
 
+Result:
+
+- The CDNA4 entry prologue snapshots enabled X/Y/Z system SGPRs into one
+  common persistent VGPR assignment before any original instruction can reuse
+  the scalar inputs; disabled dimensions are canonical zero.
+- When ConSan inserts the AQL dispatch-pointer pair ahead of the original ABI,
+  it reads all snapshots from their shifted locations and then restores every
+  original user/system SGPR to its former number.
+- A shared-helper fixture emits one compatible access probe plus an identity
+  prologue for each owning kernel. The live `2x2x2` grid proves eight distinct
+  3D keys and two records with one identical key per workgroup.
+
 Done criteria:
 
 - Focused controls record distinct workgroup keys for distinct workgroups and
   identical keys for waves in one workgroup.
 
-### I1B: Stable Wave64 Owner Identity - TODO
+### I1B: Stable Wave64 Owner Identity - DONE
 
 Goal: define the required standard owner source independently of debug-only
 `HW_ID` and runtime-owned TTMP payloads.
@@ -944,12 +967,23 @@ Work:
   equivalently stable architectural input.
 - Preserve compatible assignments across shared helpers.
 
+Result:
+
+- The prologue reads packed 16-bit workgroup X/Y dimensions from the standard
+  AQL dispatch packet and flattens AMDHSA's packed VGPR0 coordinates as
+  `x + size_x * (y + size_y * z)` before dividing by 64.
+- Owner, epoch, and three workgroup coordinates occupy one automatically
+  allocated five-VGPR persistent set shared by every owner of helper text.
+- Exact builder fixtures cover the SMEM load, VOP3 multiply-adds, descriptor
+  dispatch-pointer insertion, shifted system inputs, and ABI restoration. The
+  hardware oracle observes exact owners `{0,1}` in every 128-thread group.
+
 Done criteria:
 
 - Two unordered waves in one workgroup receive distinct stable owners, while
   accesses in different workgroups remain separated by I1A.
 
-### I1C: Optional HW_ID Owner Experiment - TODO
+### I1C: Optional HW_ID Owner Experiment - DONE
 
 Goal: determine whether `HW_ID` is useful for diagnostics without making it a
 standard correctness dependency.
@@ -959,6 +993,15 @@ Work:
 - Exercise migration-sensitive and repeated controls where practical.
 - Expose the source only as an explicitly experimental capability if observed
   behavior and documentation permit it.
+
+Result:
+
+- Rejected for standard and experimental correctness use. The CDNA4 ISA says
+  `HW_ID` describes current physical placement and may change during a wave's
+  lifetime, while ordinary compute probes observed zero for the tempting TTMP
+  wave fields.
+- The gfx950 capability table keeps `hw_id_owner` unavailable; NP and M0 use
+  only the stable logical owner from I1B.
 
 Done criteria:
 

@@ -34,10 +34,10 @@ standalone CDNA4 scratch tests use the same TheRock distribution under
 | `consan.cpp`: LDS check/trap backend | blanket RDNA4 gate | target capability after CDNA4 DS primitives | SC1 |
 | `consan.cpp`: report-buffer mismatch action | RDNA4 FLAT stores | CDNA4 publication backend | P1C |
 | `consan.cpp`: flat proof backends | blanket RDNA4 gate and gfx12 raw patch shapes | keep gated until FL1A selects FL1B; otherwise typed FL1X | FL1A/FL1B/FL1X |
-| `consan_moi.cpp`: descriptor workgroup sources | RDNA4 runtime TTMP payload; other targets use enabled system SGPRs | CDNA4 system-SGPR path; never assume TTMP payload | I1A |
+| `consan_moi.cpp`: descriptor workgroup sources | RDNA4 runtime TTMP payload; other targets use enabled system SGPRs | CDNA4 entry snapshot into persistent VGPRs before compiler reuse; never assume TTMP payload | I1A |
 | `consan_moi.cpp`: descriptor wave/VGPR helpers | wave32 bit and gfx12 wave64 granularity 4 | target; CDNA4 forces wave64 and granularity 8 | R1A |
 | `consan_moi.cpp`: SGPR allocation helpers | groups of 8 and limit 106 | CDNA4 ordinary user SGPR geometry and special-state split | R1A/R1B |
-| `consan_moi.cpp`: owner derivation | RDNA4 lane count plus TTMP/HW_ID inputs | CDNA4 stable wave64 architectural source; HW_ID experimental only | I1B/I1C |
+| `consan_moi.cpp`: owner derivation | RDNA4 lane count plus TTMP/HW_ID inputs | CDNA4 packed workitem ID plus AQL workgroup dimensions; reject HW_ID and TTMP as standard sources | I1B/I1C |
 | `consan_moi.cpp`: inline-shadow backend | blanket RDNA4 gate; gfx12 FLAT atomics/waits | target capability after CDNA4 atomic publication | IS1A-IS1C |
 | `consan_moi.cpp`: sampled backend | blanket RDNA4 gate and VCC/SCC save convention | target capability after CDNA4 primitives | SA1A-SA1C |
 | `consan_moi.cpp`: access-record backend | blanket RDNA4 gate and gfx12 global stores | target capability after CDNA4 publication/identity | RR1A/RR1B |
@@ -79,3 +79,27 @@ existing gfx1201 bytes. `ConSanSpillHipTest.Gfx950VgprScratchRoundTrip` and
 `Gfx950PartialExecVgprScratchRoundTrip` execute those exact instructions on the
 MI355X. Disassembly of the bundled gfx950 object contains the words above, and
 both hardware tests pass.
+
+## CDNA4 Stable Identity Contract
+
+gfx950 does not provide a usable ordinary-code wave-in-workgroup value through
+the tempting sources. TTMP registers are trap-handler/runtime state and read as
+zero in the focused compute probes. The ISA manual also explicitly warns that
+`HW_ID` reports physical placement which may change during a wave's lifetime.
+Neither source participates in standard ConSan correctness.
+
+ConSan instead performs a reversible AMDHSA entry transaction. It enables the
+standard AQL dispatch-pointer user SGPR pair, snapshots the descriptor-selected
+workgroup X/Y/Z system SGPRs into three persistent VGPRs before guest code can
+reuse them, and reads packed 16-bit workgroup X/Y dimensions from the dispatch
+packet. From AMDHSA's packed workitem VGPR0 it computes
+`x + size_x * (y + size_y * z)`, divides by the wave64 width, initializes the
+persistent owner/epoch pair, and then shifts every original ABI SGPR back to
+its pre-instrumentation number before branching to the original entry.
+
+LLVM-matched SMEM and VOP3 fixtures cover the dispatch load and multiply-add
+encodings. A synthetic descriptor test covers dispatch-pointer insertion,
+system-SGPR snapshots, original-ABI restoration, and persistent record inputs.
+The guarded `StableThreeDimensionalIdentityRecordReplay` hardware test launches
+eight 3D workgroups with two waves each and requires all eight distinct
+workgroup keys and the exact owner set `{0,1}` in every group.

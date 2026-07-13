@@ -641,6 +641,7 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
 struct ConSanMoiWorkgroupSource {
   std::optional<uint16_t> scalar_src;
+  std::optional<uint16_t> vector_src;
   bool shift_right_16 = false;
   bool mask_low_16 = false;
 };
@@ -1090,10 +1091,12 @@ find_first_light_access_record_candidates(const ConSanResult &result,
 [[nodiscard]] bool append_store_workgroup_source(std::vector<uint32_t> &words, uint64_t address,
                                                  const ConSanMoiWorkgroupSource &source,
                                                  uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  if (!source.scalar_src)
+  if (!source.scalar_src && !source.vector_src)
     return true;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 2u);
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *source.scalar_src, arch));
+  const uint16_t input =
+      source.vector_src ? vector_source_vgpr(*source.vector_src) : *source.scalar_src;
+  words.push_back(build_v_mov_b32_e32(value_vgpr, input, arch));
   if (source.mask_low_16) {
     const auto shift_left =
         build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
@@ -1242,10 +1245,12 @@ append_dynamic_barrier_store_u32_scalar_src(std::vector<uint32_t> &words, uint64
 [[nodiscard]] bool append_dynamic_barrier_store_workgroup_source(
     std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
     uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  if (!source.scalar_src)
+  if (!source.scalar_src && !source.vector_src)
     return true;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *source.scalar_src, arch));
+  const uint16_t input =
+      source.vector_src ? vector_source_vgpr(*source.vector_src) : *source.scalar_src;
+  words.push_back(build_v_mov_b32_e32(value_vgpr, input, arch));
   if (source.mask_low_16) {
     const auto shift_left =
         build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
@@ -1422,10 +1427,12 @@ append_dynamic_access_store_u32_scalar_src(std::vector<uint32_t> &words, uint64_
 [[nodiscard]] bool append_dynamic_access_store_workgroup_source(
     std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
     uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  if (!source.scalar_src)
+  if (!source.scalar_src && !source.vector_src)
     return true;
   const uint16_t value_vgpr = static_cast<uint16_t>(scratch_vgpr + 5u);
-  words.push_back(build_v_mov_b32_e32(value_vgpr, *source.scalar_src, arch));
+  const uint16_t input =
+      source.vector_src ? vector_source_vgpr(*source.vector_src) : *source.scalar_src;
+  words.push_back(build_v_mov_b32_e32(value_vgpr, input, arch));
   if (source.mask_low_16) {
     const auto shift_left =
         build_v_lshlrev_b32_e32(value_vgpr, scalar_positive_inline_u32(16), value_vgpr, arch);
@@ -1575,6 +1582,18 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
 
+[[nodiscard]] bool moi_descriptor_enables_dispatch_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR) != 0;
+}
+
+[[nodiscard]] uint16_t moi_descriptor_dispatch_ptr_sgpr(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+             ? 4u
+             : 0u;
+}
+
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_workgroup_id_sgpr(const KD &desc,
                                                                        uint32_t dimension) {
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
@@ -1625,6 +1644,10 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   return std::min<uint32_t>(count, moi_max_ordinary_sgprs(arch));
 }
 
+[[nodiscard]] uint32_t moi_descriptor_dispatch_insertion_width(const KD &desc) {
+  return moi_descriptor_enables_dispatch_ptr(desc) ? 0u : 2u;
+}
+
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
@@ -1638,26 +1661,47 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250) {
     return ConSanMoiWorkgroupSources{
         moi_descriptor_enables_workgroup_id(desc, 0)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridX), false}
+            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridX), std::nullopt, false,
+                                       false}
             : ConSanMoiWorkgroupSource{},
         moi_descriptor_enables_workgroup_id(desc, 1)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
-                                       /*shift_right_16=*/false, /*mask_low_16=*/true}
+            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz), std::nullopt, false,
+                                       true}
             : ConSanMoiWorkgroupSource{},
         moi_descriptor_enables_workgroup_id(desc, 2)
-            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz),
-                                       /*shift_right_16=*/true}
+            ? ConSanMoiWorkgroupSource{ttmp_scalar_operand(kTtmpRdna4GridYz), std::nullopt, true,
+                                       false}
             : ConSanMoiWorkgroupSource{},
     };
   }
   const auto sgpr_source = [](std::optional<uint16_t> sgpr) {
-    return sgpr ? ConSanMoiWorkgroupSource{*sgpr, false} : ConSanMoiWorkgroupSource{};
+    return sgpr ? ConSanMoiWorkgroupSource{*sgpr, std::nullopt, false, false}
+                : ConSanMoiWorkgroupSource{};
   };
   return ConSanMoiWorkgroupSources{
       sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 0)),
       sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 1)),
       sgpr_source(moi_descriptor_workgroup_id_sgpr(desc, 2)),
   };
+}
+
+[[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
+moi_probe_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
+                            const ConSanOptions &options, rj_code_arch_t arch,
+                            std::vector<std::string> &errors) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+    if (!options.moi_workgroup_vgprs[0] || !options.moi_workgroup_vgprs[1] ||
+        !options.moi_workgroup_vgprs[2]) {
+      errors.emplace_back("ConSan MOI CDNA4 stable workgroup identity has no persistent VGPRs");
+      return std::nullopt;
+    }
+    return ConSanMoiWorkgroupSources{
+        ConSanMoiWorkgroupSource{std::nullopt, *options.moi_workgroup_vgprs[0], false, false},
+        ConSanMoiWorkgroupSource{std::nullopt, *options.moi_workgroup_vgprs[1], false, false},
+        ConSanMoiWorkgroupSource{std::nullopt, *options.moi_workgroup_vgprs[2], false, false},
+    };
+  }
+  return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors);
 }
 
 [[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
@@ -1679,10 +1723,25 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return consan_moi_decode_descriptor_register_count(granulated, moi_max_ordinary_sgprs(arch), 8u);
 }
 
-[[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
-                                                                 uint64_t descriptor_file_offset,
-                                                                 rj_code_arch_t arch,
-                                                                 std::vector<std::string> &errors) {
+enum class MoiOwnerInputKind : uint8_t {
+  WorkitemId,
+};
+
+struct MoiOwnerInput {
+  MoiOwnerInputKind kind = MoiOwnerInputKind::WorkitemId;
+  uint16_t source = kWorkitemIdX;
+  uint16_t shift_right = 0;
+  uint32_t mask = consan_moi_exact_shadow::max_owner;
+};
+
+[[nodiscard]] bool same_owner_input(const MoiOwnerInput &lhs, const MoiOwnerInput &rhs) {
+  return lhs.kind == rhs.kind && lhs.source == rhs.source && lhs.shift_right == rhs.shift_right &&
+         lhs.mask == rhs.mask;
+}
+
+[[nodiscard]] std::optional<MoiOwnerInput>
+moi_descriptor_owner_input(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
+                           rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
     errors.emplace_back("ConSan MOI owner derivation descriptor exceeds ELF bytes");
     return std::nullopt;
@@ -1690,14 +1749,46 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return moi_descriptor_wavefront_size(desc, arch) == 32 ? 5 : 6;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // Standard gfx950 paths replace this site-local fallback with a persistent
+    // entry snapshot. Keep a deterministic wave64 fallback only for
+    // compatibility checks; runtime-owned TTMPs and debug HW_ID are not used.
+    return MoiOwnerInput{MoiOwnerInputKind::WorkitemId, kWorkitemIdX,
+                         /*shift_right=*/6u, consan_moi_exact_shadow::max_owner};
+  }
+  return MoiOwnerInput{
+      MoiOwnerInputKind::WorkitemId, kWorkitemIdX,
+      static_cast<uint16_t>(moi_descriptor_wavefront_size(desc, arch) == 32 ? 5 : 6),
+      consan_moi_exact_shadow::max_owner};
 }
 
-[[nodiscard]] std::optional<uint16_t> moi_kernel_owner_shift(std::span<const uint8_t> image,
-                                                             const ConSanKernelInfo &kernel,
-                                                             rj_code_arch_t arch,
-                                                             std::vector<std::string> &errors) {
-  return moi_descriptor_owner_shift(image, kernel.descriptor_file_offset, arch, errors);
+[[nodiscard]] std::optional<MoiOwnerInput>
+moi_kernel_owner_input(std::span<const uint8_t> image, const ConSanKernelInfo &kernel,
+                       rj_code_arch_t arch, std::vector<std::string> &errors) {
+  return moi_descriptor_owner_input(image, kernel.descriptor_file_offset, arch, errors);
+}
+
+[[nodiscard]] bool append_moi_owner_input(std::vector<uint32_t> &words, uint16_t destination_vgpr,
+                                          const MoiOwnerInput &input, rj_code_arch_t arch,
+                                          std::vector<std::string> &errors) {
+  const uint16_t source_vgpr = input.source;
+  const auto shift = build_v_lshrrev_b32_e32(
+      destination_vgpr, scalar_positive_inline_u32(input.shift_right), source_vgpr, arch);
+  if (!shift) {
+    errors.emplace_back("ConSan MOI could not encode stable owner shift");
+    return false;
+  }
+  words.push_back(*shift);
+  if (input.mask != consan_moi_exact_shadow::max_owner) {
+    const auto mask =
+        build_v_and_b32_e32_literal(destination_vgpr, input.mask, destination_vgpr, arch);
+    if (!mask) {
+      errors.emplace_back("ConSan MOI could not encode stable owner mask");
+      return false;
+    }
+    words.insert(words.end(), mask->begin(), mask->end());
+  }
+  return true;
 }
 
 [[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
@@ -2123,6 +2214,10 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
     request.forbidden.expand({RegClass::VGPR, *options.moi_owner_vgpr, 1});
   if (options.moi_epoch_vgpr)
     request.forbidden.expand({RegClass::VGPR, *options.moi_epoch_vgpr, 1});
+  for (const auto workgroup_vgpr : options.moi_workgroup_vgprs) {
+    if (workgroup_vgpr)
+      request.forbidden.expand({RegClass::VGPR, *workgroup_vgpr, 1});
+  }
 
   const ConSanRegisterPlan register_plan = plan_consan_registers(request, live_before_all_owners);
   plan.source = register_plan.source;
@@ -2151,6 +2246,7 @@ struct ResolvedMoiScratchPlan {
   uint16_t base = 0;
   uint16_t count = 0;
   uint16_t required_vgpr_count = 0;
+  uint16_t max_referenced_sgpr_count = 0;
   uint32_t original_private_segment_size = 0;
   std::vector<uint64_t> owner_descriptor_file_offsets;
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
@@ -2193,6 +2289,7 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
     resolved.base = *plan.scratch_vgpr;
     resolved.count = expected_count;
     resolved.required_vgpr_count = plan.required_vgpr_count;
+    resolved.max_referenced_sgpr_count = plan.max_referenced_sgpr_count;
     resolved.original_private_segment_size = plan.original_private_segment_size;
     resolved.owner_descriptor_file_offsets = plan.owner_descriptor_file_offsets;
     resolved.source = plan.source;
@@ -2203,6 +2300,12 @@ resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOp
     if (options.moi_epoch_vgpr) {
       resolved.required_vgpr_count = std::max<uint16_t>(
           resolved.required_vgpr_count, static_cast<uint16_t>(*options.moi_epoch_vgpr + 1u));
+    }
+    for (const auto workgroup_vgpr : options.moi_workgroup_vgprs) {
+      if (workgroup_vgpr) {
+        resolved.required_vgpr_count = std::max<uint16_t>(
+            resolved.required_vgpr_count, static_cast<uint16_t>(*workgroup_vgpr + 1u));
+      }
     }
     return resolved;
   }
@@ -2378,12 +2481,59 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   return false;
 }
 
+[[nodiscard]] bool configure_automatic_moi_identity_sgprs(ConSanOptions &options,
+                                                          rj_code_arch_t arch,
+                                                          ConSanResult &result) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 ||
+      options.moi_owner_source != ConSanMoiOwnerSource::WorkitemId ||
+      !options.moi_report_buffer_address || options.moi_identity_sgpr)
+    return false;
+
+  uint32_t first = 0;
+  bool found_owned_scope = false;
+  for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+    if (plan.owner_descriptor_file_offsets.empty())
+      continue;
+    found_owned_scope = true;
+    // The dispatch-pointer ABI transaction inserts two user SGPRs before the
+    // original inputs. Keep the unpack temporaries above both views.
+    first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count + 2u);
+  }
+  if (!found_owned_scope) {
+    result.warnings.emplace_back(
+        "ConSan MOI could not derive automatic CDNA4 identity SGPRs without an owned scope");
+    return false;
+  }
+
+  for (uint32_t base = first; base + 2u <= moi_max_ordinary_sgprs(arch); ++base) {
+    if (options.moi_exec_save_sgpr &&
+        range_overlaps(static_cast<uint16_t>(base), 2u, *options.moi_exec_save_sgpr,
+                       moi_exec_save_sgpr_count(options)))
+      continue;
+    if (options.moi_owner_sgpr &&
+        range_overlaps(static_cast<uint16_t>(base), 2u, *options.moi_owner_sgpr, 1u))
+      continue;
+    options.moi_identity_sgpr = static_cast<uint16_t>(base);
+    result.resolved_moi_identity_sgpr = options.moi_identity_sgpr;
+    result.warnings.emplace_back("ConSan MOI automatically assigned CDNA4 identity SGPRs s" +
+                                 std::to_string(base) + ":s" + std::to_string(base + 1u));
+    return true;
+  }
+
+  result.errors.emplace_back("ConSan MOI could not place two fresh CDNA4 identity SGPRs");
+  return false;
+}
+
 [[nodiscard]] bool configure_automatic_moi_persistent_vgprs(ConSanOptions &options,
+                                                            rj_code_arch_t arch,
                                                             ConSanResult &result) {
   if (options.moi_owner_vgpr || options.moi_epoch_vgpr)
     return false;
-  const bool needs_persistent_state = options.moi_init_owner_epoch || options.moi_track_atomics ||
-                                      options.moi_engine == ConSanMoiEngine::InlineShadow;
+  const bool needs_persistent_state =
+      options.moi_init_owner_epoch || options.moi_track_atomics ||
+      options.moi_engine == ConSanMoiEngine::InlineShadow ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+       options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId);
   if (!needs_persistent_state)
     return false;
   if (!options.moi_report_buffer_address)
@@ -2408,7 +2558,14 @@ moi_special_state_sgprs(const ConSanOptions &options) {
         "scope");
     return false;
   }
-  if (options.force_private_epoch || persistent_base + 2u > kMaxVgprs) {
+  const uint32_t persistent_count = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u;
+  if (options.force_private_epoch || persistent_base + persistent_count > kMaxVgprs) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      result.errors.emplace_back(
+          "ConSan MOI CDNA4 stable owner requires two persistent VGPRs at kernel entry");
+      return false;
+    }
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
     result.moi_private_epoch_automatic = true;
@@ -2419,14 +2576,23 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 
   options.moi_owner_vgpr = static_cast<uint16_t>(persistent_base);
   options.moi_epoch_vgpr = static_cast<uint16_t>(persistent_base + 1u);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+      options.moi_workgroup_vgprs[dimension] =
+          static_cast<uint16_t>(persistent_base + 2u + dimension);
+      result.resolved_moi_workgroup_vgprs[dimension] = options.moi_workgroup_vgprs[dimension];
+    }
+    options.automatic_moi_identity_vgprs = true;
+  }
   options.moi_init_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;
   result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
   result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
   result.moi_persistent_vgprs_automatic = true;
-  result.warnings.emplace_back("ConSan MOI automatically assigned persistent owner/epoch VGPRs v" +
-                               std::to_string(*options.moi_owner_vgpr) + ":v" +
-                               std::to_string(*options.moi_epoch_vgpr));
+  result.warnings.emplace_back(
+      "ConSan MOI automatically assigned persistent identity VGPRs v" +
+      std::to_string(*options.moi_owner_vgpr) + ":v" +
+      std::to_string(static_cast<uint32_t>(*options.moi_owner_vgpr) + persistent_count - 1u));
   return true;
 }
 
@@ -2491,33 +2657,40 @@ struct MoiPrivateEpochLayout {
   uint32_t ephemeral_base = 0;
 };
 
-[[nodiscard]] std::optional<uint16_t>
-common_moi_private_owner_shift(std::span<const uint8_t> image,
+[[nodiscard]] std::optional<MoiOwnerInput>
+common_moi_private_owner_input(std::span<const uint8_t> image,
                                const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
                                std::vector<std::string> &warnings) {
-  std::optional<uint16_t> common_shift;
+  std::optional<MoiOwnerInput> common_input;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
-    if (!shift) {
+    const auto input = moi_descriptor_owner_input(image, descriptor_offset, arch, errors);
+    if (!input) {
       warnings.insert(warnings.end(), errors.begin(), errors.end());
       return std::nullopt;
     }
-    if (common_shift && *common_shift != *shift) {
-      warnings.emplace_back("ConSan MOI shared private owner has incompatible owner wave sizes");
+    if (common_input && !same_owner_input(*common_input, *input)) {
+      if (common_input->kind == MoiOwnerInputKind::WorkitemId &&
+          input->kind == MoiOwnerInputKind::WorkitemId &&
+          common_input->shift_right != input->shift_right) {
+        warnings.emplace_back("ConSan MOI shared private owner has incompatible owner wave sizes");
+      } else {
+        warnings.emplace_back(
+            "ConSan MOI shared private owner has incompatible descriptor ABI inputs");
+      }
       return std::nullopt;
     }
-    common_shift = shift;
+    common_input = input;
   }
-  if (!common_shift)
+  if (!common_input)
     warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
-  return common_shift;
+  return common_input;
 }
 
 [[nodiscard]] bool same_workgroup_source(const ConSanMoiWorkgroupSource &lhs,
                                          const ConSanMoiWorkgroupSource &rhs) {
-  return lhs.scalar_src == rhs.scalar_src && lhs.shift_right_16 == rhs.shift_right_16 &&
-         lhs.mask_low_16 == rhs.mask_low_16;
+  return lhs.scalar_src == rhs.scalar_src && lhs.vector_src == rhs.vector_src &&
+         lhs.shift_right_16 == rhs.shift_right_16 && lhs.mask_low_16 == rhs.mask_low_16;
 }
 
 [[nodiscard]] bool same_workgroup_sources(const ConSanMoiWorkgroupSources &lhs,
@@ -2526,30 +2699,36 @@ common_moi_private_owner_shift(std::span<const uint8_t> image,
          same_workgroup_source(lhs.z, rhs.z);
 }
 
-[[nodiscard]] std::optional<uint64_t>
-common_moi_record_owner_descriptor(std::span<const uint8_t> image,
-                                   const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-                                   std::vector<std::string> &warnings) {
-  std::optional<uint16_t> common_shift;
+[[nodiscard]] std::optional<uint64_t> common_moi_record_owner_descriptor(
+    std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
+    const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+    if (resources.owner_descriptor_file_offsets.empty()) {
+      warnings.emplace_back("ConSan MOI shared record owner has no owning descriptor");
+      return std::nullopt;
+    }
+    return resources.owner_descriptor_file_offsets.front();
+  }
+  std::optional<MoiOwnerInput> common_owner_input;
   std::optional<ConSanMoiWorkgroupSources> common_workgroup_sources;
   std::optional<uint64_t> representative;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
+    const auto owner_input = moi_descriptor_owner_input(image, descriptor_offset, arch, errors);
     const auto workgroup_sources =
         moi_descriptor_workgroup_sources(image, descriptor_offset, arch, errors);
-    if (!shift || !workgroup_sources) {
+    if (!owner_input || !workgroup_sources) {
       warnings.insert(warnings.end(), errors.begin(), errors.end());
       return std::nullopt;
     }
-    if ((common_shift && *common_shift != *shift) ||
+    if ((common_owner_input && !same_owner_input(*common_owner_input, *owner_input)) ||
         (common_workgroup_sources &&
          !same_workgroup_sources(*common_workgroup_sources, *workgroup_sources))) {
       warnings.emplace_back(
           "ConSan MOI shared record owner has incompatible descriptor ABI inputs");
       return std::nullopt;
     }
-    common_shift = shift;
+    common_owner_input = owner_input;
     common_workgroup_sources = workgroup_sources;
     if (!representative)
       representative = descriptor_offset;
@@ -2915,27 +3094,24 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     return std::nullopt;
   }
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!owner_shift)
+    const auto owner_input =
+        moi_descriptor_owner_input(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    if (!owner_input)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr + (options.moi_dynamic_access_records ? 4u : 2u));
-    const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
+    if (!append_moi_owner_input(derived_owner_words, value_vgpr, *owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI first-light probe could not encode stable owner derivation");
       return std::nullopt;
     }
     derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
   }
   ConSanMoiWorkgroupSources workgroup_sources;
   if (candidate.kernel_descriptor_file_offset) {
-    const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    const auto descriptor_workgroup_sources = moi_probe_workgroup_sources(
+        bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
     workgroup_sources = *descriptor_workgroup_sources;
@@ -2944,9 +3120,8 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   std::vector<uint32_t> words;
   words.reserve(candidate.size / sizeof(uint32_t) + 1u + 7u * 12u + 9u + 10u + 20u + 24u +
                 (options.moi_owner_vgpr || derived_owner_vgpr ? 9u : 0u) +
-                (options.moi_epoch_vgpr ? 9u : 0u) + (derived_owner_vgpr ? 1u : 0u));
-  if (derived_owner_word)
-    words.push_back(*derived_owner_word);
+                (options.moi_epoch_vgpr ? 9u : 0u) + derived_owner_words.size());
+  words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -3209,11 +3384,11 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   return true;
 }
 
-[[nodiscard]] bool append_inline_shadow_owner_field(std::vector<uint32_t> &words,
-                                                    const ConSanOptions &options, uint16_t low_vgpr,
-                                                    uint16_t tmp_vgpr, rj_code_arch_t arch,
-                                                    std::optional<uint16_t> private_owner_shift,
-                                                    std::vector<std::string> &errors) {
+[[nodiscard]] bool
+append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptions &options,
+                                 uint16_t low_vgpr, uint16_t tmp_vgpr, rj_code_arch_t arch,
+                                 std::optional<MoiOwnerInput> private_owner_input,
+                                 std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
@@ -3226,18 +3401,14 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 
   switch (options.moi_owner_source) {
   case ConSanMoiOwnerSource::WorkitemId: {
-    if (!private_owner_shift) {
-      errors.emplace_back(
-          "ConSan MOI private owner has no descriptor-compatible workitem-id encoding");
+    if (!private_owner_input) {
+      errors.emplace_back("ConSan MOI private owner has no descriptor-compatible stable encoding");
       return false;
     }
-    const auto owner = build_v_lshrrev_b32_e32(
-        tmp_vgpr, scalar_positive_inline_u32(*private_owner_shift), kWorkitemIdX, arch);
-    if (!owner) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from workitem id");
+    if (!append_moi_owner_input(words, tmp_vgpr, *private_owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI inline-shadow probe could not derive stable owner");
       return false;
     }
-    words.push_back(*owner);
     break;
   }
   case ConSanMoiOwnerSource::HwId: {
@@ -3548,7 +3719,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    std::optional<uint32_t> private_epoch_offset, std::optional<uint16_t> private_owner_shift,
+    std::optional<uint32_t> private_epoch_offset, std::optional<MoiOwnerInput> private_owner_input,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
@@ -3623,7 +3794,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   }
   words.insert(words.end(), mov_low->begin(), mov_low->end());
   if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, arch,
-                                        private_owner_shift, errors)) {
+                                        private_owner_input, errors)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
     return std::nullopt;
   }
@@ -3749,7 +3920,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
     std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiOwnerInput> private_owner_input;
     uint32_t required_private_bytes = 0;
   };
   std::vector<PlannedInlineShadowPatch> planned_patches;
@@ -3767,15 +3938,15 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       continue;
 
     std::optional<MoiPrivateEpochLayout> private_layout;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiOwnerInput> private_owner_input;
     if (options.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(result, *resources, result.warnings);
       if (!private_layout)
         continue;
       if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
-        private_owner_shift =
-            common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
-        if (!private_owner_shift)
+        private_owner_input =
+            common_moi_private_owner_input(bytes, *resources, arch, result.warnings);
+        if (!private_owner_input)
           continue;
       }
     }
@@ -3795,7 +3966,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     auto words = build_inline_shadow_words(
         bytes, candidate, candidate_options, arch, layout,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_owner_shift, candidate_errors);
+        private_owner_input, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -3835,7 +4006,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.spill = spill;
     if (private_layout)
       planned.private_epoch_offset = private_layout->epoch_offset;
-    planned.private_owner_shift = private_owner_shift;
+    planned.private_owner_input = private_owner_input;
     planned.required_private_bytes = required_private_bytes;
     planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == options.max_patches)
@@ -3890,7 +4061,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
                                              planned_patch.private_epoch_offset,
-                                             planned_patch.private_owner_shift, result.errors);
+                                             planned_patch.private_owner_input, result.errors);
       if (!words)
         return;
 
@@ -3999,7 +4170,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     candidate_options.scratch_vgpr = planned_patch.resources.base;
     auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
                                            planned_patch.private_epoch_offset,
-                                           planned_patch.private_owner_shift, result.errors);
+                                           planned_patch.private_owner_input, result.errors);
     if (!words) {
       result.elf_bytes.clear();
       return;
@@ -4210,21 +4381,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   const ConSanMoiLdsCellRange static_range = consan_moi_lds_cell_range_for_bytes(0, *byte_count);
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!owner_shift)
+    const auto owner_input =
+        moi_descriptor_owner_input(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    if (!owner_input)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI sampled probe could not encode owner derivation");
+    if (!append_moi_owner_input(derived_owner_words, value_vgpr, *owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI sampled probe could not encode stable owner derivation");
       return std::nullopt;
     }
     derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
   }
 
   const uint16_t low_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
@@ -4259,10 +4427,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                          static_cast<uint64_t>(record_index) * sizeof(uint64_t);
 
   std::vector<uint32_t> words;
-  words.reserve(candidate.size / sizeof(uint32_t) + 40u + (derived_owner_word ? 1u : 0u) +
+  words.reserve(candidate.size / sizeof(uint32_t) + 40u + derived_owner_words.size() +
                 (options.moi_epoch_vgpr ? 2u : 0u));
-  if (derived_owner_word)
-    words.push_back(*derived_owner_word);
+  words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
@@ -5048,21 +5215,128 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   result.modified = true;
 }
 
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_cdna4_identity_prologue_words(
+    uint64_t prologue_text_offset, uint64_t original_entry_text_offset, const KD &descriptor,
+    const ConSanOptions &options, std::vector<std::string> &errors) {
+  if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr || !options.moi_identity_sgpr ||
+      !options.moi_workgroup_vgprs[0] || !options.moi_workgroup_vgprs[1] ||
+      !options.moi_workgroup_vgprs[2]) {
+    errors.emplace_back("ConSan MOI CDNA4 identity prologue has incomplete register state");
+    return std::nullopt;
+  }
+
+  const uint16_t owner_vgpr = *options.moi_owner_vgpr;
+  const uint16_t epoch_vgpr = *options.moi_epoch_vgpr;
+  const uint16_t size_x_sgpr = *options.moi_identity_sgpr;
+  const uint16_t size_y_sgpr = static_cast<uint16_t>(size_x_sgpr + 1u);
+  const uint16_t dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
+  const uint32_t insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
+  const uint32_t original_abi_count =
+      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
+  if (moi_descriptor_user_sgpr_count(descriptor) < dispatch_sgpr ||
+      original_abi_count + insertion_width > kMaxCdna4Sgprs) {
+    errors.emplace_back("ConSan MOI CDNA4 dispatch-pointer ABI transaction exceeds SGPR bounds");
+    return std::nullopt;
+  }
+
+  // AQL kernel-dispatch packets store workgroup_size_x/y as adjacent uint16_t
+  // fields at byte offset 4. One scalar dword load obtains both values.
+  const auto load_group_xy = build_s_load_dword(size_x_sgpr, dispatch_sgpr,
+                                                /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_group_xy = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
+  if (!load_group_xy || !wait_group_xy) {
+    errors.emplace_back("ConSan MOI CDNA4 identity prologue could not load dispatch dimensions");
+    return std::nullopt;
+  }
+
+  std::vector<uint32_t> words;
+  words.reserve(40u + original_abi_count);
+  words.insert(words.end(), load_group_xy->begin(), load_group_xy->end());
+
+  // System SGPRs follow the user-SGPR block, so a newly inserted dispatch
+  // pointer shifts every original workgroup input by two registers. Snapshot
+  // the shifted values before restoring the guest-visible layout.
+  for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+    const uint16_t destination = *options.moi_workgroup_vgprs[dimension];
+    const auto original_source = moi_descriptor_workgroup_id_sgpr(descriptor, dimension);
+    const uint16_t source = original_source
+                                ? static_cast<uint16_t>(*original_source + insertion_width)
+                                : scalar_positive_inline_u32(0);
+    words.push_back(build_v_mov_b32_e32(destination, source, ROCJITSU_CODE_ARCH_CDNA4));
+  }
+
+  words.push_back(*wait_group_xy);
+  constexpr uint16_t kInline16 = kScalarPositiveInlineBase + 16u;
+  words.push_back(build_s_lshr_b32(size_y_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(build_s_lshl_b32(size_x_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(build_s_lshr_b32(size_x_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+
+  // VGPR0 is the AMDHSA packed workitem ID {00,z[9:0],y[9:0],x[9:0]}.
+  // Compute x + size_x * (y + size_y * z), then divide by wave64.
+  const auto z = build_v_lshrrev_b32_e32(owner_vgpr, scalar_positive_inline_u32(20), kWorkitemIdX,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto y = build_v_lshrrev_b32_e32(epoch_vgpr, scalar_positive_inline_u32(10), kWorkitemIdX,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mask_y =
+      build_v_and_b32_e32_literal(epoch_vgpr, 0x3ffu, epoch_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto yz = build_v_mad_u32_u24(owner_vgpr, size_y_sgpr, owner_vgpr, epoch_vgpr,
+                                      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto x =
+      build_v_and_b32_e32_literal(epoch_vgpr, 0x3ffu, kWorkitemIdX, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto flat = build_v_mad_u32_u24(owner_vgpr, size_x_sgpr, owner_vgpr, epoch_vgpr,
+                                        ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wave = build_v_lshrrev_b32_e32(owner_vgpr, scalar_positive_inline_u32(6), owner_vgpr,
+                                            ROCJITSU_CODE_ARCH_CDNA4);
+  if (!z || !y || !mask_y || !yz || !x || !flat || !wave) {
+    errors.emplace_back("ConSan MOI CDNA4 identity prologue could not encode logical owner");
+    return std::nullopt;
+  }
+  words.push_back(*z);
+  words.push_back(*y);
+  words.insert(words.end(), mask_y->begin(), mask_y->end());
+  words.insert(words.end(), yz->begin(), yz->end());
+  words.insert(words.end(), x->begin(), x->end());
+  words.insert(words.end(), flat->begin(), flat->end());
+  words.push_back(*wave);
+  words.push_back(
+      build_v_mov_b32_e32(epoch_vgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
+
+  if (insertion_width != 0) {
+    for (uint32_t destination = dispatch_sgpr; destination < original_abi_count; ++destination) {
+      words.push_back(build_s_mov_b32(static_cast<uint16_t>(destination),
+                                      static_cast<uint16_t>(destination + insertion_width),
+                                      ROCJITSU_CODE_ARCH_CDNA4));
+    }
+  }
+
+  const uint64_t branch_pc =
+      prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
+  const auto branch = compute_sopp_branch_simm16(branch_pc, original_entry_text_offset);
+  if (!branch) {
+    errors.emplace_back("ConSan MOI CDNA4 identity prologue branch target is out of range");
+    return std::nullopt;
+  }
+  words.push_back(build_s_branch(*branch, ROCJITSU_CODE_ARCH_CDNA4));
+  return words;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_owner_epoch_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t owner_vgpr,
-    uint16_t epoch_vgpr, uint16_t owner_shift_bits, ConSanMoiOwnerSource owner_source,
-    std::optional<uint16_t> owner_sgpr, rj_code_arch_t arch, std::vector<std::string> &errors) {
+    uint16_t epoch_vgpr, const MoiOwnerInput &owner_input, ConSanMoiOwnerSource owner_source,
+    std::optional<uint16_t> owner_sgpr, const KD &descriptor, const ConSanOptions &options,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && owner_source == ConSanMoiOwnerSource::WorkitemId)
+    return build_cdna4_identity_prologue_words(prologue_text_offset, original_entry_text_offset,
+                                               descriptor, options, errors);
+
   std::vector<uint32_t> words;
   words.reserve(4);
   switch (owner_source) {
   case ConSanMoiOwnerSource::WorkitemId: {
-    auto owner_init = build_v_lshrrev_b32_e32(
-        owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kWorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI owner/epoch prologue could not encode owner VGPR init");
+    if (!append_moi_owner_input(words, owner_vgpr, owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI owner/epoch prologue could not encode stable owner init");
       return std::nullopt;
     }
-    words.push_back(*owner_init);
     break;
   }
   case ConSanMoiOwnerSource::HwId: {
@@ -5146,8 +5420,8 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
 [[nodiscard]] bool
 grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const uint8_t> image,
                                      const ConSanKernelInfo &kernel, uint32_t required_vgpr_count,
-                                     uint32_t required_sgpr_count, rj_code_arch_t arch,
-                                     std::vector<std::string> &errors) {
+                                     uint32_t required_sgpr_count, bool enable_dispatch_ptr,
+                                     rj_code_arch_t arch, std::vector<std::string> &errors) {
   if (kernel.descriptor_file_offset > image.size() ||
       sizeof(KD) > image.size() - kernel.descriptor_file_offset) {
     errors.emplace_back("ConSan MOI descriptor register growth exceeds ELF bytes");
@@ -5156,6 +5430,17 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
+  if (enable_dispatch_ptr && !moi_descriptor_enables_dispatch_ptr(desc)) {
+    const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(desc);
+    if (user_sgpr_count > 29u) {
+      errors.emplace_back("ConSan MOI cannot insert a dispatch pointer into the user-SGPR ABI");
+      return false;
+    }
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                    1u);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                    (user_sgpr_count + 2u));
+  }
   if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
@@ -5305,8 +5590,9 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                           ConSanResult &result) {
   if (!options.moi_init_owner_epoch)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI owner/epoch prologue currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI owner/epoch prologue currently supports only RDNA4 and CDNA4");
     return;
   }
   if (options.automatic_moi_private_epoch) {
@@ -5342,11 +5628,17 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     result.errors.emplace_back("ConSan MOI owner/epoch prologue found no .text section");
     return;
   }
-  const uint32_t required_vgpr_count =
+  uint32_t required_vgpr_count =
       std::max<uint32_t>(*options.moi_owner_vgpr, *options.moi_epoch_vgpr) + 1u;
-  const uint32_t required_sgpr_count = options.moi_owner_source == ConSanMoiOwnerSource::HwId
-                                           ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
-                                           : 0u;
+  for (const auto workgroup_vgpr : options.moi_workgroup_vgprs) {
+    if (workgroup_vgpr)
+      required_vgpr_count = std::max<uint32_t>(required_vgpr_count, *workgroup_vgpr + 1u);
+  }
+  uint32_t required_sgpr_count = options.moi_owner_source == ConSanMoiOwnerSource::HwId
+                                     ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
+                                     : 0u;
+  if (options.moi_identity_sgpr)
+    required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *options.moi_identity_sgpr + 2u);
   std::vector<ConSanKernelInfo> target_kernels;
   target_kernels.reserve(result.kernels.size());
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -5374,8 +5666,23 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     target_kernels.push_back(std::move(active));
   }
   for (const ConSanKernelInfo &kernel : target_kernels) {
-    if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, kernel, required_vgpr_count,
-                                              required_sgpr_count, arch, result.errors)) {
+    if (kernel.descriptor_file_offset > active_bytes.size() ||
+        sizeof(KD) > active_bytes.size() - kernel.descriptor_file_offset) {
+      result.errors.emplace_back("ConSan MOI identity descriptor exceeds ELF bytes");
+      return;
+    }
+    KD descriptor{};
+    std::memcpy(&descriptor, active_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    uint32_t kernel_required_sgprs = required_sgpr_count;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+      kernel_required_sgprs = std::max<uint32_t>(
+          kernel_required_sgprs, moi_descriptor_abi_sgpr_count(descriptor, arch) +
+                                     moi_descriptor_dispatch_insertion_width(descriptor));
+    }
+    if (!grow_moi_kernel_descriptor_registers(
+            patcher, active_bytes, kernel, required_vgpr_count, kernel_required_sgprs,
+            options.automatic_moi_identity_vgprs, arch, result.errors)) {
       return;
     }
   }
@@ -5386,14 +5693,16 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
 
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
-    const std::optional<uint16_t> owner_shift =
-        moi_kernel_owner_shift(active_bytes, kernel, arch, result.errors);
-    if (!owner_shift)
+    const auto owner_input = moi_kernel_owner_input(active_bytes, kernel, arch, result.errors);
+    if (!owner_input)
       return;
-    auto words = build_owner_epoch_prologue_words(prologue_text_offset, kernel.entry_text_offset,
-                                                  *options.moi_owner_vgpr, *options.moi_epoch_vgpr,
-                                                  *owner_shift, options.moi_owner_source,
-                                                  options.moi_owner_sgpr, arch, result.errors);
+    KD descriptor{};
+    std::memcpy(&descriptor, active_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    auto words = build_owner_epoch_prologue_words(
+        prologue_text_offset, kernel.entry_text_offset, *options.moi_owner_vgpr,
+        *options.moi_epoch_vgpr, *owner_input, options.moi_owner_source, options.moi_owner_sgpr,
+        descriptor, options, arch, result.errors);
     if (!words)
       return;
     if (!patcher.redirect_kernel_entry(kernel.descriptor_file_offset, kernel.entry_text_offset,
@@ -5477,7 +5786,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     return std::nullopt;
 
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr) {
     if (!candidate.kernel_descriptor_file_offset) {
       errors.emplace_back(
@@ -5485,24 +5794,21 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
           "barriers");
       return std::nullopt;
     }
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!owner_shift)
+    const auto owner_input =
+        moi_descriptor_owner_input(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    if (!owner_input)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI barrier record patch could not encode owner derivation");
+    if (!append_moi_owner_input(derived_owner_words, value_vgpr, *owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI barrier record patch could not encode stable owner");
       return std::nullopt;
     }
     derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
   }
   ConSanMoiWorkgroupSources workgroup_sources;
   if (candidate.kernel_descriptor_file_offset) {
-    const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    const auto descriptor_workgroup_sources = moi_probe_workgroup_sources(
+        bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
     workgroup_sources = *descriptor_workgroup_sources;
@@ -5558,8 +5864,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
 
   std::vector<uint32_t> record_words;
   record_words.reserve(128);
-  if (derived_owner_word)
-    record_words.push_back(*derived_owner_word);
+  record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
   if ((derived_owner_vgpr &&
        !append_dynamic_barrier_store_u32_vgpr(
            record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
@@ -6066,7 +6371,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     BarrierRecordCandidate planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+          common_moi_record_owner_descriptor(bytes, *resources, options, arch, result.warnings);
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
@@ -6590,7 +6895,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     AtomicRecordCandidate planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+          common_moi_record_owner_descriptor(bytes, *resources, options, arch, result.warnings);
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
@@ -6713,32 +7018,29 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return std::nullopt;
 
   std::optional<uint16_t> derived_owner_vgpr;
-  std::optional<uint32_t> derived_owner_word;
+  std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr) {
     if (!candidate.kernel_descriptor_file_offset) {
       errors.emplace_back(
           "ConSan MOI atomic record patch requires RJ_CONSAN_MOI_OWNER_VGPR for function atomics");
       return std::nullopt;
     }
-    const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
-    if (!owner_shift)
+    const auto owner_input =
+        moi_descriptor_owner_input(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    if (!owner_input)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
-    const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
-    if (!owner_init) {
-      errors.emplace_back("ConSan MOI atomic record patch could not encode owner derivation");
+    if (!append_moi_owner_input(derived_owner_words, value_vgpr, *owner_input, arch, errors)) {
+      errors.emplace_back("ConSan MOI atomic record patch could not encode stable owner");
       return std::nullopt;
     }
     derived_owner_vgpr = value_vgpr;
-    derived_owner_word = *owner_init;
   }
 
   ConSanMoiWorkgroupSources workgroup_sources;
   if (candidate.kernel_descriptor_file_offset) {
-    const auto descriptor_workgroup_sources = moi_descriptor_workgroup_sources(
-        bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
+    const auto descriptor_workgroup_sources = moi_probe_workgroup_sources(
+        bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors);
     if (!descriptor_workgroup_sources)
       return std::nullopt;
     workgroup_sources = *descriptor_workgroup_sources;
@@ -6755,8 +7057,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                 (spill ? spill->save_words.size() + spill->restore_words.size() : 0u));
   if (spill)
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
-  if (derived_owner_word)
-    words.push_back(*derived_owner_word);
+  words.insert(words.end(), derived_owner_words.begin(), derived_owner_words.end());
   for (uint64_t offset = 0; offset < candidate.site.size; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
@@ -6937,7 +7238,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     AtomicRecordCandidate planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
+          common_moi_record_owner_descriptor(bytes, *resources, options, arch, result.warnings);
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
@@ -7134,12 +7435,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_exec_save_sgprs(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_persistent_vgprs(effective_options, result))
+  if (configure_automatic_moi_identity_sgprs(effective_options, arch, result))
+    rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
+  if (configure_automatic_moi_persistent_vgprs(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (!result.resolved_moi_owner_vgpr)
     result.resolved_moi_owner_vgpr = effective_options.moi_owner_vgpr;
   if (!result.resolved_moi_epoch_vgpr)
     result.resolved_moi_epoch_vgpr = effective_options.moi_epoch_vgpr;
+  for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+    if (!result.resolved_moi_workgroup_vgprs[dimension])
+      result.resolved_moi_workgroup_vgprs[dimension] =
+          effective_options.moi_workgroup_vgprs[dimension];
+  }
+  if (!result.resolved_moi_identity_sgpr)
+    result.resolved_moi_identity_sgpr = effective_options.moi_identity_sgpr;
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;
   if (!result.resolved_moi_owner_sgpr)

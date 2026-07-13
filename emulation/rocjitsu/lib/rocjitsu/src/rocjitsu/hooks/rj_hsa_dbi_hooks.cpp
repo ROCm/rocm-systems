@@ -82,6 +82,7 @@ struct HookConfig {
   bool moi_sampled_check = false;
   bool test_force_vgpr_spill = false;
   bool test_force_private_epoch = false;
+  uint32_t test_require_identity_groups = 0;
   std::string test_kernel_name_filter;
   bool moi_require_records = false;
   bool moi_require_diagnostics = false;
@@ -755,6 +756,9 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   if (!parse_bool_env("RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH", false,
                       &config.test_force_private_epoch))
     return std::nullopt;
+  if (!parse_u32_env("RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS", 0,
+                     &config.test_require_identity_groups))
+    return std::nullopt;
   if (const char *test_filter = std::getenv("RJ_CONSAN_TEST_KERNEL_FILTER"))
     config.test_kernel_name_filter = test_filter;
   if (!parse_bool_env("RJ_CONSAN_MOI_REQUIRE_RECORDS", false, &config.moi_require_records))
@@ -1348,6 +1352,8 @@ public:
     uint64_t replay_diagnostic_count = 0;
     uint64_t sampled_conflict_count = 0;
     uint64_t sampled_immediate_conflict_count = 0;
+    uint64_t identity_workgroup_count = 0;
+    uint64_t identity_multi_owner_workgroup_count = 0;
   };
 
   Summary summarize_and_clear(CoreApiTable *core) {
@@ -1370,6 +1376,9 @@ public:
       total.replay_diagnostic_count += entry_summary.replay_diagnostic_count;
       total.sampled_conflict_count += entry_summary.sampled_conflict_count;
       total.sampled_immediate_conflict_count += entry_summary.sampled_immediate_conflict_count;
+      total.identity_workgroup_count += entry_summary.identity_workgroup_count;
+      total.identity_multi_owner_workgroup_count +=
+          entry_summary.identity_multi_owner_workgroup_count;
       if (core != nullptr && core->hsa_memory_free_fn != nullptr && entries_[i].ptr != nullptr)
         (void)core->hsa_memory_free_fn(entries_[i].ptr);
       entries_[i] = Entry{};
@@ -1609,6 +1618,39 @@ private:
             sizeof(rocjitsu::ConSanMoiBarrierRecord) +
         static_cast<size_t>(header->atomic_record_capacity) *
             sizeof(rocjitsu::ConSanMoiAtomicRecord));
+    struct IdentityGroup {
+      uint32_t x = 0;
+      uint32_t y = 0;
+      uint32_t z = 0;
+      std::vector<uint32_t> owners;
+    };
+    std::vector<IdentityGroup> identity_groups;
+    for (uint32_t i = 0; i < visible_records; ++i) {
+      const rocjitsu::ConSanMoiAccessRecord &record = records[i];
+      auto group = std::ranges::find_if(identity_groups, [&](const IdentityGroup &candidate) {
+        return candidate.x == record.workgroup_x && candidate.y == record.workgroup_y &&
+               candidate.z == record.workgroup_z;
+      });
+      if (group == identity_groups.end()) {
+        identity_groups.push_back(
+            {record.workgroup_x, record.workgroup_y, record.workgroup_z, {record.wave_id}});
+      } else if (std::ranges::find(group->owners, record.wave_id) == group->owners.end()) {
+        group->owners.push_back(record.wave_id);
+      }
+    }
+    summary.identity_workgroup_count = identity_groups.size();
+    summary.identity_multi_owner_workgroup_count =
+        std::ranges::count_if(identity_groups, [](const IdentityGroup &group) {
+          return group.owners.size() == 2u &&
+                 std::ranges::find(group.owners, 0u) != group.owners.end() &&
+                 std::ranges::find(group.owners, 1u) != group.owners.end();
+        });
+    if (!identity_groups.empty()) {
+      log_message(kLogInfo,
+                  "ConSan MOI auto identity reader=%llu workgroups=%zu multi_owner_workgroups=%llu",
+                  static_cast<unsigned long long>(entry.reader), identity_groups.size(),
+                  static_cast<unsigned long long>(summary.identity_multi_owner_workgroup_count));
+    }
     if (visible_records != 0 || visible_barriers != 0 || visible_atomics != 0) {
       uint64_t required_shadow_entries = 0;
       for (uint32_t i = 0; i < visible_records; ++i) {
@@ -2032,6 +2074,8 @@ public:
     const bool moi_forbid_diagnostics = config_ && config_->moi_forbid_diagnostics;
     const bool moi_require_replay_conflict = config_ && config_->moi_require_replay_conflict;
     const bool moi_forbid_overflow = config_ && config_->moi_forbid_overflow;
+    const uint32_t test_require_identity_groups =
+        config_ ? config_->test_require_identity_groups : 0u;
     CodeObjectReaderRegistry::instance().clear();
     KernelPrivateDispatchRegistry::instance().clear();
     clear_unlocked();
@@ -2068,6 +2112,19 @@ public:
                    static_cast<unsigned long long>(moi_report_summary.buffer_count));
       std::fflush(stderr);
       std::_Exit(86);
+    }
+    if (test_require_identity_groups != 0 &&
+        (moi_report_summary.identity_workgroup_count != test_require_identity_groups ||
+         moi_report_summary.identity_multi_owner_workgroup_count != test_require_identity_groups)) {
+      std::fprintf(
+          stderr,
+          "[rocjitsu-dbi-hooks] RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS=%u requested, but "
+          "observed workgroups=%llu multi_owner_workgroups=%llu\n",
+          test_require_identity_groups,
+          static_cast<unsigned long long>(moi_report_summary.identity_workgroup_count),
+          static_cast<unsigned long long>(moi_report_summary.identity_multi_owner_workgroup_count));
+      std::fflush(stderr);
+      std::_Exit(91);
     }
     if (moi_require_replay_conflict && moi_report_summary.replay_conflict_count == 0) {
       std::fprintf(

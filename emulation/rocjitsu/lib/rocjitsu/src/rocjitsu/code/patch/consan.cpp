@@ -150,8 +150,8 @@ ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture)
     capabilities.group_flat_access = ConSanNativeSupport::InventoryOnly;
     capabilities.barrier = ConSanNativeSupport::InventoryOnly;
     capabilities.atomic = ConSanNativeSupport::InventoryOnly;
-    capabilities.workgroup_identity = ConSanNativeSupport::InventoryOnly;
-    capabilities.stable_wave_owner = ConSanNativeSupport::InventoryOnly;
+    capabilities.workgroup_identity = ConSanNativeSupport::NativeEmission;
+    capabilities.stable_wave_owner = ConSanNativeSupport::NativeEmission;
     capabilities.hw_id_owner = ConSanNativeSupport::Unavailable;
     capabilities.scratch_spill = ConSanNativeSupport::NativeEmission;
     capabilities.non_scratch_wait = ConSanNativeSupport::NativeEmission;
