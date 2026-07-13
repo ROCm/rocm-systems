@@ -103,6 +103,10 @@ Full gfx950 support means:
   retaining one-word `v_add_nc_u32_e32` on RDNA4. The unsafe CDNA4 E32 add is
   rejected explicitly, operand boundaries are covered, and the gfx950 live
   record probe still passes.
+- 2026-07-13: `W1` is `DONE`. Every remaining hard-coded gfx12 LDS/load wait
+  in MOI emission was replaced by target dispatch. CDNA4 general FLAT paths
+  wait for both VM and LGKM counters, LDS paths wait for LGKM, exact encodings
+  decode as `s_waitcnt`, and the live gfx950 producer/publication probe passes.
 
 ## DAG Overview
 
@@ -209,7 +213,7 @@ flowchart LR
   I1A["I1A: Workgroup Identity"]:::todo
   I1B["I1B: Stable Wave64 Owner"]:::todo
   I1C["I1C: Optional HW_ID Experiment"]:::todo
-  W1["W1: Non-Scratch Wait Semantics"]:::active
+  W1["W1: Non-Scratch Wait Semantics"]:::done
   B1A["B1A: Barrier Decode And Emission"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
   SC1["SC1: SuperCollider Native LDS"]:::todo
@@ -868,7 +872,7 @@ Done criteria:
 - The result is recorded as experimental or rejected. NP and M0 do not depend
   on this node.
 
-### W1: CDNA4 Non-Scratch Memory Wait Semantics - ACTIVE
+### W1: CDNA4 Non-Scratch Memory Wait Semantics - DONE
 
 Goal: model CDNA4 memory completion without gfx12 wait encodings.
 
@@ -879,6 +883,15 @@ Work:
 - Require both `VM_CNT=0` and `LGKM_CNT=0` after general FLAT operations, as
   required by the ISA manual.
 - Leave scratch save/restore waits owned by S1.
+
+Result:
+
+- Original LDS operations use target-dispatched LDS waits; report FLAT loads,
+  stores, and atomics use the general-FLAT wait that drains both VM and LGKM on
+  CDNA4.
+- No gfx12 `s_wait_loadcnt` or `s_wait_dscnt` literal remains in MOI emission.
+- Exact-byte/decode tests and the live gfx950 access-record producer/consumer
+  smoke cover the currently admitted paths; later engines reuse these helpers.
 
 Done criteria:
 

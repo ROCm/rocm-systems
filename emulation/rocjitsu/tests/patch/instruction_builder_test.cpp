@@ -173,6 +173,27 @@ TEST(InstructionBuilder, BuildSplitScratchWaits) {
   EXPECT_FALSE(build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildTargetDispatchedNonScratchWaits) {
+  const auto cdna_flat = build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cdna_lds = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto rdna_flat = build_s_wait_flat_load0(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto rdna_lds = build_s_wait_lds0(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(cdna_flat && cdna_lds && rdna_flat && rdna_lds);
+  EXPECT_EQ(*cdna_flat, 0xbf8c0070u);
+  EXPECT_EQ(*cdna_lds, 0xbf8cc07fu);
+  EXPECT_EQ(*rdna_flat, 0xbfc00000u);
+  EXPECT_EQ(*rdna_lds, 0xbfc60000u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> flat_inst(decoder->decode(&*cdna_flat));
+  std::unique_ptr<Instruction> lds_inst(decoder->decode(&*cdna_lds));
+  ASSERT_NE(flat_inst, nullptr);
+  ASSERT_NE(lds_inst, nullptr);
+  EXPECT_EQ(flat_inst->mnemonic(), "s_waitcnt");
+  EXPECT_EQ(lds_inst->mnemonic(), "s_waitcnt");
+}
+
 TEST(InstructionBuilder, BuildCdna4AddressFreeScratchB32) {
   const auto store = build_cdna4_address_free_scratch_store_b32(
       /*vsrc=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);

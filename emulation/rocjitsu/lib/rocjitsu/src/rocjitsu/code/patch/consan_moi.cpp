@@ -601,8 +601,6 @@ inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
-inline constexpr uint32_t kWaitLoadcnt0 = 0xBFC00000u;
-inline constexpr uint32_t kWaitDscnt0 = 0xBFC60000u;
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
@@ -3554,7 +3552,12 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  words.push_back(kWaitDscnt0);
+  const auto wait_lds = build_s_wait_lds0(arch);
+  if (!wait_lds) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not encode the LDS completion wait");
+    return std::nullopt;
+  }
+  words.push_back(*wait_lds);
 
   const auto mov_low = build_v_mov_b32_e64_literal(low_vgpr, low_literal, arch);
   const auto mov_high = build_v_mov_b32_e64_literal(high_vgpr, high_literal, arch);
@@ -3629,7 +3632,13 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
         return std::nullopt;
       }
       words.insert(words.end(), atomic_swap->begin(), atomic_swap->end());
-      words.push_back(kWaitLoadcnt0);
+      const auto wait_flat = build_s_wait_flat_load0(arch);
+      if (!wait_flat) {
+        errors.emplace_back(
+            "ConSan MOI inline-shadow probe could not encode the shadow atomic completion wait");
+        return std::nullopt;
+      }
+      words.push_back(*wait_flat);
       if (!append_inline_shadow_diagnostic_words(
               words, candidate, options, arch, layout, old_value_vgpr,
               static_cast<uint16_t>(old_value_vgpr + 1u), low_vgpr, high_vgpr,
@@ -4203,7 +4212,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  words.push_back(kWaitDscnt0);
+  const auto wait_lds = build_s_wait_lds0(arch);
+  if (!wait_lds) {
+    errors.emplace_back("ConSan MOI sampled probe could not encode the LDS completion wait");
+    return std::nullopt;
+  }
+  words.push_back(*wait_lds);
 
   std::optional<size_t> runtime_skip_branch_index;
   if (runtime_sampled) {
@@ -6277,7 +6291,13 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  words.push_back(kWaitLoadcnt0);
+  const auto wait_flat = build_s_wait_flat_load0(arch);
+  if (!wait_flat) {
+    errors.emplace_back(
+        "ConSan MOI inline atomic patch could not encode the atomic completion wait");
+    return std::nullopt;
+  }
+  words.push_back(*wait_flat);
 
   if (atomic_event_kind_for_site(candidate.site) == ConSanMoiAtomicEventKind::Release) {
     if (!append_store_u32_vgpr(words,
@@ -6689,7 +6709,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     std::memcpy(&word, bytes.data() + candidate.site.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  words.push_back(kWaitLoadcnt0);
+  const auto wait_flat = build_s_wait_flat_load0(arch);
+  if (!wait_flat) {
+    errors.emplace_back(
+        "ConSan MOI atomic record patch could not encode the atomic completion wait");
+    return std::nullopt;
+  }
+  words.push_back(*wait_flat);
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t atomic_record_base =
