@@ -1240,6 +1240,7 @@ void PlatformState::SetDynamicLibraryHandle(void* handle) {
 
 // ================================================================================================
 void PlatformState::GetLoadingMode(hipModuleLoadingMode_t* mode) {
+  if (mode == nullptr) return;
   *mode = HIP_MODULE_LAZY_LOADING;
 
   // Use the cached flag value from initialization (not getenv)
