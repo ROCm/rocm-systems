@@ -65,7 +65,7 @@ run(int tid, hipStream_t stream, float* d, bool use_push_pop)
 {
     {
         std::lock_guard<std::mutex> lk{ print_lock };
-        printf("[selective_region][thread %d] starting\n", tid);
+        printf("[selective-region][thread %d] starting\n", tid);
     }
 
     roctx_range_id_t region1_id  = 0;
