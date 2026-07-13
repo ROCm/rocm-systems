@@ -308,11 +308,10 @@ constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
 
-std::vector<uint8_t>
-make_rdna4_lds_code_object(std::span<const uint32_t> text_words,
-                           std::string_view kernel_name = "lds_probe",
-                           uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated,
-                           bool wave32 = false, bool uses_dynamic_stack = false) {
+std::vector<uint8_t> make_rdna4_lds_code_object(
+    std::span<const uint32_t> text_words, std::string_view kernel_name = "lds_probe",
+    uint32_t vgpr_granulated = kRdna4Wave64AllVgprsGranulated, bool wave32 = false,
+    bool uses_dynamic_stack = false, uint32_t machine = EF_AMDGPU_MACH_AMDGCN_GFX1201) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   constexpr uint64_t rodata_vaddr = 0x2100;
@@ -355,7 +354,7 @@ make_rdna4_lds_code_object(std::span<const uint32_t> text_words,
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  ehdr.e_flags = machine;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -2416,6 +2415,75 @@ TEST(ConSanMoi, WarnsWhenReportBufferIsSmallerThanHeader) {
     saw_small_buffer_warning |=
         warning.find("smaller than the report ABI header") != std::string::npos;
   EXPECT_TRUE(saw_small_buffer_warning);
+}
+
+TEST(ConSanMoi, Gfx950DescriptorRegisterGeometryUsesCdna4Encoding) {
+  const ConSanMoiDescriptorRegisterGeometry geometry =
+      consan_moi_descriptor_register_geometry(ROCJITSU_CODE_ARCH_CDNA4,
+                                              /*descriptor_wave32=*/true);
+  EXPECT_EQ(geometry.wavefront_size, 64u);
+  EXPECT_EQ(geometry.max_vgpr_count, 256u);
+  EXPECT_EQ(geometry.max_sgpr_count, 106u);
+  EXPECT_EQ(geometry.vgpr_encoding_granularity, 8u);
+  EXPECT_EQ(geometry.sgpr_encoding_granularity, 8u);
+
+  EXPECT_EQ(consan_moi_decode_descriptor_register_count(0, geometry.max_vgpr_count,
+                                                        geometry.vgpr_encoding_granularity),
+            8u);
+  EXPECT_EQ(consan_moi_decode_descriptor_register_count(31, geometry.max_vgpr_count,
+                                                        geometry.vgpr_encoding_granularity),
+            256u);
+  EXPECT_EQ(consan_moi_encode_descriptor_register_count(256, geometry.max_vgpr_count,
+                                                        geometry.vgpr_encoding_granularity),
+            31u);
+  EXPECT_FALSE(consan_moi_encode_descriptor_register_count(257, geometry.max_vgpr_count,
+                                                           geometry.vgpr_encoding_granularity)
+                   .has_value());
+
+  EXPECT_EQ(consan_moi_decode_descriptor_register_count(13, geometry.max_sgpr_count,
+                                                        geometry.sgpr_encoding_granularity),
+            106u);
+  EXPECT_EQ(consan_moi_encode_descriptor_register_count(106, geometry.max_sgpr_count,
+                                                        geometry.sgpr_encoding_granularity),
+            13u);
+  EXPECT_FALSE(consan_moi_encode_descriptor_register_count(107, geometry.max_sgpr_count,
+                                                           geometry.sgpr_encoding_granularity)
+                   .has_value());
+}
+
+TEST(ConSanMoi, RdnaDescriptorRegisterGeometryRetainsWaveSizeEncoding) {
+  const auto wave64 = consan_moi_descriptor_register_geometry(ROCJITSU_CODE_ARCH_RDNA4, false);
+  const auto wave32 = consan_moi_descriptor_register_geometry(ROCJITSU_CODE_ARCH_RDNA4, true);
+  EXPECT_EQ(wave64.wavefront_size, 64u);
+  EXPECT_EQ(wave64.vgpr_encoding_granularity, 4u);
+  EXPECT_EQ(wave32.wavefront_size, 32u);
+  EXPECT_EQ(wave32.vgpr_encoding_granularity, 8u);
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanDecodesEightVgprsFromZeroDescriptorField) {
+  std::array<uint32_t, 170> text_words{};
+  text_words[0] = 0xD81A0000u;
+  text_words[1] = 0x00000000u; // ds_write_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_descriptor_geometry",
+                                 /*vgpr_granulated=*/0, /*wave32=*/true,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 8u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
 }
 
 TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {

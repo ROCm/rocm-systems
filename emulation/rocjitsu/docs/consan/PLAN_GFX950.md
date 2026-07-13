@@ -29,9 +29,10 @@ The CDNA4 ISA reference establishes several non-negotiable constraints:
 
 - gfx950 is wave64. `EXEC` and `VCC` are 64-bit architectural state, and
   vector, vector-memory, and LDS operations are masked by `EXEC`.
-- User SGPRs are numbered 0-101 and allocated in groups of 16. `VCC` aliases
-  SGPRs 106-107. Regular VGPRs are numbered 0-255 and allocated in groups of
-  eight; AccVGPRs are a distinct architectural class.
+- User SGPRs are numbered 0-101 and physically allocated in groups of 16;
+  their descriptor count field is encoded in groups of eight. `VCC` aliases
+  SGPRs 106-107. Regular VGPRs are numbered 0-255 and allocated and encoded in
+  groups of eight; AccVGPRs are a distinct architectural class.
 - `FLAT_SCRATCH` occupies architectural operands 102-103. Scratch instructions
   have a signed 13-bit byte offset, cannot access LDS, and contribute only to
   `VM_CNT`.
@@ -92,6 +93,11 @@ Full gfx950 support means:
   CDNA4 LDS-versus-FLAT wait integration bug. `D1A`, `P1C`, `RR1A`, and `T1A`
   are active; dynamic records and field-level host assertions remain before
   `RR1A` can become `DONE`.
+- 2026-07-13: `R1A` is `DONE`. Descriptor planning now treats CDNA4 as
+  wave64 with eight-VGPR encoding groups, preserves RDNA wave32/wave64
+  behavior, accepts the SGPR 106 boundary despite its partially filled final
+  descriptor group, and rejects VGPR 257 / SGPR 107. A synthetic gfx950 patch
+  verifies that descriptor field zero is planned as eight VGPRs.
 
 ## DAG Overview
 
@@ -111,7 +117,7 @@ flowchart LR
   A3A["A3A: Basic ISA Fixtures"]:::todo
   A3B["A3B: Private And Pressure Fixtures"]:::todo
   A3C["A3C: Shared-Helper Fixture"]:::todo
-  R1A["R1A: Limits And Descriptor Geometry"]:::todo
+  R1A["R1A: Limits And Descriptor Geometry"]:::done
   R1B["R1B: Scalar And Special State"]:::todo
   R1C["R1C: Owners And Transaction Tests"]:::todo
   F0{"F0: gfx950 Foundation Ready"}:::target
@@ -489,7 +495,7 @@ Done criteria:
 - CPU-only patch planning computes one compatible helper plan across every
   reachable owner.
 
-### R1A: CDNA4 Limits And Descriptor Geometry - TODO
+### R1A: CDNA4 Limits And Descriptor Geometry - DONE
 
 Goal: prove the ordinary register limits and descriptor count geometry used by
 the allocator.
@@ -499,6 +505,15 @@ Work:
 - Verify wave size, ordinary VGPR/SGPR limits, allocation granularities, and
   descriptor fields.
 - Remove RDNA wave32 assumptions from MOI descriptor helpers.
+
+Result:
+
+- Architecture-aware descriptor helpers force CDNA4 wave64 and use eight-VGPR
+  groups while retaining the existing RDNA wave-size rules.
+- Boundary tests cover the final ordinary VGPR and SGPR counts, the partially
+  filled final SGPR descriptor group, and the first rejected counts.
+- A synthetic gfx950 code object exercises the real resource planner and
+  confirms that a zero VGPR descriptor field decodes to eight registers.
 
 Done criteria:
 

@@ -555,6 +555,37 @@ consan_moi_sampled_replay_entries(ConSanMoiReportHeader &header,
   return replay;
 }
 
+ConSanMoiDescriptorRegisterGeometry
+consan_moi_descriptor_register_geometry(rj_code_arch_t arch, bool descriptor_wave32) {
+  ConSanMoiDescriptorRegisterGeometry geometry;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    geometry.wavefront_size = 64;
+    geometry.vgpr_encoding_granularity = 8;
+    return geometry;
+  }
+  geometry.wavefront_size = descriptor_wave32 ? 32 : 64;
+  geometry.vgpr_encoding_granularity = descriptor_wave32 ? 8 : 4;
+  return geometry;
+}
+
+uint32_t consan_moi_decode_descriptor_register_count(uint32_t granulated_count, uint32_t max_count,
+                                                     uint32_t granularity) {
+  if (granularity == 0)
+    return 0;
+  const uint64_t allocated = (static_cast<uint64_t>(granulated_count) + 1u) * granularity;
+  return static_cast<uint32_t>(std::min<uint64_t>(allocated, max_count));
+}
+
+std::optional<uint32_t> consan_moi_encode_descriptor_register_count(uint32_t required_count,
+                                                                    uint32_t max_count,
+                                                                    uint32_t granularity) {
+  if (required_count == 0 || required_count > max_count || granularity == 0)
+    return std::nullopt;
+  const uint64_t rounded =
+      ((static_cast<uint64_t>(required_count) + granularity - 1u) / granularity) * granularity;
+  return static_cast<uint32_t>(rounded / granularity - 1u);
+}
+
 namespace {
 
 inline constexpr uint16_t kRdna4ExecLo = 126;
@@ -1504,10 +1535,10 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   return true;
 }
 
-[[nodiscard]] uint32_t moi_descriptor_wavefront_size(const KD &desc) {
+[[nodiscard]] uint32_t moi_descriptor_wavefront_size(const KD &desc, rj_code_arch_t arch) {
   const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
                                       kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
-  return wave32 ? 32 : 64;
+  return consan_moi_descriptor_register_geometry(arch, wave32).wavefront_size;
 }
 
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &desc) {
@@ -1585,27 +1616,28 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   };
 }
 
-[[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc) {
-  return moi_descriptor_wavefront_size(desc) == 32 ? 8 : 4;
+[[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
+  const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
+                                      kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+  return consan_moi_descriptor_register_geometry(arch, wave32).vgpr_encoding_granularity;
 }
 
-[[nodiscard]] uint32_t moi_descriptor_vgpr_allocation_count(const KD &desc) {
-  const uint32_t granularity = moi_descriptor_vgpr_granularity(desc);
+[[nodiscard]] uint32_t moi_descriptor_vgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
+  const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
   const uint32_t granulated =
       AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  const uint32_t allocated = (granulated + 1u) * granularity;
-  return std::min<uint32_t>(allocated, kMaxVgprs);
+  return consan_moi_decode_descriptor_register_count(granulated, kMaxVgprs, granularity);
 }
 
 [[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc) {
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  const uint32_t allocated = (granulated + 1u) * 8u;
-  return std::min<uint32_t>(allocated, kMaxSgprs);
+  return consan_moi_decode_descriptor_register_count(granulated, kMaxSgprs, 8u);
 }
 
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
                                                                  uint64_t descriptor_file_offset,
+                                                                 rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors) {
   if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
     errors.emplace_back("ConSan MOI owner derivation descriptor exceeds ELF bytes");
@@ -1614,28 +1646,30 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return moi_descriptor_wavefront_size(desc) == 32 ? 5 : 6;
+  return moi_descriptor_wavefront_size(desc, arch) == 32 ? 5 : 6;
 }
 
 [[nodiscard]] std::optional<uint16_t> moi_kernel_owner_shift(std::span<const uint8_t> image,
                                                              const ConSanKernelInfo &kernel,
+                                                             rj_code_arch_t arch,
                                                              std::vector<std::string> &errors) {
-  return moi_descriptor_owner_shift(image, kernel.descriptor_file_offset, errors);
+  return moi_descriptor_owner_shift(image, kernel.descriptor_file_offset, arch, errors);
 }
 
-[[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count) {
+[[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
+                                                       rj_code_arch_t arch) {
   if (required_count == 0 || required_count > kMaxVgprs)
     return false;
-  if (required_count <= moi_descriptor_vgpr_allocation_count(desc))
+  if (required_count <= moi_descriptor_vgpr_allocation_count(desc, arch))
     return true;
 
-  const uint32_t granularity = std::max<uint32_t>(moi_descriptor_vgpr_granularity(desc), 1u);
-  const uint32_t rounded = ((required_count + granularity - 1u) / granularity) * granularity;
-  if (rounded > kMaxVgprs)
+  const uint32_t granularity = std::max<uint32_t>(moi_descriptor_vgpr_granularity(desc, arch), 1u);
+  const auto granulated =
+      consan_moi_encode_descriptor_register_count(required_count, kMaxVgprs, granularity);
+  if (!granulated)
     return false;
-  const uint32_t granulated = rounded / granularity - 1u;
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  granulated);
+                  *granulated);
   return true;
 }
 
@@ -1646,20 +1680,19 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
     return true;
 
   constexpr uint32_t kSgprGranularity = 8;
-  const uint32_t rounded =
-      ((required_count + kSgprGranularity - 1u) / kSgprGranularity) * kSgprGranularity;
-  if (rounded > kMaxSgprs)
+  const auto granulated =
+      consan_moi_encode_descriptor_register_count(required_count, kMaxSgprs, kSgprGranularity);
+  if (!granulated)
     return false;
-  const uint32_t granulated = rounded / kSgprGranularity - 1u;
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  granulated);
+                  *granulated);
   return true;
 }
 
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
                                                     const ConSanKernelInfo &kernel,
-                                                    uint32_t required_count,
+                                                    uint32_t required_count, rj_code_arch_t arch,
                                                     std::vector<std::string> &errors) {
   if (kernel.descriptor_file_offset > image.size() ||
       sizeof(KD) > image.size() - kernel.descriptor_file_offset) {
@@ -1669,7 +1702,7 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_count)) {
+  if (!grow_moi_descriptor_vgpr_allocation(desc, required_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
@@ -1683,9 +1716,11 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
-                                                    ConSanResult &result, uint32_t required_count) {
+                                                    ConSanResult &result, uint32_t required_count,
+                                                    rj_code_arch_t arch) {
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, kernel, required_count, result.errors)) {
+    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, kernel, required_count, arch,
+                                          result.errors)) {
       return false;
     }
   }
@@ -1952,7 +1987,7 @@ struct MoiResourcePlanningState {
       KD descriptor{};
       std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
       stored.current_vgpr_count =
-          static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor));
+          static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor, arch));
       stored.current_sgpr_count =
           static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor));
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
@@ -2407,12 +2442,12 @@ struct MoiPrivateEpochLayout {
 
 [[nodiscard]] std::optional<uint16_t>
 common_moi_private_owner_shift(std::span<const uint8_t> image,
-                               const ResolvedMoiScratchPlan &resources,
+                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
                                std::vector<std::string> &warnings) {
   std::optional<uint16_t> common_shift;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, errors);
+    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
     if (!shift) {
       warnings.insert(warnings.end(), errors.begin(), errors.end());
       return std::nullopt;
@@ -2449,7 +2484,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   std::optional<uint64_t> representative;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, errors);
+    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
     const auto workgroup_sources =
         moi_descriptor_workgroup_sources(image, descriptor_offset, arch, errors);
     if (!shift || !workgroup_sources) {
@@ -2550,12 +2585,11 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
   return spill;
 }
 
-[[nodiscard]] bool apply_descriptor_requirements(CodeObjectPatcher &patcher,
-                                                 const AmdGpuCodeObject &code_object,
-                                                 std::span<const uint8_t> image,
-                                                 const ConSanResult &result,
-                                                 const MoiDescriptorVgprRequirements &requirements,
-                                                 std::vector<std::string> &errors) {
+[[nodiscard]] bool
+apply_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
+                              std::span<const uint8_t> image, const ConSanResult &result,
+                              const MoiDescriptorVgprRequirements &requirements,
+                              rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     if (kernel == nullptr) {
@@ -2572,7 +2606,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     }
     ConSanKernelInfo active = *kernel;
     active.descriptor_file_offset = active_kernel->descriptor_file_offset;
-    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, active, required_count, errors))
+    if (!grow_moi_kernel_descriptor_vgprs(patcher, image, active, required_count, arch, errors))
       return false;
   }
   return true;
@@ -2692,6 +2726,7 @@ apply_spill_metadata_requirements(std::vector<uint8_t> &image, const ConSanResul
 [[nodiscard]] bool apply_descriptor_requirements(std::vector<uint8_t> &image,
                                                  const ConSanResult &result,
                                                  const MoiDescriptorVgprRequirements &requirements,
+                                                 rj_code_arch_t arch,
                                                  std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
@@ -2704,7 +2739,7 @@ apply_spill_metadata_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count)) {
+    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count, arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
       return false;
     }
@@ -2830,7 +2865,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   std::optional<uint32_t> derived_owner_word;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(
@@ -3673,7 +3708,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!private_layout)
         continue;
       if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
-        private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+        private_owner_shift =
+            common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
         if (!private_owner_shift)
           continue;
       }
@@ -3767,7 +3803,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
-                                       result.errors))
+                                       arch, result.errors))
       return;
     if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
                                              private_requirements, result.errors))
@@ -3913,7 +3949,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements,
+  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements, arch,
                                      result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -4112,7 +4148,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   std::optional<uint32_t> derived_owner_word;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
@@ -4413,7 +4449,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
-                                       result.errors)) {
+                                       arch, result.errors)) {
       return;
     }
     if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
@@ -4582,7 +4618,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements,
+  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements, arch,
                                      result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -4771,7 +4807,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   if (uses_appended_cave) {
     CodeObjectPatcher patcher(code_object);
     if (!apply_descriptor_requirements(patcher, code_object, bytes, result, descriptor_requirements,
-                                       result.errors)) {
+                                       arch, result.errors)) {
       return;
     }
     if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
@@ -4919,7 +4955,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements,
+  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements, arch,
                                      result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -5041,9 +5077,11 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
   return kernel_contains_patch_anchor(kernel, patch);
 }
 
-[[nodiscard]] bool grow_moi_kernel_descriptor_registers(
-    CodeObjectPatcher &patcher, std::span<const uint8_t> image, const ConSanKernelInfo &kernel,
-    uint32_t required_vgpr_count, uint32_t required_sgpr_count, std::vector<std::string> &errors) {
+[[nodiscard]] bool
+grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const uint8_t> image,
+                                     const ConSanKernelInfo &kernel, uint32_t required_vgpr_count,
+                                     uint32_t required_sgpr_count, rj_code_arch_t arch,
+                                     std::vector<std::string> &errors) {
   if (kernel.descriptor_file_offset > image.size() ||
       sizeof(KD) > image.size() - kernel.descriptor_file_offset) {
     errors.emplace_back("ConSan MOI descriptor register growth exceeds ELF bytes");
@@ -5052,7 +5090,7 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count)) {
+  if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
@@ -5270,7 +5308,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
   }
   for (const ConSanKernelInfo &kernel : target_kernels) {
     if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, kernel, required_vgpr_count,
-                                              required_sgpr_count, result.errors)) {
+                                              required_sgpr_count, arch, result.errors)) {
       return;
     }
   }
@@ -5282,7 +5320,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
     const std::optional<uint16_t> owner_shift =
-        moi_kernel_owner_shift(active_bytes, kernel, result.errors);
+        moi_kernel_owner_shift(active_bytes, kernel, arch, result.errors);
     if (!owner_shift)
       return;
     auto words = build_owner_epoch_prologue_words(prologue_text_offset, kernel.entry_text_offset,
@@ -5381,7 +5419,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       return std::nullopt;
     }
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
@@ -5748,12 +5786,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
       }
     }
     if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result, requirements,
-                                       result.errors)) {
+                                       arch, result.errors)) {
       return;
     }
   } else if (!grow_moi_kernel_descriptor_vgprs(patcher, active_bytes, result,
-                                               static_cast<uint32_t>(*options.moi_epoch_vgpr) +
-                                                   1u)) {
+                                               static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u,
+                                               arch)) {
     return;
   }
   if (!options.automatic_moi_private_epoch) {
@@ -5982,7 +6020,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, result.errors) ||
+                                     descriptor_requirements, arch, result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors) ||
       !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
@@ -6499,7 +6537,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, result.errors) ||
+                                     descriptor_requirements, arch, result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors) ||
       !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
@@ -6610,7 +6648,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
     }
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
@@ -6839,7 +6877,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   if (!apply_descriptor_requirements(patcher, code_object, active_bytes, result,
-                                     descriptor_requirements, result.errors) ||
+                                     descriptor_requirements, arch, result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors)) {
     return;

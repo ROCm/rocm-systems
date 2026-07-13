@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -37,6 +38,26 @@ enum class ConSanMoiAtomicEventKind : uint32_t {
   Release = 1,
   Acquire = 2,
 };
+
+/// Ordinary register geometry encoded by an AMDGPU kernel descriptor.
+struct ConSanMoiDescriptorRegisterGeometry {
+  uint32_t wavefront_size = 64;
+  uint32_t max_vgpr_count = 256;
+  uint32_t max_sgpr_count = 106;
+  uint32_t vgpr_encoding_granularity = 4;
+  uint32_t sgpr_encoding_granularity = 8;
+};
+
+[[nodiscard]] ConSanMoiDescriptorRegisterGeometry
+consan_moi_descriptor_register_geometry(rj_code_arch_t arch, bool descriptor_wave32);
+
+[[nodiscard]] uint32_t consan_moi_decode_descriptor_register_count(uint32_t granulated_count,
+                                                                   uint32_t max_count,
+                                                                   uint32_t granularity);
+
+[[nodiscard]] std::optional<uint32_t>
+consan_moi_encode_descriptor_register_count(uint32_t required_count, uint32_t max_count,
+                                            uint32_t granularity);
 
 inline constexpr uint32_t kConSanMoiReportMagic = 0x494f4d43u; // "CMOI" as little-endian bytes.
 inline constexpr uint32_t kConSanMoiReportAbiVersion = 1;
