@@ -2294,6 +2294,20 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         rj_add_hip_test(
+            hip_consan_atomic_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/hip_consan_atomic_gfx950_test.hip
+        )
+        rj_add_hip_test_case(
+            hip_consan_atomic_gfx950_test
+            "ConSanAtomicGfx950Test.ReturnsOldValueAndPublishesReplacement"
+        )
+        rj_add_hip_test_case(
+            hip_consan_atomic_gfx950_test
+            "ConSanAtomicGfx950Test.ContentionFormsOneAtomicExchangeChain"
+        )
+
+        rj_add_hip_test(
             hip_consan_moi_gfx950_test
             ARCH gfx950
             SOURCE dbi/hip_consan_moi_gfx950_test.hip

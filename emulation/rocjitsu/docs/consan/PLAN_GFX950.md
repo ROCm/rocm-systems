@@ -224,6 +224,11 @@ Full gfx950 support means:
   automatic registers and require a patch; the clean marker stays zero and the
   racy marker is observed. Synthetic tests cover inline and appended placement,
   and all 193 ConSan CPU regressions pass.
+- 2026-07-13: `IS1A` is `DONE`. LLVM and the decoder agree on the CDNA4
+  `flat_atomic_swap_x2 ... sc0` return form already emitted by ConSan. A
+  standalone one-lane gfx950 control observes the exact old 64-bit value and
+  final replacement; a 64-lane contention control proves all returned values
+  plus the final slot form one lossless serialized exchange chain.
 
 ## DAG Overview
 
@@ -356,7 +361,7 @@ flowchart LR
   SA1A["SA1A: Static Sampled Publication"]:::done
   SA1B["SA1B: Runtime Selection And Check"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::done
-  IS1A["IS1A: Shadow Atomic Primitive"]:::todo
+  IS1A["IS1A: Shadow Atomic Primitive"]:::done
   IS1B["IS1B: Single-Cell Inline Shadow"]:::todo
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
   FL1A["FL1A: Group-Flat Inventory"]:::todo
@@ -1290,7 +1295,7 @@ Done criteria:
 - A known sampled race produces both host-scan and immediate-check signals in
   focused controls, while stale and non-overlapping controls remain clean.
 
-### IS1A: gfx950 Shadow Atomic Primitive - TODO
+### IS1A: gfx950 Shadow Atomic Primitive - DONE
 
 Goal: select and prove the atomic primitive used for exact GPU-side shadow
 publication.
@@ -1303,6 +1308,17 @@ Done criteria:
 
 - Standalone contention and return-value controls establish the primitive's
   exact update and completion semantics.
+
+Result:
+
+- `ConSanAtomicGfx950Test.ReturnsOldValueAndPublishesReplacement` executes the
+  exact `0xdd810000` `flat_atomic_swap_x2 ... sc0` form followed by a zero
+  VM/LGKM wait, and verifies both the returned old value and published 64-bit
+  replacement.
+- `ConSanAtomicGfx950Test.ContentionFormsOneAtomicExchangeChain` applies the
+  same primitive from 64 lanes. The 64 return values plus the final slot are
+  exactly the initial value and all 64 distinct replacements, proving atomic
+  serialization without lost or torn updates.
 
 ### IS1B: gfx950 Single-Cell Inline Shadow - TODO
 

@@ -897,6 +897,9 @@ build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16
       vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // CDNA4's three-operand return form requires the SC0 cache-policy token;
+    // it always returns the old value in vdst. The target has no equivalent
+    // per-instruction scope field, so the shared API's scope is validation-only.
     (void)return_old_value;
     return std::vector<uint32_t>{0xDD810000u, static_cast<uint32_t>(vaddr) |
                                                   (static_cast<uint32_t>(vsrc) << 8u) |
