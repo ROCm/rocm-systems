@@ -67,11 +67,49 @@ jobs:
           FETCH_ARTIFACT_ARGS: "--rccl --tests"
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
+      - name: Discover RCCL library path
+        id: rccl_path
+        run: |
+          source ${{ env.VENV_DIR }}/bin/activate
+          RCCL_LIB=$(find ${{ env.OUTPUT_ARTIFACTS_DIR }} -name 'librccl.so' -type f | head -1)
+          if [ -z "$RCCL_LIB" ]; then
+            echo "ERROR: librccl.so not found in artifacts"
+            find ${{ env.OUTPUT_ARTIFACTS_DIR }} -name '*.so' | head -20
+            exit 1
+          fi
+          RCCL_LIB_DIR=$(dirname "$RCCL_LIB")
+          echo "Found librccl.so at: $RCCL_LIB"
+          echo "RCCL_LIB_DIR=$RCCL_LIB_DIR" >> "$GITHUB_OUTPUT"
+
+          ROCM_LIB_DIR=$(find ${{ env.OUTPUT_ARTIFACTS_DIR }} -path '*/dist/rocm/lib' -type d | head -1)
+          if [ -n "$ROCM_LIB_DIR" ]; then
+            echo "Found ROCm lib dir: $ROCM_LIB_DIR"
+            echo "ROCM_LIB_DIR=$ROCM_LIB_DIR" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install PyTorch ROCm nightly
         timeout-minutes: 10
         run: |
           source ${{ env.VENV_DIR }}/bin/activate
           pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm6.3
+          pip install pytest
+
+      - name: Verify RCCL override
+        env:
+          LD_LIBRARY_PATH: "${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
+        run: |
+          source ${{ env.VENV_DIR }}/bin/activate
+          python -c "
+          import ctypes, os
+          rccl = ctypes.CDLL('librccl.so')
+          print(f'Loaded librccl.so from LD_LIBRARY_PATH')
+          print(f'LD_LIBRARY_PATH: {os.environ.get(\"LD_LIBRARY_PATH\", \"\")}')
+          "
+
+          CI_RCCL="${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}/librccl.so"
+          TORCH_RCCL=$(python -c "import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), 'lib', 'librccl.so'))")
+          echo "CI-built RCCL: $(ls -la $CI_RCCL)"
+          echo "PyTorch bundled RCCL: $(ls -la $TORCH_RCCL 2>/dev/null || echo 'not found')"
 
       - name: Fetch PyTorch test files
         run: |
@@ -96,7 +134,7 @@ jobs:
       - name: Run PyTorch c10d NCCL tests
         timeout-minutes: 60
         env:
-          LD_LIBRARY_PATH: "${{ github.workspace }}/build/lib:${{ github.workspace }}/build/dist/rocm/lib:${LD_LIBRARY_PATH}"
+          LD_LIBRARY_PATH: "${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
@@ -120,6 +158,7 @@ jobs:
             --nnodes=1 \
             --standalone \
             test_c10d_nccl.py \
+            --use-pytest \
             -v \
             -k "test_allreduce or test_allgather_base or test_broadcast or test_reduce_scatter_base or test_barrier" \
             2>&1 | tee pytorch_c10d_results.log
