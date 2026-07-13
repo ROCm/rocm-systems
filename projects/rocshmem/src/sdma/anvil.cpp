@@ -27,6 +27,7 @@
 
 #include <fstream>
 #include <cstring>
+#include <stdexcept>
 
 #include "sdma_pkt_struct.h"
 #include "sdma_pkt_struct_mi4.h"
@@ -295,8 +296,35 @@ AnvilLib::~AnvilLib() {
   }
 }
 
+void AnvilLib::querySdmaEngineCounts() {
+  if (gpuAgents_.empty()) {
+    LOG_WARN("anvil: no GPU agents; SDMA engine count unknown");
+    return;
+  }
+
+  const hsa_agent_t agent = gpuAgents_[0];
+  hsa_status_t status = hsa_agent_get_info(
+      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_ENG), &numSdmaEngines_);
+  if (status != HSA_STATUS_SUCCESS) {
+    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_ENG query failed: %#x", status);
+    numSdmaEngines_ = 0;
+  }
+
+  status = hsa_agent_get_info(
+      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG),
+      &numSdmaXgmiEngines_);
+  if (status != HSA_STATUS_SUCCESS) {
+    LOG_WARN("anvil: HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG query failed: %#x", status);
+    numSdmaXgmiEngines_ = 0;
+  }
+
+  numSdmaEnginesTotal_ = numSdmaEngines_ + numSdmaXgmiEngines_;
+  LOG_TRACE("anvil: SDMA engines host=%u xgmi=%u total=%u", numSdmaEngines_, numSdmaXgmiEngines_,
+            numSdmaEnginesTotal_);
+}
+
 void AnvilLib::init() {
-  std::call_once(init_flag, []() {
+  std::call_once(init_flag, [this]() {
     // HSA
     hsa_status_t status{hsa_init()};
     if (status != HSA_STATUS_SUCCESS) {
@@ -310,6 +338,8 @@ void AnvilLib::init() {
     if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {
       LOG_TRACE("Failure to iterate HSA CPU agents: %#x", status);
     }
+
+    querySdmaEngineCounts();
 
     SetUpKFD();
     s_kfd_opened = true;
@@ -368,27 +398,60 @@ int AnvilLib::getOamId(int deviceId) {
   std::string busId = getBusId(deviceId);
   std::string file_str = "/sys/bus/pci/devices/" + busId + "/xgmi_physical_id";
   std::ifstream file(file_str);
-  int xgmi_physical_id = -1;
+  int xgmi_physical_id;
   if (file.is_open()) {
-    if (file >> xgmi_physical_id) return xgmi_physical_id;
-    LOG_WARN("anvil: failed to read xGMI physical id from %s", file_str.c_str());
+    if (!(file >> xgmi_physical_id)) {
+      throw std::runtime_error("Failed to read xGMI physical id from file: " + file_str);
+    }
   } else {
-    LOG_WARN("anvil: xGMI physical id sysfs not found at %s", file_str.c_str());
+    throw std::runtime_error("Failed to open file: " + file_str);
   }
-  // Fallback for containers / parts without sysfs: pin to HIP device index.
-  const int fallback = deviceId % 8;
-  LOG_WARN("anvil: using deviceId%%8=%d as OAM id for device %d", fallback, deviceId);
-  return fallback;
+  return xgmi_physical_id;
+}
+
+int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
+  auto normalizeOamId = [](int oamId) {
+    if (oamId < 0) return 0;
+    return oamId % static_cast<int>(AnvilLib::kMi300xOamMapDim);
+  };
+
+  const int srcOamId = normalizeOamId(getOamId(srcDeviceId));
+  const int dstOamId = normalizeOamId(getOamId(dstDeviceId));
+
+  // Use even engines only (MI300X xGMI SDMA layout).
+  int engineId =
+      mi300xOamMap[static_cast<size_t>(srcOamId)][static_cast<size_t>(dstOamId)] * 2;
+
+  if (numSdmaEnginesTotal_ > 0 &&
+      static_cast<uint32_t>(engineId) >= numSdmaEnginesTotal_) {
+    LOG_WARN("anvil: legacy OAM-map engine %d >= total %u, clamping", engineId,
+             numSdmaEnginesTotal_);
+    engineId = static_cast<int>(static_cast<uint32_t>(engineId) % numSdmaEnginesTotal_);
+  }
+  return engineId;
 }
 
 int AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
-  int srcOamId = getOamId(srcDeviceId) % 8;
-  int dstOamId = getOamId(dstDeviceId) % 8;
-  if (srcOamId < 0) srcOamId = 0;
-  if (dstOamId < 0) dstOamId = 0;
+  if (srcDeviceId >= 0 && dstDeviceId >= 0 &&
+      srcDeviceId < static_cast<int>(gpuAgents_.size()) &&
+      dstDeviceId < static_cast<int>(gpuAgents_.size())) {
+    uint32_t engineMask = 0;
+    const hsa_status_t status = hsa_amd_memory_get_preferred_copy_engine(
+        gpuAgents_[dstDeviceId], gpuAgents_[srcDeviceId], &engineMask);
+    if (status == HSA_STATUS_SUCCESS && engineMask != 0) {
+      const int engineId = __builtin_ctz(engineMask);
+      if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||
+                            static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
+        LOG_TRACE("SDMA: HSA preferred engine %d for %d -> %d (mask=0x%x)", engineId, srcDeviceId,
+                  dstDeviceId, engineMask);
+        return engineId;
+      }
+      LOG_WARN("anvil: HSA preferred engine %d out of range (total=%u), using OAM map", engineId,
+               numSdmaEnginesTotal_);
+    }
+  }
 
-  // Use even engines only
-  return mi300xOamMap[static_cast<size_t>(srcOamId)][static_cast<size_t>(dstOamId)] * 2;
+  return getSdmaEngineIdFromOamMap(srcDeviceId, dstDeviceId);
 }
 
 AnvilLib& anvil = anvil.getInstance();
