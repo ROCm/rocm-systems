@@ -20,6 +20,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import json
+import sys
 
 
 AMDSMI_ERROR_MESSAGES = {
@@ -52,6 +53,8 @@ AMDSMI_ERROR_MESSAGES = {
     33: "No more free slot",
     34: "Driver not loaded",
     # Reserved for future error messages
+    # Data and size errors
+    39: "There is more data than the buffer size the user passed",
     40: "No data was found for given input",
     41: "Insufficient size for operation",
     42: "Unexpected size of data was read",
@@ -68,6 +71,8 @@ AMDSMI_ERROR_MESSAGES = {
     53: "Parsed argument is invalid",
     54: "AMDGPU restart error",
     55: "Setting is not available",
+    56: "EEPROM is corrupted",
+    # General errors
     0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
     0xFFFFFFFF: "Unknown error",
 }
@@ -77,6 +82,10 @@ def _get_error_message(error_code):
     if abs(error_code) in AMDSMI_ERROR_MESSAGES:
         return AMDSMI_ERROR_MESSAGES[abs(error_code)]
     return "Generic error"
+
+
+# All exception values are derived from accepted values in Confluence
+# "AMD SMI Error Codes"
 
 
 class AmdSmiException(Exception):
@@ -101,15 +110,27 @@ class AmdSmiException(Exception):
         return self.message
 
 
+class AmdSmiImportException(AmdSmiException):
+    def __init__(self, message=None):
+        super().__init__()
+
+        self.value = 192
+        common_message = "AMD-SMI Unhandled import error."
+        if message:
+            common_message = message
+
+        self.stdout_message = f"{common_message} Error code: {self.value}"
+
+
 class AmdSmiInvalidCommandException(AmdSmiException):
     def __init__(self, command, outputformat: str, message=None):
         super().__init__()
-        self.value = -1
+
+        self.value = 193
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' is invalid. Run 'amd-smi -h' for more info."
-
+        common_message = f"AMD-SMI Command '{self.command}' is invalid."
         if message:
             common_message = message
 
@@ -120,16 +141,21 @@ class AmdSmiInvalidCommandException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterException(AmdSmiException):
-    def __init__(self, command, arg, outputformat: str):
+    def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = -2
+        self.value = 194
         self.command = command
         self.arg = arg
         self.output_format = outputformat
 
-        common_message = (
-            f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
-        )
+        if not arg:
+            common_message = ""
+        else:
+            common_message = f"AMD-SMI Parameter '{self.arg}' is invalid."
+        if hint:
+            if hint[-1] == ".":
+                hint = hint[:-1]
+            common_message = f"{common_message} {hint}.".strip()
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -140,7 +166,7 @@ class AmdSmiInvalidParameterException(AmdSmiException):
 class AmdSmiDeviceNotFoundException(AmdSmiException):
     def __init__(self, command, outputformat: str, gpu: bool, cpu: bool, core: bool):
         super().__init__()
-        self.value = -3
+        self.value = 195
         self.command = command
         self.output_format = outputformat
 
@@ -153,7 +179,7 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
         elif core:
             self.device_type = "CPU CORE"
 
-        common_message = f"Can not find a device: {self.device_type} '{self.command}'"
+        common_message = f"AMD-SMI Can not find a device: {self.device_type} '{self.command}'."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -164,11 +190,11 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
 class AmdSmiInvalidFilePathException(AmdSmiException):
     def __init__(self, command, outputformat: str, message=None):
         super().__init__()
-        self.value = -4
+        self.value = 196
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Path '{self.command}' cannot be found."
+        common_message = f"AMD-SMI Path '{self.command}' cannot be found."
 
         if message:
             common_message = message
@@ -182,14 +208,21 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 class AmdSmiInvalidParameterValueException(AmdSmiException):
     def __init__(self, command, arg, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = -5
+        self.value = 197
         self.command = command
         self.arg = arg
         self.output_format = outputformat
+        if arg is not None:
+            common_message = f"AMD-SMI Value '{self.arg}' is not of valid type or format."
+        elif hint is None:
+            common_message = "AMD-SMI Value is not of valid type or format."
+        else:
+            common_message = ""
 
-        common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
         if hint:
-            common_message += f" {hint}"
+            if hint[-1] == ".":
+                hint = hint[:-1]
+            common_message = f"{common_message} {hint}."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -200,11 +233,11 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
 class AmdSmiMissingParameterValueException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = -6
+        self.value = 198
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.command}' requires a value. Run '--help' for more info."
+        common_message = f"AMD-SMI Parameter '{self.command}' requires a value."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -215,13 +248,11 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
 class AmdSmiCommandNotSupportedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = -7
+        self.value = 199
         self.command = command
         self.output_format = outputformat
 
-        common_message = (
-            f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
-        )
+        common_message = f"AMD-SMI Command '{self.command}' is not supported on the system."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -232,11 +263,11 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
 class AmdSmiParameterNotSupportedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = -8
+        self.value = 200
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.command}' is not supported on the system. Run '--help' for more info."
+        common_message = f"AMD-SMI Parameter '{self.command}' is not supported on the system."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -245,13 +276,15 @@ class AmdSmiParameterNotSupportedException(AmdSmiException):
 
 
 class AmdSmiRequiredCommandException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = -9
+        self.value = 201
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' requires a target argument. Run 'amd-smi {self.command} -h' for more info."
+        common_message = f"AMD-SMI Command '{self.command}' requires a target argument."
+        if hint:
+            common_message = f"{common_message} {hint}.".strip()
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -262,11 +295,11 @@ class AmdSmiRequiredCommandException(AmdSmiException):
 class AmdSmiInvalidSubcommandException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = -10
+        self.value = 202
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"AMD-SMI Command '{self.command}' is invalid. Must receive valid AMD-SMI Command first. Run 'amd-smi -h' for more info."
+        common_message = f"AMD-SMI Command '{self.command}' is invalid. Must receive valid AMD-SMI Command first."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -275,15 +308,17 @@ class AmdSmiInvalidSubcommandException(AmdSmiException):
 
 
 class AmdSmiPermissionDeniedException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, hint: str = None):
         super().__init__()
-        self.value = -11
+        self.value = 203
         self.command = command
         self.output_format = outputformat
 
-        common_message = (
-            f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
-        )
+        common_message = f"AMD-SMI Command '{self.command}'"
+        if hint is not None:
+            common_message += f" {hint}."
+        else:
+            common_message += " requires elevation (sudo privileges required)."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -294,11 +329,11 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
 class AmdSmiUnknownErrorException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
-        self.value = -100
+        self.value = 255
         self.command = command
         self.output_format = outputformat
 
-        common_message = "An unknown error has occurred. Run 'help' for more info."
+        common_message = "AMD-SMI An unknown error has occurred."
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -307,14 +342,19 @@ class AmdSmiUnknownErrorException(AmdSmiException):
 
 
 class AmdSmiLibraryErrorException(AmdSmiException):
-    def __init__(self, outputformat: str, error_code):
+    def __init__(self, outputformat: str, msg: str, error_code: int):
         super().__init__()
-        self.value = -1000 - abs(error_code)
+        if error_code == 0xFFFFFFFF:
+            error_code = 206
+        elif error_code == 0xFFFFFFFE:
+            error_code = 205
+        self.value = abs(error_code)
         self.smilibcode = error_code
         self.output_format = outputformat
-
-        common_message = f"AMDSMI has returned error '{self.value}' - '{AMDSMI_ERROR_MESSAGES[abs(self.smilibcode)]}'"
-
+        if msg:
+            common_message = msg
+        else:
+            common_message = f"AMDSMI has returned error '{self.value}' - '{_get_error_message(abs(self.smilibcode))}'."
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
         self.csv_message = f"error,code\n{common_message}, {self.value}"

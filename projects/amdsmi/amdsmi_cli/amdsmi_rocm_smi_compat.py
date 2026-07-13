@@ -21,7 +21,7 @@ SMI_PAT = 0
 SMI_HASH = "amdsmi"
 __version__ = "%s.%s.%s+%s" % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
-# Set to 1 if an error occurs
+# Set to error_code if an error occurs
 RETCODE = 0
 
 # If we want JSON format output instead
@@ -821,10 +821,10 @@ def showAllConcise(deviceList):
     import amdsmi
 
     if PRINT_JSON:
-        print("NOT_SUPPORTED: Cannot print JSON/CSV output for concise output")
-        sys.exit(1)
-
-    silent = True
+        error_code = 199
+        msg = f"NOT_SUPPORTED: Cannot print JSON/CSV output for concise output. Error code: {error_code}"
+        print(msg, file=sys.stderr)
+        sys.exit(error_code)
 
     # CRITICAL: Cache BDF first to minimize GPU wake-up
     bdf_cache = {}
@@ -997,28 +997,40 @@ def main():
     # Import amdsmi
     try:
         import amdsmi
-    except ImportError:
-        print("ERROR: Could not import amdsmi module")
-        print("Install with: pip install amdsmi")
-        return 1
+        from amdsmi import amdsmi_interface
+    except ImportError as e:
+        error_code = 192
+        print("Could not import amdsmi module", file=sys.stderr)
+        print("Install with: pip install amdsmi", file=sys.stderr)
+        print(f"Error: {e}. Error code: {error_code}", file=sys.stderr)
+        return error_code
 
     # Check if driver is initialized
     if not driverInitialized():
-        logging.error("Unable to detect amdgpu driver. Exiting...")
-        return 1
+        error_code = 195
+        msg = "Unable to detect amdgpu driver. Exiting..."
+        logging.error(msg)
+        print(f"Error: {msg} Error code: {error_code}", file=sys.stderr)
+        return error_code
 
     # Initialize AMD SMI (equivalent to rocm_smi.initializeRsmi())
     if not initializeRsmi():
-        logging.error("Failed to initialize AMD SMI")
-        return 1
+        error_code = amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT
+        msg = "Failed to initialize AMD SMI"
+        logging.error(msg)
+        print(f"Error: {msg} Error code: {error_code}", file=sys.stderr)
+        return error_code
 
     try:
         # Get processor handles (equivalent to rocm_smi.listDevices())
         deviceList = listDevices()
 
         if not deviceList:
-            logging.error("No AMD GPU devices found")
-            return 1
+            error_code = amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED
+            msg = "No AMD GPU devices found"
+            logging.error(msg)
+            print(f"Error: {msg}. Error code: {error_code}", file=sys.stderr)
+            return error_code
 
         # Check AMD GPUs (equivalent to rocm_smi.checkAmdGpus())
         if not checkAmdGpus(deviceList):

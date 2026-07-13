@@ -85,7 +85,7 @@ class MonitorCommands:
             brcm_switch (bool, optional): Value override for args.brcm_switch. Defaults to None.
 
         Raises:
-            ValueError: Value error if no gpu value is provided
+            AmdSmiLibraryException: if there is an AMDSMI library error
             IndexError: Index error if gpu list is empty
 
         Return:
@@ -849,7 +849,7 @@ class MonitorCommands:
                 process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
+                    self.helpers.raise_permission_exception("Command requires elevation")
                 logging.debug(
                     "Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info()
                 )

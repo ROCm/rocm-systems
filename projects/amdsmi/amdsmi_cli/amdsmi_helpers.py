@@ -1793,6 +1793,20 @@ class AMDSMIHelpers:
                 continue
         return None
 
+    def raise_permission_exception(self, msg=None):
+        if len(sys.argv) > 2:
+            cmd = " ".join(sys.argv[1:3])
+        elif len(sys.argv) == 2:
+            cmd = sys.argv[1]
+        else:
+            cmd = "unknown"
+
+        if msg is None:
+            msg = "Confirmation not given. Exiting without setting value"
+        raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(
+            cmd, self.get_output_format(), msg
+        )
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -1818,7 +1832,7 @@ class AMDSMIHelpers:
         if user_input in ["y", "Y", "yes", "Yes", "YES"]:
             return
         else:
-            sys.exit("Confirmation not given. Exiting without setting value")
+            self.raise_permission_exception()
 
     def confirm_changing_memory_partition_gpu_reload_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
@@ -1857,8 +1871,8 @@ class AMDSMIHelpers:
             print("")
             return
         else:
-            print("Confirmation not given. Exiting without setting value")
-            sys.exit(1)
+            msg = "Confirmation not given. Exiting without setting value"
+            self.raise_permission_exception(msg)
 
     def is_valid_profile(self, profile):
         profile_presets = (
@@ -2723,23 +2737,29 @@ class AMDSMIHelpers:
                 num_entries = num_entries + len(entries)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError(
-                        "Error opening CPER file. This command requires elevation"
-                    ) from e
+                    msg = "Error opening CPER file. This command requires elevation"
+                    self.raise_permission_exception(msg)
                 if (
                     e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise FileNotFoundError(
-                        "Error accessing CPER files. This command requires CPER to be enabled."
-                    ) from e
+                    output_format = self.get_output_format()
+                    command = sys.argv[1] if len(sys.argv) > 1 else "unknown"
+                    msg = "Error accessing CPER files. This command requires CPER to be enabled."
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
+                        command, output_format, msg
+                    )
+                output_format = self.get_output_format()
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
-                    raise OSError("Error opening CPER file. Unable to read CPER File") from e
+                    msg = "Error opening CPER file. Unable to read CPER File."
                 else:
-                    logging.debug(f"Cannot retrieve CPER entries: {e}")
-                    break
+                    msg = f"Cannot retrieve CPER entries: {e}."
+                    logging.debug(msg)
+                raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                    output_format, msg, e.get_error_code()
+                )
 
             args.cursor[gpu_idx] = new_cursor
             if len(entries) == 0:
@@ -3163,9 +3183,9 @@ class AMDSMIHelpers:
                         "sensor": power_type_key,
                         "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
                         "current_power_cap": self.unit_format(logger, current_power_cap, "W"),
-                        "message": f"{power_type_key} power cap is already set to {requested_power_cap}W",
+                        "message": f"{power_type_key} power cap is already set to {requested_power_cap} W",
                     }
-                return f"{power_type_key} power cap is already set to {requested_power_cap}W"
+                return f"{power_type_key} power cap is already set to {requested_power_cap} W"
             elif current_power_cap == 0:
                 if logger.is_json_format() or logger.is_csv_format():
                     return {
@@ -3180,7 +3200,7 @@ class AMDSMIHelpers:
                 # Raise so the caller exits with a non-zero return code
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
-                    f"{requested_power_cap}W",
+                    f"{requested_power_cap} W",
                     self.get_output_format(),
                     hint=f"Power cap must be between {min_power_cap}W and {max_power_cap}W",
                 )
@@ -3189,27 +3209,23 @@ class AMDSMIHelpers:
                 requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO
             )
             amdsmi_interface.amdsmi_set_power_cap(device_handle, power_type, new_power_cap)
+            msg = f"Successfully set {power_type_key} power cap to {requested_power_cap} W"
             if logger.is_json_format() or logger.is_csv_format():
                 return {
                     "status": "success",
                     "sensor": power_type_key,
                     "power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                    "message": f"Successfully set {power_type_key} power cap to {requested_power_cap}W",
+                    "message": msg,
                 }
-            return f"Successfully set {power_type_key} power cap to {requested_power_cap}W"
+            return msg
         except amdsmi_exception.AmdSmiLibraryException as e:
             if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                raise PermissionError("Command requires elevation") from e
-            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap}W"
-            if logger.is_json_format() or logger.is_csv_format():
-                return {
-                    "status": "error",
-                    "sensor": power_type_key,
-                    "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                    "error": e.get_error_info(detailed=False),
-                    "message": error_msg,
-                }
-            return error_msg
+                self.raise_permission_exception("Command requires elevation")
+            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set {power_type_key} power cap to {requested_power_cap} W"
+            output_format = self.get_output_format()
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                sys.argv[1] if len(sys.argv) > 1 else "unknown", None, output_format, error_msg
+            )
 
     def prompt_reboot(self):
         """Prompt user to reboot and execute if confirmed

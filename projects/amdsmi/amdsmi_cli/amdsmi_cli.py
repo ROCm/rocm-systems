@@ -69,19 +69,20 @@ except ImportError:
         from amdsmi_logger import AMDSMILogger
         import amdsmi_cli_exceptions
     except ImportError as e:
-        print(f"Unhandled import error: {e}")
-        print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
-        sys.exit(1)
+        error_code = 192
+        print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present")
+        print(f"Unhandled import error: {e}. Error code: {error_code}", file=sys.stderr)
+        sys.exit(error_code)
 
 
 def _print_error(e, destination):
     if destination in ["stdout", "json", "csv"]:
-        print(e)
+        print(e, file=sys.stderr)
     else:
         f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
-        print("Error occurred. Result written to " + str(destination) + " file")
+        print("Error occurred. Result written to " + str(destination) + " file", file=sys.stderr)
 
 
 def configure_logging_and_execute(args, amd_smi_commands):
@@ -237,9 +238,8 @@ if __name__ == "__main__":
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(
-                sys.argv[1], amd_smi_commands.logger.destination
-            )
+            outputformat = amd_smi_commands.logger.format
+            raise amdsmi_cli_exceptions.AmdSmiInvalidCommandException(sys.argv[1], outputformat)
 
         # Handle command modifiers before subcommand execution
         # human readable is the default output format
@@ -258,17 +258,8 @@ if __name__ == "__main__":
         sys.exit(abs(e.value))
     except amdsmi_exception.AmdSmiLibraryException as e:
         exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-            amd_smi_commands.logger.format, e.get_error_code()
+            amd_smi_commands.logger.format, None, e.get_error_code()
         )
-        _print_error(
-            f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
-            amd_smi_commands.logger.destination,
-        )
-        sys.exit(abs(exc.value))
-    except PermissionError as e:
-        command = sys.argv[1] if len(sys.argv) > 1 else ""
-        outputformat = amd_smi_commands.logger.format
-        exc = amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command, outputformat)
         _print_error(
             f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}",
             amd_smi_commands.logger.destination,
