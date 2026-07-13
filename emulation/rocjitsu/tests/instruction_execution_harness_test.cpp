@@ -4,10 +4,10 @@
 /// @file instruction_execution_harness_test.cpp
 /// @brief Phase E parameterized test: execute every instruction on every ISA.
 ///
-/// For each ISA, iterates all auto-generated test encodings, decodes the
-/// instruction, and calls execute() on a zeroed wavefront.  Instructions that
-/// throw UnimplementedInst are recorded as coverage exceptions; the test
-/// reports a per-ISA coverage percentage.
+/// For each ISA, iterates auto-generated encodings that are safe to execute on
+/// a zeroed wavefront, decodes them, and calls execute(). Decode failures are
+/// rejected, and UnimplementedInst results must exactly match the explicit
+/// expectation for that ISA.
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/rj_code.h"
@@ -39,11 +39,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -179,20 +182,28 @@ inline bool should_skip_inst(std::string_view mn) {
   return false;
 }
 
-struct HarnessCoverageExpectation {
+constexpr std::array<std::string_view, 1> EXPECTED_CDNA_UNIMPLEMENTED = {"s_setvskip"};
+constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
+    "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
+constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
+                                                                          "s_subvector_loop_end"};
+constexpr std::array<std::string_view, 0> EXPECTED_NO_UNIMPLEMENTED = {};
+
+struct HarnessExpectation {
   std::string_view arch_name;
-  double min_coverage;
-  size_t max_unimplemented;
+  std::span<const std::string_view> unimplemented;
 };
 
-constexpr HarnessCoverageExpectation HARNESS_COVERAGE_EXPECTATIONS[] = {
-    {"cdna1", 99.0, 1},  {"cdna2", 99.0, 1},    {"cdna3", 99.0, 1},  {"cdna4", 99.0, 1},
-    {"rdna1", 98.0, 3},  {"rdna2", 98.5, 2},    {"rdna3", 100.0, 0}, {"rdna3_5", 100.0, 0},
-    {"rdna4", 100.0, 0}, {"gfx1250", 100.0, 0},
+constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
+    {"cdna1", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna2", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_CDNA_UNIMPLEMENTED},  {"cdna4", EXPECTED_CDNA_UNIMPLEMENTED},
+    {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
+    {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
 };
 
-const HarnessCoverageExpectation *harness_coverage_expectation(std::string_view arch_name) {
-  for (const auto &expectation : HARNESS_COVERAGE_EXPECTATIONS)
+const HarnessExpectation *harness_expectation(std::string_view arch_name) {
+  for (const auto &expectation : HARNESS_EXPECTATIONS)
     if (expectation.arch_name == arch_name)
       return &expectation;
   return nullptr;
@@ -219,12 +230,12 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
   ASSERT_NE(decoder, nullptr) << "Failed to create decoder for " << arch_name;
 
   size_t total = num_encodings;
-  [[maybe_unused]] size_t decoded = 0;
+  size_t decoded = 0;
   size_t executed = 0;
-  size_t unimplemented = 0;
-  size_t skipped_mem = 0;
-  std::vector<std::string> unimpl_list;
+  size_t skipped = 0;
+  std::vector<std::string_view> unimpl_list;
   std::vector<std::string> decode_fail_list;
+  std::vector<std::string> execution_fail_list;
 
   for (size_t i = 0; i < total; ++i) {
     const auto &te = encodings[i];
@@ -232,7 +243,7 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     // Skip memory instructions — they require valid addresses and will
     // crash or hang when executed on zeroed wavefront/memory state.
     if (should_skip_inst(te.mnemonic)) {
-      ++skipped_mem;
+      ++skipped;
       continue;
     }
 
@@ -267,45 +278,50 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
       cu->execute_instruction(inst.get(), *wf);
       ++executed;
     } catch (const util::UnimplementedInst &) {
-      ++unimplemented;
       unimpl_list.emplace_back(te.mnemonic);
+    } catch (const std::exception &error) {
+      execution_fail_list.emplace_back(std::string(te.mnemonic).append(": ").append(error.what()));
     } catch (...) {
-      ++executed; // Other exceptions are acceptable on zeroed state.
+      execution_fail_list.emplace_back(te.mnemonic);
     }
 
     // Reset the wavefront for the next instruction.
     cu->reset_all_wf();
   }
 
-  size_t testable = total - skipped_mem;
-  double coverage = testable > 0 ? 100.0 * executed / testable : 0.0;
-  std::printf(
-      "\n  %.*s: %zu/%zu executed (%.1f%%), %zu unimplemented, %zu decode fail, %zu mem skipped\n",
-      static_cast<int>(arch_name.size()), arch_name.data(), executed, testable, coverage,
-      unimplemented, decode_fail_list.size(), skipped_mem);
+  size_t testable = total - skipped;
+  std::printf("\n  %.*s: %zu/%zu testable encodings executed, %zu unimplemented, "
+              "%zu decode fail, %zu execution fail, %zu skipped\n",
+              static_cast<int>(arch_name.size()), arch_name.data(), executed, testable,
+              unimpl_list.size(), decode_fail_list.size(), execution_fail_list.size(), skipped);
 
   if (!unimpl_list.empty()) {
     std::printf("  Unimplemented (%zu):", unimpl_list.size());
-    for (size_t i = 0; i < std::min(unimpl_list.size(), size_t{20}); ++i)
-      std::printf(" %s", unimpl_list[i].c_str());
+    for (size_t i = 0; i < std::min(unimpl_list.size(), size_t{20}); ++i) {
+      const auto mnemonic = unimpl_list[i];
+      std::printf(" %.*s", static_cast<int>(mnemonic.size()), mnemonic.data());
+    }
     if (unimpl_list.size() > 20)
       std::printf(" ... +%zu more", unimpl_list.size() - 20);
     std::printf("\n");
   }
 
-  // Decode failures are a hard regression: every listed test encoding should
-  // decode for its target architecture. The primary coverage metric is: of the
-  // instructions that decode, how many execute without throwing
-  // UnimplementedInst?
-  // Unimplemented instructions are tracked in coverage_exceptions files.
+  // Every encoding admitted by should_skip_inst must decode. Known
+  // UnimplementedInst results are named explicitly so failures identify the
+  // exact instruction that regressed instead of only crossing a numeric
+  // coverage threshold.
   EXPECT_GT(decoded, 0u) << "No instructions decoded for " << arch_name;
-  if (const auto *expectation = harness_coverage_expectation(arch_name)) {
-    EXPECT_GE(coverage, expectation->min_coverage)
-        << arch_name << " instruction execution harness coverage regressed";
-    EXPECT_LE(unimplemented, expectation->max_unimplemented)
-        << arch_name << " gained new unimplemented instructions";
-    EXPECT_EQ(decode_fail_list.size(), 0u) << arch_name << " gained decode failures";
-  }
+  EXPECT_EQ(decode_fail_list.size(), 0u) << arch_name << " gained decode failures";
+  EXPECT_EQ(execution_fail_list.size(), 0u)
+      << arch_name << " failed to execute implemented instructions";
+
+  const auto *expectation = harness_expectation(arch_name);
+  ASSERT_NE(expectation, nullptr) << "Missing harness expectation for " << arch_name;
+  std::sort(unimpl_list.begin(), unimpl_list.end());
+  std::vector<std::string_view> expected(expectation->unimplemented.begin(),
+                                         expectation->unimplemented.end());
+  std::sort(expected.begin(), expected.end());
+  EXPECT_EQ(unimpl_list, expected) << arch_name << " unimplemented instruction set changed";
 }
 
 // --- Parameterized tests per ISA ---
