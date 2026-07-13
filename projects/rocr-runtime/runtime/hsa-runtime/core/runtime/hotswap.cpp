@@ -499,13 +499,17 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
     return {};
   }
 
-  bool rewritten = false;
 #ifdef ROCR_HOTSWAP_TESTING
-  if (g_force_retarget_code_object_failure_for_testing.load(std::memory_order_relaxed)) {
-    HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
-  } else
+  const bool force_retarget_failure_for_testing =
+      g_force_retarget_code_object_failure_for_testing.load(std::memory_order_relaxed);
+#else
+  constexpr bool force_retarget_failure_for_testing = false;
 #endif
-  {
+
+  bool rewritten = false;
+  if (force_retarget_failure_for_testing) {
+    HOTSWAP_LOG("hotswap: forcing retarget failure for test\n");
+  } else {
     rewritten = RetargetCodeObject(code_object.data, code_object.size,
                                    decision->source_isa.c_str(), decision->target_isa.c_str(),
                                    out_elf_buffer, out_elf_size,
