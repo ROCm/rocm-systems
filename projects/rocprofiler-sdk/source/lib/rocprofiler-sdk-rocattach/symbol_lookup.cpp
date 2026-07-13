@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -42,6 +44,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -619,7 +622,6 @@ vaddr_to_offset(const target_elf& elf, uint64_t vaddr, uint64_t size)
 {
     for(const auto& segment : elf.load_segments)
     {
-        if(segment.p_type != PT_LOAD) continue;
         if(vaddr < segment.p_vaddr) continue;
         auto delta = vaddr - segment.p_vaddr;
         if(delta > segment.p_filesz || size > segment.p_filesz - delta) continue;
@@ -881,13 +883,6 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
         return std::nullopt;
     }
 
-    if(!symbol_is_supported_function(*sym))
-    {
-        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Symbol " << symbol
-                   << " is not a supported exported function in " << elf->path;
-        return std::nullopt;
-    }
-
     auto address = checked_add(*load_bias, sym->st_value);
     if(!address)
     {
@@ -910,25 +905,6 @@ resolve_target_symbol(pid_t pid, const mapped_object& object, std::string_view s
     return address;
 }
 }  // namespace
-
-bool
-find_library(void*& addr, int inpid, const std::string& library)
-{
-    auto object = select_unique_mapped_object(inpid, library);
-    if(!object) return false;
-
-    for(const auto& mapping : object->mappings)
-    {
-        if(mapping.file_offset != 0) continue;
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        addr = reinterpret_cast<void*>(mapping.start);
-        return true;
-    }
-
-    ROCP_ERROR << "[rocprofiler-sdk-rocattach] Couldn't find library " << library
-               << " (with file offset 0) in /proc/" << inpid << "/maps";
-    return false;
-}
 
 bool
 find_symbol(int target_pid, void*& addr, const std::string& library, const std::string& symbol)
