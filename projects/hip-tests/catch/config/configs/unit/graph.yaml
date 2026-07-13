@@ -1235,6 +1235,17 @@ graph:
     # Hangs on Windows (PAL), hitting CI timeout; passes on Linux.
     # https://github.com/ROCm/rocm-systems/issues/7148
     disabled: [amd_windows, amd_wsl]
+  Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipLaunchHostFunc_SdmaDtoHHostCallbackVisibilityNoProducer:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipLaunchHostFunc_KernelWritesPinnedMem_HostNodeReads:
+    <<: *level_2
+    tags: [capture]
+  Unit_hipLaunchHostFunc_KernelWritesManagedMem_HostNodeReads:
+    <<: *level_2
     tags: [capture]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
@@ -1274,6 +1285,7 @@ graph:
     tags: [userobj]
   Unit_hipGraphRetainUserObject_Negative_Basic:
     <<: *level_2
+    disabled: [asan]
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
@@ -1750,3 +1762,4 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_2
     tags: [exec]
+

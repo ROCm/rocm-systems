@@ -773,6 +773,141 @@
       "tests": [
         { "name": "NetIB_Stress_InlineSend", "description": "CTS inline send boundary (USE_INLINE=1)", "test_filter": "NetIbMPITest.InlineSendBoundary" }
       ]
+    },
+
+    "net_ib_gin_peermem": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_NET": "ib"
+      },
+      "tests": [
+        { "name": "NetIB_GIN_PeerMem_IPutSignalZeroSize_Ctx1", "description": "GIN peermem: iput signal zero size (Ctx1, RegMr)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalZeroSize/Ctx1_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalZeroSize_Ctx2", "description": "GIN peermem: iput signal zero size (Ctx2, RegMr)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalZeroSize/Ctx2_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInvalidSignalOp_Ctx1", "description": "GIN peermem: iput signal invalid signal op (Ctx1, RegMr)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalInvalidSignalOp/Ctx1_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInvalidSignalOp_Ctx2", "description": "GIN peermem: iput signal invalid signal op (Ctx2, RegMr)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalInvalidSignalOp/Ctx2_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx1_4KiB", "description": "GIN peermem: iput basic (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx1_64KiB", "description": "GIN peermem: iput basic (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx1_1MiB", "description": "GIN peermem: iput basic (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx2_4KiB", "description": "GIN peermem: iput basic (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx2_64KiB", "description": "GIN peermem: iput basic (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutBasic_Ctx2_1MiB", "description": "GIN peermem: iput basic (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx1_4KiB", "description": "GIN peermem: iget basic (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx1_64KiB", "description": "GIN peermem: iget basic (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx1_1MiB", "description": "GIN peermem: iget basic (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx2_4KiB", "description": "GIN peermem: iget basic (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx2_64KiB", "description": "GIN peermem: iget basic (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IGetBasic_Ctx2_1MiB", "description": "GIN peermem: iget basic (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx1_4KiB", "description": "GIN peermem: iput signal inc (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx1_64KiB", "description": "GIN peermem: iput signal inc (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx1_1MiB", "description": "GIN peermem: iput signal inc (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx2_4KiB", "description": "GIN peermem: iput signal inc (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx2_64KiB", "description": "GIN peermem: iput signal inc (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalInc_Ctx2_1MiB", "description": "GIN peermem: iput signal inc (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx1_4KiB", "description": "GIN peermem: iput signal add (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx1_64KiB", "description": "GIN peermem: iput signal add (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx1_1MiB", "description": "GIN peermem: iput signal add (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx2_4KiB", "description": "GIN peermem: iput signal add (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx2_64KiB", "description": "GIN peermem: iput signal add (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAdd_Ctx2_1MiB", "description": "GIN peermem: iput signal add (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx1_4KiB", "description": "GIN peermem: iput signal at offset (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx1_64KiB", "description": "GIN peermem: iput signal at offset (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx1_1MiB", "description": "GIN peermem: iput signal at offset (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx2_4KiB", "description": "GIN peermem: iput signal at offset (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx2_64KiB", "description": "GIN peermem: iput signal at offset (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IPutSignalAtOffset_Ctx2_1MiB", "description": "GIN peermem: iput signal at offset (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx1_4KiB", "description": "GIN peermem: multiple inflight iputs (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx1_64KiB", "description": "GIN peermem: multiple inflight iputs (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx1_1MiB", "description": "GIN peermem: multiple inflight iputs (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx2_4KiB", "description": "GIN peermem: multiple inflight iputs (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx2_64KiB", "description": "GIN peermem: multiple inflight iputs (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIPuts_Ctx2_1MiB", "description": "GIN peermem: multiple inflight iputs (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx1_4KiB", "description": "GIN peermem: multiple inflight igets (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx1_64KiB", "description": "GIN peermem: multiple inflight igets (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx1_1MiB", "description": "GIN peermem: multiple inflight igets (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx2_4KiB", "description": "GIN peermem: multiple inflight igets (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx2_64KiB", "description": "GIN peermem: multiple inflight igets (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MultipleInflightIGets_Ctx2_1MiB", "description": "GIN peermem: multiple inflight igets (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx1_4KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx1_64KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx1, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_RegMr" }
+      ]
+    },
+    "net_ib_gin_dmabuf": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_NET": "ib"
+      },
+      "tests": [
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalZeroSize_Ctx1", "description": "GIN dmabuf: iput signal zero size (Ctx1, DmaBuf)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalZeroSize/Ctx1_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalZeroSize_Ctx2", "description": "GIN dmabuf: iput signal zero size (Ctx2, DmaBuf)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalZeroSize/Ctx2_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInvalidSignalOp_Ctx1", "description": "GIN dmabuf: iput signal invalid signal op (Ctx1, DmaBuf)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalInvalidSignalOp/Ctx1_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInvalidSignalOp_Ctx2", "description": "GIN dmabuf: iput signal invalid signal op (Ctx2, DmaBuf)", "test_filter": "CtxOnly/GinMPIFixedSizeTest.IPutSignalInvalidSignalOp/Ctx2_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx1_4KiB", "description": "GIN dmabuf: iput basic (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx1_64KiB", "description": "GIN dmabuf: iput basic (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx1_1MiB", "description": "GIN dmabuf: iput basic (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx2_4KiB", "description": "GIN dmabuf: iput basic (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx2_64KiB", "description": "GIN dmabuf: iput basic (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutBasic_Ctx2_1MiB", "description": "GIN dmabuf: iput basic (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutBasic/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx1_4KiB", "description": "GIN dmabuf: iget basic (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx1_64KiB", "description": "GIN dmabuf: iget basic (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx1_1MiB", "description": "GIN dmabuf: iget basic (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx2_4KiB", "description": "GIN dmabuf: iget basic (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx2_64KiB", "description": "GIN dmabuf: iget basic (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IGetBasic_Ctx2_1MiB", "description": "GIN dmabuf: iget basic (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IGetBasic/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx1_4KiB", "description": "GIN dmabuf: iput signal inc (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx1_64KiB", "description": "GIN dmabuf: iput signal inc (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx1_1MiB", "description": "GIN dmabuf: iput signal inc (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx2_4KiB", "description": "GIN dmabuf: iput signal inc (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx2_64KiB", "description": "GIN dmabuf: iput signal inc (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalInc_Ctx2_1MiB", "description": "GIN dmabuf: iput signal inc (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalInc/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx1_4KiB", "description": "GIN dmabuf: iput signal add (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx1_64KiB", "description": "GIN dmabuf: iput signal add (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx1_1MiB", "description": "GIN dmabuf: iput signal add (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx2_4KiB", "description": "GIN dmabuf: iput signal add (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx2_64KiB", "description": "GIN dmabuf: iput signal add (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAdd_Ctx2_1MiB", "description": "GIN dmabuf: iput signal add (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAdd/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx1_4KiB", "description": "GIN dmabuf: iput signal at offset (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx1_64KiB", "description": "GIN dmabuf: iput signal at offset (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx1_1MiB", "description": "GIN dmabuf: iput signal at offset (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx2_4KiB", "description": "GIN dmabuf: iput signal at offset (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx2_64KiB", "description": "GIN dmabuf: iput signal at offset (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IPutSignalAtOffset_Ctx2_1MiB", "description": "GIN dmabuf: iput signal at offset (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.IPutSignalAtOffset/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx1_4KiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx1_64KiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx1_1MiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx2_4KiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx2_64KiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIPuts_Ctx2_1MiB", "description": "GIN dmabuf: multiple inflight iputs (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIPuts/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx1_4KiB", "description": "GIN dmabuf: multiple inflight igets (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx1_64KiB", "description": "GIN dmabuf: multiple inflight igets (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx1_1MiB", "description": "GIN dmabuf: multiple inflight igets (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx2_4KiB", "description": "GIN dmabuf: multiple inflight igets (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx2_64KiB", "description": "GIN dmabuf: multiple inflight igets (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MultipleInflightIGets_Ctx2_1MiB", "description": "GIN dmabuf: multiple inflight igets (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MultipleInflightIGets/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx1_4KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx1_64KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx1, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/GinMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" }
+      ]
+    },
+    "net_ib_cast_gin_peermem": {
+      "extends": "net_ib_gin_peermem",
+      "env_variables": {
+        "NCCL_NET": "ib-cast"
+      }
+    },
+    "net_ib_cast_gin_dmabuf": {
+      "extends": "net_ib_gin_dmabuf",
+      "env_variables": {
+        "NCCL_NET": "ib-cast"
+      }
     }
   },
   "test_suites": [
@@ -996,6 +1131,30 @@
       "name": "NET IB - Stress Inline CTS",
       "description": "CTS inline send boundary tests",
       "config": "net_ib_stress_inline",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GIN Peermem",
+      "description": "GIN plugin tests with peermem support",
+      "config": "net_ib_gin_peermem",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GIN DmaBuf",
+      "description": "GIN plugin tests with dma-buf support",
+      "config": "net_ib_gin_dmabuf",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - GIN Peermem",
+      "description": "GIN plugin tests with peermem support",
+      "config": "net_ib_cast_gin_peermem",
+      "enabled": true
+    },
+    {
+      "name": "NET IB-CAST - GIN DmaBuf",
+      "description": "GIN plugin tests with dma-buf support",
+      "config": "net_ib_cast_gin_dmabuf",
       "enabled": true
     }
   ]

@@ -87,7 +87,11 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [r"perfetto-trace-0\.proto", r"wall_clock-0\.txt"]
+        BINARY_REWRITE_PASS_REGEX = [
+            r"perfetto-trace-0\.proto",
+            r"wall_clock-0\.txt",
+            r"Enabling MPI support\.\.\.",
+        ]
         BINARY_REWRITE_FAIL_REGEX = [
             r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
         ]
@@ -120,13 +124,11 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [
-            r"Successfully executed: .+rocprof-sys-merge-output.sh.*"
-        ]
+        BINARY_REWRITE_PASS_REGEX = [r"merged\.proto"]
         BINARY_REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
-            "ROCPROFSYS_MERGE_PERFETTO_FILES": "ON",
+            "ROCPROFSYS_PERFETTO_COMBINE_TRACES": "ON",
         }
         result = self.run_test(
             mode,
