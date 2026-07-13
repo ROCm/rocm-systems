@@ -85,6 +85,7 @@ The first domains are:
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
+- `mem_location_pool`: location-based memory pool set/get and access-query contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
 - `driver_entry_point`: driver entry-point symbol resolution contracts
 - `ipc`: capability-gated same-process IPC memory and event handle contracts

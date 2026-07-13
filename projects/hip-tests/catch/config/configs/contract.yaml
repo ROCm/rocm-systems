@@ -1218,6 +1218,15 @@ contract:
   Contract_MemoryPoolAccess_SetAccessNoneCurrentDevice_IsRejected:
     <<: *level_0
     tags: [memory_pool_access]
+  Contract_MemLocationPool_GetMemPool_ReturnsPoolForDeviceLocation:
+    <<: *level_0
+    tags: [mem_location_pool]
+  Contract_MemLocationPool_SetMemPool_RoundTripsThroughGetMemPool:
+    <<: *level_0
+    tags: [mem_location_pool]
+  Contract_MemLocationPool_GetAccess_ReturnsFlagsForPooledAllocation:
+    <<: *level_0
+    tags: [mem_location_pool]
   Contract_Extension_GetProcAddress_ResolvesKnownSymbol:
     <<: *level_0
     tags: [extension]
