@@ -1663,31 +1663,9 @@ fail:
   goto exit;
 }
 
+// Build CollNet's node-major dense rank order unless we've already built it.
 static ncclResult_t collNetInitRailRankMap(ncclComm_t comm) {
-  int rank = comm->rank;
-  uint64_t nonHeadMask = (1ull << comm->localRanks) - 1;
-
-  comm->collNetDenseToUserRank = ncclMemoryStackAlloc<int>(&comm->memPermanent, comm->nRanks);
-  comm->collNetUserToDenseRank = ncclMemoryStackAlloc<int>(&comm->memPermanent, comm->nRanks);
-  // initialize collNetUserToDenseRank[rank]
-  comm->collNetUserToDenseRank[rank] = -1;
-  for (int h = 0; h < comm->collNetHeadsNum; h++) {
-    nonHeadMask ^= 1ull << comm->rankToLocalRank[comm->collNetHeads[h]];
-    if (comm->collNetHeads[h] == rank) {
-      comm->collNetUserToDenseRank[rank] = h;
-      break;
-    }
-  }
-  if (comm->collNetUserToDenseRank[rank] == -1) {
-    comm->collNetUserToDenseRank[rank] = COMPILER_POPCOUNT64(nonHeadMask & ((1ull << comm->localRank) - 1));
-  }
-  comm->collNetUserToDenseRank[rank] += comm->node * comm->localRanks;
-
-  NCCLCHECK(bootstrapAllGather(comm->bootstrap, comm->collNetUserToDenseRank, sizeof(int)));
-  for (int r = 0; r < comm->nRanks; r++) {
-    comm->collNetDenseToUserRank[comm->collNetUserToDenseRank[r]] = r;
-  }
-  return ncclSuccess;
+  return ncclTransportInitRankMap(comm, comm->collNetHeadsNum, comm->collNetHeads);
 }
 
 // Checks if the heads used by collNetChain are either a subset of, or equal to comm->collNetHeads
@@ -1795,8 +1773,6 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
           comm->collNetSharedRes = parent->collNetSharedRes;
           for (int c = 0; c < comm->nChannels; ++c) NCCLCHECKGOTO(initCollnetChannel(comm, c, parent, true), ret, fail);
         }
-
-        NCCLCHECKGOTO(collNetInitRailRankMap(comm), ret, fail);
       } else {
         collNetSetupFail = 1;
         if (comm->rank == 0) {
@@ -1806,6 +1782,7 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
         goto fail;
       }
     }
+    NCCLCHECKGOTO(collNetInitRailRankMap(comm), ret, fail);
     share = true;
   } else {
     /* this allocated buffer will be freed on proxy side */

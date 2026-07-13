@@ -182,6 +182,9 @@ static ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConn
       case NCCL_ALGO_PAT:
         {
           NCCLCHECK(ncclTransportPatConnect(comm));
+          if (comm->localRanks > 1 && comm->nvlsSupport) {
+            NCCLCHECK(ncclNvlsBufferSetup(comm));
+          }
           break;
         }
         // Yes, it's a dead code.  That's fine...

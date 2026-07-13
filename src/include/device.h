@@ -446,7 +446,7 @@ struct ncclKernelComm {
   bool p2pCrossClique;
   int isAllNvlink;
 
-  int* collNetDenseToUserRank;
+  int* denseToUserRank;
 
   // Flag to ask NCCL kernels to abort
   volatile uint32_t* abortFlag;

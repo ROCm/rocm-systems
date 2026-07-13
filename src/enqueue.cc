@@ -2241,6 +2241,13 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     chunkSize = (int)tunerChunkSize;
   }
 
+  // Multi-RPN PAT stages through the NVLS FIFO, so the per-step chunk
+  // must fit a single NVLS slot (nvlsChunkSize).
+  if ((info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) && info->algorithm == NCCL_ALGO_PAT &&
+      !comm->isOneRPN && comm->nvlsChunkSize > 0) {
+    chunkSize = std::min(comm->nvlsChunkSize, chunkSize);
+  }
+
   // Compute nSteps for proxies
   chunkSize = chunkSize / grainSize * grainSize; // align chunkSize to multiple grainSize
   switch (pattern) {

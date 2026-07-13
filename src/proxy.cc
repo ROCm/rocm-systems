@@ -575,6 +575,17 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
   return ncclSuccess;
 }
 
+// Keep PAT proxy peers on the NVLS-dense rail across nodes.
+static ncclResult_t getNvlsDenseLocalRank(struct ncclComm* comm, int* denseLocalRank) {
+  *denseLocalRank = comm->localRanks == 1 ? 0 : comm->channels[0].nvls.headRank;
+  return ncclSuccess;
+}
+
+static int nvlsDensePeer(struct ncclComm* comm, int node, int denseLocalRank) {
+  int densePeer = node * comm->localRanks + denseLocalRank;
+  return comm->denseToUserRank == nullptr ? densePeer : comm->denseToUserRank[densePeer];
+}
+
 // justInquire != nullptr means don't actually do anything, just assertain need of
 // ncclProxySaveOp for this op.
 ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool* justInquire) {
@@ -658,12 +669,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       // Run full algorithm to count the number of steps for each peer.
       ncclResult_t result = ncclSuccess;
       const ssize_t size = op->nbytes / comm->nRanks;
-      const int rank = comm->rank, nranks = comm->nRanks;
+      const int nodeId = comm->node, nNodes = comm->nNodes;
+      const int maxParallelFactor = NCCL_PAT_NWORKERS / WARP_SIZE;
+      int denseLocalRank;
       int *nstepsSend = NULL, *nstepsRecv = NULL;
-      PatRSAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks);
+      PatRSAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, maxParallelFactor, 0, size, size, op->chunkSize, nodeId,
+                                nNodes);
       struct ncclPatStep ps = {0};
-      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nranks)), result, exit_pat_up);
-      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nranks)), result, exit_pat_up);
+      NCCLCHECKGOTO(getNvlsDenseLocalRank(comm, &denseLocalRank), result, exit_pat_up);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nNodes)), result, exit_pat_up);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nNodes)), result, exit_pat_up);
 
       do {
         algo.getNextOp(&ps);
@@ -671,14 +686,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
         if (ps.recvDim != -1 && ps.postRecv) nstepsRecv[ps.recvDim]++;
         if (ps.sendDim != -1 && ps.postSend) nstepsSend[ps.sendDim]++;
       } while (ps.last != 2);
-      for (int i = 0; i < log2Up(nranks); i++) {
+      for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
-          int sendPeer = (rank + (1 << i)) % nranks;
+          int sendNode = (nodeId + (1 << i)) % nNodes;
+          int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_up);
         }
         if (nstepsRecv[i]) {
-          int recvPeer = (rank - (1 << i) + nranks) % nranks;
+          int recvNode = (nodeId - (1 << i) + nNodes) % nNodes;
+          int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_up);
         }
@@ -694,12 +711,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       // Run full algorithm to count the number of steps for each peer.
       ncclResult_t result = ncclSuccess;
       const ssize_t size = op->nbytes / comm->nRanks;
-      const int rank = comm->rank, nranks = comm->nRanks;
+      const int nodeId = comm->node, nNodes = comm->nNodes;
+      const int maxParallelFactor = NCCL_PAT_NWORKERS / WARP_SIZE;
+      int denseLocalRank;
       int *nstepsSend = NULL, *nstepsRecv = NULL;
-      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, 16, 0, size, size, op->chunkSize, rank, nranks);
+      PatAGAlgorithm<char> algo(op->chunkSize, NCCL_STEPS, maxParallelFactor, 0, size, size, op->chunkSize, nodeId,
+                                nNodes);
       struct ncclPatStep ps = {0};
-      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nranks)), result, exit_pat_down);
-      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nranks)), result, exit_pat_down);
+      NCCLCHECKGOTO(getNvlsDenseLocalRank(comm, &denseLocalRank), result, exit_pat_down);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsSend, log2Up(nNodes)), result, exit_pat_down);
+      NCCLCHECKGOTO(ncclCalloc(&nstepsRecv, log2Up(nNodes)), result, exit_pat_down);
 
       do {
         algo.getNextOp(&ps);
@@ -707,14 +728,16 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
         if (ps.recvDim != -1 && ps.postRecv) nstepsRecv[ps.recvDim]++;
         if (ps.sendDim != -1 && ps.postSend) nstepsSend[ps.sendDim]++;
       } while (ps.last != 2);
-      for (int i = 0; i < log2Up(nranks); i++) {
+      for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
-          int sendPeer = (rank - (1 << i) + nranks) % nranks;
+          int sendNode = (nodeId - (1 << i) + nNodes) % nNodes;
+          int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_down);
         }
         if (nstepsRecv[i]) {
-          int recvPeer = (rank + (1 << i)) % nranks;
+          int recvNode = (nodeId + (1 << i)) % nNodes;
+          int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_down);
         }

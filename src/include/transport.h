@@ -180,6 +180,7 @@ ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConne
 
 ncclResult_t ncclTransportRingConnect(struct ncclComm* comm);
 ncclResult_t ncclTransportTreeConnect(struct ncclComm* comm);
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int nHeads, const int* heads);
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm);
 
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]);

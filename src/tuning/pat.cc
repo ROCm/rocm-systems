@@ -8,13 +8,18 @@
 #include "core.h"
 #include "comm.h"
 #include "cost_model.h"
+#include "device.h"
+#include <cfloat>
 
 NCCL_PARAM(PatEnable, "PAT_ENABLE", 2);
 static int ncclPatEnable(struct ncclComm* comm) {
   int patEnable = ncclParamPatEnable();
   if (comm->minCompCap < 60) return 0; // Need SM60 or higher for CUDA atomics
   if (patEnable != 2) return patEnable;
-  if (comm->nNodes != comm->nRanks) return 0; // PAT only supports 1 GPU per node
+  if (!comm->isOneRPN) {
+    if (comm->nNodes < 2) return 0;   // Multi-RPN PAT is inter-node only
+    if (!comm->nvlsSupport) return 0; // Multi-RPN PAT uses NVLS for the intra-node phase.
+  }
   if (comm->netDeviceType != NCCL_NET_DEVICE_HOST) return 0;   // PAT doesn't support net device offload
   return 1;
 }
@@ -39,6 +44,25 @@ ncclResult_t ncclTuningPatModelInit(struct ncclComm* comm, int id, int enabled[N
       continue;
     }
     float busBw = std::min(comm->graphs[algo].bwInter, comm->graphs[algo].bwIntra) * comm->graphs[algo].nChannels;
+    if (!comm->isOneRPN) {
+      if (!comm->nvlsSupport) busBw = 0.0f;
+      if (busBw > 0.0f) {
+        int nHeads = comm->channels[0].nvls.nHeads;
+        for (int r = 0; r < comm->nRanks; r++) {
+          int node = comm->rankToNode[r];
+          if (comm->nodeRanks[node].localRanks != nHeads) {
+            busBw = 0.0f;
+            break;
+          }
+        }
+      }
+    }
+    if (busBw == 0.0f) {
+      comm->tuningContext.generalLatencies[c][algo][proto] = -1.0;
+      comm->tuningContext.generalBandwidths[c][algo][proto] = -1.0;
+      enabled[c] = 0;
+      continue;
+    }
     comm->tuningContext.generalBandwidths[c][algo][proto] = busBw * 0.75;
     comm->tuningContext.generalLatencies[c][algo][proto] =
       comm->tuningContext.tuningConstants.baseLatencies[algo][proto];
@@ -55,8 +79,18 @@ ncclResult_t ncclTuningPatModelInit(struct ncclComm* comm, int id, int enabled[N
 
 ncclResult_t ncclTuningPatModelSim(struct ncclTuningInput_t* const inputs, struct ncclTuningResult_t* const tuning) {
   ncclResult_t ret = ncclSuccess;
+  if (inputs->func == ncclFuncReduceScatter && !inputs->comm->isOneRPN &&
+      !ncclNvlsSupported(inputs->devRedOp, inputs->datatype)) {
+    tuning->valid = 0;
+    return ret;
+  }
   if (inputs->comm->tuningContext.generalBandwidths[inputs->func][tuning->algo][tuning->proto] == -1.0f) {
     tuning->valid = 0;
+    return ret;
+  }
+  // Multi-RPN PAT is opt-in only for now.
+  if (!inputs->comm->isOneRPN) {
+    tuning->timeUs = FLT_MAX / 2.0f;
     return ret;
   }
   tuning->timeUs =

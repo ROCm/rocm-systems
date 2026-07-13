@@ -710,8 +710,8 @@ struct ncclComm {
   int* collNetHeads;
   int collNetHeadsNum;
   int collNetChainSupport;
-  int* collNetDenseToUserRank;
-  int* collNetUserToDenseRank;
+  // Node-major rank order with transport heads first on each node.
+  int* denseToUserRank;
   /* sharable collNet proxy progress resource. */
   struct ncclCollNetSharedRes* collNetSharedRes;
 
