@@ -2423,7 +2423,7 @@ TEST(ConSanMoi, Gfx950DescriptorRegisterGeometryUsesCdna4Encoding) {
                                               /*descriptor_wave32=*/true);
   EXPECT_EQ(geometry.wavefront_size, 64u);
   EXPECT_EQ(geometry.max_vgpr_count, 256u);
-  EXPECT_EQ(geometry.max_sgpr_count, 106u);
+  EXPECT_EQ(geometry.max_sgpr_count, 102u);
   EXPECT_EQ(geometry.vgpr_encoding_granularity, 8u);
   EXPECT_EQ(geometry.sgpr_encoding_granularity, 8u);
 
@@ -2440,13 +2440,13 @@ TEST(ConSanMoi, Gfx950DescriptorRegisterGeometryUsesCdna4Encoding) {
                                                            geometry.vgpr_encoding_granularity)
                    .has_value());
 
-  EXPECT_EQ(consan_moi_decode_descriptor_register_count(13, geometry.max_sgpr_count,
+  EXPECT_EQ(consan_moi_decode_descriptor_register_count(12, geometry.max_sgpr_count,
                                                         geometry.sgpr_encoding_granularity),
-            106u);
-  EXPECT_EQ(consan_moi_encode_descriptor_register_count(106, geometry.max_sgpr_count,
+            102u);
+  EXPECT_EQ(consan_moi_encode_descriptor_register_count(102, geometry.max_sgpr_count,
                                                         geometry.sgpr_encoding_granularity),
-            13u);
-  EXPECT_FALSE(consan_moi_encode_descriptor_register_count(107, geometry.max_sgpr_count,
+            12u);
+  EXPECT_FALSE(consan_moi_encode_descriptor_register_count(103, geometry.max_sgpr_count,
                                                            geometry.sgpr_encoding_granularity)
                    .has_value());
 }
@@ -2520,6 +2520,80 @@ TEST(ConSanMoi, Gfx950InventoriesBasicLdsReadWriteAndExcludesAtomic) {
   EXPECT_EQ(result.moi_candidates[1].addr_vgpr, 0u);
   EXPECT_EQ(result.moi_candidates[1].dst_vgpr, 1u);
   EXPECT_EQ(result.moi_candidates[1].width_bits, 32u);
+}
+
+TEST(ConSanMoi, Gfx950ScalarPlanningReservesDescriptorAbiInputsWithoutEmission) {
+  std::array<uint32_t, 4> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_system_sgprs",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 31u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_dynamic_access_records = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().max_referenced_sgpr_count, 36u);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 36u);
+}
+
+TEST(ConSanMoi, Gfx950ScalarFullPlanningFailsClosedWithoutEmission) {
+  std::array<uint32_t, 4> text_words = {
+      build_s_mov_b32(101, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4),
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_scalar_full",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_dynamic_access_records = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  EXPECT_FALSE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().max_referenced_sgpr_count, 102u);
+  EXPECT_FALSE(result.resolved_moi_exec_save_sgpr);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("could not place a fresh automatic EXEC-save SGPR window") !=
+           std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950SpecialRegisterGeometryMatchesWave64Abi) {
+  const auto special = consan_moi_special_register_geometry(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(special);
+  EXPECT_EQ(special->vcc_lo, 106u);
+  EXPECT_EQ(special->vcc_hi, 107u);
+  EXPECT_EQ(special->exec_lo, 126u);
+  EXPECT_EQ(special->exec_hi, 127u);
 }
 
 TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {

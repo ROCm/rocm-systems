@@ -95,8 +95,8 @@ Full gfx950 support means:
   `RR1A` can become `DONE`.
 - 2026-07-13: `R1A` is `DONE`. Descriptor planning now treats CDNA4 as
   wave64 with eight-VGPR encoding groups, preserves RDNA wave32/wave64
-  behavior, accepts the SGPR 106 boundary despite its partially filled final
-  descriptor group, and rejects VGPR 257 / SGPR 107. A synthetic gfx950 patch
+  behavior, accepts the ordinary SGPR 102 boundary despite its partially
+  filled final descriptor group, and rejects VGPR 257 / SGPR 103. A synthetic gfx950 patch
   verifies that descriptor field zero is planned as eight VGPRs.
 - 2026-07-13: `P1B` is `DONE`. The final VCC-sensitive arithmetic gap was
   closed by routing CDNA4 probe adds through LLVM-matched `v_add3_u32` while
@@ -116,6 +116,12 @@ Full gfx950 support means:
   field-level evidence (`event_index=0`, write kind, owner/epoch zero, four
   LDS bytes, cell `[0,1)`, and full wave64 lane mask); the dynamic run publishes
   64 visible records with automatic EXEC/VCC/SCC preservation.
+- 2026-07-13: `R1B` is `DONE`. CDNA4 planning now distinguishes ordinary
+  SGPRs `s0-s101` from `FLAT_SCRATCH`, XNACK, VCC, and EXEC; reserves all
+  descriptor-enabled user/system SGPR inputs (including workgroup info and
+  private wave offset); and fails closed when no five-SGPR special-state save
+  window remains. This also corrected the S3/S4 edge: isolated live scratch
+  proof S4 and transaction audit S3 independently gate S5.
 
 ## DAG Overview
 
@@ -153,7 +159,7 @@ flowchart LR
   A3B["A3B: Private And Pressure Fixtures"]:::todo
   A3C["A3C: Shared-Helper Fixture"]:::todo
   R1A["R1A: Limits And Descriptor Geometry"]:::done
-  R1B["R1B: Scalar And Special State"]:::todo
+  R1B["R1B: Scalar And Special State"]:::done
   R1C["R1C: Owners And Transaction Tests"]:::todo
   F0{"F0: gfx950 Foundation Ready"}:::target
 
@@ -185,7 +191,7 @@ flowchart LR
   S3["S3: Private-Segment Transaction Audit"]:::todo
   S4["S4: Standalone Live VGPR Round Trip"]:::done
   S5["S5: Target-Dispatched Spill Backend"]:::active
-  RR1A["RR1A: Access Record Emission"]:::todo
+  RR1A["RR1A: Access Record Emission"]:::done
   S6["S6: Forced-Spill Record/Replay"]:::todo
   SA1C["SA1C: Sampled Host Oracle"]:::todo
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
@@ -202,7 +208,7 @@ flowchart LR
   F0 --> S3
   S1 --> S2
   S2 --> S4
-  S3 --> S4
+  S3 --> S5
   S4 --> S5
   S5 --> S6
   RR1A --> S6
@@ -557,7 +563,7 @@ Done criteria:
 - Unit tests cover boundary count encodings and reject the first unrepresentable
   VGPR/SGPR allocation.
 
-### R1B: CDNA4 Scalar And Special State - TODO
+### R1B: CDNA4 Scalar And Special State - DONE
 
 Goal: prove scalar-resource and architectural-state inputs independently of
 ordinary descriptor growth.
@@ -566,6 +572,17 @@ Work:
 
 - Verify special-register numbering and the EXEC/VCC/SCC preservation model.
 - Verify workgroup system-SGPR layout and private-segment enablement.
+
+Result:
+
+- The ordinary CDNA4 scalar allocation limit is `s0-s101`; architectural VCC
+  and EXEC remain modeled separately at `s106:s107` and `s126:s127`.
+- Resource planning reserves the descriptor's user SGPRs plus enabled
+  workgroup X/Y/Z, workgroup-info, and private-segment wave-offset inputs even
+  when guest instructions do not mention them.
+- Synthetic no-emission tests cover a 36-SGPR ABI footprint, automatic save
+  placement immediately above it, scalar-file exhaustion, and the special
+  register numbers.
 
 Done criteria:
 

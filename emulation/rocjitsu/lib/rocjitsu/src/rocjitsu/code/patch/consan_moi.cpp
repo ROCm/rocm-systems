@@ -560,12 +560,25 @@ consan_moi_descriptor_register_geometry(rj_code_arch_t arch, bool descriptor_wav
   ConSanMoiDescriptorRegisterGeometry geometry;
   if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
     geometry.wavefront_size = 64;
+    geometry.max_sgpr_count = 102;
     geometry.vgpr_encoding_granularity = 8;
     return geometry;
   }
   geometry.wavefront_size = descriptor_wave32 ? 32 : 64;
   geometry.vgpr_encoding_granularity = descriptor_wave32 ? 8 : 4;
   return geometry;
+}
+
+std::optional<ConSanMoiSpecialRegisterGeometry>
+consan_moi_special_register_geometry(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return ConSanMoiSpecialRegisterGeometry{};
+  default:
+    return std::nullopt;
+  }
 }
 
 uint32_t consan_moi_decode_descriptor_register_count(uint32_t granulated_count, uint32_t max_count,
@@ -596,7 +609,8 @@ inline constexpr uint16_t kScalarOperandTtmpBase = 108;
 inline constexpr uint16_t kTtmpRdna4GridYz = 7;
 inline constexpr uint16_t kTtmpRdna4GridX = 9;
 inline constexpr uint32_t kMaxVgprs = 256;
-inline constexpr uint32_t kMaxSgprs = 106;
+inline constexpr uint32_t kMaxRdna4Sgprs = 106;
+inline constexpr uint32_t kMaxCdna4Sgprs = 102;
 inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
 inline constexpr uint16_t kGfx12HwIdOwnerBits = 10;
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
@@ -605,6 +619,10 @@ inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
+}
+
+[[nodiscard]] constexpr uint32_t moi_max_ordinary_sgprs(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? kMaxCdna4Sgprs : kMaxRdna4Sgprs;
 }
 
 struct ConSanMoiWorkgroupSource {
@@ -1579,6 +1597,20 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   }
 }
 
+[[nodiscard]] uint32_t moi_descriptor_abi_sgpr_count(const KD &desc, rj_code_arch_t arch) {
+  uint32_t count = moi_descriptor_user_sgpr_count(desc);
+  count += moi_descriptor_enables_workgroup_id(desc, 0) ? 1u : 0u;
+  count += moi_descriptor_enables_workgroup_id(desc, 1) ? 1u : 0u;
+  count += moi_descriptor_enables_workgroup_id(desc, 2) ? 1u : 0u;
+  count += AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO)
+               ? 1u
+               : 0u;
+  count += AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)
+               ? 1u
+               : 0u;
+  return std::min<uint32_t>(count, moi_max_ordinary_sgprs(arch));
+}
+
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
@@ -1627,10 +1659,10 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return consan_moi_decode_descriptor_register_count(granulated, kMaxVgprs, granularity);
 }
 
-[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc) {
+[[nodiscard]] uint32_t moi_descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
   const uint32_t granulated = AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  return consan_moi_decode_descriptor_register_count(granulated, kMaxSgprs, 8u);
+  return consan_moi_decode_descriptor_register_count(granulated, moi_max_ordinary_sgprs(arch), 8u);
 }
 
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
@@ -1671,15 +1703,17 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
   return true;
 }
 
-[[nodiscard]] bool grow_moi_descriptor_sgpr_allocation(KD &desc, uint32_t required_count) {
-  if (required_count == 0 || required_count > kMaxSgprs)
+[[nodiscard]] bool grow_moi_descriptor_sgpr_allocation(KD &desc, uint32_t required_count,
+                                                       rj_code_arch_t arch) {
+  const uint32_t max_sgprs = moi_max_ordinary_sgprs(arch);
+  if (required_count == 0 || required_count > max_sgprs)
     return false;
-  if (required_count <= moi_descriptor_sgpr_allocation_count(desc))
+  if (required_count <= moi_descriptor_sgpr_allocation_count(desc, arch))
     return true;
 
   constexpr uint32_t kSgprGranularity = 8;
   const auto granulated =
-      consan_moi_encode_descriptor_register_count(required_count, kMaxSgprs, kSgprGranularity);
+      consan_moi_encode_descriptor_register_count(required_count, max_sgprs, kSgprGranularity);
   if (!granulated)
     return false;
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -1871,7 +1905,7 @@ struct MoiKernelResourceContext {
   return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxVgprs));
 }
 
-[[nodiscard]] uint16_t max_referenced_sgpr_count(const KernelCfgScope &scope) {
+[[nodiscard]] uint16_t max_referenced_sgpr_count(const KernelCfgScope &scope, rj_code_arch_t arch) {
   uint32_t max_count = 0;
   for (BasicBlock *block : scope.blocks) {
     if (block == nullptr)
@@ -1885,7 +1919,7 @@ struct MoiKernelResourceContext {
       });
     }
   }
-  return static_cast<uint16_t>(std::min<uint32_t>(max_count, kMaxSgprs));
+  return static_cast<uint16_t>(std::min<uint32_t>(max_count, moi_max_ordinary_sgprs(arch)));
 }
 
 [[nodiscard]] const Instruction *instruction_at(BasicBlock *block, uint64_t text_offset) {
@@ -1917,11 +1951,13 @@ struct MoiResourcePlanningState {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   BlockOffsetIndex block_index;
   std::vector<MoiKernelResourceContext> contexts;
+  uint16_t max_sgpr_count = 0;
   bool valid = false;
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
                            const ConSanResult &result)
-      : bytes(input), code_object(input.data(), input.size()), decoder(Decoder::create(arch)) {
+      : bytes(input), code_object(input.data(), input.size()), decoder(Decoder::create(arch)),
+        max_sgpr_count(static_cast<uint16_t>(moi_max_ordinary_sgprs(arch))) {
     if (!code_object.is_valid() || !decoder)
       return;
 
@@ -1976,7 +2012,7 @@ struct MoiResourcePlanningState {
                                                            LivenessAnalysisOptions{},
                                                            stored.scope.liveness_edges);
       stored.max_referenced_vgpr_count = max_referenced_vgpr_count(stored.scope);
-      stored.max_referenced_sgpr_count = max_referenced_sgpr_count(stored.scope);
+      stored.max_referenced_sgpr_count = max_referenced_sgpr_count(stored.scope, arch);
 
       if (kernel.descriptor_file_offset > bytes.size() ||
           sizeof(KD) > bytes.size() - kernel.descriptor_file_offset) {
@@ -1984,10 +2020,12 @@ struct MoiResourcePlanningState {
       }
       KD descriptor{};
       std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
+      stored.max_referenced_sgpr_count = static_cast<uint16_t>(std::max<uint32_t>(
+          stored.max_referenced_sgpr_count, moi_descriptor_abi_sgpr_count(descriptor, arch)));
       stored.current_vgpr_count =
           static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor, arch));
       stored.current_sgpr_count =
-          static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor));
+          static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor, arch));
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
       stored.descriptor_valid = true;
     }
@@ -2034,7 +2072,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   }
 
   plan.current_vgpr_count = kMaxVgprs;
-  plan.current_sgpr_count = kMaxSgprs;
+  plan.current_sgpr_count = state.max_sgpr_count;
   RegisterSet live_before_all_owners;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
@@ -2244,6 +2282,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(ConSanOptions &options,
+                                                           rj_code_arch_t arch,
                                                            ConSanResult &result) {
   if (options.moi_exec_save_sgpr)
     return false;
@@ -2267,7 +2306,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   }
 
   first = util::align_up(first, 2u);
-  for (uint32_t base = first; base + count <= kMaxSgprs; base += 2u) {
+  for (uint32_t base = first; base + count <= moi_max_ordinary_sgprs(arch); base += 2u) {
     if (options.moi_owner_sgpr &&
         range_overlaps(static_cast<uint16_t>(base), count, *options.moi_owner_sgpr, 1u)) {
       continue;
@@ -2286,7 +2325,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   return false;
 }
 
-[[nodiscard]] bool configure_automatic_moi_owner_sgpr(ConSanOptions &options,
+[[nodiscard]] bool configure_automatic_moi_owner_sgpr(ConSanOptions &options, rj_code_arch_t arch,
                                                       ConSanResult &result) {
   if (options.moi_owner_source != ConSanMoiOwnerSource::HwId || options.moi_owner_sgpr)
     return false;
@@ -2306,7 +2345,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
   }
 
-  for (uint32_t sgpr = first; sgpr < kMaxSgprs; ++sgpr) {
+  for (uint32_t sgpr = first; sgpr < moi_max_ordinary_sgprs(arch); ++sgpr) {
     if (options.moi_exec_save_sgpr &&
         range_overlaps(static_cast<uint16_t>(sgpr), 1u, *options.moi_exec_save_sgpr,
                        moi_exec_save_sgpr_count(options))) {
@@ -2650,9 +2689,11 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool apply_sgpr_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanResult &result, const AmdGpuCodeObject &code_object,
-    const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
+[[nodiscard]] bool
+apply_sgpr_descriptor_requirements(CodeObjectPatcher &patcher, const ConSanResult &result,
+                                   const AmdGpuCodeObject &code_object,
+                                   const MoiDescriptorSgprRequirements &requirements,
+                                   rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
     const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
     const auto active_kernel =
@@ -2674,7 +2715,7 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
     }
     KD descriptor{};
     std::memcpy(&descriptor, current_image.data() + active_descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count)) {
+    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count, arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
@@ -2749,7 +2790,7 @@ apply_spill_metadata_requirements(std::vector<uint8_t> &image, const ConSanResul
 [[nodiscard]] bool
 apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResult &result,
                                    const MoiDescriptorSgprRequirements &requirements,
-                                   std::vector<std::string> &errors) {
+                                   rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
       errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
@@ -2761,7 +2802,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count)) {
+    if (!grow_moi_descriptor_sgpr_allocation(descriptor, required_count, arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor SGPR allocation");
       return false;
     }
@@ -3817,7 +3858,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!apply_spill_descriptor_requirements(patcher, code_object, bytes, result,
                                              private_requirements, result.errors))
       return;
-    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements, arch,
                                             result.errors))
       return;
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3963,7 +4004,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     result.elf_bytes.clear();
     return;
   }
-  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements,
+  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements, arch,
                                           result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -4470,7 +4511,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                              private_requirements, result.errors)) {
       return;
     }
-    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements, arch,
                                             result.errors))
       return;
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -4637,7 +4678,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     result.elf_bytes.clear();
     return;
   }
-  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements,
+  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements, arch,
                                           result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -4828,7 +4869,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                              private_requirements, result.errors)) {
       return;
     }
-    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+    if (!apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements, arch,
                                             result.errors))
       return;
     const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -4974,7 +5015,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     result.elf_bytes.clear();
     return;
   }
-  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements,
+  if (!apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements, arch,
                                           result.errors)) {
     result.elf_bytes.clear();
     return;
@@ -5108,7 +5149,8 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation");
     return false;
   }
-  if (required_sgpr_count != 0 && !grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count)) {
+  if (required_sgpr_count != 0 &&
+      !grow_moi_descriptor_sgpr_allocation(desc, required_sgpr_count, arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor SGPR allocation");
     return false;
   }
@@ -6037,7 +6079,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
                                      descriptor_requirements, arch, result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements, arch,
                                           result.errors)) {
     return;
   }
@@ -6560,7 +6602,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                      descriptor_requirements, arch, result.errors) ||
       !apply_spill_descriptor_requirements(patcher, code_object, active_bytes, result,
                                            private_requirements, result.errors) ||
-      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements,
+      !apply_sgpr_descriptor_requirements(patcher, result, code_object, scalar_requirements, arch,
                                           result.errors)) {
     return;
   }
@@ -7077,9 +7119,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   for (const ConSanFunctionInfo &function : result.functions)
     append_moi_candidates(function, effective_options.flat_provenance_mode, result);
   rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_owner_sgpr(effective_options, result))
+  if (configure_automatic_moi_owner_sgpr(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_exec_save_sgprs(effective_options, result))
+  if (configure_automatic_moi_exec_save_sgprs(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);

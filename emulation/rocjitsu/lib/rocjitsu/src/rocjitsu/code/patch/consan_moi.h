@@ -48,8 +48,18 @@ struct ConSanMoiDescriptorRegisterGeometry {
   uint32_t sgpr_encoding_granularity = 8;
 };
 
+struct ConSanMoiSpecialRegisterGeometry {
+  uint16_t vcc_lo = 106;
+  uint16_t vcc_hi = 107;
+  uint16_t exec_lo = 126;
+  uint16_t exec_hi = 127;
+};
+
 [[nodiscard]] ConSanMoiDescriptorRegisterGeometry
 consan_moi_descriptor_register_geometry(rj_code_arch_t arch, bool descriptor_wave32);
+
+[[nodiscard]] std::optional<ConSanMoiSpecialRegisterGeometry>
+consan_moi_special_register_geometry(rj_code_arch_t arch);
 
 [[nodiscard]] uint32_t consan_moi_decode_descriptor_register_count(uint32_t granulated_count,
                                                                    uint32_t max_count,
