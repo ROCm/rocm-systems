@@ -72,8 +72,6 @@ set(AMD_TEST_SRC
     fp8_e8m0.cc
     fp6_ocp.cc
     fp4_ocp.cc
-    ext_ocp_fp8.cc
-    ext_ocp_fp4.cc
     memcpy_async.cc
     bfloat16_atomic_test.cc
     fp16_atomic_test.cc
@@ -84,7 +82,7 @@ set(AMD_TEST_SRC
 # bitfield ABI on Windows. Only compile the fp6 OCP test on non-Windows until
 # the header is made portable.
 if(NOT WIN32)
-  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc)
+  list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc)
 endif()
 
 set(AMD_ARCH_SPEC_TEST_SRC
