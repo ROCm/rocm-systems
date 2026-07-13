@@ -1206,6 +1206,6 @@ TEST_F(DispatchTest, LoadHsacoNoPdi) {
   uint64_t ko = 0;
   ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_NOPDI_PATH),
                                  "vector_scalar_add", &exe, &ko));
-  EXPECT_NE(ko, 0u);  // descriptor exists; pdi_dev_addr inside it is 0
+  EXPECT_NE(ko, 0u);  // descriptor exists; pdi_bo_va inside it is 0
   EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
