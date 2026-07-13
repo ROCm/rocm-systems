@@ -2692,65 +2692,108 @@ TEST_CASE("Unit_HRR_MiscAPIs_Direct", "[.][hrr][direct]") {
 // Workload V — Driver-style 3D/2D memcpy variants
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_DrvMemcpy3D_Direct", "[.][hrr][direct]") {
-  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  // Driver 3D struct-pointer copies, validated end to end by D2H.
+  // Chain: host(hsrc=VAL) --hipDrvMemcpy3D H2D--> A --hipDrvMemcpy3DAsync D2D--> B
+  //        --hipDrvMemcpy3D D2D--> C. Final D2H requires all three driver copies
+  //        (H2D blob path + dual device-ptr translation) to have replayed.
   HIP_CHECK(hipSetDevice(0));
-  float* d = nullptr;
-  HIP_CHECK(hipMalloc(&d, SZ));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = 0x5C5C5C5C;
+
+  int *A = nullptr, *B = nullptr, *C = nullptr;
+  HIP_CHECK(hipMalloc(&A, SZ));
+  HIP_CHECK(hipMalloc(&B, SZ));
+  HIP_CHECK(hipMalloc(&C, SZ));
   hipStream_t s;
-  HIP_CHECK(hipStreamCreate(&s));
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
 
-  // hipDrvMemcpy3D — D2D (same pointer, zero-size to avoid actual copy)
+  int* hsrc = new int[N];
+  for (int i = 0; i < N; ++i) hsrc[i] = VAL;
+
+  // (1) hipDrvMemcpy3D H2D: host hsrc -> device A (exercises the blob path).
   { HIP_MEMCPY3D p{};
-    p.srcMemoryType = hipMemoryTypeDevice;
-    p.dstMemoryType = hipMemoryTypeDevice;
-    p.srcDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.dstDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.WidthInBytes  = 4;
-    p.Height        = 1;
-    p.Depth         = 1;
-    p.srcPitch      = 4; p.srcHeight = 1;
-    p.dstPitch      = 4; p.dstHeight = 1;
-    (void)hipDrvMemcpy3D(&p); }
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hsrc;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(A);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
 
-  // hipDrvMemcpy3DAsync
+  // (2) hipDrvMemcpy3DAsync D2D: A -> B on a stream (dual pointer translation).
   { HIP_MEMCPY3D p{};
-    p.srcMemoryType = hipMemoryTypeDevice;
-    p.dstMemoryType = hipMemoryTypeDevice;
-    p.srcDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.dstDevice     = reinterpret_cast<hipDeviceptr_t>(d);
-    p.WidthInBytes  = 4;
-    p.Height        = 1;
-    p.Depth         = 1;
-    p.srcPitch      = 4; p.srcHeight = 1;
-    p.dstPitch      = 4; p.dstHeight = 1;
-    (void)hipDrvMemcpy3DAsync(&p, s); }
-
-  // hipMemcpy3DPeer / hipMemcpy3DPeerAsync — same device (device 0 → 0)
-  { hipMemcpy3DPeerParms pp{};
-    pp.srcDevice = 0; pp.dstDevice = 0;
-    pp.srcPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.dstPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.extent    = make_hipExtent(sizeof(float), 1, 1);
-    (void)hipMemcpy3DPeer(&pp); }
-  { hipMemcpy3DPeerParms pp{};
-    pp.srcDevice = 0; pp.dstDevice = 0;
-    pp.srcPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.dstPtr    = make_hipPitchedPtr(d, sizeof(float), 1, 1);
-    pp.extent    = make_hipExtent(sizeof(float), 1, 1);
-    (void)hipMemcpy3DPeerAsync(&pp, s); }
-
-  (void)hipStreamSynchronize(s);
-
-  // D2H blob (value = 21)
-  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), 21, N));
-  HIP_CHECK(hipDeviceSynchronize());
-  int* h = new int[N]();
-  HIP_CHECK(hipMemcpyAsync(h, d, SZ, hipMemcpyDeviceToHost, s));
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(A);
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3DAsync(&p, s)); }
   HIP_CHECK(hipStreamSynchronize(s));
-  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 21);
 
-  HIP_CHECK(hipFree(d));
+  // (3) hipDrvMemcpy3D D2D: B -> C (sync device-to-device).
+  { HIP_MEMCPY3D p{};
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(B);
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(C);
+    p.WidthInBytes  = SZ; p.Height = 1; p.Depth = 1;
+    p.srcPitch = SZ; p.srcHeight = 1;
+    p.dstPitch = SZ; p.dstHeight = 1;
+    HIP_CHECK(hipDrvMemcpy3D(&p)); }
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, C, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipFree(A));
+  HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipFree(C));
   HIP_CHECK(hipStreamDestroy(s));
+  delete[] hsrc;
+  delete[] h;
+}
+
+// ===========================================================================
+// hipDrvMemcpy2DUnaligned — driver 2D struct-pointer copy (hip_Memcpy2D).
+// host(hsrc=VAL) --H2D--> A --D2D--> B, validated by D2H on B.
+// ===========================================================================
+TEST_CASE("Unit_HRR_DrvMemcpy2DUnaligned_Direct", "[.][hrr][direct]") {
+  HIP_CHECK(hipSetDevice(0));
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = 0x2D2D2D2D;
+
+  int *A = nullptr, *B = nullptr;
+  HIP_CHECK(hipMalloc(&A, SZ));
+  HIP_CHECK(hipMalloc(&B, SZ));
+  hipStream_t s;
+  HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+
+  int* hsrc = new int[N];
+  for (int i = 0; i < N; ++i) hsrc[i] = VAL;
+
+  // (1) H2D single row: host hsrc -> device A (blob path).
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeHost;   p.srcHost   = hsrc;                                p.srcPitch = SZ;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(A); p.dstPitch = SZ;
+    p.WidthInBytes  = SZ; p.Height = 1;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+
+  // (2) D2D: A -> B (dual pointer translation).
+  { hip_Memcpy2D p{};
+    p.srcMemoryType = hipMemoryTypeDevice; p.srcDevice = reinterpret_cast<hipDeviceptr_t>(A); p.srcPitch = SZ;
+    p.dstMemoryType = hipMemoryTypeDevice; p.dstDevice = reinterpret_cast<hipDeviceptr_t>(B); p.dstPitch = SZ;
+    p.WidthInBytes  = SZ; p.Height = 1;
+    HIP_CHECK(hipDrvMemcpy2DUnaligned(&p)); }
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpyAsync(h, B, SZ, hipMemcpyDeviceToHost, s));
+  HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipFree(A));
+  HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipStreamDestroy(s));
+  delete[] hsrc;
   delete[] h;
 }
 

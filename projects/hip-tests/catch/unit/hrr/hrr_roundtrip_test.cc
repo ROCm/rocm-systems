@@ -1029,6 +1029,11 @@ HIP_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
+  hrr_run_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_TextureRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_texture"};
   // On devices without image support the workload exits early after

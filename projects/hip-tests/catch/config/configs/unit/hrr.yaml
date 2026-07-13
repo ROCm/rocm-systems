@@ -159,6 +159,9 @@ hrr:
   Unit_HRR_DrvMemcpy3DRoundtrip:
     <<: *level_2
     tags: [capture, memcpy, playback, roundtrip]
+  Unit_HRR_DrvMemcpy2DUnalignedRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, playback, roundtrip]
   Unit_HRR_TextureRoundtrip:
     <<: *level_2
     tags: [capture, texture, playback, roundtrip]
@@ -223,6 +226,9 @@ hrr:
     <<: *level_2
     tags: [direct, device]
   Unit_HRR_DrvMemcpy3D_Direct:
+    <<: *level_2
+    tags: [direct, memcpy]
+  Unit_HRR_DrvMemcpy2DUnaligned_Direct:
     <<: *level_2
     tags: [direct, memcpy]
   Unit_HRR_DrvMemcpy_Direct:
