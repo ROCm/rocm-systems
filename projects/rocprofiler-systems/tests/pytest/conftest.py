@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pytest
 from pytest import StashKey
 
+from rocprofsys import environment
 from rocprofsys import (
     RocprofsysConfig,
     discover_build_config,
@@ -38,6 +39,7 @@ from rocprofsys import (
     get_target_gpu_arch,
     get_xnack_support,
     TestResult,
+    ValidationResult,
     validate_regex,
     validate_file_regex,
     validate_perfetto_trace,
@@ -108,12 +110,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         default=False,
         help="Show the test configuration and exit without running any tests",
-    )
-    group.addoption(
-        "--output-dir",
-        action="store",
-        default=None,
-        help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
     )
     group.addoption(
         "--ctest-mode",
@@ -641,10 +637,11 @@ def pytest_runtest_makereport(item, call):
         report_output.append(f"{'='*70}")
         report_output.append(f"Command: {cmd}")
     test_env = getattr(test_result, "environment", None)
-    if test_env:
-        env_lines = [f"  {k}={v}" for k, v in sorted(test_env.items())]
-        report_output.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
-        report_output.append(f"{'='*70}")
+    if isinstance(test_env, environment.TestEnvironment):
+        env_lines = test_env.format_layers()
+        if env_lines:
+            report_output.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
+            report_output.append(f"{'='*70}")
     test_output = getattr(test_result, "test_output", "")
     extra_output = getattr(test_result, "extra_output", None)
     if test_output or extra_output:
@@ -1481,8 +1478,9 @@ def _generate_rocprofsys_config_header() -> list[str]:
                 "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys)",
             )
         )
+    # Use fundamental system env to avoid verbose output
     header.extend(["-" * 70, "System Environment:"])
-    for key, value in sorted(rocprof_config.get_fundamental_environment().items()):
+    for key, value in environment.fundamental_system_environment().items():
         header.append(_row(f"{key}:", value))
     header.extend(["=" * 70, ""])
     return header
@@ -1571,10 +1569,8 @@ def get_rocprof_config() -> RocprofsysConfig:
         pytest_config = getattr(pytest, "_config_ref", None)
         python_versions = None
         python_root_dirs = None
-        custom_output_dir = None
         rocm_optional = False
         if pytest_config:
-            custom_output_dir = pytest_config.getoption("--output-dir", default=None)
             ver_str = pytest_config.getoption("--python-versions", default=None)
             dir_str = pytest_config.getoption("--python-root-dirs", default=None)
             # When generating the CTestTestfile.cmake in TheRock, ROCm is not present
@@ -1589,7 +1585,6 @@ def get_rocprof_config() -> RocprofsysConfig:
                 ]
 
         return discover_build_config(
-            output_dir=Path(custom_output_dir) if custom_output_dir else None,
             python_versions=python_versions,
             python_root_dirs=python_root_dirs,
             rocm_optional=rocm_optional,
@@ -1677,84 +1672,33 @@ def _cleanup_temp_patterns() -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def base_env(rocprof_config) -> dict[str, str]:
-    """Get base environment variables for test execution."""
-    return rocprof_config.get_base_environment()
+def library_path(rocprof_config) -> str:
+    """Computed LD_LIBRARY_PATH (rocprofsys libs + user override + ROCm LLVM libs)."""
+    return rocprof_config.get_library_path()
 
 
 @pytest.fixture
-def flat_env(base_env: dict[str, str]) -> dict[str, str]:
+def flat_env() -> dict[str, str]:
     """Environment variables for flat profile tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "ROCPROFSYS_FLAT_PROFILE": "ON",
-        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_COLLAPSE_PROCESSES": "ON",
-        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
-        "ROCPROFSYS_SAMPLING_FREQ": "50",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
+    return environment.flat_environment()
 
 
 @pytest.fixture
-def lock_env(base_env: dict[str, str]) -> dict[str, str]:
+def lock_env() -> dict[str, str]:
     """Environment variables for thread lock tracing tests."""
-    return {
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-        "ROCPROFSYS_SAMPLING_FREQ": "750",
-        "ROCPROFSYS_COLLAPSE_THREADS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
-        "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
-        "ROCPROFSYS_COUT_OUTPUT": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_LOG_LEVEL": "info",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
+    return environment.lock_environment()
 
 
 @pytest.fixture
-def perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
+def perfetto_env() -> dict[str, str]:
     """Environment variables for perfetto-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "ON",
-        "ROCPROFSYS_PROFILE": "OFF",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_PERFETTO_BACKEND": "inprocess",
-        "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
+    return environment.perfetto_environment()
 
 
 @pytest.fixture
-def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
+def timemory_env() -> dict[str, str]:
     """Environment variables for timemory-only tests."""
-    return {
-        "ROCPROFSYS_TRACE": "OFF",
-        "ROCPROFSYS_PROFILE": "ON",
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
-        "OMP_PROC_BIND": "spread",
-        "OMP_PLACES": "threads",
-        "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
-    }
+    return environment.timemory_environment()
 
 
 # ----------------------------------------------------------------------------
@@ -2056,6 +2000,7 @@ class RocprofsysTest:
         assert_file_regex,
         get_test_num_threads,
         test_output_dir,
+        library_path,
     ):
 
         self.run_test = run_test
@@ -2069,6 +2014,7 @@ class RocprofsysTest:
         self.assert_file_regex = assert_file_regex
         self.num_threads = get_test_num_threads
         self.test_output_dir = test_output_dir
+        self.library_path = library_path
 
 
 # ============================================================================
@@ -2163,13 +2109,16 @@ def run_test(
         # Timeout: ROCPROFSYS_CI_TIMEOUT env, else @pytest.mark.timeout, else default
         ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
         if ci_timeout_env is not None:
+            # Shell-exported value: drives the subprocess timeout below and is
+            # already carried by the user env layer. Do NOT echo it into the
+            # test layer, or it would mask the real base default in dumps.
             timeout = int(ci_timeout_env)
         elif request.node.get_closest_marker("timeout"):
             timeout = request.node.get_closest_marker("timeout").args[0]
+            env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
         else:
             timeout = 300
-
-        env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
+            env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
 
         # Verify that MPI is available for "mpi_optional" tests
         if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
@@ -2428,8 +2377,8 @@ def assert_rocpd(subtests, tests_dir, request):
         with subtests.test(subtest_name):
             if not check_use_rocpd():
                 pytest.skip("ROCpd is disabled")
-            rocpd_file = result.rocpd_file
-            if rocpd_file is None:
+            rocpd_files = result.rocpd_files
+            if not rocpd_files:
                 pytest.fail("ROCpd database not created")
 
             existing_rules = None
@@ -2438,35 +2387,79 @@ def assert_rocpd(subtests, tests_dir, request):
                 if not existing_rules:
                     pytest.fail("No validation rules found")
 
-            validation = validate_rocpd_database(
-                rocpd_file,
-                tests_dir=tests_dir,
-                rules_files=existing_rules,
-                timeout=timeout,
-                gpu_category_to_skip=gpu_category_to_skip,
+            def validate_candidate(rocpd_file: Path) -> ValidationResult:
+                return validate_rocpd_database(
+                    rocpd_file,
+                    tests_dir=tests_dir,
+                    rules_files=existing_rules,
+                    timeout=timeout,
+                    gpu_category_to_skip=gpu_category_to_skip,
+                )
+
+            passing_output, failures, global_failure = _validate_rocpd_candidates(
+                rocpd_files,
+                validate_candidate,
+                pass_regex=pass_regex,
+                fail_regex=fail_regex,
             )
-            output = f"Command: {validation.command}\n\n{validation.message}"
-            if not validation.is_valid:
+
+            if global_failure is not None:
+                msg = fail_message or f"ROCpd validation failed:\n{global_failure}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    pytest.fail(msg, pytrace=False)
+            elif passing_output is None:
+                output = "\n\n--- Next ROCpd candidate ---\n\n".join(failures)
                 msg = fail_message or f"ROCpd validation failed:\n{output}"
                 if skip_on_fail:
                     pytest.skip(msg)
                 else:
-                    pytest.fail(msg)
-            if pass_regex:
-                for pattern in pass_regex:
-                    if not re.search(pattern, validation.stdout):
-                        pytest.fail(
-                            f"Pass regex not found: {pattern}\n{output}", pytrace=False
-                        )
-            if fail_regex:
-                for pattern in fail_regex:
-                    if re.search(pattern, validation.stdout):
-                        pytest.fail(
-                            f"Fail regex found: {pattern}\n{output}", pytrace=False
-                        )
-            _print_subtest_output(request, subtest_name, output)
+                    pytest.fail(msg, pytrace=False)
+            _print_subtest_output(request, subtest_name, passing_output)
 
     return _assert_rocpd
+
+
+def _validate_rocpd_candidates(
+    rocpd_files: list[Path],
+    validate_candidate: Callable[[Path], ValidationResult],
+    pass_regex: Optional[list[str]] = None,
+    fail_regex: Optional[list[str]] = None,
+) -> tuple[Optional[str], list[str], Optional[str]]:
+    """Validate ROCpd candidates and return the first passing output.
+
+    Multi-process runs can emit multiple ROCpd databases. Some rank-local
+    databases may not contain the GPU rows required by a rule set, so the
+    validation succeeds if any emitted candidate fully validates. A fail regex
+    match is a global failure and stops validation immediately.
+    """
+    failures: list[str] = []
+
+    for rocpd_file in rocpd_files:
+        validation = validate_candidate(rocpd_file)
+        output = f"Command: {validation.command}\n\n{validation.message}"
+        if fail_regex:
+            for pattern in fail_regex:
+                if re.search(pattern, validation.stdout):
+                    return None, failures, f"Fail regex found: {pattern}\n{output}"
+        if not validation.is_valid:
+            failures.append(output)
+            continue
+
+        regex_failure = None
+        if pass_regex:
+            for pattern in pass_regex:
+                if not re.search(pattern, validation.stdout):
+                    regex_failure = f"Pass regex not found: {pattern}"
+                    break
+        if regex_failure is not None:
+            failures.append(f"{regex_failure}\n{output}")
+            continue
+
+        return output, failures, None
+
+    return None, failures, None
 
 
 @pytest.fixture
