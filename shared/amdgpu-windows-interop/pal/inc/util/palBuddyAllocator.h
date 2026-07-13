@@ -90,6 +90,28 @@ public:
         gpusize  alignment,
         gpusize* pOffset);
 
+    /// Suballocates the block at a specific caller-supplied offset instead of letting the allocator
+    /// choose one. This lets a second allocator mirror the suballocation decisions of a first one so
+    /// that (for example) multi-GPU shared virtual memory lands at an identical address on every
+    /// device. The covering block must currently be free; if it is already suballocated (or split
+    /// underneath a used block) @ref ErrorOutOfGpuMemory is returned.
+    ///
+    /// @note This entry point does not participate in the @ref ClaimGpuMemory protocol; callers must
+    ///       not interleave it with the Claim/Allocate pattern on the same allocator instance.
+    ///
+    /// @param [in]  size       The size of the requested suballocation.
+    /// @param [in]  alignment  The alignment requirements of the requested suballocation.
+    /// @param [in]  offset     The offset within the base allocation at which to place the block.
+    ///                         Must be aligned to the block size derived from size and alignment.
+    ///
+    /// @returns Success if the block at the given offset was successfully suballocated,
+    ///          @ref ErrorInvalidValue if the offset is out of range or misaligned, or
+    ///          @ref ErrorOutOfGpuMemory if the covering block is not free.
+    Result AllocateAtOffset(
+        gpusize  size,
+        gpusize  alignment,
+        gpusize  offset);
+
     /// Frees a previously allocated suballocation.
     ///
     /// @param [in]  offset         The offset the suballocated block starts within the base allocation.

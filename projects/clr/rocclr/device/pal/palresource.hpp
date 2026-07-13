@@ -521,6 +521,10 @@ class Resource {
 
 typedef Util::BuddyAllocator<Device> MemBuddyAllocator;
 
+//! Sentinel for the suballocator "forced offset" argument meaning "let the buddy allocator pick the
+//! offset". Used by multi-GPU fine-grain SVM to force peer devices onto the leader's exact offset.
+static constexpr Pal::gpusize kNoForcedOffset = ~Pal::gpusize(0);
+
 class MemorySubAllocator {
  public:
   MemorySubAllocator(Device* device, bool retain_final_chunk = false)
@@ -528,9 +532,11 @@ class MemorySubAllocator {
 
   ~MemorySubAllocator();
 
-  //! Create suballocation
+  //! Create suballocation. When forced_offset != kNoForcedOffset the block is placed at that exact
+  //! intra-chunk offset (mirroring another device) instead of one chosen by the buddy allocator.
   GpuMemoryReference* Allocate(Pal::gpusize size, Pal::gpusize alignment,
-                               const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset);
+                               const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset,
+                               Pal::gpusize forced_offset = kNoForcedOffset);
   //! Free suballocation
   bool Free(std::recursive_mutex& monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
 
@@ -593,7 +599,8 @@ class ResourceCache {
       Resource::Descriptor* desc,  //!< Resource descriptor - cache key
       Pal::gpusize size, Pal::gpusize alignment,
       const Pal::IGpuMemory* reserved_va,  //!< Reserved VA for SVM suballocations
-      Pal::gpusize* offset);
+      Pal::gpusize* offset,
+      Pal::gpusize forced_offset = kNoForcedOffset);  //!< Force this intra-chunk offset (MGPU SVM)
 
   //! Destroys cache
   //! Returns true if cache was freed and false if cache is already empty.

@@ -1148,9 +1148,27 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
     createInfo.size = allocSize;
     createInfo.alignment = MaxGpuAlignment;
     createInfo.flags.gl2Uncached = desc_.gl2CacheDisabled_;
+    Pal::gpusize forcedOffset = kNoForcedOffset;
     if (svmPtr != 0) {
       createInfo.flags.useReservedGpuVa = true;
       createInfo.pReservedGpuVaOwner = params->svmBase_->iMem();
+      // Multi-GPU fine-grain SVM requires one identical virtual address on every device. Each device
+      // suballocates from its own buddy allocator, which would otherwise pick an intra-chunk offset
+      // independently, so the canonical VA (chunkBase + subOffset) would diverge across devices. The
+      // leader device (svmPtr == 0) suballocates first and chooses the offset; every peer
+      // (svmPtr != 0) reserves the same chunk base via pReservedGpuVaOwner and mirrors the leader's
+      // exact offset so both chunkBase and subOffset match. The leader's offset is svmBase_->offset().
+      if (params->svmBase_ != nullptr) {
+        forcedOffset = params->svmBase_->offset();
+        if (getenv("HIP_DUMP_MEMOBJ") != nullptr) {
+          LogPrintfInfo(
+              "CreateSvm FORCE-OFFSET dev=%d svmDevices=%zu leaderOffset=0x%llx reservedBase=0x%llx",
+              dev().index(),
+              ((params->owner_ != nullptr) ? params->owner_->getContext().svmDevices().size() : 0),
+              static_cast<unsigned long long>(forcedOffset),
+              static_cast<unsigned long long>(createInfo.pReservedGpuVaOwner->Desc().gpuVirtAddr));
+        }
+      }
     } else {
       createInfo.flags.useReservedGpuVa = false;
       createInfo.pReservedGpuVaOwner = nullptr;
@@ -1158,7 +1176,8 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
     createInfo.flags.interprocess = desc_.interprocess_;
     if (!dev().settings().svmFineGrainSystem_) {
       memRef_ = dev().resourceCache().findGpuMemory(&desc_, createInfo.size, createInfo.alignment,
-                                                    createInfo.pReservedGpuVaOwner, &subOffset_);
+                                                    createInfo.pReservedGpuVaOwner, &subOffset_,
+                                                    forcedOffset);
     }
     if (memRef_ == nullptr) {
       memRef_ = GpuMemoryReference::Create(dev(), createInfo);
@@ -2161,9 +2180,11 @@ MemorySubAllocator::~MemorySubAllocator() {
 // ================================================================================================
 GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize alignment,
                                                  const Pal::IGpuMemory* reserved_va,
-                                                 Pal::gpusize* offset) {
+                                                 Pal::gpusize* offset,
+                                                 Pal::gpusize forced_offset) {
   GpuMemoryReference* mem_ref = nullptr;
   MemBuddyAllocator* allocator = nullptr;
+  const bool useForcedOffset = (forced_offset != kNoForcedOffset);
   // Check if the resource size and alignment are allowed for suballocation
   if ((size < device_->settings().subAllocationMaxSize_) &&
       (alignment <= device_->properties().gpuMemoryProperties.fragmentSize)) {
@@ -2179,8 +2200,26 @@ GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize
             (reserved_va->Desc().gpuVirtAddr != mem_ref->iMem()->Desc().gpuVirtAddr)) {
           continue;
         }
-        // If we have found a valid chunk, then suballocate memory
-        if (Pal::Result::Success == allocator->Allocate(size, alignment, offset)) {
+        // If we have found a valid chunk, then suballocate memory. For multi-GPU fine-grain SVM a
+        // peer device must land at the leader's exact intra-chunk offset so the canonical VA
+        // (chunkBase + offset) matches; force it via AllocateAtOffset instead of letting the buddy
+        // allocator pick its own offset.
+        if (useForcedOffset) {
+          const Pal::Result res = allocator->AllocateAtOffset(size, alignment, forced_offset);
+          if (getenv("HIP_DUMP_MEMOBJ") != nullptr) {
+            LogPrintfInfo(
+                "MemorySubAllocator AllocateAtOffset chunkBase=0x%llx offset=0x%llx size=0x%llx "
+                "-> result=%d resultVA=0x%llx",
+                static_cast<unsigned long long>(mem_ref->iMem()->Desc().gpuVirtAddr),
+                static_cast<unsigned long long>(forced_offset),
+                static_cast<unsigned long long>(size), static_cast<int>(res),
+                static_cast<unsigned long long>(mem_ref->iMem()->Desc().gpuVirtAddr + forced_offset));
+          }
+          if (Pal::Result::Success == res) {
+            *offset = forced_offset;
+            return mem_ref;
+          }
+        } else if (Pal::Result::Success == allocator->Allocate(size, alignment, offset)) {
           return mem_ref;
         }
       }
@@ -2287,7 +2326,8 @@ bool ResourceCache::addGpuMemory(Resource::Descriptor* desc, GpuMemoryReference*
 GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal::gpusize size,
                                                  Pal::gpusize alignment,
                                                  const Pal::IGpuMemory* reserved_va,
-                                                 Pal::gpusize* offset) {
+                                                 Pal::gpusize* offset,
+                                                 Pal::gpusize forced_offset) {
   std::scoped_lock l(lockCacheOps_);
   GpuMemoryReference* ref = nullptr;
 
@@ -2296,14 +2336,15 @@ GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal
     // Do not use suballocator for VA_Range.
     return nullptr;
   } else if ((desc->type_ == Resource::Local) && !desc->SVMRes_) {
-    ref = mem_sub_alloc_local_.Allocate(size, alignment, reserved_va, offset);
+    ref = mem_sub_alloc_local_.Allocate(size, alignment, reserved_va, offset, forced_offset);
   } else if ((desc->type_ == Resource::Local) && desc->SVMRes_) {
-    ref = mem_sub_alloc_coarse_.Allocate(size, alignment, reserved_va, offset);
+    ref = mem_sub_alloc_coarse_.Allocate(size, alignment, reserved_va, offset, forced_offset);
   } else if (desc->SVMRes_) {
     if (desc->gl2CacheDisabled_) {
-      ref = mem_sub_alloc_fine_uncached_.Allocate(size, alignment, reserved_va, offset);
+      ref = mem_sub_alloc_fine_uncached_.Allocate(size, alignment, reserved_va, offset,
+                                                  forced_offset);
     } else {
-      ref = mem_sub_alloc_fine_.Allocate(size, alignment, reserved_va, offset);
+      ref = mem_sub_alloc_fine_.Allocate(size, alignment, reserved_va, offset, forced_offset);
     }
   }
 

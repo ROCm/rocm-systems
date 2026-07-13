@@ -262,6 +262,90 @@ Result BuddyAllocator<Allocator>::Allocate(
 }
 
 // =====================================================================================================================
+// Suballocates the block at a specific caller-supplied offset (rather than picking the next free block). Used to
+// mirror another allocator's suballocation so that multi-GPU SVM lands at an identical address on every device. The
+// covering block must currently be free. This does not use the ClaimGpuMemory protocol, so it must not be interleaved
+// with Claim/Allocate on the same allocator instance.
+template <typename Allocator>
+Result BuddyAllocator<Allocator>::AllocateAtOffset(
+    gpusize size,
+    gpusize alignment,
+    gpusize offset)
+{
+    PAL_ASSERT(m_pFreeBlockSets != nullptr);
+    PAL_ASSERT(m_pUsedBlockMap != nullptr);
+
+    // Pad the requested allocation size to the nearest POT of the size and alignment (matches Allocate).
+    const uint32 kval = Max(SizeToKval(Pow2Pad(Max(size, alignment))), m_minKval);
+
+    // The requested offset must be within the base allocation and aligned to this level's block size.
+    if ((kval >= m_baseAllocKval) ||
+        (offset >= KvalToSize(m_baseAllocKval)) ||
+        ((offset & (KvalToSize(kval) - 1)) != 0))
+    {
+        return Result::ErrorInvalidValue;
+    }
+
+    // Take an exclusive lock so the multi-level split below is atomic with respect to Allocate/Free.
+    RWLockAuto<RWLock::ReadWrite> freeLock(&m_freeLock);
+
+    // Find the smallest free ancestor block that covers 'offset'.
+    uint32  foundKval = kval;
+    gpusize ancestor  = 0;
+    bool    found     = false;
+    for (uint32 k = kval; k < m_baseAllocKval; ++k)
+    {
+        const gpusize candidate = offset & ~(KvalToSize(k) - 1);
+        if (IsOffsetFree(candidate, k))
+        {
+            foundKval = k;
+            ancestor  = candidate;
+            found     = true;
+            break;
+        }
+    }
+
+    if (found == false)
+    {
+        // The covering block is already suballocated -> the requested offset cannot be honored.
+        return Result::ErrorOutOfGpuMemory;
+    }
+
+    // Remove the free ancestor and split it down to 'kval', inserting the buddy half that does NOT contain 'offset'
+    // as free at each level (mirrors the buddy-insert logic in GetNextFreeBlock).
+    Result result = RemoveOffsetFromFreeSet(ancestor, foundKval);
+    for (uint32 k = foundKval; (result == Result::Success) && (k > kval); --k)
+    {
+        const gpusize buddyOffset = ancestor + KvalToSize(k - 1);
+        if (offset < buddyOffset)
+        {
+            // 'offset' is in the lower half; free the upper half and keep descending into 'ancestor'.
+            result = InsertToFreeSet(buddyOffset, k - 1);
+        }
+        else
+        {
+            // 'offset' is in the upper half; free the lower half and descend into the upper half.
+            result  = InsertToFreeSet(ancestor, k - 1);
+            ancestor = buddyOffset;
+        }
+    }
+
+    // 'ancestor' now equals 'offset' at level 'kval'; mark it used.
+    if (result == Result::Success)
+    {
+        PAL_ASSERT(ancestor == offset);
+        result = SetKvalUsed(offset, kval);
+    }
+
+    if (result == Result::Success)
+    {
+        // Increment the number of suballocations this buddy allocator manages
+        AtomicIncrement(&m_numSuballocations);
+    }
+    return result;
+}
+
+// =====================================================================================================================
 // Gets the next free block by recursively dividing larger blocks until a suitible sized block is created.
 template <typename Allocator>
 Result BuddyAllocator<Allocator>::GetNextFreeBlock(
