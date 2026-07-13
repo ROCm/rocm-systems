@@ -1,7 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 import struct
 
+import pytest
+
 import aie_hsaco
+import aie_hsaco_dump
 
 
 def _parse(section: bytes):
@@ -47,3 +50,30 @@ def test_shared_blob_deduplicated():
     # Both kernels resolve to the same bytes and the blob appears once in the pool.
     assert out[0]["insts"] == out[1]["insts"] == shared
     assert section.count(shared) == 1
+
+
+def test_dump_round_trip():
+    section = aie_hsaco.build_section("aie2", [
+        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=b"\xaa", kernarg_size=8, num_cols=1)])
+    info = aie_hsaco_dump.parse_section(section)
+    assert info["arch_version"] == (1, 0)
+    assert info["kernels"][0]["name"] == "k"
+    assert info["kernels"][0]["has_pdi"] is True
+
+
+def test_dump_rejects_bad_magic():
+    section = bytearray(aie_hsaco.build_section("aie2", [
+        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)]))
+    section[0] ^= 0xFF
+    with pytest.raises(ValueError, match="magic"):
+        aie_hsaco_dump.parse_section(bytes(section))
+
+
+def test_dump_rejects_blob_overrun():
+    section = bytearray(aie_hsaco.build_section("aie2", [
+        dict(name="k", insts=b"\x01\x02\x03\x04", pdi=None, kernarg_size=0, num_cols=1)]))
+    # Corrupt insts_size in the first entry to overrun the section.
+    entry_base = struct.unpack_from("<I", section, 8)[0]  # header_size
+    struct.pack_into("<I", section, entry_base + 8, 0xFFFFFFFF)  # insts_size field
+    with pytest.raises(ValueError, match="overrun|bounds"):
+        aie_hsaco_dump.parse_section(bytes(section))
