@@ -5,7 +5,7 @@
 .. _execution_context_management_reference:
 
 *******************************************************************************
-Peer to peer device memory access
+Execution Context Management
 *******************************************************************************
 
 .. doxygengroup:: ExecutionContext
