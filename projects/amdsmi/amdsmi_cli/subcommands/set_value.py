@@ -1282,10 +1282,8 @@ class SetValueCommands:
                 self.logger.clear_multiple_devices_output()
                 return
             if args.compute_partition:
-                current_set_count = self.helpers.get_set_count()
-                future_set_count = 0
-                attempted_to_set = "N/A"
                 user_requested_partition_args = "N/A"
+                accelerator_set_choices = []
                 try:
                     (accelerator_set_choices, accelerator_profiles) = (
                         self.helpers.get_accelerator_choices_types_indices()
@@ -1297,7 +1295,6 @@ class SetValueCommands:
                     )
                     if args.compute_partition in accelerator_profiles["profile_types"]:
                         index = accelerator_profiles["profile_types"].index(args.compute_partition)
-                        attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
                         user_requested_partition_args = f"{args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})"
                         amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
                             args.gpu, int(accelerator_profiles["profile_indices"][index])
@@ -1307,23 +1304,46 @@ class SetValueCommands:
                         index = accelerator_profiles["profile_indices"].index(
                             args.compute_partition
                         )
-                        attempted_to_set = f"Attempted to set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition}) on {gpu_string}"
                         user_requested_partition_args = f"{accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})"
                         amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(
                             args.gpu, accelerator_partition
                         )
-                    else:
-                        raise ValueError(
-                            f"Invalid accelerator configuration {args.compute_partition} on {gpu_string}"
+                    elif (
+                        args.compute_partition
+                        in amdsmi_interface.AmdSmiComputePartitionType.__members__
+                    ):
+                        # Profiles could not be enumerated (e.g. a device that
+                        # does not support accelerator partitions). Attempt the
+                        # set anyway so the driver reports THIS device's real
+                        # status; any failure is recorded below and the loop keeps
+                        # going to the remaining devices instead of aborting the
+                        # whole command.
+                        compute_partition = amdsmi_interface.AmdSmiComputePartitionType[
+                            args.compute_partition
+                        ]
+                        user_requested_partition_args = args.compute_partition
+                        amdsmi_interface.amdsmi_set_gpu_compute_partition(
+                            args.gpu, compute_partition
                         )
-                    self.helpers.increment_set_count()
-                    future_set_count = self.helpers.get_set_count()
-                    if current_set_count == future_set_count - 1:
-                        self.logger.store_output(
+                    else:
+                        # Not a valid accelerator type or profile index -- a CLI
+                        # parameter error. Record and keep going.
+                        self.helpers.store_device_error(
+                            self.logger,
                             args.gpu,
                             "accelerator_partition",
-                            f"Successfully set accelerator partition to {user_requested_partition_args}",
+                            f"Invalid accelerator configuration {args.compute_partition}",
+                            code=int(AmdSmiExitCode.INVALID_PARAMETER_VALUE),
                         )
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
+                    self.logger.store_output(
+                        args.gpu,
+                        "accelerator_partition",
+                        f"Successfully set accelerator partition to {user_requested_partition_args}",
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -1331,33 +1351,28 @@ class SetValueCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    elif (
-                        e.get_error_code()
-                        == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-                    ):
-                        self.helpers.increment_set_count()
-                        future_set_count = self.helpers.get_set_count()
-                        if current_set_count == future_set_count - 1:
-                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set compute partition to {user_requested_partition_args}"
-                            self.helpers.store_device_error(
-                                self.logger, args.gpu, "accelerator_partition", out, exception=e
-                            )
-                    elif (
+                    # record-then-finalize: surface THIS device's failure and keep
+                    # going to the remaining devices instead of aborting the whole
+                    # command. The library status in the message says what the
+                    # issue is (e.g. SETTING_UNAVAILABLE, NOT_SUPPORTED).
+                    out = (
+                        f"[{e.get_error_info(detailed=False)}] Unable to set accelerator partition "
+                        f"to {user_requested_partition_args}"
+                    )
+                    # SETTING_UNAVAILABLE means the value is valid but not allowed
+                    # in the current state (e.g. wrong memory partition mode), so
+                    # provide hint on how to resolve the issue.
+                    if (
                         e.get_error_code()
                         == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
                     ):
-                        print(
-                            f"\n{attempted_to_set}\n"
-                            f"\n[AMDSMI_STATUS_SETTING_UNAVAILABLE] Please check amd-smi partition --memory --accelerator for available profiles.\n"
-                            "Users may need to switch memory partition to another mode in order to enable the desired accelerator partition.\n"
+                        out += (
+                            ".\nPlease check `sudo amd-smi partition -am` for available profiles.\n"
                         )
-                        raise ValueError(
-                            f"[AMDSMI_STATUS_SETTING_UNAVAILABLE] Unable to set accelerator partition to {args.compute_partition} on {gpu_string}"
-                        ) from e
-                    else:
-                        raise ValueError(
-                            f"Unable to set accelerator partition to {args.compute_partition} on {gpu_string}"
-                        ) from e
+                        out += "Some modes may require a memory partition change to enable."
+                    self.helpers.store_device_error(
+                        self.logger, args.gpu, "accelerator_partition", out, exception=e
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return

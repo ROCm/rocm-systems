@@ -361,6 +361,11 @@ GPU: 0
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
   - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
 
+- **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**  
+  - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.
+  - Input is validated against the static partition type names when profiles cannot be enumerated.
+  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` instead of `N/A`.
+
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
