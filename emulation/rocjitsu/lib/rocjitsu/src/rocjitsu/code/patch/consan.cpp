@@ -960,6 +960,10 @@ atomic_address_space_hint(const Instruction &inst, const FlatPointerTracker &tra
   return static_cast<int32_t>(value << 8) >> 8;
 }
 
+[[nodiscard]] int32_t sign_extend_12(uint32_t value) {
+  return static_cast<int32_t>(value << 20) >> 20;
+}
+
 template <typename Raw> void fill_flat_like_atomic_raw(ConSanAtomicSite &site, const Raw &raw) {
   site.raw_op = static_cast<uint32_t>(raw.op);
   site.raw_saddr = static_cast<uint32_t>(raw.saddr);
@@ -990,6 +994,21 @@ void fill_ds_atomic_raw(ConSanAtomicSite &site, const rdna4::VdsMachineInst &raw
   site.raw_data0 = static_cast<uint32_t>(raw.data0);
   site.raw_data1 = static_cast<uint32_t>(raw.data1);
   site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+}
+
+void fill_cdna4_flat_atomic_raw(ConSanAtomicSite &site, const cdna4::FlatMachineInst &raw) {
+  site.raw_op = static_cast<uint32_t>(raw.op);
+  site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+  site.raw_vaddr = static_cast<uint32_t>(raw.addr);
+  site.raw_vsrc = static_cast<uint32_t>(raw.data);
+  site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+  site.raw_ioffset = sign_extend_12(static_cast<uint32_t>(raw.offset));
+  site.raw_segment = static_cast<uint32_t>(raw.seg);
+  // CDNA4 has no GFX12 SCOPE/TH fields. Preserve its native SC bits in the
+  // generic record fields: scope is zero and semantics packs SC0 | SC1 << 1.
+  site.raw_scope = 0u;
+  site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
+  site.returns_old_value = raw.sc0 != 0;
 }
 
 [[nodiscard]] bool is_barrier_instruction(const Instruction &inst) {
@@ -1176,7 +1195,12 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   }
   site.returns_old_value = atomic_returns_from_mnemonic(mnemonic);
 
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && mnemonic.starts_with("flat_atomic") &&
+      instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+    cdna4::FlatMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    fill_cdna4_flat_atomic_raw(site, raw);
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
     if (mnemonic.starts_with("ds_") && instruction_bytes.size() >= sizeof(rdna4::VdsMachineInst)) {
       rdna4::VdsMachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));

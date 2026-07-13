@@ -246,6 +246,13 @@ Full gfx950 support means:
   seven VGPRs on gfx950. A new CDNA4 hybrid keeps owner/workgroup identity in
   persistent VGPRs while placing epoch plus ephemeral frames in one 44-byte
   private layout; 1,024 live guest values survive and the race still reports.
+- 2026-07-13: `AT1A` is `DONE`. The CDNA4 decoder now preserves the native
+  eight-byte FLAT atomic address, offset, `SC0`, and `SC1` fields and uses
+  `SC0` to distinguish release from return-old-value acquire records. Live
+  two-Wave64 controls record two LDS accesses plus both atomic events: a
+  same-address handoff replays cleanly and changing only the acquire address
+  reports the conflict. All 1,483 Rocjitsu unit tests and all 88 gfx950 CTests
+  pass.
 
 ## DAG Overview
 
@@ -385,7 +392,7 @@ flowchart LR
   FL1B["FL1B: Group-Flat Emission"]:::todo
   FL1X["FL1X: Typed No-Forms Result"]:::todo
   FLC{"FLC: Group-Flat Capability Closed"}:::target
-  AT1A["AT1A: Atomic Decode And Records"]:::todo
+  AT1A["AT1A: Atomic Decode And Records"]:::done
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
   NP{"NP: Native Probe Parity"}:::target
 
@@ -1461,10 +1468,11 @@ Only one of FL1B or FL1X is required to reach FLC. Discovery of an admissible
 strongly classified form requires FL1B; FL1X is not an escape from implementing
 an observed required form.
 
-### AT1A: gfx950 Atomic Decode And Record/Replay - TODO
+### AT1A: gfx950 Atomic Decode And Record/Replay - DONE
 
-Goal: decode the admitted LDS atomic forms and establish record/replay ordering
-without claiming global-memory race detection.
+Goal: decode the admitted global FLAT atomic handoff forms and establish
+record/replay ordering for LDS accesses without claiming global-memory race
+detection.
 
 Work:
 

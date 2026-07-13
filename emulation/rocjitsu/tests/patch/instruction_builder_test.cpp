@@ -706,13 +706,16 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
   const auto load = build_flat_load_b32_vaddr_vdst(2, 4, ROCJITSU_CODE_ARCH_CDNA4);
   const auto atomic_add =
       build_flat_atomic_add_u32_vaddr_vsrc_vdst(2, 4, 5, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto atomic_add_no_return =
+      build_flat_atomic_add_u32_vaddr_vsrc_vdst(2, 4, 5, false, 2, ROCJITSU_CODE_ARCH_CDNA4);
   const auto atomic_swap =
       build_flat_atomic_swap_b64_vaddr_vsrc_vdst(2, 4, 6, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(literal && store && load && atomic_add && atomic_swap);
+  ASSERT_TRUE(literal && store && load && atomic_add && atomic_add_no_return && atomic_swap);
   EXPECT_EQ(*literal, (std::vector<uint32_t>{0x7e1402ffu, 0x12345678u}));
   EXPECT_EQ(*store, (std::vector<uint32_t>{0xdc700000u, 0x00000402u}));
   EXPECT_EQ(*load, (std::vector<uint32_t>{0xdc500000u, 0x04000002u}));
   EXPECT_EQ(*atomic_add, (std::vector<uint32_t>{0xdd090000u, 0x05000402u}));
+  EXPECT_EQ(*atomic_add_no_return, (std::vector<uint32_t>{0xdd080000u, 0x05000402u}));
   EXPECT_EQ(*atomic_swap, (std::vector<uint32_t>{0xdd810000u, 0x06000402u}));
 
   const auto save_exec = build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4);

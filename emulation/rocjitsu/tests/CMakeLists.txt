@@ -2660,6 +2660,54 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.AtomicHandoffSameAddressCompletes"
+            NAME "ConSanMoiGfx950Test.RecordReplayAtomicHandoffSameAddressIsClean"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_atomic_handoff"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.RecordReplayAtomicHandoffSameAddressIsClean"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*processed_atomics=2.*diagnostics=0.*conflict=false"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.AtomicHandoffWrongAddressCompletes"
+            NAME "ConSanMoiGfx950Test.RecordReplayAtomicHandoffWrongAddressReports"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_atomic_handoff"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.RecordReplayAtomicHandoffWrongAddressReports"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*processed_atomics=2.*diagnostics=1.*conflict=true"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.ForcedSpillPreservesLiveVgprs"
             NAME "ConSanMoiGfx950Test.ForcedSpillRecordReplay"
             TIMEOUT 30

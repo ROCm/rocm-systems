@@ -298,6 +298,88 @@ __global__ __launch_bounds__(128) void gfx950_moi_static_sampled_selection(uint3
     out[0] = 0x95080001u;
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_atomic_handoff(uint32_t *out,
+                                                                 uint32_t *release_counter,
+                                                                 uint32_t *acquire_counter,
+                                                                 uint32_t *flag) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (tid == 0u) {
+    const uint32_t value = 0x95090001u;
+    const uint32_t one = 1u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+    asm volatile("flat_atomic_add %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 :
+                 : "v"(release_counter), "v"(one)
+                 : "memory");
+    *flag = 1u;
+  }
+  if (tid == 64u) {
+    volatile uint32_t *volatile_flag = flag;
+    while (*volatile_flag == 0u) {
+    }
+    const uint32_t one = 1u;
+    uint32_t old = 0u;
+    asm volatile("flat_atomic_add %0, %1, %2 sc0\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 : "=&v"(old)
+                 : "v"(acquire_counter), "v"(one)
+                 : "memory");
+    uint32_t loaded = 0u;
+    asm volatile("ds_read_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 : "=v"(loaded)
+                 : "v"(address)
+                 : "memory");
+    out[0] = loaded;
+    out[1] = old;
+  }
+}
+
+void run_atomic_handoff(bool same_address) {
+  uint32_t *device_out = nullptr;
+  uint32_t *release_counter = nullptr;
+  uint32_t *acquire_counter = nullptr;
+  uint32_t *flag = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, 2u * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&release_counter, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&acquire_counter, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&flag, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, 2u * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(release_counter, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(acquire_counter, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(flag, 0, sizeof(uint32_t)));
+  uint32_t *selected_acquire_counter = same_address ? release_counter : acquire_counter;
+  gfx950_moi_atomic_handoff<<<1, 128>>>(device_out, release_counter, selected_acquire_counter,
+                                        flag);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out[2] = {};
+  HIP_ASSERT(hipMemcpy(out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(flag));
+  HIP_ASSERT(hipFree(acquire_counter));
+  HIP_ASSERT(hipFree(release_counter));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out[0], 0x95090001u);
+  EXPECT_EQ(out[1], same_address ? 1u : 0u);
+}
+
 TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
@@ -478,6 +560,14 @@ TEST(ConSanMoiGfx950Test, StaticSampledSelectionCompletes) {
   HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_out));
   EXPECT_EQ(out, 0x95080001u);
+}
+
+TEST(ConSanMoiGfx950Test, AtomicHandoffSameAddressCompletes) {
+  run_atomic_handoff(/*same_address=*/true);
+}
+
+TEST(ConSanMoiGfx950Test, AtomicHandoffWrongAddressCompletes) {
+  run_atomic_handoff(/*same_address=*/false);
 }
 
 } // namespace

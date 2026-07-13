@@ -357,6 +357,7 @@ struct ConSanAtomicSite {
   std::optional<int32_t> raw_ioffset;
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
+  std::optional<uint32_t> raw_segment;
   std::optional<bool> returns_old_value;
   std::string mnemonic;
 };

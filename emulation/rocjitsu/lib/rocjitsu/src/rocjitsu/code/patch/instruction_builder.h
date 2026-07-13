@@ -866,12 +866,11 @@ build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_
       vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
-    // CDNA4 FLAT atomics require SC0 and return the old value. Callers that do
-    // not need it provide a disposable destination.
-    (void)return_old_value;
-    return std::vector<uint32_t>{0xDD090000u, static_cast<uint32_t>(vaddr) |
-                                                  (static_cast<uint32_t>(vsrc) << 8u) |
-                                                  (static_cast<uint32_t>(vdst) << 24u)};
+    // CDNA4 SC0 requests the old value; without SC0 the destination is ignored.
+    const uint32_t sc0 = return_old_value ? 1u << 16u : 0u;
+    return std::vector<uint32_t>{0xDD080000u | sc0, static_cast<uint32_t>(vaddr) |
+                                                        (static_cast<uint32_t>(vsrc) << 8u) |
+                                                        (static_cast<uint32_t>(vdst) << 24u)};
   }
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;

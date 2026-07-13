@@ -6650,9 +6650,11 @@ struct AtomicRecordCandidate {
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site) {
   if (!site.mnemonic.starts_with("flat_atomic"))
     return false;
-  if (site.size != 3u * sizeof(uint32_t))
-    return false;
-  if (!site.raw_saddr || *site.raw_saddr != kRdna4FlatNoSaddr)
+  const bool rdna4_no_saddr =
+      site.size == 3u * sizeof(uint32_t) && site.raw_saddr == kRdna4FlatNoSaddr;
+  const bool cdna4_no_saddr =
+      site.size == 2u * sizeof(uint32_t) && site.raw_segment == 0u && site.raw_saddr == 0u;
+  if (!rdna4_no_saddr && !cdna4_no_saddr)
     return false;
   if (!site.raw_ioffset || *site.raw_ioffset != 0)
     return false;
@@ -7307,8 +7309,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI atomic record patch currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI atomic record patch currently supports only RDNA4 and CDNA4");
     return;
   }
   if (!options.moi_report_buffer_address) {

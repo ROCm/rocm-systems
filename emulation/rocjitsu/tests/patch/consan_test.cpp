@@ -897,6 +897,27 @@ std::vector<uint8_t> make_rdna4_flat_atomic_release_acquire_code_object() {
   return make_rdna4_lds_code_object(text_words);
 }
 
+std::vector<uint8_t> make_gfx950_flat_atomic_release_acquire_code_object() {
+  const auto release = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/2, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/false, /*scope=*/0,
+      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto acquire = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
+      /*vaddr=*/4, /*vsrc=*/1, /*vdst=*/0, /*return_old_value=*/true, /*scope=*/0,
+      ROCJITSU_CODE_ARCH_CDNA4);
+  if (!release || !acquire)
+    return {};
+  const std::array<uint32_t, 5> text_words = {
+      (*release)[0],
+      (*release)[1],
+      (*acquire)[0],
+      (*acquire)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  return make_rdna4_lds_code_object(text_words, "gfx950_atomic_handoff",
+                                    kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
+                                    /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+}
+
 TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   const std::vector<uint8_t> bytes = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
   ConSanOptions options;
@@ -5587,6 +5608,84 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
       trampoline_words,
       make_expected_literal_store_words(atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope),
                                         2u, *options.scratch_vgpr)));
+}
+
+TEST(ConSanMoi, Gfx950InventoriesFlatAtomicScOrderingFields) {
+  const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  ASSERT_EQ(kernel.atomic_sites.size(), 2u);
+  const ConSanAtomicSite &release = kernel.atomic_sites[0];
+  const ConSanAtomicSite &acquire = kernel.atomic_sites[1];
+  EXPECT_EQ(release.mnemonic, "flat_atomic_add");
+  EXPECT_EQ(acquire.mnemonic, "flat_atomic_add");
+  EXPECT_EQ(release.size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(acquire.size, 2u * sizeof(uint32_t));
+  ASSERT_TRUE(release.addr_vgpr && acquire.addr_vgpr);
+  EXPECT_EQ(*release.addr_vgpr, 2u);
+  EXPECT_EQ(*acquire.addr_vgpr, 4u);
+  ASSERT_TRUE(release.raw_saddr && acquire.raw_saddr);
+  EXPECT_EQ(*release.raw_saddr, 0u);
+  EXPECT_EQ(*acquire.raw_saddr, 0u);
+  ASSERT_TRUE(release.raw_segment && acquire.raw_segment);
+  EXPECT_EQ(*release.raw_segment, 0u);
+  EXPECT_EQ(*acquire.raw_segment, 0u);
+  ASSERT_TRUE(release.raw_ioffset && acquire.raw_ioffset);
+  EXPECT_EQ(*release.raw_ioffset, 0);
+  EXPECT_EQ(*acquire.raw_ioffset, 0);
+  ASSERT_TRUE(release.raw_scope && acquire.raw_scope);
+  EXPECT_EQ(*release.raw_scope, 0u);
+  EXPECT_EQ(*acquire.raw_scope, 0u);
+  ASSERT_TRUE(release.raw_th && acquire.raw_th);
+  EXPECT_EQ(*release.raw_th, 0u);
+  EXPECT_EQ(*acquire.raw_th, 1u);
+  ASSERT_TRUE(release.returns_old_value && acquire.returns_old_value);
+  EXPECT_FALSE(*release.returns_old_value);
+  EXPECT_TRUE(*acquire.returns_old_value);
+}
+
+TEST(ConSanMoi, Gfx950AtomicRecordPatchEmitsReleaseAndAcquireRecords) {
+  const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_owner_vgpr = 11;
+  options.moi_epoch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2);
+  options.max_patches = 2;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
+  ASSERT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+                                  }),
+            2u);
+  const auto release_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord && patch.anchor_offset == 0u;
+  });
+  const auto acquire_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord &&
+           patch.anchor_offset == 2u * sizeof(uint32_t);
+  });
+  ASSERT_NE(release_patch, result.patches.end());
+  ASSERT_NE(acquire_patch, result.patches.end());
+  EXPECT_EQ(release_patch->original_size, 2u * sizeof(uint32_t));
+  EXPECT_EQ(acquire_patch->original_size, 2u * sizeof(uint32_t));
 }
 
 TEST(ConSanMoi, AtomicRecordAutomaticallyPlansScratch) {
