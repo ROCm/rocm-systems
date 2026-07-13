@@ -27,11 +27,13 @@ Once processing is complete, ``ReleaseFrame()`` is used to release the frame.
 For information about using the FFMpeg decoder, see :doc:`Understanding the rocDecode videodecode sample
 <../how-to/using-rocDecode-videodecode-sample>`.
 
-.. note:: 
+.. note::
 
-  The FFmpeg development libraries must be installed to use the FFMpeg decoder:
+  The FFmpeg development libraries must be installed to use the FFMpeg decoder.
 
-  ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
+  On Linux: ``sudo apt install libavcodec-dev libavformat-dev libavutil-dev``
+
+  On Windows: use pre-built FFmpeg libraries or build from source, and pass ``-DFFMPEG_ROOT=<path-to-ffmpeg>`` to CMake when configuring.
 
 .. |ffmpeg| replace:: ``utils/ffmpegvideodecode/ffmpeg_video_dec.h``
 .. _ffmpeg: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils/ffmpegvideodecode/ffmpeg_video_dec.h

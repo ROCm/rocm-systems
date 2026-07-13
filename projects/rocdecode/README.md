@@ -14,6 +14,11 @@ access the video decoding features available on your GPU.
 * AV1 - 8 bit, and 10 bit
 * VP9 - 8 bit, and 10 bit
 
+## Supported platforms
+
+* **Linux** (Ubuntu 22.04 / 24.04)
+* **Windows** (Windows 10/11) — experimental, via the VA-API on D3D12 (vaon12) backend
+
 ## Prerequisites
 
 ### Hardware
@@ -24,7 +29,7 @@ access the video decoding features available on your GPU.
 
 ### ROCm via TheRock
 
-rocDecode is built and installed as part of [TheRock](https://github.com/ROCm/TheRock). All core dependencies are provided by the TheRock build, including:
+rocDecode is built and installed as part of [TheRock](https://github.com/ROCm/TheRock) on both Linux and Windows. All core dependencies are provided by the TheRock build, including:
 
 * HIP runtime and development libraries
 * AMD Clang++ compiler (C++17 required)
@@ -32,17 +37,38 @@ rocDecode is built and installed as part of [TheRock](https://github.com/ROCm/Th
 * Libdrm (amdgpu)
 * CMake and pkg-config
 
+### Windows additional dependencies
+
+On Windows, rocDecode uses the [vaon12](https://devblogs.microsoft.com/directx/video-acceleration-api-va-api-now-available-on-windows/) backend (Mesa's VA-API on D3D12 translation layer) for hardware-accelerated decoding. In addition to the TheRock-provided dependencies, the following are needed:
+
+* **vaon12** — VA-API on D3D12 libraries (`va.dll`, `va_win32.dll`, `vaon12_drv_video.dll`), available via the [Microsoft.Direct3D.VideoAccelerationCompatibilityPack NuGet package](https://www.nuget.org/packages/Microsoft.Direct3D.VideoAccelerationCompatibilityPack)
+* **Visual Studio 2022** with C++ desktop workload (MSVC compiler, C++17)
+* **CMake** 3.10 or later
+* **Windows SDK** (provides D3D12 and DXGI headers/libraries)
+
+**Optional:**
+
+* **FFmpeg** — pre-built libraries or built from source (required for samples and the host decoder library)
+
 ### FFmpeg (required for samples and tests)
 
-[FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests:
+[FFmpeg](https://github.com/FFmpeg/FFmpeg) development libraries must be installed separately to build and run samples and extended tests.
+
+**Linux:**
 
   ```shell
   sudo apt install libavcodec-dev libavformat-dev libavutil-dev
   ```
 
+**Windows:**
+
+  Use pre-built FFmpeg libraries or build from source. Pass `-DFFMPEG_ROOT=<path>` to CMake when configuring.
+
 ## Build and install
 
-rocDecode is built as part of [TheRock](https://github.com/ROCm/TheRock). To build standalone from source:
+rocDecode is built as part of [TheRock](https://github.com/ROCm/TheRock) on both Linux and Windows. To build standalone from source:
+
+### Linux
 
 ```shell
 git clone https://github.com/ROCm/rocm-systems.git
@@ -53,16 +79,41 @@ make -j8
 sudo make install
 ```
 
+### Windows
+
+```bat
+git clone https://github.com/ROCm/rocm-systems.git
+cd rocm-systems\projects\rocdecode
+mkdir build && cd build
+cmake .. -DVAON12_ROOT=<path-to-vaon12> -DROCM_PATH=<path-to-TheRock-build>
+cmake --build . --config Release
+cmake --install . --config Release
+```
+
+> [!NOTE]
+> * Set `VAON12_ROOT` to the vaon12 NuGet package or custom build directory.
+> * Set `ROCM_PATH` to the TheRock build output directory.
+> * To include FFmpeg support, add `-DFFMPEG_ROOT=<path-to-ffmpeg>`.
+
 ### Run tests
+
+  **Linux:**
 
   ```shell
   make test
   ```
+
+  **Windows:**
+
+  ```bat
+  ctest -C Release
+  ```
+
   > [!IMPORTANT]
-  > `make test` requires FFmpeg dev libraries to be installed
+  > Tests require FFmpeg dev libraries to be installed
 
   > [!NOTE]
-  > To run tests with verbose option, use `make test ARGS="-VV"`.
+  > To run tests with verbose output, use `ctest -VV` (or `make test ARGS="-VV"` on Linux).
 
 ## Verify installation
 
@@ -110,5 +161,7 @@ individual folders to build and run the samples.
 
 * Linux
   * Ubuntu - `22.04` / `24.04`
+* Windows (experimental)
+  * Windows 10 / 11
 * [TheRock](https://github.com/ROCm/TheRock) - `7.12` or later
 * FFmpeg - `4.4.2` / `6.1.1`

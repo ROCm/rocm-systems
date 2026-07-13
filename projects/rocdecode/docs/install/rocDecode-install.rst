@@ -37,6 +37,13 @@ video decode package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) withou
 additional ROCm libraries and tools, install the ``amdrocm-decode`` package.
 This includes the ROCm runtime and system dependencies.
 
+.. note::
+
+   On Windows, rocDecode is built and installed as part of
+   `TheRock <https://github.com/ROCm/TheRock>`__ for Windows.
+   Package manager installation (apt/dnf/zypper) is not available on Windows.
+   For building from source on Windows, see :doc:`./rocDecode-build-and-install`.
+
 1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
 
