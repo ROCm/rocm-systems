@@ -750,6 +750,21 @@ contract:
   Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
     tags: [graph_memcpy3d_node]
+  Contract_DriverGraphNode_AddMemcpyNode_LaunchesCopyThroughGraph:
+    <<: *level_0
+    tags: [driver_graph_node]
+  Contract_DriverGraphNode_MemcpyNodeGetParams_RoundTripsExtent:
+    <<: *level_0
+    tags: [driver_graph_node]
+  Contract_DriverGraphNode_ExecMemcpyNodeSetParams_RetargetsSourceAfterInstantiate:
+    <<: *level_0
+    tags: [driver_graph_node]
+  Contract_DriverGraphNode_AddMemsetNode_LaunchesExpectedValue:
+    <<: *level_0
+    tags: [driver_graph_node]
+  Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfterInstantiate:
+    <<: *level_0
+    tags: [driver_graph_node]
   Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct:
     <<: *level_0
     tags: [graph_node_find]
