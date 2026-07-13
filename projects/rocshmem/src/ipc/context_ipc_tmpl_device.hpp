@@ -151,7 +151,7 @@ __device__ void ipc_compute_reduce(T *src, T *dst, int size, int wg_id, int wg_s
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ void IPCContext::internal_direct_allreduce(
+__device__ void IPCContext::internal_direct_allreduce_wg(
     T *dst, const T *src, int nelems, IPCTeam *team_obj) {  // NOLINT(runtime/int)
 
   int stride = team_obj->tinfo_wrt_world->stride;
@@ -376,7 +376,7 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
  *        [03+13+23+33]  [03+13+23+33] [03+13+23+33]  [03+13+23+33]
  */
 template <typename T, ROCSHMEM_OP Op>
-__device__ void IPCContext::internal_ring_allreduce(
+__device__ void IPCContext::internal_ring_allreduce_wg(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
@@ -504,14 +504,14 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
   }
 
   if (is_thread_zero_in_wave()) {
-    for (int i = 0; i < 2 * num_pes - 2; i++) {
+    for (int i = 0; i < 2 * constmem.num_pes - 2; i++) {
       pSync[i] = ROCSHMEM_SYNC_VALUE;
     }
   }
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
+__device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
                                   const T *source, int nreduce) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -524,7 +524,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
-    internal_direct_allreduce<T, Op>(dest, source, nreduce, team_obj);
+    internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
@@ -540,7 +540,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
       chunk_size = seg_size / PE_size;
 
       if (n_seg > 0) {
-        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+        internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
                                        seg_size, chunk_size);
       }
       if (n_seg_up > n_seg) {
@@ -549,7 +549,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
         if (p_chunk > 0) {
-          internal_ring_allreduce<T, Op>(p_dst, p_src,
+          internal_ring_allreduce_wg<T, Op>(p_dst, p_src,
                                          (p_chunk * PE_size), team_obj, 1,
                                          (p_chunk * PE_size), p_chunk);
         }
@@ -560,7 +560,7 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
           p_dst += (p_chunk * PE_size);
           const T *p_src2 = p_src + (p_chunk * PE_size);
 
-          internal_direct_allreduce<T, Op>(p_dst, p_src2, p_count, team_obj);
+          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj);
         }
       }
     } else {

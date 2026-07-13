@@ -639,7 +639,7 @@ __device__ int rocshmem_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
   LOGD_API("device::reduce_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nreduce=%d",
     ctx.ctx_opaque, team, dest, source, nreduce);
 
-  return get_internal_ctx(ctx)->reduce<T, Op>(team, dest, source, nreduce);
+  return get_internal_ctx(ctx)->reduce_wg<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T, ROCSHMEM_OP Op>

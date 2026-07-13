@@ -113,7 +113,7 @@ struct GetROType<long double> {
  *****************************************************************************/
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
+__device__ int ROContext::reduce_wg(rocshmem_team_t team, T *dest,
                                  const T *source, int nreduce) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();

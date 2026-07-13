@@ -70,7 +70,7 @@ class ReduceWaveTester : public Tester {
    * The default value for the maximum number of teams is 40.
    */
   int num_teams = 39;
-  rocshmem_team_t *reduce_wave_world_dup;
+  rocshmem_team_t *team_reduce_wave_world_dup;
 };
 
 #include "reduce_wave_tester.cpp"

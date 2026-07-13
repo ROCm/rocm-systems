@@ -135,10 +135,10 @@ ReduceWaveTester<T1, T2>::ReduceWaveTester(
   if (num_teams < args.num_wgs * num_warps){
     printf(
       "not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
-    abort();
+    exit(0);
   }
 
-  CHECK_HIP(hipMalloc(&reduce_wave_world_dup,
+  CHECK_HIP(hipMalloc(&team_reduce_wave_world_dup,
                       sizeof(rocshmem_team_t) * num_teams));
 }
 
@@ -146,7 +146,7 @@ template <typename T1, ROCSHMEM_OP T2>
 ReduceWaveTester<T1, T2>::~ReduceWaveTester() {
   free_test_buffer(s_buf, args.local_buf_type);
   free_test_buffer(r_buf);
-  CHECK_HIP(hipFree(reduce_wave_world_dup));
+  CHECK_HIP(hipFree(team_reduce_wave_world_dup));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -154,10 +154,10 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
   bw_factor = n_pes;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
-    reduce_wave_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
+    team_reduce_wave_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                &reduce_wave_world_dup[team_i]);
-    if (reduce_wave_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
+                                &team_reduce_wave_world_dup[team_i]);
+    if (team_reduce_wave_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
       std::cout << "Team " << team_i << " is invalid!" << std::endl;
       abort();
     }
@@ -172,7 +172,7 @@ void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,
                      start_time, end_time, s_buf, r_buf, size, _type,
-                     _shmem_context, wf_size, reduce_wave_world_dup);
+                     _shmem_context, wf_size, team_reduce_wave_world_dup);
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;
@@ -181,7 +181,7 @@ void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::postLaunchKernel() {
   for (int team_i = 0; team_i < num_teams; team_i++) {
-    rocshmem_team_destroy(reduce_wave_world_dup[team_i]);
+    rocshmem_team_destroy(team_reduce_wave_world_dup[team_i]);
   }
 }
 

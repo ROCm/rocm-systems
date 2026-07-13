@@ -94,7 +94,7 @@ class ROContext : public Context {
   __device__ T g(const T *source, int pe);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce(rocshmem_team_t team, T *dest, const T *source,
+  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source,
                         int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
