@@ -268,7 +268,11 @@ __launch_bounds__(128) void gfx950_moi_no_coordinate_clean_grid(uint32_t *comple
     atomicExch(&ticket_slot, atomicAdd(completion_count, 1u));
   __syncthreads();
   if (local == 0u || local == 64u) {
-    const uint32_t ticket = atomicAdd(&ticket_slot, 0u);
+    // A literal atomicAdd(..., 0) is optimized into an ordinary LDS read,
+    // which would itself participate in the access-race assertion. This CAS
+    // can never match the small ticket values, so it is a true no-op atomic
+    // read and remains outside ordinary access instrumentation.
+    const uint32_t ticket = atomicCAS(&ticket_slot, 0xffffffffu, 0xffffffffu);
     const uint32_t owner = local >> 6u;
     if ((ticket & 1u) != owner)
       return;

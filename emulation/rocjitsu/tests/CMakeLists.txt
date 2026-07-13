@@ -2351,11 +2351,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
                 "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
                 "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
-                # Select only the deliberately alternating target write. The
-                # preceding ticket read is synchronization machinery, not part
-                # of the cross-workgroup isolation assertion.
-                "RJ_CONSAN_MOI_SAMPLE_STRIDE=2"
-                "RJ_CONSAN_MOI_SAMPLE_OFFSET=1"
                 "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_clean_grid"
                 "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
