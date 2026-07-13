@@ -95,9 +95,8 @@ jobs:
           pip install pytest
 
       - name: Verify RCCL override
-        env:
-          LD_LIBRARY_PATH: "${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
         run: |
+          export LD_LIBRARY_PATH="${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
           source ${{ env.VENV_DIR }}/bin/activate
           python -c "
           import ctypes, os
@@ -134,11 +133,12 @@ jobs:
       - name: Run PyTorch c10d NCCL tests
         timeout-minutes: 60
         env:
-          LD_LIBRARY_PATH: "${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
         run: |
+          set -o pipefail
+          export LD_LIBRARY_PATH="${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
           source ${{ env.VENV_DIR }}/bin/activate
           cd pytorch_tests
 
