@@ -356,6 +356,15 @@ Full gfx950 support means:
   original path. The new synthetic dual-entry regression and 209 focused
   ConSan tests pass. All 10 guarded selected IREE rows pass record/replay in
   6.01 seconds with both patch and record non-vacuity required.
+- 2026-07-13: `T3SA` is `DONE`; `T3IS` is now `ACTIVE`. All 10 guarded selected
+  IREE rows pass sampled MOI in 6.03 seconds with both patch and sampled-record
+  non-vacuity required. The first inline-shadow pass accepts 4/10 rows; five
+  scalar MFMA rows and configured scan fault after automatic persistent
+  identity VGPRs cross the descriptor's CDNA4 `ACCUM_OFFSET`. Explicit
+  non-initialized owner/epoch registers avoid the fault, and instruction-level
+  reduction confirms that writing persistent identity into the accumulator
+  window corrupts live MFMA state. T3IS remains orange while identity state is
+  moved out of the overlapping VGPR window.
 
 ## DAG Overview
 
@@ -574,8 +583,8 @@ flowchart LR
   T3A["T3A: Workload Inventory"]:::done
   T3SC["T3SC: SuperCollider Selected Workloads"]:::done
   T3RR["T3RR: Record/Replay Selected Workloads"]:::done
-  T3SA["T3SA: Sampled Selected Workloads"]:::active
-  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::todo
+  T3SA["T3SA: Sampled Selected Workloads"]:::done
+  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SC["T4SC: SuperCollider Broad IREE"]:::todo
   T4RR["T4RR: Record/Replay Broad IREE"]:::todo
@@ -1848,13 +1857,21 @@ ConSan now emits paired equivalent launch stubs at that exact spacing, with
 each stub returning to the corresponding original entry. A synthetic gfx950
 regression locks down the dual-entry layout.
 
-### T3SA: Sampled Selected Workloads - ACTIVE
+### T3SA: Sampled Selected Workloads - DONE
 
 Goal: run the T3A selection under guarded sampled MOI.
 
-### T3IS: Inline-Shadow Selected Workloads - TODO
+Result: all 10 selected rows pass in 6.03 seconds with
+`RJ_CONSAN_REQUIRE_PATCH=1` and `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`.
+
+### T3IS: Inline-Shadow Selected Workloads - ACTIVE
 
 Goal: run the T3A selection under guarded inline shadow.
+
+Current evidence: 4/10 rows pass. The failing scalar MFMA and scan rows expose
+automatic persistent identity VGPR placement at or above CDNA4
+`ACCUM_OFFSET`; the node remains active until identity state no longer aliases
+the accumulator window and all 10 guarded rows pass.
 
 For each T3 profile node:
 
