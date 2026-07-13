@@ -7,6 +7,7 @@
 #include <gin_anvil/sdma_factory.h>
 
 #include "anvil.hpp"
+#include "util.hpp"
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <vector>
@@ -116,19 +117,19 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
-    hipFree(dev_row);
+    CHECK_HIP(hipFree(dev_row));
     return -1;
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
-    hipFree(dev_row);
+    CHECK_HIP(hipFree(dev_row));
     return -1;
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
-    hipFree(dev_row);
-    hipFree(dirty);
+    CHECK_HIP(hipFree(dev_row));
+    CHECK_HIP(hipFree(dirty));
     return -1;
   }
 
@@ -150,8 +151,8 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = handle;
-  if (impl->deviceHandles_d) hipFree(impl->deviceHandles_d);
-  if (impl->sdmaDirty_d) hipFree(impl->sdmaDirty_d);
+  if (impl->deviceHandles_d) CHECK_HIP(hipFree(impl->deviceHandles_d));
+  if (impl->sdmaDirty_d) CHECK_HIP(hipFree(impl->sdmaDirty_d));
   delete impl;
 }
 
