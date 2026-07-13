@@ -98,6 +98,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed VRAM total under-reported as the BIOS carveout on APUs**.  
+  - On APUs (for example gfx1151 / Strix Halo), `amdsmi_get_gpu_memory_total()` / `rsmi_dev_memory_total_get()` returned the small dedicated VRAM carveout from sysfs `mem_info_vram_total` (512 MiB) instead of the unified memory the GPU actually addresses. KFD `mem_banks` already reports the true size (for example 110 GiB), matching the GTT total and what HIP reports as the device total.
+  - The VRAM total is now sourced from the KFD topology whenever KFD reports a larger total than sysfs. On discrete GPUs the two sources agree, so their behavior is unchanged.
+
 - **Fixed `amd-smi set --power-cap` rejecting the minimum allowed value**.  
   - The lower bound is now inclusive, so setting the power cap to the exact minimum of the reported range (e.g. `210` when the range is 210-300W) succeeds instead of failing validation, matching the inclusive range shown in the error message.
 
