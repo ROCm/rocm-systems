@@ -16,6 +16,7 @@
 #include "compiler.h"
 #include "diagnostics_log.h"
 #include "diagnostics.h"
+#include "diagnostics_checks.h"
 #include "transport.h"
 
 ncclResult_t rasDiagnosticsFormatLine(char* out, size_t outSize, const char* line) {

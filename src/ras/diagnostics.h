@@ -108,25 +108,4 @@ ncclResult_t rasCollDiagMerge(struct rasCollective* coll, struct rasMsg* msg);
 // Locally-initiated completion: summarizes the gathered peer payloads owned by the client.
 ncclResult_t rasDiagnosticsResume(struct rasClient* client);
 
-ncclResult_t rasDiagnosticsGpuModelCollectLocal(const struct rasDiagnosticsContext* ctx,
-                                                struct rasDiagnosticsLocalData* data);
-ncclResult_t rasDiagnosticsGpuModelSummarize(
-  const struct rasDiagnosticsContext* ctx, const struct rasDiagnosticsReporter* reporter, const char* data, int nData);
-ncclResult_t rasDiagnosticsCudaDriverVersionCollectLocal(const struct rasDiagnosticsContext* ctx,
-                                                         struct rasDiagnosticsLocalData* data);
-ncclResult_t rasDiagnosticsCudaDriverVersionSummarize(
-  const struct rasDiagnosticsContext* ctx, const struct rasDiagnosticsReporter* reporter, const char* data, int nData);
-ncclResult_t rasDiagnosticsEccCollectLocal(const struct rasDiagnosticsContext* ctx,
-                                           struct rasDiagnosticsLocalData* data);
-ncclResult_t rasDiagnosticsEccSummarize(const struct rasDiagnosticsContext* ctx,
-                                        const struct rasDiagnosticsReporter* reporter, const char* data, int nData);
-ncclResult_t rasDiagnosticsNvLinkCollectLocal(const struct rasDiagnosticsContext* ctx,
-                                              struct rasDiagnosticsLocalData* data);
-ncclResult_t rasDiagnosticsNvLinkSummarize(const struct rasDiagnosticsContext* ctx,
-                                           const struct rasDiagnosticsReporter* reporter, const char* data, int nData);
-ncclResult_t rasDiagnosticsNcclEnvCollectLocal(const struct rasDiagnosticsContext* ctx,
-                                               struct rasDiagnosticsLocalData* data);
-ncclResult_t rasDiagnosticsNcclEnvSummarize(const struct rasDiagnosticsContext* ctx,
-                                            const struct rasDiagnosticsReporter* reporter, const char* data, int nData);
-
 #endif // NCCL_RAS_DIAGNOSTICS_H_

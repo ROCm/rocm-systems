@@ -14,9 +14,8 @@ ncclResult_t ncclRunDiagnosticsActive(ncclComm* comm);
 
 #if defined(NCCL_OS_LINUX)
 
-// Run one external tool to completion for an active diagnostics check. `command` is a tool
-// invocation (e.g. "ib_write_bw -d mlx5_0 ..."); it will run with a timeout and get killed
-// afterwards.
+// Run one external tool to completion for a diagnostics check. `command` is a tool
+// invocation (e.g. "ib_write_bw -d mlx5_0 ..."); it will run with a timeout and get killed afterwards.
 int ncclDiagChildRun(const char* command, int timeoutSec, char* output, int outputSize);
 
 #endif // NCCL_OS_LINUX
