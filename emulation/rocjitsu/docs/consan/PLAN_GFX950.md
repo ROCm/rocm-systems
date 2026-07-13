@@ -304,6 +304,13 @@ Full gfx950 support means:
   both gfx950 runtime support and a physically enumerated gfx950. This machine
   discovers the native gfx950 controls and no gfx1201 live controls; the
   consolidated clean/racy SuperCollider rows pass.
+- 2026-07-13: `T1B` is `DONE`; `T2SC` is now `ACTIVE`. The matrix auto-detects
+  gfx1201/gfx950 from the workspace ROCm agent enumerator, accepts an explicit
+  architecture override, and fails dry runs whose CTest selection is empty.
+  gfx950 dry-run selection names 38 focused rocJITsu live controls, all 44
+  independent hip-moi controls, and 11 CDNA4 IREE tile-and-fuse/scan/softmax
+  workloads for each profile. The existing RDNA4 selector remains the gfx1201
+  branch rather than leaking into gfx950 runs.
 
 ## DAG Overview
 
@@ -512,8 +519,8 @@ flowchart LR
   SP{"SP: Spill Accepted"}:::target
   NP{"NP: Native Probe Parity"}:::target
   T1A["T1A: Target-Aware Test Registration"]:::done
-  T1B["T1B: Workload And Tier Selection"]:::active
-  T2SC["T2SC: SuperCollider Focused Tier"]:::todo
+  T1B["T1B: Workload And Tier Selection"]:::done
+  T2SC["T2SC: SuperCollider Focused Tier"]:::active
   T2RR["T2RR: Record/Replay Focused Tier"]:::todo
   T2SA["T2SA: Sampled Focused Tier"]:::todo
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::todo
@@ -1628,7 +1635,7 @@ Result:
 - gfx950 discovery contains the native focused controls and no gfx1201 live
   rows. The consolidated clean/racy SuperCollider controls pass.
 
-### T1B: Target-Aware Workload And Tier Selection - ACTIVE
+### T1B: Target-Aware Workload And Tier Selection - DONE
 
 Goal: select equivalent semantic workloads without embedding RDNA4 names in
 the common tier harness.
@@ -1644,7 +1651,18 @@ Done criteria:
 - Dry-run output on each architecture names a nonempty guarded focused tier and
   the intended architecture-specific selected workloads.
 
-### T2SC: gfx950 SuperCollider Focused Tier - TODO
+Result:
+
+- The matrix auto-detects gfx950/gfx1201 using the workspace ROCm agent
+  enumerator, with `CONSAN_GPU_ARCH` available for explicit cross-machine
+  selection and `CONSAN_DRY_RUN=1` for non-mutating discovery.
+- Empty dry-run selections are failures. On gfx950, tier 0 selects 38 live
+  rocJITsu controls; tier 1 selects all 44 hip-moi controls and 11 CDNA4 IREE
+  tile-and-fuse MFMA, scan, and softmax tests per profile.
+- gfx1201 retains its established RDNA4 tile-and-fuse WMMA selector; gfx950
+  uses CDNA4 MFMA names and cannot silently run an empty RDNA-only regex.
+
+### T2SC: gfx950 SuperCollider Focused Tier - ACTIVE
 
 Goal: prove focused native SuperCollider behavior before broader workloads.
 
