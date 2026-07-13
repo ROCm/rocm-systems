@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -44,6 +46,49 @@ enum class ConSanMoiOwnerSource : uint8_t {
 enum class ConSanFlatProvenanceMode : uint8_t {
   Likely,
   Strict,
+};
+
+/// Distinguishes decode/inventory knowledge from a native emitter that is
+/// safe for live instrumentation on the selected architecture.
+enum class ConSanNativeSupport : uint8_t {
+  Unavailable,
+  InventoryOnly,
+  NativeEmission,
+};
+
+enum class ConSanNativeFeature : uint8_t {
+  LdsAccess,
+  GroupFlatAccess,
+  Barrier,
+  Atomic,
+  WorkgroupIdentity,
+  StableWaveOwner,
+  HwIdOwner,
+  ScratchSpill,
+  NonScratchWait,
+  ReportPublication,
+  SuperCollider,
+  RecordReplay,
+  Sampled,
+  InlineShadow,
+};
+
+struct ConSanTargetCapabilities {
+  rj_code_arch_t architecture = ROCJITSU_CODE_ARCH_INVALID;
+  ConSanNativeSupport lds_access = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport group_flat_access = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport barrier = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport atomic = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport workgroup_identity = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport stable_wave_owner = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport hw_id_owner = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport scratch_spill = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport non_scratch_wait = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport report_publication = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport supercollider = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport record_replay = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport sampled = ConSanNativeSupport::Unavailable;
+  ConSanNativeSupport inline_shadow = ConSanNativeSupport::Unavailable;
 };
 
 enum class ConSanRegisterAllocationSource : uint8_t {
@@ -445,6 +490,12 @@ struct ConSanResult {
 
 [[nodiscard]] const char *consan_flavor_name(ConSanFlavor flavor);
 [[nodiscard]] const char *consan_moi_engine_name(ConSanMoiEngine engine);
+[[nodiscard]] const char *consan_native_feature_name(ConSanNativeFeature feature);
+[[nodiscard]] const char *consan_native_support_name(ConSanNativeSupport support);
+[[nodiscard]] ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture);
+[[nodiscard]] ConSanNativeSupport
+consan_native_feature_support(const ConSanTargetCapabilities &capabilities,
+                              ConSanNativeFeature feature);
 
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);

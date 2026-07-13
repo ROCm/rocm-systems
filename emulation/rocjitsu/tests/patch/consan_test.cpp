@@ -139,6 +139,31 @@ TEST(ConSanResourcePlan, ForbiddenFullFileHasTypedFailure) {
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
 }
 
+TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
+  const ConSanTargetCapabilities gfx950 = consan_target_capabilities(ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(gfx950.lds_access, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.scratch_spill, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.non_scratch_wait, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.report_publication, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.record_replay, ConSanNativeSupport::NativeEmission);
+  EXPECT_EQ(gfx950.group_flat_access, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.barrier, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.hw_id_owner, ConSanNativeSupport::Unavailable);
+
+  const ConSanTargetCapabilities unknown = consan_target_capabilities(ROCJITSU_CODE_ARCH_INVALID);
+  EXPECT_EQ(consan_native_feature_support(unknown, ConSanNativeFeature::LdsAccess),
+            ConSanNativeSupport::Unavailable);
+  EXPECT_STREQ(consan_native_feature_name(ConSanNativeFeature::GroupFlatAccess),
+               "group-flat-access");
+  EXPECT_STREQ(consan_native_support_name(ConSanNativeSupport::InventoryOnly), "inventory-only");
+}
+
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
   names.insert(names.end(), name.begin(), name.end());
@@ -2531,6 +2556,70 @@ TEST(ConSanMoi, Gfx950InventoriesBasicLdsReadWriteAndExcludesAtomic) {
   EXPECT_EQ(result.moi_candidates[1].addr_vgpr, 0u);
   EXPECT_EQ(result.moi_candidates[1].dst_vgpr, 1u);
   EXPECT_EQ(result.moi_candidates[1].width_bits, 32u);
+}
+
+TEST(ConSanMoi, Gfx950BasicFixtureInventoriesNativeInstructionFamilies) {
+  // LLVM gfx950 encodings retained as a deterministic CPU-only A3A fixture.
+  const std::array<uint32_t, 12> text_words = {
+      0xD81A000Cu,
+      0x00000100u, // ds_write_b32 v0, v1 offset:12
+      0xD86C0000u,
+      0x02000000u, // ds_read_b32 v2, v0
+      0xBF8A0000u, // s_barrier
+      0xDC500000u,
+      0x03000004u, // flat_load_dword v3, v[4:5]
+      0xDC700000u,
+      0x00000304u, // flat_store_dword v[4:5], v3
+      0xD8000000u,
+      0x00000100u, // ds_add_u32 v0, v1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_basic_families",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_write_count, 1u);
+  EXPECT_EQ(kernel.stats.lds_read_count, 1u);
+  EXPECT_EQ(kernel.stats.lds_atomic_count, 1u);
+  EXPECT_EQ(kernel.stats.flat_read_count, 1u);
+  EXPECT_EQ(kernel.stats.flat_write_count, 1u);
+  EXPECT_EQ(kernel.barrier_sites.size(), 1u);
+  EXPECT_EQ(kernel.atomic_sites.size(), 1u);
+}
+
+TEST(ConSanMoi, Gfx950InventoryOnlySampledCapabilityHasTypedSkip) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_sampled_inventory",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("context=moi-sampled-access") != std::string::npos &&
+           warning.find("feature=sampled") != std::string::npos &&
+           warning.find("support=inventory-only") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, Gfx950ScalarPlanningReservesDescriptorAbiInputsWithoutEmission) {

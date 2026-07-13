@@ -141,6 +141,13 @@ Full gfx950 support means:
   lanes after restoration, and requires the runtime log to prove AQL
   dispatch-private growth from 0 to 12 bytes. Explicit kernel filters keep all
   four gfx950 CTests isolated; the full group passes.
+- 2026-07-13: `A2` and `A3A` are `DONE`. A target capability table now
+  distinguishes unavailable, inventory-only, and proven native-emission
+  support for LDS, group-FLAT, barriers, atomics, identities, scratch, waits,
+  publication, and each engine path; target dispatch emits typed feature and
+  support reasons when it skips. An LLVM-matched CPU fixture retains gfx950 DS
+  read/write, barrier, FLAT read/write, DS atomic, and end-program words and
+  inventories every initial native family without a GPU.
 
 ## DAG Overview
 
@@ -173,8 +180,8 @@ flowchart LR
   A1A["A1A: Locate Architecture Assumptions"]:::done
   A1B["A1B: Classify Assumptions"]:::done
   A1C["A1C: Close Inventory"]:::done
-  A2["A2: Capability And Target Dispatch"]:::active
-  A3A["A3A: Basic ISA Fixtures"]:::todo
+  A2["A2: Capability And Target Dispatch"]:::done
+  A3A["A3A: Basic ISA Fixtures"]:::done
   A3B["A3B: Private And Pressure Fixtures"]:::todo
   A3C["A3C: Shared-Helper Fixture"]:::todo
   R1A["R1A: Limits And Descriptor Geometry"]:::done
@@ -492,7 +499,7 @@ Done criteria:
 - Every existing `RDNA4` gate in an active ConSan path has an owner and planned
   disposition; no gate is removed merely because a generic decoder exists.
 
-### A2: Capability And Target Dispatch - ACTIVE
+### A2: Capability And Target Dispatch - DONE
 
 Goal: make unsupported native probe families explicit per architecture.
 
@@ -509,7 +516,7 @@ Done criteria:
 - gfx950 inventory never enters an RDNA4 encoder accidentally.
 - Synthetic tests distinguish supported inventory from supported emission.
 
-### A3A: gfx950 Basic ISA Fixtures - TODO
+### A3A: gfx950 Basic ISA Fixtures - DONE
 
 Goal: retain small deterministic instruction inputs for decoder and patch-shape
 tests.

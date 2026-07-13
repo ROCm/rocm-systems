@@ -617,6 +617,18 @@ inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
+[[nodiscard]] bool require_native_feature(rj_code_arch_t arch, ConSanNativeFeature feature,
+                                          std::string_view context, ConSanResult &result) {
+  const ConSanNativeSupport support =
+      consan_native_feature_support(consan_target_capabilities(arch), feature);
+  if (support == ConSanNativeSupport::NativeEmission)
+    return true;
+  result.warnings.emplace_back("ConSan capability skip context=" + std::string(context) +
+                               " feature=" + consan_native_feature_name(feature) +
+                               " support=" + consan_native_support_name(support));
+  return false;
+}
+
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }
@@ -4348,10 +4360,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI sampled probe currently supports only RDNA4");
+  if (!require_native_feature(arch, ConSanNativeFeature::Sampled, "moi-sampled-access", result))
     return;
-  }
 
   const ConSanMoiReportBufferLayout layout =
       consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
@@ -4705,11 +4715,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
-    result.warnings.emplace_back(
-        "ConSan MOI first-light probe has no native backend for this architecture");
+  if (!require_native_feature(arch, ConSanNativeFeature::RecordReplay, "moi-record-replay-access",
+                              result))
     return;
-  }
   if (options.moi_report_buffer_size < consan_moi_report_buffer_min_bytes(1, 0, 0, 0)) {
     result.warnings.emplace_back(
         "ConSan MOI first-light probe requires room for the report header and one access record");

@@ -79,6 +79,126 @@ const char *consan_moi_engine_name(ConSanMoiEngine engine) {
   return "unknown";
 }
 
+const char *consan_native_feature_name(ConSanNativeFeature feature) {
+  switch (feature) {
+  case ConSanNativeFeature::LdsAccess:
+    return "lds-access";
+  case ConSanNativeFeature::GroupFlatAccess:
+    return "group-flat-access";
+  case ConSanNativeFeature::Barrier:
+    return "barrier";
+  case ConSanNativeFeature::Atomic:
+    return "atomic";
+  case ConSanNativeFeature::WorkgroupIdentity:
+    return "workgroup-identity";
+  case ConSanNativeFeature::StableWaveOwner:
+    return "stable-wave-owner";
+  case ConSanNativeFeature::HwIdOwner:
+    return "hw-id-owner";
+  case ConSanNativeFeature::ScratchSpill:
+    return "scratch-spill";
+  case ConSanNativeFeature::NonScratchWait:
+    return "non-scratch-wait";
+  case ConSanNativeFeature::ReportPublication:
+    return "report-publication";
+  case ConSanNativeFeature::SuperCollider:
+    return "supercollider";
+  case ConSanNativeFeature::RecordReplay:
+    return "record-replay";
+  case ConSanNativeFeature::Sampled:
+    return "sampled";
+  case ConSanNativeFeature::InlineShadow:
+    return "inline-shadow";
+  }
+  return "unknown";
+}
+
+const char *consan_native_support_name(ConSanNativeSupport support) {
+  switch (support) {
+  case ConSanNativeSupport::Unavailable:
+    return "unavailable";
+  case ConSanNativeSupport::InventoryOnly:
+    return "inventory-only";
+  case ConSanNativeSupport::NativeEmission:
+    return "native-emission";
+  }
+  return "unknown";
+}
+
+ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture) {
+  ConSanTargetCapabilities capabilities;
+  capabilities.architecture = architecture;
+  if (architecture == ROCJITSU_CODE_ARCH_RDNA4) {
+    capabilities.lds_access = ConSanNativeSupport::NativeEmission;
+    capabilities.group_flat_access = ConSanNativeSupport::NativeEmission;
+    capabilities.barrier = ConSanNativeSupport::NativeEmission;
+    capabilities.atomic = ConSanNativeSupport::NativeEmission;
+    capabilities.workgroup_identity = ConSanNativeSupport::NativeEmission;
+    capabilities.stable_wave_owner = ConSanNativeSupport::NativeEmission;
+    capabilities.hw_id_owner = ConSanNativeSupport::NativeEmission;
+    capabilities.scratch_spill = ConSanNativeSupport::NativeEmission;
+    capabilities.non_scratch_wait = ConSanNativeSupport::NativeEmission;
+    capabilities.report_publication = ConSanNativeSupport::NativeEmission;
+    capabilities.supercollider = ConSanNativeSupport::NativeEmission;
+    capabilities.record_replay = ConSanNativeSupport::NativeEmission;
+    capabilities.sampled = ConSanNativeSupport::NativeEmission;
+    capabilities.inline_shadow = ConSanNativeSupport::NativeEmission;
+    return capabilities;
+  }
+  if (architecture == ROCJITSU_CODE_ARCH_CDNA4) {
+    capabilities.lds_access = ConSanNativeSupport::NativeEmission;
+    capabilities.group_flat_access = ConSanNativeSupport::InventoryOnly;
+    capabilities.barrier = ConSanNativeSupport::InventoryOnly;
+    capabilities.atomic = ConSanNativeSupport::InventoryOnly;
+    capabilities.workgroup_identity = ConSanNativeSupport::InventoryOnly;
+    capabilities.stable_wave_owner = ConSanNativeSupport::InventoryOnly;
+    capabilities.hw_id_owner = ConSanNativeSupport::Unavailable;
+    capabilities.scratch_spill = ConSanNativeSupport::NativeEmission;
+    capabilities.non_scratch_wait = ConSanNativeSupport::NativeEmission;
+    capabilities.report_publication = ConSanNativeSupport::NativeEmission;
+    capabilities.supercollider = ConSanNativeSupport::InventoryOnly;
+    capabilities.record_replay = ConSanNativeSupport::NativeEmission;
+    capabilities.sampled = ConSanNativeSupport::InventoryOnly;
+    capabilities.inline_shadow = ConSanNativeSupport::InventoryOnly;
+  }
+  return capabilities;
+}
+
+ConSanNativeSupport consan_native_feature_support(const ConSanTargetCapabilities &capabilities,
+                                                  ConSanNativeFeature feature) {
+  switch (feature) {
+  case ConSanNativeFeature::LdsAccess:
+    return capabilities.lds_access;
+  case ConSanNativeFeature::GroupFlatAccess:
+    return capabilities.group_flat_access;
+  case ConSanNativeFeature::Barrier:
+    return capabilities.barrier;
+  case ConSanNativeFeature::Atomic:
+    return capabilities.atomic;
+  case ConSanNativeFeature::WorkgroupIdentity:
+    return capabilities.workgroup_identity;
+  case ConSanNativeFeature::StableWaveOwner:
+    return capabilities.stable_wave_owner;
+  case ConSanNativeFeature::HwIdOwner:
+    return capabilities.hw_id_owner;
+  case ConSanNativeFeature::ScratchSpill:
+    return capabilities.scratch_spill;
+  case ConSanNativeFeature::NonScratchWait:
+    return capabilities.non_scratch_wait;
+  case ConSanNativeFeature::ReportPublication:
+    return capabilities.report_publication;
+  case ConSanNativeFeature::SuperCollider:
+    return capabilities.supercollider;
+  case ConSanNativeFeature::RecordReplay:
+    return capabilities.record_replay;
+  case ConSanNativeFeature::Sampled:
+    return capabilities.sampled;
+  case ConSanNativeFeature::InlineShadow:
+    return capabilities.inline_shadow;
+  }
+  return ConSanNativeSupport::Unavailable;
+}
+
 std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value) {
   if (ascii_iequals(value, "supercollider"))
     return ConSanFlavor::SuperCollider;
