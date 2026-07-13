@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/semantic/rules.h"
 
 #include "rocjitsu/analysis/liveness.h"
+#include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/dbt/semantic_scratch.h"
@@ -169,14 +170,14 @@ void emit_cdna3_vop3(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, ui
 
 void emit_cdna3_vop2_literal(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint8_t vsrc1,
                              uint32_t literal) {
-  auto [w0, w1] = build_cdna3_vop2_literal(op, vdst, vsrc1, literal);
+  auto [w0, w1] = Cdna3Emitter::vop2_literal(op, vdst, vsrc1, literal);
   words.push_back(w0);
   words.push_back(w1);
 }
 
 void emit_cdna3_ds(std::vector<uint32_t> &words, uint16_t op, uint8_t vdst, uint8_t addr,
                    uint8_t data0 = 0, uint8_t data1 = 0, uint8_t offset0 = 0, uint8_t offset1 = 0) {
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::ds(op, vdst, addr, data0, data1, offset0, offset1);
+  auto [w0, w1] = Cdna3Emitter::ds(op, vdst, addr, data0, data1, offset0, offset1);
   words.push_back(w0);
   words.push_back(w1);
 }
@@ -327,7 +328,7 @@ make_cdna3_virtual_lds_borrow_scratch(TranslationContext &context,
 
 void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineInst &src, uint16_t op,
                       uint8_t vdata) {
-  Cdna3MemoryInstructionBuilder::MubufOperands operands{};
+  Cdna3Emitter::MubufOperands operands{};
   operands.offset = static_cast<uint16_t>(src.offset);
   operands.offen = src.offen != 0;
   operands.idxen = src.idxen != 0;
@@ -337,7 +338,7 @@ void emit_cdna3_mubuf(std::vector<uint32_t> &words, const cdna4::MubufMachineIns
   operands.vaddr = static_cast<uint8_t>(src.vaddr);
   operands.srsrc = static_cast<uint8_t>(src.srsrc);
   operands.soffset = static_cast<uint8_t>(src.soffset);
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::mubuf(operands, op, vdata);
+  auto [w0, w1] = Cdna3Emitter::mubuf(operands, op, vdata);
   words.push_back(w0);
   words.push_back(w1);
 }

@@ -55,6 +55,7 @@
 #include "rocjitsu/code/dbt/generated/legalization_rdna4_to_cdna4.h"
 #include "rocjitsu/code/dbt/generated/legalization_types.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -1521,9 +1522,9 @@ TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsDs) {
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::ds(/*op=*/63, /*vdst=*/5, /*addr=*/6,
-                                                    /*data0=*/7, /*data1=*/8, /*offset0=*/9,
-                                                    /*offset1=*/10);
+  auto [w0, w1] = Cdna3Emitter::ds(/*op=*/63, /*vdst=*/5, /*addr=*/6,
+                                   /*data0=*/7, /*data1=*/8, /*offset0=*/9,
+                                   /*offset1=*/10);
   const uint32_t raw[2]{w0, w1};
   cdna3::DsMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1539,7 +1540,7 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsDs) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsNonLdsMubuf) {
-  Cdna3MemoryInstructionBuilder::MubufOperands operands{};
+  Cdna3Emitter::MubufOperands operands{};
   operands.offset = 0x345;
   operands.offen = true;
   operands.idxen = false;
@@ -1550,7 +1551,7 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsNonLdsMubuf) {
   operands.srsrc = 12;
   operands.soffset = 13;
 
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::mubuf(operands, /*op=*/23, /*vdata=*/14);
+  auto [w0, w1] = Cdna3Emitter::mubuf(operands, /*op=*/23, /*vdata=*/14);
   const uint32_t raw[2]{w0, w1};
   cdna3::MubufMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1572,9 +1573,8 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsNonLdsMubuf) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatScratchDwordLoad) {
-  auto [w0, w1] =
-      Cdna3MemoryInstructionBuilder::flat_scratch_dword(/*op=*/20, /*vgpr=*/17,
-                                                        /*byte_offset=*/0x1234, /*is_load=*/true);
+  auto [w0, w1] = Cdna3Emitter::flat_scratch_dword(/*op=*/20, /*vgpr=*/17,
+                                                   /*byte_offset=*/0x1234, /*is_load=*/true);
   const uint32_t raw[2]{w0, w1};
   cdna3::FlatScratchMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1589,7 +1589,8 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatScratchDwordLoad) {
 }
 
 TEST(InstructionBuilder, Cdna3BuildsVop2Literal) {
-  auto [w0, w1] = build_cdna3_vop2_literal(/*op=*/52, /*vdst=*/5, /*vsrc1=*/6, /*literal=*/5000);
+  auto [w0, w1] = Cdna3Emitter::vop2_literal(/*op=*/52, /*vdst=*/5, /*vsrc1=*/6,
+                                             /*literal=*/5000);
   const uint32_t raw[2]{w0, w1};
   cdna3::Vop2InstLiteralMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1603,7 +1604,7 @@ TEST(InstructionBuilder, Cdna3BuildsVop2Literal) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalLoad) {
-  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  Cdna3Emitter::FlatGlobalOperands operands{};
   operands.signed_offset13 = 0x1003;
   operands.sc0 = true;
   operands.sc1 = true;
@@ -1611,8 +1612,8 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalLoad) {
   operands.addr = 21;
   operands.saddr = 22;
 
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_load(operands, /*op=*/20,
-                                                                  /*vdst=*/23);
+  auto [w0, w1] = Cdna3Emitter::flat_global_load(operands, /*op=*/20,
+                                                 /*vdst=*/23);
   const uint32_t raw[2]{w0, w1};
   cdna3::FlatMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1632,7 +1633,7 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalLoad) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalStore) {
-  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  Cdna3Emitter::FlatGlobalOperands operands{};
   operands.signed_offset13 = 0x0FFC;
   operands.sc0 = false;
   operands.sc1 = true;
@@ -1641,8 +1642,8 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalStore) {
   operands.saddr = 26;
   operands.acc = true;
 
-  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_global_store(operands, /*op=*/31,
-                                                                   /*data=*/25);
+  auto [w0, w1] = Cdna3Emitter::flat_global_store(operands, /*op=*/31,
+                                                  /*data=*/25);
   const uint32_t raw[2]{w0, w1};
   cdna3::FlatMachineInst actual{};
   std::memcpy(&actual, raw, sizeof(actual));
@@ -1663,9 +1664,8 @@ TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsFlatGlobalStore) {
 }
 
 TEST(InstructionBuilder, Cdna3MemoryBuilderBuildsSmemLoadDwordX2) {
-  auto [w0, w1] =
-      Cdna3MemoryInstructionBuilder::smem_load_dwordx2(/*dst_sgpr=*/100, /*sbase_sgpr=*/4,
-                                                       /*byte_offset=*/0x20);
+  auto [w0, w1] = Cdna3Emitter::smem_load_dwordx2(/*dst_sgpr=*/100, /*sbase_sgpr=*/4,
+                                                  /*byte_offset=*/0x20);
 
   EXPECT_EQ(w0, 0xC0061902u);
   EXPECT_EQ(w1, 0x20u);

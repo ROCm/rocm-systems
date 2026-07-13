@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/dbt/virtual_lds_abi.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/patch/instruction_builder.h"

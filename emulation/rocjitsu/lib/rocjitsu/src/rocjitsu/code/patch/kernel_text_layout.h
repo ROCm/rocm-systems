@@ -14,9 +14,14 @@
 
 namespace rocjitsu {
 
+/// @brief Reserved dwords for a canonical recovered indirect transfer.
+inline constexpr size_t kMaxRecoveredIndirectTransferWords = 6;
+
+/// @brief Reserved dwords for the largest direct long-branch sequence.
+inline constexpr size_t kMaxDirectBranchTransferWords = 7;
+
 class BasicBlock;
 class Instruction;
-struct KdTranslation;
 
 /// @brief Relocated placement of one source CFG block in one emitted kernel.
 ///
@@ -71,12 +76,40 @@ enum class TextLayoutFailureCategory {
   ResourceLimit,
 };
 
+/// @brief Stable machine-readable reason for a relocation failure.
+enum class TextLayoutFailureReason {
+  None,
+  BranchOutOfRange,
+};
+
 /// @brief Result of applying a relocation fixup.
 struct TextRelocationResult {
   bool ok = true;
   TextLayoutFailureCategory failure = TextLayoutFailureCategory::None;
+  TextLayoutFailureReason reason = TextLayoutFailureReason::None;
   uint64_t source_offset = 0;
   std::string message;
+};
+
+/// @brief Descriptor-neutral entry layout requested by DBT or DBI.
+struct KernelEntryLayoutPlan {
+  /// @brief True when hardware may enter again at source entry plus 256 bytes.
+  bool has_kernarg_preload = false;
+
+  /// @brief Source `.text` offset of the compatible-firmware preload entry.
+  uint64_t kernarg_preload_entry_text_offset = 0;
+
+  /// @brief Target instructions that must execute before the relocated body.
+  std::vector<uint32_t> prologue_words;
+};
+
+/// @brief Minimal placement facts needed to emit a skipped-kernel trap stub.
+struct SkippedKernelLayoutPlan {
+  /// @brief Original entry offset whose 256-byte residue must be preserved.
+  uint64_t source_entry = 0;
+
+  /// @brief Emit trap stubs at both legal preload firmware entry addresses.
+  bool has_kernarg_preload = false;
 };
 
 /// @brief Result of appending descriptor-visible kernel text.
@@ -101,12 +134,12 @@ struct KernelTextAppendResult {
 /// patches explicit PC-relative branch immediates and reserved recovered-indirect
 /// windows after all translated block starts are known.
 struct KernelTextLayout {
-  KdTranslation *translation = nullptr; ///< Descriptor plan for this kernel.
-  uint64_t source_entry = 0;            ///< Original descriptor entry offset.
-  uint64_t target_entry = 0;            ///< Final descriptor entry offset.
-  uint64_t target_body_entry = 0;       ///< Relocated original entry offset.
-  uint64_t body_begin = 0;              ///< First emitted body byte.
-  uint64_t body_end = 0;                ///< One-past-end of emitted body.
+  KernelEntryLayoutPlan entry_plan; ///< Entry code requested by the producer.
+  uint64_t source_entry = 0;        ///< Original descriptor entry offset.
+  uint64_t target_entry = 0;        ///< Final descriptor entry offset.
+  uint64_t target_body_entry = 0;   ///< Relocated original entry offset.
+  uint64_t body_begin = 0;          ///< First emitted body byte.
+  uint64_t body_end = 0;            ///< One-past-end of emitted body.
   /// SGPR pair reserved by the descriptor for out-of-range direct branches.
   ///
   /// Direct branches normally patch in place as one SOPP/SOPK instruction. When
@@ -142,8 +175,8 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
 [[nodiscard]] std::optional<uint64_t> target_for_source_offset(const KernelTextLayout &layout,
                                                                uint64_t source_offset);
 
-/// @brief Return true if @p translation's preload launch stubs fit the ABI window.
-[[nodiscard]] bool kernarg_preload_launch_window_fits(const KdTranslation &translation);
+/// @brief Return true if @p plan's preload launch stubs fit the ABI window.
+[[nodiscard]] bool kernarg_preload_launch_window_fits(const KernelEntryLayoutPlan &plan);
 
 /// @brief Choose the fixed patch-window size for a direct branch.
 ///
@@ -172,9 +205,12 @@ void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelT
 /// final hardware entry location is known.
 void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta);
 
-/// @brief Append a target-ISA trap kernel body used for skipped kernels.
+/// @brief Append a target-ISA trap body for a skipped kernel.
+///
+/// @details The neutral plan contains only placement facts needed by the patch
+/// layer. DBT and DBI retain ownership of descriptor policy and diagnostics.
 [[nodiscard]] KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
-                                                                const KdTranslation &translation,
+                                                                const SkippedKernelLayoutPlan &plan,
                                                                 rj_code_arch_t arch);
 
 /// @brief Append one relocated kernel body plus any descriptor-visible entry stubs.

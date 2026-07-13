@@ -23,16 +23,14 @@ std::optional<SemanticSpillRange> SemanticSpillFrame::allocate_dwords(uint16_t d
   if (dword_count == 0 || byte_alignment == 0)
     return std::nullopt;
 
-  const uint64_t base =
-      util::align_up(static_cast<uint64_t>(cursor_), static_cast<uint64_t>(byte_alignment));
-  const uint64_t last = base + (static_cast<uint64_t>(dword_count) - 1u) * sizeof(uint32_t);
-  const uint64_t end = base + static_cast<uint64_t>(dword_count) * sizeof(uint32_t);
-  if (last > max_dword_offset || end > std::numeric_limits<uint32_t>::max())
+  const uint32_t bytes = static_cast<uint32_t>(dword_count) * sizeof(uint32_t);
+  auto base = cursor_.preview(bytes, byte_alignment);
+  if (!base || static_cast<uint64_t>(*base) + bytes - sizeof(uint32_t) > max_dword_offset)
     return std::nullopt;
 
-  cursor_ = static_cast<uint32_t>(end);
-  context_.require_private_segment_bytes(cursor_);
-  return SemanticSpillRange{.byte_offset = static_cast<uint32_t>(base), .dword_count = dword_count};
+  base = cursor_.allocate(bytes, byte_alignment);
+  context_.require_private_segment_bytes(cursor_.high_water_mark());
+  return SemanticSpillRange{.byte_offset = *base, .dword_count = dword_count};
 }
 
 SemanticScratchAllocator::SemanticScratchAllocator(const Instruction &inst,

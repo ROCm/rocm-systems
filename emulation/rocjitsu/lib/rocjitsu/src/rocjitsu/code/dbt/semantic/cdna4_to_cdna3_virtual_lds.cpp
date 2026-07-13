@@ -4,8 +4,10 @@
 #include "rocjitsu/code/dbt/lds_virtualization.h"
 
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
+#include "rocjitsu/code/dbt/virtual_lds_abi.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
@@ -37,11 +39,6 @@ inline constexpr uint32_t kFlatGlobalPositiveImm13Max = 4095;
 inline constexpr uint32_t kCdnaOrdinarySgprLimit = 102;
 inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 8;
 inline constexpr uint32_t kCdnaSmemImmediateByteOffsetMax = 0x1FFFFF;
-inline constexpr uint32_t kVirtualLdsStateBackingBaseOffset = 0;
-inline constexpr uint32_t kVirtualLdsStateStrideXOffset = 8;
-inline constexpr uint32_t kVirtualLdsStateStrideYOffset = 12;
-inline constexpr uint32_t kVirtualLdsStateStrideZOffset = 16;
-inline constexpr uint32_t kVirtualLdsRuntimeStateBytes = 24;
 struct VirtualLdsVgprRange {
   uint16_t base = 0;
   uint16_t count = 0;
@@ -309,7 +306,7 @@ void emit_virtual_lds_base_spill_setup(std::vector<uint32_t> &words,
     words.push_back(build_cdna3_v_readfirstlane_b32(static_cast<uint8_t>(base + 1), temps[1].reg));
     return;
   }
-  auto [load0, load1] = Cdna3MemoryInstructionBuilder::smem_load_dwordx2(
+  auto [load0, load1] = Cdna3Emitter::smem_load_dwordx2(
       base, static_cast<uint8_t>(context.virtual_lds_kernarg_segment_ptr_sgpr),
       context.virtual_lds_kernarg_pointer_offset);
   words.push_back(load0);
@@ -361,7 +358,7 @@ void emit_cdna3_scratch_load_b32(std::vector<uint32_t> &words, uint8_t dst, uint
 /// @brief Add a 32-bit literal to a VGPR and append the two-word CDNA3 VOP2 encoding.
 void emit_cdna3_v_add_u32_literal(std::vector<uint32_t> &words, uint8_t vdst, uint8_t vsrc1,
                                   uint32_t literal) {
-  auto [w0, w1] = build_cdna3_vop2_literal(cdna3::kVAddU32Vop2, vdst, vsrc1, literal);
+  auto [w0, w1] = Cdna3Emitter::vop2_literal(cdna3::kVAddU32Vop2, vdst, vsrc1, literal);
   words.push_back(w0);
   words.push_back(w1);
 }
@@ -690,13 +687,13 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   uint32_t state_offset = translation.lds_overflow_kernarg_pointer_offset;
 
   auto append_smem_load_dword = [&](uint8_t dst, uint8_t sbase, uint32_t offset) {
-    auto [load0, load1] = Cdna3MemoryInstructionBuilder::smem_load_dword(dst, sbase, offset);
+    auto [load0, load1] = Cdna3Emitter::smem_load_dword(dst, sbase, offset);
     translation.prologue_words.push_back(load0);
     translation.prologue_words.push_back(load1);
     Cdna3ScratchEmitter::append_wait(translation.prologue_words);
   };
   auto append_smem_load_dwordx2 = [&](uint8_t dst, uint8_t sbase, uint32_t offset) {
-    auto [load0, load1] = Cdna3MemoryInstructionBuilder::smem_load_dwordx2(dst, sbase, offset);
+    auto [load0, load1] = Cdna3Emitter::smem_load_dwordx2(dst, sbase, offset);
     translation.prologue_words.push_back(load0);
     translation.prologue_words.push_back(load1);
     translation.prologue_words.push_back(pack_sopp(cdna3::kSWaitcntSopp, kCdnaWaitcntAll0));
@@ -801,9 +798,9 @@ struct VirtualLdsDsOp {
 };
 
 /// @brief Build common CDNA3 FLAT/GLOBAL operands for virtual-LDS memory traffic.
-[[nodiscard]] Cdna3MemoryInstructionBuilder::FlatGlobalOperands
+[[nodiscard]] Cdna3Emitter::FlatGlobalOperands
 make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, uint8_t saddr) {
-  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
+  Cdna3Emitter::FlatGlobalOperands operands{};
   operands.signed_offset13 = signed_offset13;
   operands.addr = addr;
   operands.saddr = saddr;
@@ -1227,8 +1224,7 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
           staged_read2_temp
               ? static_cast<uint8_t>(staged_read2_temp->base() + (access.vdst - src.vdst))
               : access.vdst;
-      auto [w0, w1] =
-          Cdna3MemoryInstructionBuilder::flat_global_load(flat_operands, op->flat_op, vdst);
+      auto [w0, w1] = Cdna3Emitter::flat_global_load(flat_operands, op->flat_op, vdst);
       words.push_back(w0);
       words.push_back(w1);
     };
@@ -1462,8 +1458,7 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
                                 : static_cast<uint8_t>(context.virtual_lds_base_sgpr));
       auto flat_operands = operands;
       flat_operands.acc = data_is_acc;
-      auto [w0, w1] =
-          Cdna3MemoryInstructionBuilder::flat_global_store(flat_operands, op->flat_op, data);
+      auto [w0, w1] = Cdna3Emitter::flat_global_store(flat_operands, op->flat_op, data);
       words.push_back(w0);
       words.push_back(w1);
     };
