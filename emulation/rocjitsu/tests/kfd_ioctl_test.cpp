@@ -24,6 +24,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -705,9 +706,9 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
 // In daemon mode the debugger's dbg_fd is a number in the *client's* fd table
 // and is meaningless to the daemon. The client hands the real fd over
 // out-of-band as SCM_RIGHTS ancillary data; the daemon receives it in its own
-// fd space and the rj_vm_execute_as() glue substitutes it into DBG_TRAP
+// fd space and the rj_vm_execute_as_ex() glue substitutes it into DBG_TRAP
 // ENABLE's dbg_fd so the debug session can later signal it, releasing it on
-// DISABLE. These tests exercise the real rj_vm_execute_as() dispatch path
+// DISABLE. These tests exercise the real rj_vm_execute_as_ex() dispatch path
 // (where the substitution and adoption live), not the raw driver ioctl.
 class DbgTrapDaemonTest : public ::testing::Test {
 protected:
@@ -726,20 +727,20 @@ protected:
     }
   }
 
-  // Runs one ioctl through rj_vm_execute_as() (the daemon dispatch path), with
-  // an optional out-of-band in_handle. On return, *in_handle_out (when given)
-  // carries cmd.in_handle, which the glue clears to -1 once the debug session
-  // has adopted the transferred fd.
+  // Runs one ioctl through rj_vm_execute_as_ex() (the daemon dispatch path),
+  // with an optional out-of-band in_handle. On return, *in_handle_out (when
+  // given) carries the transferred fd, which the glue clears to -1 once the
+  // debug session has adopted it.
   int execute(uint32_t cmd_id, void *buf, size_t buf_size, int in_handle, int *in_handle_out) {
     rj_vm_cmd_t cmd{};
     cmd.cmd = cmd_id;
     cmd.buf = buf;
     cmd.buf_size = buf_size;
     cmd.shared_handle = -1;
-    cmd.in_handle = in_handle;
-    rj_vm_execute_as(vm_, process_id_, &cmd);
+    rj_handle_t xfer = in_handle;
+    rj_vm_execute_as_ex(vm_, process_id_, &cmd, &xfer);
     if (in_handle_out != nullptr)
-      *in_handle_out = cmd.in_handle;
+      *in_handle_out = xfer;
     return cmd.result;
   }
 
@@ -817,7 +818,7 @@ TEST_F(DbgTrapDaemonTest, EnableWithoutTransferredFdReturnsEbadf) {
 
 // End-to-end: the RemoteDriver client hands the debugger's notifier fd to an
 // in-process daemon over SCM_RIGHTS (mirroring tools/rocjitsu's handle_client),
-// and the daemon-side rj_vm_execute_as() adopts it. Proven by having the daemon
+// and the daemon-side rj_vm_execute_as_ex() adopts it. Proven by having the daemon
 // write a sentinel through the *transferred* descriptor and reading it back on
 // the client's own eventfd — only possible if SCM_RIGHTS delivered a working
 // alias of the same kernel object.
@@ -828,10 +829,11 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   constexpr uint64_t kSentinel = 0x0102030405060708ULL;
   std::atomic<int> fds_received{0};
   std::atomic<int> in_handle_after{-2};
+  std::atomic<int> notifier_cloexec{-1};
 
   // Minimal stand-in for the daemon's RPC_IOCTL loop: capture an optional
   // SCM_RIGHTS fd on the header (rpc_recv_msg, exactly as tools/rocjitsu does),
-  // thread it through cmd.in_handle into the real rj_vm_execute_as() path, and
+  // thread it through the out-of-band in_handle of rj_vm_execute_as_ex(), and
   // reclaim it only if the session did not adopt it. jthread so an ASSERT_*
   // failure unwinds without std::terminate() on a joinable thread.
   std::jthread server([&, server_fd = sv[1]] {
@@ -872,6 +874,10 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       // by writing a sentinel through it before the handler adopts it.
       if (in_fd >= 0) {
         fds_received.fetch_add(1);
+        // rpc_recv_msg passes MSG_CMSG_CLOEXEC, so the transferred notifier must
+        // arrive close-on-exec and cannot leak through a later exec.
+        int fd_flags = ::fcntl(in_fd, F_GETFD);
+        notifier_cloexec.store((fd_flags >= 0 && (fd_flags & FD_CLOEXEC)) ? 1 : 0);
         uint64_t s = kSentinel;
         [[maybe_unused]] ssize_t w = ::write(in_fd, &s, sizeof(s));
       }
@@ -881,11 +887,11 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       cmd.buf = payload.data() + sizeof(rocjitsu::RpcIoctlRequest);
       cmd.buf_size = ireq->args_bytes;
       cmd.shared_handle = -1;
-      cmd.in_handle = in_fd;
-      rj_vm_execute_as(vm_, process_id_, &cmd);
-      in_handle_after.store(cmd.in_handle);
-      if (cmd.in_handle >= 0)
-        ::close(cmd.in_handle);
+      rj_handle_t in_handle = in_fd;
+      rj_vm_execute_as_ex(vm_, process_id_, &cmd, &in_handle);
+      in_handle_after.store(in_handle);
+      if (in_handle >= 0)
+        ::close(in_handle);
 
       rocjitsu::RpcHeader resp{};
       resp.opcode = rocjitsu::RPC_IOCTL;
@@ -915,6 +921,9 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
   // The client sent exactly one fd via SCM_RIGHTS and the session adopted it.
   EXPECT_EQ(fds_received.load(), 1);
   EXPECT_EQ(in_handle_after.load(), -1);
+  // The transferred notifier was received close-on-exec (MSG_CMSG_CLOEXEC), so
+  // it cannot leak through a later exec in the daemon.
+  EXPECT_EQ(notifier_cloexec.load(), 1);
 
   // The daemon's write through the transferred fd is visible on our eventfd,
   // proving the descriptor was really carried across the process boundary.
@@ -958,12 +967,132 @@ TEST_F(DbgTrapDaemonTest, ForeignClientCannotDriveAnothersSession) {
   cmd.buf = &op;
   cmd.buf_size = sizeof(op);
   cmd.shared_handle = -1;
-  cmd.in_handle = -1;
   rj_vm_execute_as(vm_, other_pid, &cmd); // caller = B
   EXPECT_EQ(cmd.result, -EPERM);
 
   rj_vm_device_close(vm_, other_pid);
   EXPECT_EQ(disable(), 0); // A tears down its session (closes the notifier)
+}
+
+// --- RemoteDriver DBG_TRAP GET_DEVICE_SNAPSHOT response copy-back ---
+//
+// The client saves the caller's snapshot buffer pointer and capacity
+// (num_devices * entry_size) before serialization, then on the response only
+// writes it back on success, clamped to that capacity. This guards daemon mode
+// against a failed op (e.g. -ENOSYS) mutating caller memory and against a
+// daemon-returned count larger than the caller's buffer.
+
+// One-shot daemon stand-in: read a single RPC_IOCTL, then reply with `result`
+// and a response whose inline tail (after the echoed arg struct) is
+// `extra_bytes` of `poison`. Does not close `server_fd` (caller owns it).
+void serve_one_ioctl_reply(int server_fd, int32_t result, size_t arg_struct_size,
+                           size_t extra_bytes, uint8_t poison) {
+  rocjitsu::RpcHeader hdr{};
+  int in_fds[1] = {-1};
+  size_t num_in = 1;
+  if (rocjitsu::rpc_recv_msg(server_fd, &hdr, sizeof(hdr), in_fds, &num_in) <= 0)
+    return;
+  if (in_fds[0] >= 0)
+    ::close(in_fds[0]);
+  std::vector<uint8_t> req(hdr.payload_bytes);
+  if (!rocjitsu::rpc_recv_exact(server_fd, req.data(), hdr.payload_bytes))
+    return;
+
+  // Response payload = echoed arg struct + poison tail. The client copies the
+  // first arg_struct_size bytes back into its arg and treats the remainder as
+  // inline snapshot data to write into the caller's snapshot buffer.
+  std::vector<uint8_t> out(arg_struct_size + extra_bytes);
+  std::memcpy(out.data(), req.data() + sizeof(rocjitsu::RpcIoctlRequest), arg_struct_size);
+  std::memset(out.data() + arg_struct_size, poison, extra_bytes);
+
+  rocjitsu::RpcHeader resp{};
+  resp.opcode = rocjitsu::RPC_IOCTL;
+  resp.request_id = hdr.request_id;
+  resp.result = result;
+  resp.payload_bytes = static_cast<uint32_t>(out.size());
+  rocjitsu::rpc_send_exact(server_fd, &resp, sizeof(resp));
+  rocjitsu::rpc_send_exact(server_fd, out.data(), out.size());
+}
+
+// A GET_DEVICE_SNAPSHOT that the daemon fails (result != 0) must not copy the
+// response tail into the caller's snapshot buffer, even though the daemon
+// returned inline bytes.
+TEST(RemoteDriverDbgSnapshotTest, FailedSnapshotLeavesCallerBufferUntouched) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kNumDevices = 4;
+  constexpr uint32_t kEntrySize = 16;
+  constexpr size_t kCap = static_cast<size_t>(kNumDevices) * kEntrySize;
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCap, kSentinel);
+
+  std::jthread server([&, server_fd = sv[1]] {
+    serve_one_ioctl_reply(server_fd, -ENOSYS, arg_struct_size, kCap, kPoison);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kNumDevices;
+  snap.device_snapshot.entry_size = kEntrySize;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), -ENOSYS);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "failed GET_DEVICE_SNAPSHOT mutated caller memory";
+
+  server.join();
+}
+
+// On success the copy is clamped to the caller's original capacity
+// (num_devices * entry_size); a daemon returning a larger tail cannot overrun
+// the caller's buffer.
+TEST(RemoteDriverDbgSnapshotTest, SuccessfulSnapshotClampsCopyToCallerCapacity) {
+  int sv[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
+
+  constexpr uint32_t kNumDevices = 4;
+  constexpr uint32_t kEntrySize = 16;
+  constexpr size_t kCap = static_cast<size_t>(kNumDevices) * kEntrySize;
+  constexpr size_t kGuard = 32; // tail beyond the declared capacity, must be untouched
+  constexpr uint8_t kSentinel = 0xAB;
+  constexpr uint8_t kPoison = 0xCD;
+  const size_t arg_struct_size = sizeof(kfd_ioctl_dbg_trap_args);
+
+  std::vector<uint8_t> caller_buf(kCap + kGuard, kSentinel);
+
+  std::jthread server([&, server_fd = sv[1]] {
+    // Return MORE inline bytes than the caller's capacity to exercise the clamp.
+    serve_one_ioctl_reply(server_fd, 0, arg_struct_size, kCap + kGuard, kPoison);
+    ::close(server_fd);
+  });
+
+  rocjitsu::RemoteDriver rd(sv[0]);
+
+  kfd_ioctl_dbg_trap_args snap{};
+  snap.pid = 4242;
+  snap.op = KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT;
+  snap.device_snapshot.num_devices = kNumDevices;
+  snap.device_snapshot.entry_size = kEntrySize;
+  snap.device_snapshot.snapshot_buf_ptr = reinterpret_cast<uint64_t>(caller_buf.data());
+
+  EXPECT_EQ(rd.ioctl(AMDKFD_IOC_DBG_TRAP, &snap), 0);
+  EXPECT_TRUE(std::all_of(caller_buf.begin(), caller_buf.begin() + kCap, [](uint8_t b) {
+    return b == kPoison;
+  })) << "successful snapshot did not copy the daemon payload";
+  EXPECT_TRUE(std::all_of(caller_buf.begin() + kCap, caller_buf.end(), [](uint8_t b) {
+    return b == kSentinel;
+  })) << "snapshot copy overran the caller's declared capacity";
+
+  server.join();
 }
 
 } // namespace

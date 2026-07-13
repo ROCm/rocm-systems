@@ -64,6 +64,11 @@ pub enum RjVmMode {
 }
 
 /// Device command descriptor (`rj_vm_cmd_t`).
+///
+/// Part of the runtime-loaded ABI, so the layout is frozen at 32 bytes:
+/// an older caller may hand the library a shorter object. A transferred
+/// input fd (e.g. a debugger notifier) is deliberately *not* a field
+/// here — it travels out-of-band through [`Lib::vm_execute_as_ex`].
 #[repr(C)]
 #[derive(Debug)]
 pub struct RjVmCmd {
@@ -77,8 +82,6 @@ pub struct RjVmCmd {
     pub result: i32,
     /// `[out]` Backing handle for shareable allocations, or -1.
     pub shared_handle: RjHandle,
-    /// `[in]` Client-provided fd (e.g. debugger notifier), or -1.
-    pub in_handle: RjHandle,
 }
 
 /// Device memory mapping descriptor (`rj_vm_map_t`).
@@ -191,6 +194,8 @@ type FnVmDestroy = unsafe extern "C" fn(*mut RjVm);
 type FnVmDeviceOpen = unsafe extern "C" fn(*mut RjVm, i32, *mut u32) -> RjStatus;
 type FnVmDeviceClose = unsafe extern "C" fn(*mut RjVm, u32) -> RjStatus;
 type FnVmExecuteAs = unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmCmd) -> RjStatus;
+type FnVmExecuteAsEx =
+    unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmCmd, *mut RjHandle) -> RjStatus;
 type FnVmDeviceMapAs = unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmMap) -> RjStatus;
 type FnVmDeviceUnmapAs = unsafe extern "C" fn(*mut RjVm, u32, *mut RjVmUnmap) -> RjStatus;
 type FnVmGpuId = unsafe extern "C" fn(*mut RjVm, *mut u32) -> RjStatus;
@@ -217,6 +222,10 @@ pub struct Lib {
     vm_device_open: FnVmDeviceOpen,
     vm_device_close: FnVmDeviceClose,
     vm_execute_as: FnVmExecuteAs,
+    // Optional: only present in libraries that carry a transferred input
+    // fd (e.g. a debugger notifier) out-of-band. When absent, daemon
+    // clients fall back to `vm_execute_as` with no fd transfer.
+    vm_execute_as_ex: Option<FnVmExecuteAsEx>,
     vm_device_map_as: FnVmDeviceMapAs,
     vm_device_unmap_as: FnVmDeviceUnmapAs,
     vm_gpu_id: FnVmGpuId,
@@ -258,6 +267,11 @@ impl Lib {
             let vm_device_open = *lib.get::<FnVmDeviceOpen>(b"rj_vm_device_open\0")?;
             let vm_device_close = *lib.get::<FnVmDeviceClose>(b"rj_vm_device_close\0")?;
             let vm_execute_as = *lib.get::<FnVmExecuteAs>(b"rj_vm_execute_as\0")?;
+            // Optional symbol: tolerate older libraries that predate it.
+            let vm_execute_as_ex = lib
+                .get::<FnVmExecuteAsEx>(b"rj_vm_execute_as_ex\0")
+                .map(|s| *s)
+                .ok();
             let vm_device_map_as = *lib.get::<FnVmDeviceMapAs>(b"rj_vm_device_map_as\0")?;
             let vm_device_unmap_as = *lib.get::<FnVmDeviceUnmapAs>(b"rj_vm_device_unmap_as\0")?;
             let vm_gpu_id = *lib.get::<FnVmGpuId>(b"rj_vm_gpu_id\0")?;
@@ -276,6 +290,7 @@ impl Lib {
                 vm_device_open,
                 vm_device_close,
                 vm_execute_as,
+                vm_execute_as_ex,
                 vm_device_map_as,
                 vm_device_unmap_as,
                 vm_gpu_id,
@@ -373,6 +388,32 @@ impl Lib {
         cmd: *mut RjVmCmd,
     ) -> RjStatus {
         unsafe { (self.vm_execute_as)(vm, process_id, cmd) }
+    }
+
+    /// Execute a device command on behalf of `process_id`, transferring
+    /// an out-of-band input fd (e.g. a debugger notifier for DBG_TRAP
+    /// ENABLE).
+    ///
+    /// `in_handle` is `[in/out]`: pass the fd to transfer (or -1). On
+    /// adoption the VM clears it to -1 so the caller does not close the
+    /// descriptor; otherwise it is left for the caller to reclaim.
+    ///
+    /// Returns `None` when the loaded library predates the symbol —
+    /// callers should then fall back to [`Lib::vm_execute_as`] (no fd
+    /// transfer).
+    ///
+    /// # Safety
+    /// `vm` must be live, `cmd` a valid writable descriptor, and
+    /// `in_handle` a valid pointer to an `RjHandle`.
+    pub unsafe fn vm_execute_as_ex(
+        &self,
+        vm: *mut RjVm,
+        process_id: u32,
+        cmd: *mut RjVmCmd,
+        in_handle: *mut RjHandle,
+    ) -> Option<RjStatus> {
+        let f = self.vm_execute_as_ex?;
+        Some(unsafe { f(vm, process_id, cmd, in_handle) })
     }
 
     /// Map device memory on behalf of `process_id` (daemon mode).
@@ -486,6 +527,8 @@ mod tests {
         assert_eq!(std::mem::size_of::<RjVmMap>(), 40);
         assert_eq!(std::mem::size_of::<RjVmUnmap>(), 16);
         // rj_vm_cmd_t: u32 + (pad) + ptr + usize + i32 + i32 on 64-bit.
+        // Frozen at 32 bytes — the transferred input fd is passed
+        // out-of-band via rj_vm_execute_as_ex, never appended here.
         assert_eq!(std::mem::size_of::<RjVmCmd>(), 32);
         assert_eq!(RjVmMode::Daemon as i32, 2);
         // rj_vm_gpu_info_t — must match the 312-byte RpcGpuInfo the

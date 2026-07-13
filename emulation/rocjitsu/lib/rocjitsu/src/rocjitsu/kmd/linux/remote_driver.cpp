@@ -338,6 +338,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
   uint64_t saved_dbg_rinfo_ptr = 0;
   uint32_t saved_dbg_rinfo_size = 0;
   uint64_t saved_dbg_snapshot_ptr = 0;
+  size_t saved_dbg_snapshot_cap = 0;
   if (has_embedded_pointers(request)) {
     switch (request) {
     case AMDKFD_IOC_WAIT_EVENTS:
@@ -361,6 +362,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
         break;
       case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
         saved_dbg_snapshot_ptr = dbg->device_snapshot.snapshot_buf_ptr;
+        saved_dbg_snapshot_cap =
+            static_cast<size_t>(dbg->device_snapshot.num_devices) * dbg->device_snapshot.entry_size;
         break;
       default:
         break;
@@ -538,8 +541,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
                               std::min(static_cast<size_t>(dbg->enable.rinfo_size), extra));
           break;
         case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
-          dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
-          copy_len = extra;
+          // Only propagate snapshot bytes on success; a failed op (e.g. -ENOSYS)
+          // must not mutate caller memory or dereference the saved output
+          // pointer. Clamp any successful copy to the original buffer capacity.
+          if (resp->result == 0) {
+            dst = reinterpret_cast<void *>(saved_dbg_snapshot_ptr);
+            copy_len = std::min(saved_dbg_snapshot_cap, extra);
+          }
           break;
         default:
           break;

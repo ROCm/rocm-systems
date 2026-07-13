@@ -479,13 +479,20 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                             buf_size: args_bytes as usize,
                             result: 0,
                             shared_handle: -1,
-                            in_handle: in_fd,
                         };
-                        unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
+                        // Transfer any notifier fd out-of-band via the
+                        // fd-carrying entry point; fall back when the loaded
+                        // library predates it (no transfer, still functional).
+                        let mut in_handle = in_fd;
+                        if unsafe { lib.vm_execute_as_ex(vm, process_id, &mut cmd, &mut in_handle) }
+                            .is_none()
+                        {
+                            unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
+                        }
                         // The debug session adopts the notifier fd on success
                         // (in_handle cleared); reclaim it otherwise.
-                        if cmd.in_handle >= 0 {
-                            unsafe { libc::close(cmd.in_handle) };
+                        if in_handle >= 0 {
+                            unsafe { libc::close(in_handle) };
                         }
                         in_fd = -1;
                         // `buf_size` is updated in place; clamp the slice
@@ -577,7 +584,8 @@ fn recv_exact(fd: RawFd, buf: &mut [u8]) -> bool {
 /// Receive the 16-byte RPC header, capturing an optional `SCM_RIGHTS` fd the
 /// client attaches to the message (the debugger notifier pipe on DBG_TRAP
 /// ENABLE). Returns `(ok, fd)`, where `fd` is `-1` if none was received. Any
-/// received fd belongs to the caller, which must close it if unused.
+/// received fd is close-on-exec and belongs to the caller, which must close it
+/// if unused.
 fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
     let mut iov = libc::iovec {
         iov_base: buf.as_mut_ptr() as *mut c_void,
@@ -591,8 +599,12 @@ fn recv_header_with_fd(fd: RawFd, buf: &mut [u8]) -> (bool, RawFd) {
     msg.msg_control = cmsg_buf.as_mut_ptr() as *mut c_void;
     msg.msg_controllen = cmsg_space as _;
 
+    // `MSG_CMSG_CLOEXEC` sets `FD_CLOEXEC` on any descriptor delivered as
+    // ancillary data, matching `rpc_recv_msg()` in the C++ daemon. Without it
+    // the transferred notifier would be inheritable and could leak through a
+    // later `exec`.
     let n = loop {
-        let r = unsafe { libc::recvmsg(fd, &mut msg, 0) };
+        let r = unsafe { libc::recvmsg(fd, &mut msg, libc::MSG_CMSG_CLOEXEC) };
         if r < 0 && last_errno() == libc::EINTR {
             continue;
         }
