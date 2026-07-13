@@ -1,8 +1,6 @@
 #
-set(ROCPROFILER_LIB_GPU_EVENTS_SOURCES gpu_events.cpp profiling_time.cpp
-                                            tracing.cpp)
-set(ROCPROFILER_LIB_GPU_EVENTS_HEADERS gpu_events.hpp profiling_time.hpp
-                                            tracing.hpp)
+set(ROCPROFILER_LIB_GPU_EVENTS_SOURCES gpu_events.cpp profiling_time.cpp tracing.cpp)
+set(ROCPROFILER_LIB_GPU_EVENTS_HEADERS gpu_events.hpp profiling_time.hpp tracing.hpp)
 
 target_sources(
     rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_GPU_EVENTS_SOURCES}
