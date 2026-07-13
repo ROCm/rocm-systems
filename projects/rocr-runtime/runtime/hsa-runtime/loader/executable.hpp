@@ -334,10 +334,15 @@ class AieKernelSymbol final : public SymbolImpl {
   /// @brief Gets the number of NPU columns used by this kernel.
   uint32_t GetNumCols() const { return num_cols; }
 
+  /// @brief Marks the kernel_object handle as visible (called at executable freeze).
+  void SetFrozen() { frozen = true; }
+
   std::string full_name;
   uint64_t descriptor_ptr;
   uint32_t kernarg_size;
   uint32_t num_cols;
+  // KERNEL_OBJECT returns 0 until freeze, matching the GPU symbol contract.
+  bool frozen = false;
 };
 
 //===----------------------------------------------------------------------===//
@@ -760,6 +765,8 @@ public:
   bool trampoline_enabled_gfx125x_ = false;
   std::vector<KdFixup> kd_fixups_;
   std::vector<std::shared_ptr<Segment>> trampoline_segments_;
+  // AIE kernel symbols, so Freeze() can make their kernel_object handles visible.
+  std::vector<std::shared_ptr<AieKernelSymbol>> aie_kernel_symbols_;
 };
 
 class AmdHsaCodeLoader : public Loader {
