@@ -75,12 +75,24 @@ target_compile_definitions(rocattach-symbol-lookup-fixture-shifted
 rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-a 4 "")
 rocattach_add_symbol_lookup_fixture(rocattach-symbol-lookup-fixture-ambiguous-b 5 "")
 
+set(
+    ROCATTACH_SYMBOL_LOOKUP_SOURCE
+    "${CMAKE_CURRENT_LIST_DIR}/../../source/lib/rocprofiler-sdk-rocattach/symbol_lookup.cpp"
+)
+
+install(
+    FILES "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}"
+    DESTINATION
+        "${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-sdk/source/lib/rocprofiler-sdk-rocattach"
+    COMPONENT tests
+)
+
 add_executable(rocattach-symbol-lookup-test)
 target_sources(
     rocattach-symbol-lookup-test
     PRIVATE
         symbol_lookup_test.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/../../source/lib/rocprofiler-sdk-rocattach/symbol_lookup.cpp
+        "${ROCATTACH_SYMBOL_LOOKUP_SOURCE}"
     )
 target_include_directories(
     rocattach-symbol-lookup-test
