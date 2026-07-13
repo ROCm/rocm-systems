@@ -259,6 +259,16 @@ public:
   }
 
 private:
+  template <typename F> static void for_each_page_chunk(uint64_t addr, size_t len, F &&fn) {
+    size_t offset = 0;
+    while (offset < len) {
+      const uint64_t ea = addr + offset;
+      const size_t chunk = std::min(len - offset, PAGE_SIZE - (ea & PAGE_MASK));
+      fn(ea, offset, chunk);
+      offset += chunk;
+    }
+  }
+
   struct VmidEntry {
     KfdProcess::PageTable *page_table = nullptr;
     std::shared_mutex *mutex = nullptr;

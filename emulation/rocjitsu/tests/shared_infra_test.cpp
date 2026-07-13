@@ -72,6 +72,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -1127,6 +1128,127 @@ TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
           amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
+}
+
+TEST(GpuMemoryTest, BlockAccessSpansSparseFallbackPages) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint64_t kAddr = amdgpu::GpuMemory::PAGE_SIZE - 8;
+  constexpr std::array<uint8_t, 16> kData = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                             0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+  mem.write_bytes(kAddr, kData.data(), kData.size());
+  std::array<uint8_t, kData.size()> result{};
+  mem.read_bytes(kAddr, result.data(), result.size());
+
+  EXPECT_EQ(result, kData);
+}
+
+TEST(GpuMemoryTest, BlockAccessSpansMappedPages) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 8;
+  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr std::array<uint8_t, 16> kData = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                             0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[0] = {first_page.data(), amdgpu::Mtype::RW, true, true};
+  page_table[1] = {second_page.data(), amdgpu::Mtype::RW, true, true};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write_bytes(kAddr, kData.data(), kData.size(), kVmid);
+  std::array<uint8_t, kData.size()> result{};
+  mem.read_bytes(kAddr, result.data(), result.size(), kVmid);
+
+  EXPECT_EQ(result, kData);
+}
+
+TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
+  amdgpu::GpuMemory mem("test_mem");
+  constexpr uint32_t kVmid = 9;
+  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr std::array<uint8_t, 16> kReadData = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                                                 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27};
+  constexpr std::array<uint8_t, 16> kWriteData = {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+                                                  0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
+
+  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  std::copy(kReadData.begin() + 8, kReadData.end(), second_page.begin());
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[1] = {second_page.data(), amdgpu::Mtype::RW, true, true};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+  for (size_t i = 0; i < 8; ++i)
+    mem.write8(kAddr + i, kReadData[i], kVmid);
+
+  std::array<uint8_t, kReadData.size()> result{};
+  mem.read_bytes(kAddr, result.data(), result.size(), kVmid);
+  EXPECT_EQ(result, kReadData);
+
+  mem.write_bytes(kAddr, kWriteData.data(), kWriteData.size(), kVmid);
+  for (size_t i = 0; i < 8; ++i)
+    EXPECT_EQ(mem.read8(kAddr + i, kVmid), kWriteData[i]);
+  EXPECT_TRUE(std::equal(kWriteData.begin() + 8, kWriteData.end(), second_page.begin()));
+}
+
+TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7800;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x01234567u, 0x89ABCDEFu, 0x76543210u, 0xFEDCBA98u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x11112222u, 0x33334444u, 0x55556666u, 0x77778888u};
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + 0x100;
+  std::array<uint8_t, 64 * sizeof(kLane0)> store_bytes{};
+  std::memcpy(store_bytes.data(), kLane0.data(), sizeof(kLane0));
+  std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
+
+  l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false);
+  EXPECT_EQ(l1.store_l2_writes(), 2u);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+
+  std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
+  l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  EXPECT_EQ(l2.backing_read_transactions(), 2u);
+  EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
+  EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
+}
+
+TEST(L1VectorCacheTest, UcDwordx4CoalescesAdjacentLanes) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7900;
+  constexpr std::array<uint32_t, 4> kLane0 = {0x01234567u, 0x89ABCDEFu, 0x76543210u, 0xFEDCBA98u};
+  constexpr std::array<uint32_t, 4> kLane1 = {0x11112222u, 0x33334444u, 0x55556666u, 0x77778888u};
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  addrs[1] = kAddr + sizeof(kLane0);
+  std::array<uint8_t, 64 * sizeof(kLane0)> store_bytes{};
+  std::memcpy(store_bytes.data(), kLane0.data(), sizeof(kLane0));
+  std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
+
+  l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false);
+  EXPECT_EQ(l1.store_l2_writes(), 1u);
+  EXPECT_EQ(l2.backing_write_transactions(), 1u);
+
+  std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
+  l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  EXPECT_EQ(l2.backing_read_transactions(), 1u);
+  EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
+  EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
 }
 
 TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {

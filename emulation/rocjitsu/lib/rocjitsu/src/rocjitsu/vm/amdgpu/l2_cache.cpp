@@ -15,6 +15,10 @@ namespace amdgpu {
 
 void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                            uint32_t vmid) {
+  if (op == simdojo::MessageOp::WRITE)
+    backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+  else
+    backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
   if (backing_memory_) {
     // Bulk backing-memory helpers are intentionally silent; cache-level
     // eviction logging stays in ensure_line().

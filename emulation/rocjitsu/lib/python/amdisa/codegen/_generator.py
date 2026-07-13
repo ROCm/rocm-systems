@@ -3268,6 +3268,11 @@ class CodeGenerator:
         # Fallback: inline dispatch for classes not yet extracted.
         L = []  # output lines
 
+        # Sleep has no architectural register effect, but FUNCTIONAL execution
+        # must return to the event loop so peer CUs can make progress.
+        if cls == 'true_nop' and sem.name in ('S_SLEEP', 'S_SLEEP_VAR'):
+            return '  wf.cu().request_functional_yield();'
+
         if cls == 'true_nop':
             return '  (void)wf;'
 
