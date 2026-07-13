@@ -24,7 +24,8 @@ import unittest
 
 
 class TestIfoeDiscovery(unittest.TestCase):
-    pass  # Add IFoE discovery tests here
+    def test_ifoe_discovery(self):
+        self.skipTest("IFoE discovery tests pending hardware/API support")
 
 
 if __name__ == "__main__":

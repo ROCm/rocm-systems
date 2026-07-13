@@ -24,7 +24,8 @@ import unittest
 
 
 class TestNicIdentity(unittest.TestCase):
-    pass  # Add NIC/IFoE identity tests here
+    def test_nic_identity(self):
+        self.skipTest("NIC identity tests pending hardware/API support")
 
 
 if __name__ == "__main__":

@@ -18,13 +18,14 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""Functional tests for IFOE device identity (stub — add tests here)."""
+"""Functional tests for IFoE device identity (stub — add tests here)."""
 
 import unittest
 
 
 class TestIfoeIdentity(unittest.TestCase):
-    pass  # Add NIC/IFoE identity tests here
+    def test_ifoe_identity(self):
+        self.skipTest("IFoE identity tests pending hardware/API support")
 
 
 if __name__ == "__main__":

@@ -398,7 +398,11 @@ tests/python/
 │   │   ├── test_thermal.py            # socket_temperature, prochot_status
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── nic/
-│   │   └── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
+│   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
+│   │   └── test_identity.py           # Stub — NIC device identity tests added here
+│   ├── ifoe/
+│   │   ├── test_discovery.py          # Stub — IFoE endpoint enumeration tests added here
+│   │   └── test_identity.py           # Stub — IFoE device identity tests added here
 │   └── system/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
