@@ -85,6 +85,8 @@ bool AieCode::IsAieCodeObject(const void* data, size_t size) {
 std::unique_ptr<AieCode> AieCode::Create(const void* data, size_t size) {
   if (!data || size == 0) return nullptr;
   auto code = std::unique_ptr<AieCode>(new AieCode());
+  code->elf_base_ = static_cast<const uint8_t*>(data);
+  code->elf_size_ = size;
   code->elf_.reset(amd::elf::NewElf64Image());
   // initAsBuffer keeps a pointer into the caller's buffer (no copy), which is
   // required since AieKernelInfo::insts_data/pdi_data point into that buffer.
@@ -100,9 +102,12 @@ bool AieCode::Parse() {
   section_size_ = sec->size();
   if (section_size_ < sizeof(aie_section_header)) return false;
   // Section has no direct data() accessor; compute the pointer into the ELF
-  // buffer from the section's file offset.
-  section_base_ = reinterpret_cast<const uint8_t*>(elf_->data()) + sec->offset();
-  if (!section_base_) return false;
+  // buffer from the section's file offset. Validate the section's [offset, size)
+  // lies within the caller's buffer before dereferencing — sec->offset()/size()
+  // come straight from the (possibly malformed) section header.
+  const uint64_t sec_offset = sec->offset();
+  if (sec_offset > elf_size_ || section_size_ > elf_size_ - sec_offset) return false;
+  section_base_ = elf_base_ + sec_offset;
 
   const auto* hdr = reinterpret_cast<const aie_section_header*>(section_base_);
   if (hdr->magic != kAieSectionMagic) return false;
