@@ -372,6 +372,23 @@ struct ConSanLdsStaticRange {
   uint32_t byte_count = 0;
 };
 
+enum class ConSanMoiLdsExclusionReason : uint8_t {
+  GdsReserved,
+  AtomicReserved,
+  PermuteOrSwizzle,
+  Transpose,
+  UnsupportedAccessForm,
+  OtherDs,
+};
+
+struct ConSanMoiLdsExclusion {
+  std::string container_name;
+  bool in_kernel = true;
+  uint64_t text_offset = 0;
+  ConSanMoiLdsExclusionReason reason = ConSanMoiLdsExclusionReason::OtherDs;
+  std::string mnemonic;
+};
+
 struct ConSanMoiCandidate {
   std::string container_name;
   bool in_kernel = true;
@@ -506,6 +523,7 @@ struct ConSanResult {
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanMoiCandidate> moi_candidates;
+  std::vector<ConSanMoiLdsExclusion> moi_lds_exclusions;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   ConSanResourcePlanSummary resource_plan_summary;
   std::vector<ConSanPatchInfo> patches;

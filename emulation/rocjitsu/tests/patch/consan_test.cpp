@@ -2818,6 +2818,65 @@ TEST(ConSanMoi, Gfx950ExtendedLdsFormsNormalizeRegistersAndScaledRanges) {
   }
 }
 
+TEST(ConSanMoi, Gfx950UnsupportedDsInventoryHasTypedDispositionPerSite) {
+  const std::array<uint32_t, 19> text_words = {
+      0xD87A1234u,
+      0x1E000004u, // ds_swizzle_b32 v30, v4
+      0xD87C0000u,
+      0x1F000605u, // ds_permute_b32 v31, v5, v6
+      0xD87E0000u,
+      0x20000807u, // ds_bpermute_b32 v32, v7, v8
+      0xD9C0000Cu,
+      0x22000009u, // ds_read_b64_tr_b4 v[34:35], v9 offset:12
+      0xD8000010u,
+      0x00000B0Au, // ds_add_u32 v10, v11 offset:16
+      0xD8400014u,
+      0x24000D0Cu, // ds_add_rtn_u32 v36, v12, v13 offset:20
+      0xD8280000u,
+      0x00000000u, // ds_nop
+      0xD81B0018u,
+      0x00000F0Eu, // reserved GDS bit on ds_write_b32 encoding
+      0xD96C001Cu,
+      0x25000000u, // ds_read_addtid_b32 v37 offset:28
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::array<ConSanMoiLdsExclusionReason, 9> expected_reasons = {
+      ConSanMoiLdsExclusionReason::PermuteOrSwizzle,
+      ConSanMoiLdsExclusionReason::PermuteOrSwizzle,
+      ConSanMoiLdsExclusionReason::PermuteOrSwizzle,
+      ConSanMoiLdsExclusionReason::Transpose,
+      ConSanMoiLdsExclusionReason::AtomicReserved,
+      ConSanMoiLdsExclusionReason::AtomicReserved,
+      ConSanMoiLdsExclusionReason::OtherDs,
+      ConSanMoiLdsExclusionReason::GdsReserved,
+      ConSanMoiLdsExclusionReason::UnsupportedAccessForm,
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_unsupported_ds", /*vgpr_granulated=*/7, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::RecordReplay;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_EQ(result.kernels.front().stats.decode_error_count, 0u);
+  EXPECT_TRUE(result.moi_candidates.empty());
+  ASSERT_EQ(result.kernels.front().lds_sites.size(), expected_reasons.size());
+  ASSERT_EQ(result.moi_lds_exclusions.size(), expected_reasons.size());
+  for (size_t i = 0; i < expected_reasons.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(result.moi_lds_exclusions[i].text_offset,
+              result.kernels.front().lds_sites[i].text_offset);
+    EXPECT_EQ(result.moi_lds_exclusions[i].mnemonic, result.kernels.front().lds_sites[i].mnemonic);
+    EXPECT_EQ(result.moi_lds_exclusions[i].reason, expected_reasons[i]);
+  }
+  ASSERT_TRUE(result.kernels.front().lds_sites[7].raw_gds);
+  EXPECT_TRUE(*result.kernels.front().lds_sites[7].raw_gds);
+}
+
 TEST(ConSanMoi, Gfx950InventoryOnlySampledCapabilityHasTypedSkip) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,

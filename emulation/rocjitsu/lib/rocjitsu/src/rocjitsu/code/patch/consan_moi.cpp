@@ -698,8 +698,30 @@ normalized_native_lds_ranges(const ConSanLdsSite &site) {
 [[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
     return false;
+  if (site.raw_gds.value_or(false))
+    return false;
   return is_single_range_native_lds_mnemonic(site.mnemonic) ||
          two_address_native_lds_offset_scale(site.mnemonic).has_value();
+}
+
+[[nodiscard]] ConSanMoiLdsExclusionReason moi_lds_exclusion_reason(const ConSanLdsSite &site) {
+  if (site.raw_gds.value_or(false))
+    return ConSanMoiLdsExclusionReason::GdsReserved;
+  if (site.kind == ConSanLdsAccessKind::Atomic)
+    return ConSanMoiLdsExclusionReason::AtomicReserved;
+  if (site.mnemonic.find("_tr_") != std::string::npos)
+    return ConSanMoiLdsExclusionReason::Transpose;
+  if (equals_any(site.mnemonic, {"ds_swizzle_b32", "ds_permute_b32", "ds_bpermute_b32"}))
+    return ConSanMoiLdsExclusionReason::PermuteOrSwizzle;
+  if (site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Write)
+    return ConSanMoiLdsExclusionReason::UnsupportedAccessForm;
+  return ConSanMoiLdsExclusionReason::OtherDs;
+}
+
+void append_moi_lds_exclusion(std::string_view container_name, bool in_kernel,
+                              const ConSanLdsSite &site, ConSanResult &result) {
+  result.moi_lds_exclusions.push_back({std::string(container_name), in_kernel, site.text_offset,
+                                       moi_lds_exclusion_reason(site), site.mnemonic});
 }
 
 struct SkippedMoiLdsCounts {
@@ -854,6 +876,7 @@ void append_moi_candidates(const ConSanKernelInfo &kernel, ConSanFlatProvenanceM
       result.moi_candidates.push_back(
           make_moi_candidate(kernel.name, true, kernel.descriptor_file_offset, site));
     } else {
+      append_moi_lds_exclusion(kernel.name, true, site, result);
       count_skipped_moi_lds_candidate(site, skipped_lds_counts);
     }
   }
@@ -880,6 +903,7 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
     if (is_moi_native_lds_candidate(site)) {
       result.moi_candidates.push_back(make_moi_candidate(function.name, false, std::nullopt, site));
     } else {
+      append_moi_lds_exclusion(function.name, false, site, result);
       count_skipped_moi_lds_candidate(site, skipped_lds_counts);
     }
   }

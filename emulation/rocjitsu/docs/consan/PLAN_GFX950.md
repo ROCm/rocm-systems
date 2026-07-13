@@ -179,6 +179,12 @@ Full gfx950 support means:
   fixture verifies source/destination registers, second write operands,
   immediate fields, 4/8/256/512-byte offset scaling, byte counts, and rounded
   shadow-cell ranges. The combined 181-test ConSan/MOI suite passes.
+- 2026-07-13: `D1C` is `DONE`. Every DS site in the representative gfx950
+  fixture now has exactly one admitted candidate or typed exclusion. The
+  exclusion inventory distinguishes reserved GDS-bit encodings, LDS atomics
+  reserved for `AT1A`, permute/swizzle, transpose, unsupported access forms,
+  and other DS operations. A reserved GDS encoding is explicitly prevented
+  from entering the LDS probe path.
 
 ## DAG Overview
 
@@ -295,7 +301,7 @@ flowchart LR
   F0{"F0: Foundation Ready"}:::target
   D1A["D1A: Basic LDS Decode"]:::done
   D1B["D1B: Extended LDS Forms"]:::done
-  D1C["D1C: Unsupported DS Inventory"]:::todo
+  D1C["D1C: Unsupported DS Inventory"]:::done
   P1A["P1A: Scalar Control Primitives"]:::done
   P1B["P1B: Vector And Address Primitives"]:::done
   P1C["P1C: Report Publication Primitives"]:::done
@@ -871,7 +877,7 @@ Done criteria:
 - Each admitted form has exact register, byte-range, and cell-range fixture
   expectations.
 
-### D1C: CDNA4 Unsupported DS And Atomic Inventory - TODO
+### D1C: CDNA4 Unsupported DS And Atomic Inventory - DONE
 
 Goal: make the remainder of the DS family explicit instead of silently
 misclassifying it.
@@ -881,6 +887,14 @@ Work:
 - Inventory transpose, permute, GDS-reserved, and LDS atomic forms.
 - Mark each form admitted elsewhere, intentionally unsupported, or reserved for
   AT1A.
+
+Result:
+
+- Non-admitted DS sites carry a stable typed reason: GDS-reserved, atomic,
+  permute/swizzle, transpose, unsupported access form, or other DS.
+- A nine-site LLVM-matched/manual-reserved-bit fixture proves complete
+  disposition coverage and proves a set GDS bit cannot become an LDS
+  sanitizer candidate.
 
 Done criteria:
 
