@@ -281,11 +281,11 @@ static ncclResult_t ncclInit() {
   rcclRegisterShutdownHandler();
 
   char strValue[2048];
-  NCCLCHECK(ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue));
+  NCCLCHECK(ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue)));
   if (strcmp(strValue, "1") == 0)
     WARN("NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by \"sudo sysctl "
          "kernel.numa_balancing=0\"");
-  NCCLCHECK(ncclTopoGetStrFromSys("/proc", "version", strValue));
+  NCCLCHECK(ncclOsTopoGetStrFromSys("/proc", "version", strValue, sizeof(strValue)));
   char *verStr, *state;
   verStr = strtok_r(strValue, " ", &state);
   for (int i = 0; i < 2; i++) {
@@ -296,7 +296,7 @@ static ncclResult_t ncclInit() {
   if (strstr(verStr, "cray") == NULL) {
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
-    NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
+    NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
       // Check BIOS string and hypervisor presence on ecx bit 31
     if (strncmp("Hyper-V UEFI Release", strValue, 20) != 0 && (ecx & (1u << 31)) == 0) {
       char cmdline[2048] = {0};

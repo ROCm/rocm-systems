@@ -57,7 +57,7 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
 
-  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|matrix-exponential.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
+  EXCLUDED_TESTS: "fork.*|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode-.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|kfd-.*|unified-memory-output-sys-run|rccl-alltoall-perf-sys-run"
   EXCLUDED_LABELS: "thread_limit"
 
 jobs:
@@ -160,6 +160,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems
         run: |
+          python3 -m pip --version
           python3 -m pip install --break-system-packages -r requirements.txt
 
       - name: Configure, Build, and Test

@@ -1113,6 +1113,7 @@ RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank m
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
+  if (comm->nNodes <= 1) return 0;
   bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
@@ -1191,8 +1192,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     else if (bytes[dir] == 0) nChannels[dir] = 1;
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir] / 2 : stepSize[dir] / 8;
-      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir] : stepSize[dir] * 32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir] * 32;
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
         nChannels[dir] *= 2;
@@ -1270,7 +1276,12 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir] / 2 : stepSize[dir] / 8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir] : stepSize[dir] * 32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax / 2) {
         nChannels[dir] *= 2;

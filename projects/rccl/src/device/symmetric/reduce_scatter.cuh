@@ -6,8 +6,13 @@
  *************************************************************************/
 
 #include "sym_kernels.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
+#else
 #include "kernel.cuh"
 #include "primitives.cuh"
+#endif
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, bool EnableTma, typename Red>
 static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, int t, bool waitNeeded,

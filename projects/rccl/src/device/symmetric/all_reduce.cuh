@@ -7,8 +7,13 @@
 
 #include "sym_kernels.h"
 #include "nccl_device.h"
+#if defined(__HIP_PLATFORM_AMD__)
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
+#else
 #include "kernel.cuh"
 #include "primitives.cuh"
+#endif
 #include <stdio.h>
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, bool EnableTma, typename Red>

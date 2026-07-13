@@ -2140,6 +2140,21 @@ ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu
   float gpuBw = system->nodes[GPU].nodes[gpu].paths[CPU][c].bw;
   int rank = system->nodes[GPU].nodes[gpu].gpu.rank;
 
+  // RCCL: on configurations with no local network device (e.g. a single-node
+  // run using the socket transport with no IB devices), the topology has no
+  // GPU->NET path. Report zero net devices instead of failing, matching how
+  // callers (paths.cc) already handle a zero count.
+  {
+    int localNets[NCCL_TOPO_MAX_NODES];
+    int localNetCount = 0;
+    NCCLCHECK(ncclTopoGetLocal(system, GPU, gpu, NET, localNets, &localNetCount, NULL));
+    if (localNetCount == 0) {
+      *count = 0;
+      *bw = 0;
+      return ncclSuccess;
+    }
+  }
+
   int netCountByBw = 0;
   float totalNetBw = 0;
   int64_t firstNetId = 0;

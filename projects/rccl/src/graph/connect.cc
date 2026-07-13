@@ -1294,18 +1294,13 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   // We permit combining max, then min, to only use the first channels, then duplicate them.
   if (comm->sharedRes->owner != comm) {
     /* child comm #channels cannot exceed top parent #channels. */
-    nChannels = comm->nChannels =
-      std::min(std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs),
-               comm->sharedRes->tpNChannels);
-    nChannels = comm->nChannels =
-      copyChannels(comm, nChannels,
-                   std::min(std::max(minNchannels, std::max(nc, comm->config.minCTAs)), comm->sharedRes->tpNChannels),
-                   ringPrev, ringNext);
+    nChannels = comm->nChannels = std::min(std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs), comm->sharedRes->tpNChannels);
+    // Bound the re-expansion target by maxCTAs (and the parent's tpNChannels) so the bandwidth channel count (nc) cannot exceed a user-requested maxCTAs.
+    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::min(std::min(comm->config.maxCTAs, comm->sharedRes->tpNChannels), std::max(minNchannels, std::max(nc, comm->config.minCTAs))), ringPrev, ringNext);
   } else {
-    nChannels = comm->nChannels =
-      std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs);
-    nChannels = comm->nChannels =
-      copyChannels(comm, nChannels, std::max(minNchannels, std::max(nc, comm->config.minCTAs)), ringPrev, ringNext);
+    nChannels = comm->nChannels = std::min(std::min(ncclMaxNchannels() * channelMultiplier, nChannels), comm->config.maxCTAs);
+    // Bound the re-expansion target by maxCTAs so the bandwidth channel count (nc) cannot exceed a user-requested maxCTAs. No-op when maxCTAs is unset.
+    nChannels = comm->nChannels = copyChannels(comm, nChannels, std::min(comm->config.maxCTAs, std::max(minNchannels, std::max(nc, comm->config.minCTAs))), ringPrev, ringNext);
   }
 
   if (comm->isGrow) {

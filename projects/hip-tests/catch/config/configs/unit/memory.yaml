@@ -796,9 +796,6 @@ memory:
   Unit_hipMemsetD8Async_KernelBuffer:
     <<: *level_2
     tags: [memset]
-  Unit_hipMemset_UnalignedKernelCornerCases:
-    <<: *level_2
-    tags: [memset]
   Unit_hipMemsetD16_UnalignedPatternFill:
     <<: *level_2
     tags: [memset]
@@ -1987,6 +1984,9 @@ memory:
     <<: *level_2
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
+    <<: *level_2
+    tags: [query]
+  Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable:
     <<: *level_2
     tags: [query]
   Unit_hipMemDiscardBatchAsync_NegativeTests:

@@ -1336,6 +1336,11 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
   if (ncclParamRasEnable() == 1 && performRasAddRanks) {
     if (ncclRasAddRanks(rasRanks, nranks) != ncclSuccess)
       INFO(NCCL_INIT | NCCL_RAS, "Continuing in spite of a RAS initialization error");
+    else
+      // Ownership of rasRanks has been handed off to the RAS thread, which frees it in
+      // rasLocalHandleAddRanks(). Clear our local pointer so the free() at exit does not
+      // double-free it (an async double-free that corrupts the heap).
+      rasRanks = nullptr;
   }
 
   BOOTSTRAP_PROF_CLOSE(timers[BOOTSTRAP_INIT_TIME_TOTAL]);

@@ -936,7 +936,7 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 
 #if !defined(TOPO_EXPL)
   char strValue[1024];
-  NCCLCHECK(ncclTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue));
+  NCCLCHECK(ncclOsTopoGetStrFromSys("/sys/devices/virtual/dmi/id", "bios_version", strValue, sizeof(strValue)));
   if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
 #endif
     int arch, vendor, model;

@@ -143,7 +143,7 @@ def kernel_fname(k):
       parts += [k.red, k.ty, k.algo]
     else:
       parts += [k.red, k.ty]
-  return paste('_', *parts) + '.cu'
+  return paste('_', *parts) + '.cpp'
 
 def kernel_gencode(k):
   if k.coll in reductions and k.algo in ldmc_algos and k.ty.startswith('f8'):
@@ -253,7 +253,7 @@ kernels_by_file = partition(kernels_to_build, lambda k: (kernel_fname(k), kernel
 
 # Add dependency only files (e.g. allreduce.cu)
 for fbase in set(kernel_fbase(k) for k in kernels_to_build):
-  fname = fbase + '.cu'
+  fname = fbase + '.cpp'
   if (fname, fbase) not in kernels_by_file:
     kernels_by_file[fname, fbase] = []
 
@@ -263,8 +263,8 @@ for (fname, fbase), ks in kernels_by_file.items():
   files_to_print += fname + ";"
   with open(os.path.join(gensrc, fname), "w") as f:
     emitln(f, '#include "sym_kernels.h"')
-    emitln(f, '#include "symmetric/kernel.cuh"')
-    emitln(f, '#include "symmetric/{fbase}.cuh"'.format(fbase=fbase))
+    emitln(f, '#include "symmetric/kernel.h"')
+    emitln(f, '#include "symmetric/{fbase}.h"'.format(fbase=fbase))
     for k in ks:
       emitln(f, instantiate(k))
 
