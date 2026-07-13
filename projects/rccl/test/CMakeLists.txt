@@ -267,6 +267,7 @@ if(BUILD_TESTS)
       BootstrapBidirTests.cpp
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
+      LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
       NetSocketTests.cpp
