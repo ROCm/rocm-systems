@@ -322,6 +322,23 @@ descriptor_sgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
       std::min<uint32_t>((granulated + 1u) * 8u, REGISTER_SET_ALLOCATABLE_SGPRS));
 }
 
+[[nodiscard]] std::optional<uint16_t>
+descriptor_cdna4_nonzero_accum_vgpr_base(std::span<const uint8_t> image,
+                                         uint64_t descriptor_file_offset, rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || descriptor_file_offset > image.size() ||
+      sizeof(KD) > image.size() - descriptor_file_offset)
+    return std::nullopt;
+  const auto *desc = reinterpret_cast<const KD *>(image.data() + descriptor_file_offset);
+  const uint32_t encoded =
+      AMDHSA_BITS_GET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+  // Encoded zero maps to v4 in the raw architecture encoding, but can also be
+  // present when no accumulator bank is used. Match existing ConSan MOI policy
+  // and treat only nonzero ACCUM_OFFSET as an actionable boundary here.
+  if (encoded == 0)
+    return std::nullopt;
+  return static_cast<uint16_t>((encoded + 1u) * 4u);
+}
+
 [[nodiscard]] bool grow_descriptor_vgpr_allocation(KD &desc, uint16_t required_count,
                                                    rj_code_arch_t arch) {
   if (required_count > REGISTER_SET_MAX_VGPRS)
@@ -1918,11 +1935,10 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
   return static_cast<uint16_t>(required_count);
 }
 
-[[nodiscard]] std::optional<uint16_t>
-find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
-                           const LivenessAnalysis *liveness,
-                           std::optional<uint16_t> min_auto_scratch_vgpr,
-                           std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
+[[nodiscard]] std::optional<uint16_t> find_liveness_scratch_vgpr(
+    const ConSanLdsSite &site, const Instruction *inst, const LivenessAnalysis *liveness,
+    std::optional<uint16_t> min_auto_scratch_vgpr, std::optional<uint16_t> max_auto_scratch_vgpr,
+    bool limit_is_descriptor_edge, uint16_t required_vgprs) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
 
@@ -1937,7 +1953,7 @@ find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
     if (max_auto_scratch_vgpr && candidate_end > *max_auto_scratch_vgpr)
       return std::nullopt;
     if (max_auto_scratch_vgpr && candidate_end == *max_auto_scratch_vgpr &&
-        needs_scratch_headroom_at_descriptor_edge(site))
+        limit_is_descriptor_edge && needs_scratch_headroom_at_descriptor_edge(site))
       return std::nullopt;
     if (candidate_end <= 256 && !is_forbidden_scratch_vgpr_run(site, *candidate, required_vgprs))
       return candidate;
@@ -1952,16 +1968,20 @@ find_liveness_scratch_vgpr(const ConSanLdsSite &site, const Instruction *inst,
 choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
                     const Instruction *inst, const LivenessAnalysis *liveness,
                     std::optional<uint16_t> min_auto_scratch_vgpr,
-                    std::optional<uint16_t> max_auto_scratch_vgpr, uint16_t required_vgprs) {
+                    std::optional<uint16_t> max_auto_scratch_vgpr, bool limit_is_descriptor_edge,
+                    uint16_t required_vgprs) {
   if (options.scratch_vgpr) {
     if (static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= 256 &&
+        (!max_auto_scratch_vgpr ||
+         static_cast<uint32_t>(*options.scratch_vgpr) + required_vgprs <= *max_auto_scratch_vgpr) &&
         !is_forbidden_scratch_vgpr_run(site, *options.scratch_vgpr, required_vgprs))
       return *options.scratch_vgpr;
     return std::nullopt;
   }
 
   if (auto scratch = find_liveness_scratch_vgpr(site, inst, liveness, min_auto_scratch_vgpr,
-                                                max_auto_scratch_vgpr, required_vgprs))
+                                                max_auto_scratch_vgpr, limit_is_descriptor_edge,
+                                                required_vgprs))
     return scratch;
 
   return std::nullopt;
@@ -2910,6 +2930,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   size_t append_cave_reachable_candidate_count = 0;
   size_t local_cave_reachable_candidate_count = 0;
   size_t s_clause_blocked_candidate_count = 0;
+  size_t accum_offset_blocked_candidate_count = 0;
   uint32_t max_observed_padding_words = 0;
   auto reachable_local_caves = [&](const ConSanLdsSite &site, uint64_t requested_words) {
     std::vector<const LocalNopCave *> caves;
@@ -2931,6 +2952,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         descriptor_vgpr_allocation_count(original_bytes, kernel.descriptor_file_offset, arch);
     const auto max_auto_vcc_save_sgpr =
         descriptor_sgpr_allocation_count(original_bytes, kernel.descriptor_file_offset);
+    const auto accum_vgpr_base = descriptor_cdna4_nonzero_accum_vgpr_base(
+        original_bytes, kernel.descriptor_file_offset, arch);
+    std::optional<uint16_t> in_descriptor_scratch_limit = max_auto_scratch_vgpr;
+    if (accum_vgpr_base) {
+      in_descriptor_scratch_limit =
+          std::min(in_descriptor_scratch_limit.value_or(*accum_vgpr_base), *accum_vgpr_base);
+    }
+    const bool scratch_limit_is_descriptor_edge =
+        !accum_vgpr_base || (max_auto_scratch_vgpr && *accum_vgpr_base >= *max_auto_scratch_vgpr);
     std::optional<uint16_t> min_auto_scratch_vgpr;
     std::optional<uint16_t> min_preferred_vcc_save_sgpr;
     const KernelMaxRegisterRefs max_refs =
@@ -2963,15 +2993,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const uint32_t padding_words = static_cast<uint32_t>(requested_words - 2u);
       const Instruction *site_inst =
           find_instruction_at_text_offset(KernelBlockScope(block_ptrs), site.text_offset);
-      auto scratch =
-          choose_scratch_vgpr(site, options, site_inst, liveness.get(), min_auto_scratch_vgpr,
-                              max_auto_scratch_vgpr, scratch_vgprs);
+      auto scratch = choose_scratch_vgpr(site, options, site_inst, liveness.get(),
+                                         min_auto_scratch_vgpr, in_descriptor_scratch_limit,
+                                         scratch_limit_is_descriptor_edge, scratch_vgprs);
+      if (!scratch && !options.scratch_vgpr && accum_vgpr_base) {
+        // Prefer a lower dead run when the usual fresh high run would enter
+        // the accumulator window.
+        scratch = choose_scratch_vgpr(site, options, site_inst, liveness.get(), std::nullopt,
+                                      in_descriptor_scratch_limit, scratch_limit_is_descriptor_edge,
+                                      scratch_vgprs);
+      }
       if (!scratch && !options.scratch_vgpr && max_auto_scratch_vgpr) {
         scratch = choose_scratch_vgpr(site, options, site_inst, liveness.get(),
-                                      min_auto_scratch_vgpr, std::nullopt, scratch_vgprs);
+                                      min_auto_scratch_vgpr, accum_vgpr_base,
+                                      /*limit_is_descriptor_edge=*/false, scratch_vgprs);
       }
-      if (!scratch)
+      if (!scratch) {
+        if (accum_vgpr_base)
+          ++accum_offset_blocked_candidate_count;
         continue;
+      }
       auto required_allocation =
           required_descriptor_vgpr_allocation_for_scratch(site, *scratch, scratch_vgprs);
       if (!required_allocation)
@@ -3143,6 +3184,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         "ds_store_b{32,64,128} site; supported_candidates=" +
         std::to_string(supported_candidate_count) +
         " scratchable_candidates=" + std::to_string(scratchable_candidate_count) +
+        " accum_offset_blocked_candidates=" + std::to_string(accum_offset_blocked_candidate_count) +
         " max_observed_padding_words=" + std::to_string(max_observed_padding_words) +
         " append_cave_reachable_candidates=" +
         std::to_string(append_cave_reachable_candidate_count) +
