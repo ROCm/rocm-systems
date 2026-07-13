@@ -130,7 +130,7 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
              (pluginLib->ncclGin == &ncclGinRocshmemApiPlugin ||
               pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin)) {
       ncclGinRocshmemSetInitContext(comm->ginContext, comm);
-    else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
+    } else if (comm->ginContext && pluginLib->ncclGin == &ncclGinAnvilSdmaPlugin) {
       ncclGinAnvilSetInitContext(comm->ginContext, comm);
     }
 #endif
@@ -274,6 +274,9 @@ static void initPluginLibsOnceFunc() {
   {
     extern ncclGin_t ncclGinRocshmemGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+    pluginCounter++;
+  }
   // Add internal SDMA Anvil plugin (GIN_TYPE=5)
   {
     extern ncclGin_t ncclGinAnvilSdmaPlugin;
