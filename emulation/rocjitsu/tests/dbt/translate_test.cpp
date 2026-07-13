@@ -2050,7 +2050,7 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
        cdna4::kVMfmaF3232x32x16F16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3232x32x16F16Vop3pMfma, 0, 256, 260, 272),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3232x32x8F16Vop3pMfma, 272)},
-      {"DsReadB64TrB16", cdna4::encoding::kDsOpHi3, cdna4::kDsReadB64TrB16Ds,
+      {"DsReadB64TrB16", cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16Ds,
        make_cdna4_ds_read_b64_tr_b16_words(), expected_cdna3_ds_read_b64_tr_b16_sequence()},
       {"BufferLoadDwordx3Lds", cdna4::encoding::kMubuf, cdna4::kBufferLoadDwordx3Mubuf,
        make_cdna4_buffer_load_lds_words(cdna4::kBufferLoadDwordx3Mubuf),

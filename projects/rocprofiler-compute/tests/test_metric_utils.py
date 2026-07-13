@@ -40,6 +40,8 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.utils_analysis import add_unit_counter
+from utils.utils_counter_defs import SUPPORTED_DENOM, UNIT_COUNTER
 
 # =============================================================================
 # Tests for utils.metrics.aggregation
@@ -252,6 +254,11 @@ class TestExpression:
         """update_denominator_string substitutes the timestamp delta for per_second."""
         result = update_denominator_string("SUM(DATA) / SUM($denom)", "per_second")
         assert "End_Timestamp - Start_Timestamp" in result
+
+    def test_update_denominator_string_substitutes_denom_for_per_kernel(self):
+        """update_denominator_string substitutes UNIT_COUNTER for per_kernel."""
+        result = update_denominator_string("SUM($denom)", "per_kernel")
+        assert result == f"SUM({UNIT_COUNTER})"
 
     def test_update_denominator_string_keeps_denom_for_unsupported_unit(self):
         """update_denominator_string leaves $denom in place for unknown units."""
@@ -963,6 +970,73 @@ class TestMetricEvaluator:
         result = evaluator.eval_expression(eval_str)
         assert isinstance(result, float)
         assert abs(result - 2.0) < 1e-9, f"MIN([10, 2, 10]) should be 2.0, got {result}"
+
+    def test_add_unit_counter_adds_column_of_ones(self):
+        """add_unit_counter injects UNIT_COUNTER with 1 per dispatch."""
+        df = pd.DataFrame({"COUNTER": [10.0, 20.0, 30.0]})
+        add_unit_counter(df)
+        assert (df[UNIT_COUNTER] == 1).all()
+        assert len(df[UNIT_COUNTER]) == 3
+
+    # YAML metric form: SUM(num)/SUM($denom) for Avg, MIN/MAX(num/$denom) bounds.
+    _AVG_MIN_MAX_EQUATIONS = [
+        pytest.param(
+            "SUM(SQ_WAVE_CYCLES) / SUM($denom)",
+            "MIN(SQ_WAVE_CYCLES / $denom)",
+            "MAX(SQ_WAVE_CYCLES / $denom)",
+            id="count",
+        ),
+        pytest.param(
+            "4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)",
+            "4 * MIN(SQ_ACTIVE_INST_ANY / $denom)",
+            "4 * MAX(SQ_ACTIVE_INST_ANY / $denom)",
+            id="scaled",
+        ),
+        pytest.param(
+            "SUM(SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / SUM($denom)",
+            "MIN((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
+            "MAX((SQ_WAVE_CYCLES + SQ_ACTIVE_INST_ANY) / $denom)",
+            id="composite",
+        ),
+    ]
+
+    def _normalized_evaluator(self):
+        """Evaluator over multi-dispatch counters with positive per-dispatch denoms.
+
+        per_cycle's $GRBM_GUI_ACTIVE_PER_XCD built-in is precomputed as a Series,
+        the way calc_builtin_vars supplies it in a real run.
+        """
+        df = pd.DataFrame({
+            "SQ_WAVE_CYCLES": [120.0, 300.0, 210.0, 450.0, 180.0],
+            "SQ_ACTIVE_INST_ANY": [80.0, 160.0, 300.0, 100.0, 220.0],
+            "SQ_WAVES": [10.0, 20.0, 15.0, 25.0, 12.0],
+            "GRBM_GUI_ACTIVE": [900.0, 1800.0, 1400.0, 2500.0, 1100.0],
+            "Start_Timestamp": [0.0, 500.0, 1000.0, 1500.0, 2000.0],
+            "End_Timestamp": [400.0, 1300.0, 1600.0, 2600.0, 2500.0],
+        })
+        add_unit_counter(df)
+        sys_vars = {"ammolite__num_xcd": 2}
+        sys_vars["ammolite__GRBM_GUI_ACTIVE_PER_XCD"] = MetricEvaluator(
+            df, sys_vars, {}
+        ).eval_expression(build_eval_string("(GRBM_GUI_ACTIVE / $num_xcd)"))
+        return MetricEvaluator(df, sys_vars, {})
+
+    @pytest.mark.parametrize("normal_unit", list(SUPPORTED_DENOM))
+    @pytest.mark.parametrize("avg_eq, min_eq, max_eq", _AVG_MIN_MAX_EQUATIONS)
+    def test_pooled_avg_stays_within_min_max(self, normal_unit, avg_eq, min_eq, max_eq):
+        """Pooled Avg = SUM(num)/SUM($denom) stays within [Min, Max] for every unit."""
+        evaluator = self._normalized_evaluator()
+
+        def evaluate(equation):
+            return evaluator.eval_expression(
+                build_eval_string(update_denominator_string(equation, normal_unit))
+            )
+
+        avg = evaluate(avg_eq)
+        minimum = evaluate(min_eq)
+        maximum = evaluate(max_eq)
+        assert minimum < maximum  # varied data keeps the bound non-trivial
+        assert minimum <= avg <= maximum
 
 
 # =============================================================================
