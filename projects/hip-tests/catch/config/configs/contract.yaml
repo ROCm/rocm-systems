@@ -1035,6 +1035,15 @@ contract:
   Contract_Vmm_SetAccess_AllowsRoundTripWhenSupported:
     <<: *level_0
     tags: [vmm]
+  Contract_VmmHandle_RetainAllocationHandle_ByAddress_Succeeds:
+    <<: *level_0
+    tags: [vmm_handle]
+  Contract_VmmHandle_GetAllocationProperties_RoundTripsFromHandle:
+    <<: *level_0
+    tags: [vmm_handle]
+  Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported:
+    <<: *level_0
+    tags: [vmm_handle]
   Contract_Copy3D_Malloc3D_ReturnsPitchedPtr:
     <<: *level_0
     tags: [copy3d]
