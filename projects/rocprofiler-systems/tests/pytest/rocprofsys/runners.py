@@ -67,6 +67,7 @@ class TestResult:
     extra_output: Optional[str] = None
     duration: Optional[float] = None
     _instrumented_files: list[Path] = field(default_factory=list)
+    __test__ = False
 
     @property
     def success(self) -> bool:
@@ -90,13 +91,11 @@ class TestResult:
         return protos[0] if protos else None
 
     @property
-    def rocpd_file(self) -> Optional[Path]:
+    def rocpd_files(self) -> list[Path]:
         candidate = self.output_dir / "rocpd.db"
         if candidate.exists():
-            return candidate
-        # Try globbing
-        dbs = list(self.output_dir.glob("*.db"))
-        return dbs[0] if dbs else None
+            return [candidate]
+        return sorted(self.output_dir.glob("*.db"))
 
     @property
     def timemory_files(self) -> list[Path]:

@@ -6,6 +6,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_sysfs.h"
@@ -18,12 +19,33 @@ RJ_DIAGNOSTIC_POP
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
 namespace fs = std::filesystem;
 
 namespace {
+
+std::string make_runtime_temp_dir(const char *prefix) {
+  std::error_code ec;
+  fs::path base = rpc_default_runtime_dir();
+  fs::create_directories(base, ec);
+  if (ec)
+    return {};
+
+  // Synthetic sysfs/DRM trees are process-owned and removed by Sysfs::cleanup().
+  // Place them under the rocjitsu runtime directory so crashes leave state in a
+  // known per-user location instead of scattering entries directly under /tmp.
+  std::string tmpl = (base / (std::string(prefix) + "_XXXXXX")).string();
+  std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
+  tmpl_buffer.push_back('\0');
+  char *dir = mkdtemp(tmpl_buffer.data());
+  if (!dir)
+    return {};
+  return dir;
+}
 
 /// @brief Debug-related topology bits derived from a GPU's GFXIP version.
 ///
@@ -151,6 +173,11 @@ void Sysfs::cleanup() {
     fs::remove_all(drm_dir_);
     drm_dir_.clear();
   }
+}
+
+void Sysfs::release_after_fork() {
+  topology_dir_.clear();
+  drm_dir_.clear();
 }
 
 void Sysfs::setup_environment() {}
@@ -436,11 +463,10 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 }
 
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
-  char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_drm");
+  if (dir.empty())
     return;
-  drm_dir_ = dir;
+  drm_dir_ = std::move(dir);
 
   for (size_t i = 0; i < gpus.size(); ++i) {
     auto &gpu = gpus[i];
@@ -496,12 +522,11 @@ std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<Gp
 std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
-  char tmpl[] = "/tmp/rocjitsu_topology_XXXXXX";
-  char *dir = mkdtemp(tmpl);
-  if (!dir)
+  std::string dir = make_runtime_temp_dir("rocjitsu_topology");
+  if (dir.empty())
     return {};
 
-  topology_dir_ = dir;
+  topology_dir_ = std::move(dir);
   if (!gpus.empty())
     gpu_info_ = gpus[0];
 
@@ -520,6 +545,48 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   write_drm_tree(gpus);
 
   return topology_dir_;
+}
+
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc) {
+  Sysfs::GpuInfo gpu{};
+  gpu.gpu_id = dev.gpu_id;
+  gpu.gfx_target_version = dev.gfx_target_version;
+  gpu.vendor_id = dev.vendor_id;
+  gpu.device_id = dev.device_id;
+  gpu.family_id = dev.family_id;
+  gpu.unique_id = dev.unique_id;
+  gpu.location_id = dev.location_id;
+  gpu.domain = dev.domain;
+  gpu.hive_id = dev.hive_id;
+  gpu.drm_render_minor = dev.drm_render_minor;
+  gpu.marketing_name = dev.marketing_name;
+  gpu.revision_id = dev.revision_id;
+  gpu.pci_revision_id = dev.pci_revision_id;
+  gpu.simd_count = dev.simd_count;
+  gpu.max_waves_per_simd = dev.max_waves_per_simd;
+  gpu.num_shader_engines = dev.num_shader_engines;
+  gpu.num_shader_arrays_per_engine = dev.num_shader_arrays_per_engine;
+  gpu.num_cu_per_sh = dev.num_cu_per_sh;
+  gpu.simd_per_cu = dev.simd_per_cu;
+  gpu.wave_front_size = dev.wave_front_size;
+  gpu.max_slots_scratch_cu = dev.max_slots_scratch_cu;
+  gpu.local_mem_size = dev.local_mem_size;
+  gpu.vram_type = dev.vram_type;
+  gpu.lds_size_kb = dev.lds_size_kb;
+  gpu.mem_width = dev.mem_width;
+  gpu.mem_clk_max = dev.mem_clk_max;
+  gpu.l1_size_kb = dev.l1_size_kb;
+  gpu.l1_line_size = dev.l1_line_size;
+  gpu.l1_assoc = dev.l1_assoc;
+  gpu.l2_size_kb = dev.l2_size_kb;
+  gpu.l2_line_size = dev.l2_line_size;
+  gpu.l2_assoc = dev.l2_assoc;
+  gpu.num_sdma_engines = dev.num_sdma_engines;
+  gpu.num_sdma_xgmi_engines = dev.num_sdma_xgmi_engines;
+  gpu.num_cp_queues = dev.num_cp_queues;
+  gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
+  gpu.num_xcc = num_xcc;
+  return gpu;
 }
 
 } // namespace rocjitsu
