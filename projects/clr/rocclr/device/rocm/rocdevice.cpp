@@ -2804,12 +2804,17 @@ void UpdateCpuAccessedBy(const void* ptr, size_t count, bool set) {
   const uintptr_t base = SvmPageBase(ptr);
   const uintptr_t end = SvmPageEnd(ptr, count);
   std::lock_guard<std::mutex> lock(g_cpuAccessedByLock);
-  for (uintptr_t p = base; p < end; p += kSvmPageSize) {
-    if (set) {
-      g_cpuAccessedByPages.insert(p);
-    } else {
-      g_cpuAccessedByPages.erase(p);
+
+  if (!set) {
+    auto it = g_cpuAccessedByPages.lower_bound(base);
+    while (it != g_cpuAccessedByPages.end() && *it < end) {
+      it = g_cpuAccessedByPages.erase(it);
     }
+    return;
+  }
+
+  for (uintptr_t p = base; p < end; p += kSvmPageSize) {
+    g_cpuAccessedByPages.insert(p);
   }
 }
 
