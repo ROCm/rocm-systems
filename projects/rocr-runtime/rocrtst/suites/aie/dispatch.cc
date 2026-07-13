@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -289,21 +290,19 @@ struct aie_vector_scalar_kernel {
   static constexpr std::size_t kernarg_bytes = num_kernargs_sizes * sizeof(uint64_t);
 
   /**
-   * @brief Create a AIE packet payload for vector-scalar add.
+   * @brief Create an AIE packet payload for vector-scalar add.
    *
-   * @param pdi_buf buffer containing the PDI for this packet
-   * @param insts_buf buffer containing the instruction sequence for this packet
-   * @param insts_size size of the instruction sequence in bytes
+   * @param kernel_object opaque kernel handle from
+   *        HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
    * @param input source buffer for the packet
    * @param output destination buffer for the packet
    * @param kernargs pointer to the kernel arguments buffer
    * @param completion_signal signal to be used for completion notification
-   * @param pkt_payload packet payload
    * @param q HSA queue to which the packet will be submitted
    */
-  static std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::uint32_t insts_size,
-                                       void* input, void* output, uint64_t* kernargs,
-                                       hsa_signal_t completion_signal, hsa_queue_t* q) {
+  static std::uint64_t dispatch_packet_ko(std::uint64_t kernel_object, void* input, void* output,
+                                          uint64_t* kernargs, hsa_signal_t completion_signal,
+                                          hsa_queue_t* q) {
     kernargs[0] = reinterpret_cast<uint64_t>(input);
     kernargs[1] = reinterpret_cast<uint64_t>(output);
     kernargs[2] = element_bytes;  // input size in bytes
@@ -316,12 +315,10 @@ struct aie_vector_scalar_kernel {
     pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
     pkt.count = 24;
     pkt.completion_signal = completion_signal;
-    pkt.insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
-    pkt.insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+    pkt.kernel_object_low = static_cast<std::uint32_t>(kernel_object & 0xFFFFFFFF);
+    pkt.kernel_object_high = static_cast<std::uint32_t>(kernel_object >> 32);
     pkt.num_kernargs = num_kernargs;
     pkt.kernarg_address = kernargs;
-    pkt.insts_size = insts_size;
-    pkt.pdi_addr = pdi_buf;
 
     auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
 
@@ -339,6 +336,106 @@ struct aie_vector_scalar_kernel {
 };
 const std::filesystem::path aie_vector_scalar_kernel::pdiPath = STRINGIFY(DEFAULT_PDI_PATH);
 const std::filesystem::path aie_vector_scalar_kernel::instsPath = STRINGIFY(DEFAULT_INSTS_PATH);
+
+// ---------------------------------------------------------------------------
+// HSA executable / kernel-object loading
+// ---------------------------------------------------------------------------
+
+// Loads an hsaco onto `agent` and returns, via out-params, the frozen executable
+// and the kernel_object handle for `kernel_name`. Also checks the pre-freeze
+// KERNEL_OBJECT contract (must be 0 before freeze).
+testing::AssertionResult load_kernel_object(hsa_agent_t agent, const std::filesystem::path& hsaco,
+                                            const char* kernel_name, hsa_executable_t* exe_out,
+                                            uint64_t* kernel_object_out) {
+  std::size_t size = 0;
+  auto f = open_binary(hsaco, &size);
+  if (!f) return testing::AssertionFailure() << "open " << hsaco;
+  std::vector<char> buf(size);
+  if (!read_exact(f, buf.data(), size)) return testing::AssertionFailure() << "read " << hsaco;
+
+  hsa_executable_t exe{};
+  if (hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                &exe) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "executable_create_alt";
+
+  hsa_code_object_reader_t reader{};
+  if (hsa_code_object_reader_create_from_memory(buf.data(), size, &reader) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "reader_create_from_memory";
+
+  if (hsa_executable_load_agent_code_object(exe, agent, reader, nullptr, nullptr) !=
+      HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "load_agent_code_object";
+
+  // KERNEL_OBJECT must be 0 before freeze.
+  hsa_executable_symbol_t sym0{};
+  if (hsa_executable_get_symbol_by_name(exe, kernel_name, &agent, &sym0) == HSA_STATUS_SUCCESS) {
+    uint64_t ko0 = 42;
+    hsa_executable_symbol_get_info(sym0, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &ko0);
+    if (ko0 != 0) return testing::AssertionFailure() << "KERNEL_OBJECT not 0 before freeze";
+  }
+
+  if (hsa_executable_freeze(exe, nullptr) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "freeze";
+
+  hsa_executable_symbol_t sym{};
+  if (hsa_executable_get_symbol_by_name(exe, kernel_name, &agent, &sym) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "get_symbol_by_name " << kernel_name;
+  uint64_t ko = 0;
+  if (hsa_executable_symbol_get_info(sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &ko) !=
+          HSA_STATUS_SUCCESS ||
+      ko == 0)
+    return testing::AssertionFailure() << "KERNEL_OBJECT 0 after freeze";
+
+  hsa_code_object_reader_destroy(reader);
+  *exe_out = exe;
+  *kernel_object_out = ko;
+  return testing::AssertionSuccess();
+}
+
+// Runs a single vector-scalar-add dispatch for kernel handle `ko` on `queue` and
+// verifies output[i] == input[i] + 1. Allocates and frees its own buffers.
+testing::AssertionResult run_single_add(std::uint64_t ko, hsa_amd_memory_pool_t data_pool,
+                                        hsa_amd_memory_pool_t kernarg_pool, hsa_queue_t* queue) {
+  std::uint32_t* input = nullptr;
+  if (hsa_amd_memory_pool_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, 0,
+                                   reinterpret_cast<void**>(&input)) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "alloc input";
+  std::uint32_t* output = nullptr;
+  if (hsa_amd_memory_pool_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, 0,
+                                   reinterpret_cast<void**>(&output)) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "alloc output";
+  uint64_t* kernargs = nullptr;
+  if (hsa_amd_memory_pool_allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes, 0,
+                                   reinterpret_cast<void**>(&kernargs)) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "alloc kernargs";
+
+  std::iota(input, input + aie_vector_scalar_kernel::element_count, 0);
+  std::fill_n(output, aie_vector_scalar_kernel::element_count, 0);
+
+  hsa_signal_t signal{};
+  if (hsa_signal_create(1, 0, nullptr, &signal) != HSA_STATUS_SUCCESS)
+    return testing::AssertionFailure() << "signal_create";
+
+  const auto wr_idx =
+      aie_vector_scalar_kernel::dispatch_packet_ko(ko, input, output, kernargs, signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  testing::AssertionResult result = testing::AssertionSuccess();
+  for (std::size_t i = 0; i < aie_vector_scalar_kernel::element_count; ++i) {
+    if (output[i] != static_cast<std::uint32_t>(i + 1)) {
+      result = testing::AssertionFailure()
+          << "mismatch at " << i << ": got " << output[i] << " want " << (i + 1);
+      break;
+    }
+  }
+
+  hsa_signal_destroy(signal);
+  hsa_amd_memory_pool_free(kernargs);
+  hsa_amd_memory_pool_free(output);
+  hsa_amd_memory_pool_free(input);
+  return result;
+}
 
 }  // namespace
 
@@ -560,14 +657,11 @@ TEST_F(DispatchTest, SingleDispatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   std::uint32_t* input = nullptr;
@@ -594,8 +688,8 @@ TEST_F(DispatchTest, SingleDispatch) {
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
   // --- Dispatch packet ---
-  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, input, output, kernargs, signal, queue);
+  const auto wr_idx =
+      aie_vector_scalar_kernel::dispatch_packet_ko(ko, input, output, kernargs, signal, queue);
 
   // --- Ring doorbell ---
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -614,8 +708,7 @@ TEST_F(DispatchTest, SingleDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, SingleDispatchVMem) {
@@ -640,32 +733,13 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  // These must come from the dev pool, which is the XDNA dev heap. The dev heap
-  // is incompatible with the vmem reserve+map path (see
-  // docs/bug-vmem-map-dev-heap.md), so they use plain pool allocation while the
-  // I/O buffers and kernargs below go through the vmem API. The vmem variant is
-  // preserved behind `#if 0` for when the runtime/driver gains dev-heap vmem
-  // support.
-#if 0
-  vmem_buffer pdi{};
-  ASSERT_TRUE(load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::pdiPath, &pdi));
-  void* const pdi_buf = pdi.va;
-
-  vmem_buffer insts{};
-  ASSERT_TRUE(
-      load_binary_vmem(dev_pool, access_agents, aie_vector_scalar_kernel::instsPath, &insts));
-  void* const insts_buf = insts.va;
-  const std::size_t insts_size = insts.size;
-#else
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
-#endif
+  // --- Load kernel via HSA executable APIs ---
+  // The PDI/instructions are placed in the dev heap by the loader; only the I/O
+  // buffers and kernargs below go through the vmem API.
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   vmem_buffer input{};
@@ -691,9 +765,8 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
   ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
 
   // --- Dispatch packet ---
-  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-      pdi_buf, insts_buf, insts_size, input.va, output.va, static_cast<std::uint64_t*>(kernargs.va),
-      signal, queue);
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(
+      ko, input.va, output.va, static_cast<std::uint64_t*>(kernargs.va), signal, queue);
 
   // --- Ring doorbell ---
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -712,13 +785,7 @@ TEST_F(DispatchTest, SingleDispatchVMem) {
   EXPECT_TRUE(vmem_free(kernargs));
   EXPECT_TRUE(vmem_free(output));
   EXPECT_TRUE(vmem_free(input));
-#if 0
-  EXPECT_TRUE(vmem_free(insts));
-  EXPECT_TRUE(vmem_free(pdi));
-#else
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
-#endif
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatch) {
@@ -730,14 +797,11 @@ TEST_F(DispatchTest, MultiDispatch) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -775,8 +839,8 @@ TEST_F(DispatchTest, MultiDispatch) {
     auto kernarg_ptr = kernargs + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                                     kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -796,8 +860,7 @@ TEST_F(DispatchTest, MultiDispatch) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchAsync) {
@@ -809,14 +872,11 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -855,8 +915,8 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
     auto kernarg_ptr = kernargs + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    last_wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    last_wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                               kernarg_ptr, signal, queue);
   }
 
   // Ring doorbell
@@ -876,8 +936,7 @@ TEST_F(DispatchTest, MultiDispatchAsync) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchWrapAround) {
@@ -891,14 +950,11 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -936,8 +992,8 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
     auto kernarg_ptr = kernargs + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                                     kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -953,8 +1009,8 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
     auto kernarg_ptr = kernargs + offset * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                                     kernarg_ptr, signal, queue);
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
   }
@@ -973,8 +1029,7 @@ TEST_F(DispatchTest, MultiDispatchWrapAround) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
@@ -988,14 +1043,11 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
                              nullptr, 0, 0, &queue),
             HSA_STATUS_SUCCESS);
 
-  // --- Load PDI and instructions ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
 
   // --- Allocate I/O buffers ---
   const auto total_element_count = aie_vector_scalar_kernel::element_count * total_num_dispatches;
@@ -1033,8 +1085,8 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
     auto kernarg_ptr = kernargs + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                                     kernarg_ptr, signal, queue);
 
     // Ring doorbell
     hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
@@ -1051,8 +1103,8 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
     auto kernarg_ptr = kernargs + offset * aie_vector_scalar_kernel::num_kernargs_sizes;
 
     // Dispatch packet
-    last_wr_idx = aie_vector_scalar_kernel::dispatch_packet(
-        pdi_buf, insts_buf, insts_size, input_ptr, output_ptr, kernarg_ptr, signal, queue);
+    last_wr_idx = aie_vector_scalar_kernel::dispatch_packet_ko(ko, input_ptr, output_ptr,
+                                                               kernarg_ptr, signal, queue);
   }
 
   // Ring doorbell
@@ -1072,6 +1124,88 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, SingleDispatchHsaco) {
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe, &ko));
+
+  EXPECT_TRUE(run_single_add(ko, data_pool, kernarg_pool, queue));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, MultiObjectHsaco) {
+  // Two independent hsacos, one kernel each, loaded into separate executables;
+  // dispatch from each and verify both.
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  hsa_executable_t exe_a{}, exe_b{};
+  uint64_t ko_a = 0, ko_b = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_PATH),
+                                 "vector_scalar_add", &exe_a, &ko_a));
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO2_PATH),
+                                 "vector_scalar_add", &exe_b, &ko_b));
+  EXPECT_NE(ko_a, ko_b);
+
+  EXPECT_TRUE(run_single_add(ko_a, data_pool, kernarg_pool, queue));
+  EXPECT_TRUE(run_single_add(ko_b, data_pool, kernarg_pool, queue));
+
+  EXPECT_EQ(hsa_executable_destroy(exe_a), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_executable_destroy(exe_b), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, DuplicateKernelNameRejected) {
+  // Load the same hsaco twice into one (unfrozen) executable: the second load
+  // must be rejected for redefining the kernel symbol on the same agent.
+  std::size_t size = 0;
+  auto f = open_binary(STRINGIFY(DEFAULT_HSACO_PATH), &size);
+  ASSERT_TRUE(static_cast<bool>(f));
+  std::vector<char> buf(size);
+  ASSERT_TRUE(read_exact(f, buf.data(), size));
+
+  hsa_executable_t exe{};
+  ASSERT_EQ(hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                      nullptr, &exe),
+            HSA_STATUS_SUCCESS);
+
+  hsa_code_object_reader_t reader1{};
+  ASSERT_EQ(hsa_code_object_reader_create_from_memory(buf.data(), size, &reader1),
+            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_executable_load_agent_code_object(exe, aie_agents.front(), reader1, nullptr, nullptr),
+      HSA_STATUS_SUCCESS);
+
+  hsa_code_object_reader_t reader2{};
+  ASSERT_EQ(hsa_code_object_reader_create_from_memory(buf.data(), size, &reader2),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(
+      hsa_executable_load_agent_code_object(exe, aie_agents.front(), reader2, nullptr, nullptr),
+      HSA_STATUS_ERROR_VARIABLE_ALREADY_DEFINED);
+
+  hsa_code_object_reader_destroy(reader2);
+  hsa_code_object_reader_destroy(reader1);
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, LoadHsacoNoPdi) {
+  hsa_executable_t exe{};
+  uint64_t ko = 0;
+  ASSERT_TRUE(load_kernel_object(aie_agents.front(), STRINGIFY(DEFAULT_HSACO_NOPDI_PATH),
+                                 "vector_scalar_add", &exe, &ko));
+  EXPECT_NE(ko, 0u);  // descriptor exists; pdi_dev_addr inside it is 0
+  EXPECT_EQ(hsa_executable_destroy(exe), HSA_STATUS_SUCCESS);
 }
