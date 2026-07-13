@@ -84,8 +84,15 @@ hipError_t Function::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod) {
   int dev = ihipGetDevice();
   amd::Kernel* k = dFunc_[dev].load(std::memory_order_acquire);
   if (k == nullptr) {
-    k = BuildKernel(hmod);
-    dFunc_[dev].store(k, std::memory_order_release);
+    amd::kernel* built_kernel = BuildKernel(hmod);
+    amd::kernel* expected = nullptr;
+    if (!dFunc_[dev].compare_exchange_strong(expected, built, std::memory_order_release,
+                                             std::memory_order_acquire)) {
+      built->release();
+      k = expected
+    } else {
+      k = built;
+    }
   }
   *hfunc = asHipFunction(k);
   return hipSuccess;

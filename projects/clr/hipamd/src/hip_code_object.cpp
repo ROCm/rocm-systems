@@ -671,22 +671,23 @@ void StatCO::ResizeForDevices(size_t device_count) {
   for (const auto& it : functions_) {
     it.second->ResizeDFunc(device_count);
   }
-  managedVarsDevicePtrInitalized_ = std::make_unique<std::atomic<bool>[]>(device_count);
-  for (size_t i = 0; i < device_count; ++i) managedVarsDevicePtrInitalized_[i].store(false, std::memory_order_relaxed);
-  managedVarsDevicePtrInitalizedSize_ = device_count;
+  managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
+  for (size_t i = 0; i < device_count; ++i)
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
+  managedVarsDevicePtrInitializedSize_ = device_count;
 }
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   // FAST PATH (lock-free): already initialized for this device
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitalizedSize_ &&
-      managedVarsDevicePtrInitalized_[deviceId].load(std::memory_order_acquire)) {
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
+      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_acquire)) {
     return hipSuccess;
   }
   // SLOW PATH: acquire exclusive lock, re-check, then do init work
   std::unique_lock<std::shared_mutex> lock(sclock_);
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitalizedSize_ &&
-      managedVarsDevicePtrInitalized_[deviceId].load(std::memory_order_relaxed)) {
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
+      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
     return hipSuccess;
   }
   hipError_t err = hipSuccess;
@@ -711,8 +712,8 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
                        mem->getSize(), hipMemcpyHostToDevice, *stream);
     }
   }
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitalizedSize_) {
-    managedVarsDevicePtrInitalized_[deviceId].store(true, std::memory_order_release);
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_) {
+    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
   }
   return err;
 }

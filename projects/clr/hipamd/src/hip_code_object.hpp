@@ -214,8 +214,8 @@ class StatCO : public CodeObject {
   //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
   //! Tracks managed var initialization per device
-  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitalized_;
-  size_t managedVarsDevicePtrInitalizedSize_ = 0;
+  std::unique_ptr<std::atomic<bool>[]> managedVarsDevicePtrInitialized_;
+  size_t managedVarsDevicePtrInitializedSize_ = 0;
 };
 
 };  // namespace hip

@@ -20,28 +20,7 @@
  *   InitManagedVarDevicePtr.
  *
  * WHAT RACE IS TARGETED:
- *   Before the thread-safety refactor, InitManagedVarDevicePtr read and wrote
- *   managedVarsDevicePtrInitalized_[deviceId] without any synchronisation.
- *   Two threads racing through the first launch could both read 'false', both
- *   initialise device pointers (double-init), or one thread could see a
- *   partially-written state.  The refactor introduced a per-device atomic flag
- *   with acquire/release semantics and a double-checked fast path so that only
- *   the first thread to win the CAS does the init work while all others observe
- *   the completed state with proper memory ordering.
- *
- * HOW THE TEST EXERCISES THE RACE:
- *   N_THREADS worker threads each wait on the same pthread_barrier_t, then all
- *   call hipLaunchKernelGGL simultaneously.  The barrier maximises the overlap
- *   of the first-touch paths into InitManagedVarDevicePtr on every device.
- *   Each thread then calls hipDeviceSynchronize and reads back the managed
- *   variable to verify it was initialised to the expected value.
- *
- * SANITIZER NOTE:
- *   In plain CI (no ThreadSanitizer) this test primarily catches crashes,
- *   incorrect initialisation of __managed__ global pointers, and deadlocks.
- *   The race is most reliably detected under TSan (-fsanitize=thread), which
- *   will report data races on managedVarsDevicePtrInitalized_ if the old
- *   unguarded code is reintroduced.
+ *   Tests static code object race conditions. Specifically managed variables
  *
  * IMPORTANT CONSTRAINT:
  *   No HIP kernel must be launched before the barrier-synchronised burst.
