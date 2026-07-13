@@ -451,6 +451,17 @@ Full gfx950 support means:
   both terminate through the documented `s_trap 0` checker path. There is no
   remaining silent corruption, replacement-object loader failure, or
   resource-induced timeout in the 259-test inventory.
+- 2026-07-13: `T3IR` scalar-state implementation passes 249/249 focused tests
+  and the isolated MXFP4 #1853 row under automatic record/replay and sampled
+  MOI. Persistent scalar state grows above the guest SGPR allocation, and a
+  one-patch budget ranks dead/explicit scratch sites ahead of descriptor
+  growth and private spill sites. This removes both the entry-time aperture
+  fault and the spill-induced numerical corruption without an override.
+- 2026-07-13: review exposed a pre-existing identity gap shared by the CDNA4
+  VGPR and SGPR representations: a descriptor that omits a workgroup-ID
+  system SGPR snapshots that dimension as zero even when the dispatch launches
+  multiple workgroups. `T3IW` tracks the required descriptor/ABI transaction
+  separately and gates semantic/broad acceptance.
 
 ## DAG Overview
 
@@ -673,6 +684,7 @@ flowchart LR
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Accumulator-Safe Scalar State"]:::active
+  T3IW["T3IW: Complete Workgroup-ID ABI"]:::todo
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -714,14 +726,18 @@ flowchart LR
   T3SA --> T3G
   T3IS --> T3IO
   T3IO --> T3IR
+  T3IO --> T3IW
   T3IO --> T3IA
   T3IR --> T3IL
+  T3IW --> T3IL
   T3IA --> T3IL --> T3G
   T3SC --> T4SV --> T4SC
   T3RR --> T4RR
   T3SA --> T4SA
   T3IR --> T4RR
   T3IR --> T4SA
+  T3IW --> T4RR
+  T3IW --> T4SA
   T3IL --> T4IS
   T4SC --> T4G
   T4RR --> T4G
@@ -2020,7 +2036,7 @@ load the snapshotted state. Exact-boundary, overlap, multiple-owner, invalid
 descriptor, shared-layout, and paired-entry regressions pass; the complete
 focused filter is 231/231.
 
-### T3IR: Accumulator-Safe Record/Replay And Sampled State - ACTIVE
+### T3IR: Accumulator-Safe Scalar State - ACTIVE
 
 Goal: preserve all wave-uniform identity state without crossing the VGPR
 accumulator window in record/replay and sampled access-record paths.
@@ -2046,6 +2062,40 @@ Done criteria:
 - Record/replay and sampled emit non-vacuous stable-identity records without
   touching accumulator VGPRs or requiring automatic private backing, and the
   isolated MXFP4 row passes.
+
+Current result: all scalar consumers and both entry variants have direct
+instruction-sequence coverage in the 249/249 focused filter. On the isolated
+MXFP4 #1853 reproducer, keeping scalar state inside the guest's 32-SGPR
+allocation first produced numerical corruption, and choosing the earliest
+access site produced an unsafe private spill. Scalar state now grows above
+the original allocation (`s32:s36` on this row), and record/replay plus sampled
+rank a later dead scratch window ahead of spill-required sites. Both automatic
+engines pass #1853 with patch and record emission and no private bytes. The
+guarded selected tiers remain before this node can become `DONE`.
+
+### T3IW: Complete Workgroup-ID ABI - TODO
+
+Goal: preserve distinct workgroup identity even when the original kernel did
+not request one or more workgroup-ID system SGPRs.
+
+Work:
+
+- Extend the CDNA4 entry transaction to make x/y/z workgroup IDs available to
+  ConSan without changing the guest-visible ABI, or derive an equivalent
+  dispatch-unique group coordinate from an architecturally valid source.
+- Account for every inserted system SGPR in user/system input ordering,
+  descriptor SGPR growth, paired kernarg-preload entries, and shared helpers.
+- Initialize both persistent-VGPR and scalar identity representations from the
+  completed coordinates; never silently substitute zero for a launched
+  dimension.
+- Add 1D/2D/3D multi-workgroup tests whose original descriptors omit each
+  coordinate, including clean isolation and intentional same-group races.
+
+Done criteria:
+
+- Every launched workgroup has a distinct recorded `(x,y,z)` identity for all
+  three MOI engines, regardless of the guest descriptor's original system-SGPR
+  request mask, with exact guest ABI restoration at both hardware entries.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
