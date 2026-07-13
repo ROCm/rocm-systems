@@ -60,7 +60,6 @@ enum ncclGinOptFlags {
 #define NCCL_GIN_BACKEND_MASK_ALL                                               \
   (((NCCL_GIN_PROXY_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_PROXY | \
    ((NCCL_GIN_GDAKI_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_GDAKI | \
-   ((NCCL_GIN_ROCSHMEM_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
    ((NCCL_GIN_ROCSHMEM_GDA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA | \
    ((NCCL_GIN_ANVIL_SDMA_ENABLE) ? 1u : 0u) << (unsigned)NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
 

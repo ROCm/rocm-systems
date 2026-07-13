@@ -66,7 +66,6 @@ ncclResult_t setLocalGinType(struct ncclComm* comm) {
   NCCLCHECK(ginState.ncclGin->getProperties(0, &props));
   if (props.netDeviceType == NCCL_NET_DEVICE_GIN_PROXY ||
       props.netDeviceType == NCCL_NET_DEVICE_GIN_GDAKI ||
-      props.netDeviceType == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) {
       props.netDeviceType == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA ||
       props.netDeviceType == NCCL_NET_DEVICE_GIN_ANVIL_SDMA) {
     // NOTE: The following cast is valid because ncclGinType_t variant values
