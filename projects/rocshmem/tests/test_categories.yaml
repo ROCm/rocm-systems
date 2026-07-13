@@ -156,6 +156,7 @@ test_categories:
       - "broadcast_wave_.*"
       - "fcollect_wave_.*"
       - "reduce_wave_.*"
+      - "teamreducescatterwave_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
