@@ -5839,7 +5839,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
               patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
               patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
               patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
-              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+              patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore ||
+              patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
           return private_access && patch.scratch_vgpr && kernel_owns_patch(kernel, patch);
         });
     if (access_patch == result.patches.end())
@@ -7082,6 +7083,7 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanOptions &options, const VgprSpillSequence *spill, rj_code_arch_t arch,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint32_t> private_epoch_offset,
     size_t inline_atomic_release_slots_offset, uint64_t cave_text_offset,
     uint64_t return_text_offset, std::vector<std::string> &errors) {
   constexpr uint16_t kInlineAtomicScratchCount = 3;
@@ -7093,7 +7095,12 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     errors.emplace_back("ConSan MOI inline atomic patch needs three scratch VGPRs");
     return std::nullopt;
   }
-  if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr) {
+  if (options.automatic_moi_private_epoch && (!private_owner_offset || !private_epoch_offset)) {
+    errors.emplace_back("ConSan MOI inline atomic patch has incomplete private identity layout");
+    return std::nullopt;
+  }
+  if (!options.automatic_moi_private_epoch &&
+      (!options.moi_owner_vgpr || !options.moi_epoch_vgpr)) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_MOI_OWNER_VGPR and "
                         "RJ_CONSAN_MOI_EPOCH_VGPR");
     return std::nullopt;
@@ -7137,11 +7144,17 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
   words.push_back(*wait_flat);
 
   if (atomic_event_kind_for_site(candidate.site) == ConSanMoiAtomicEventKind::Release) {
-    if (!append_store_u32_vgpr(words,
+    const uint16_t owner_vgpr = private_owner_offset ? value_vgpr : *options.moi_owner_vgpr;
+    const uint16_t epoch_vgpr = private_epoch_offset ? value_vgpr : *options.moi_epoch_vgpr;
+    if ((private_owner_offset &&
+         !append_moi_private_load_wait(words, value_vgpr, *private_owner_offset, arch)) ||
+        !append_store_u32_vgpr(words,
                                slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                               *options.moi_owner_vgpr, *options.scratch_vgpr, arch) ||
+                               owner_vgpr, *options.scratch_vgpr, arch) ||
+        (private_epoch_offset &&
+         !append_moi_private_load_wait(words, value_vgpr, *private_epoch_offset, arch)) ||
         !append_store_u32_vgpr(words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch),
-                               *options.moi_epoch_vgpr, *options.scratch_vgpr, arch) ||
+                               epoch_vgpr, *options.scratch_vgpr, arch) ||
         !append_store_u32_vgpr(
             words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
             address_vgpr, *options.scratch_vgpr, arch) ||
@@ -7230,8 +7243,15 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load owner");
       return std::nullopt;
     }
+    const uint16_t owner_vgpr =
+        private_owner_offset ? *options.scratch_vgpr : *options.moi_owner_vgpr;
+    if (private_owner_offset &&
+        !append_moi_private_load_wait(words, owner_vgpr, *private_owner_offset, arch)) {
+      errors.emplace_back("ConSan MOI inline atomic acquire patch could not load private owner");
+      return std::nullopt;
+    }
     const auto owner_ne =
-        build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(*options.moi_owner_vgpr), value_vgpr, arch);
+        build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(owner_vgpr), value_vgpr, arch);
     if (!owner_ne) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not compare owner");
       return std::nullopt;
@@ -7244,13 +7264,27 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load epoch");
       return std::nullopt;
     }
+    const uint16_t imported_epoch_vgpr =
+        private_epoch_offset ? value_vgpr : *options.moi_epoch_vgpr;
     const auto import_epoch = build_v_add_nc_u32_words(
-        *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), value_vgpr, arch);
+        imported_epoch_vgpr, scalar_positive_inline_u32(1), value_vgpr, arch);
     if (!import_epoch) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not import epoch");
       return std::nullopt;
     }
     words.insert(words.end(), import_epoch->begin(), import_epoch->end());
+    if (private_epoch_offset) {
+      const auto store_epoch =
+          build_moi_private_store_b32(imported_epoch_vgpr, *private_epoch_offset, arch);
+      const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                               : build_s_wait_storecnt0(arch);
+      if (!store_epoch || !wait_store) {
+        errors.emplace_back("ConSan MOI inline atomic acquire patch could not store private epoch");
+        return std::nullopt;
+      }
+      words.insert(words.end(), store_epoch->begin(), store_epoch->end());
+      words.push_back(*wait_store);
+    }
     words.push_back(*restore_exec);
     if (!append_restore_moi_special_state(words, options, arch)) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not restore VCC/SCC");
@@ -7291,7 +7325,8 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch has no release metadata slot");
     return;
   }
-  if (!options.moi_owner_vgpr || !options.moi_epoch_vgpr) {
+  if (!options.automatic_moi_private_epoch &&
+      (!options.moi_owner_vgpr || !options.moi_epoch_vgpr)) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires "
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");
     return;
@@ -7330,7 +7365,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   struct PlannedInlineAtomic {
     AtomicRecordCandidate candidate;
     ResolvedMoiScratchPlan resources;
+    std::optional<MoiPrivateEpochLayout> private_layout;
     std::optional<VgprSpillSequence> spill;
+    uint32_t required_private_bytes = 0;
   };
   std::vector<PlannedInlineAtomic> planned_candidates;
   MoiResourcePlanningState resource_state(bytes, arch, result);
@@ -7384,16 +7421,35 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
+    std::optional<MoiPrivateEpochLayout> private_layout;
+    if (options.automatic_moi_private_epoch) {
+      private_layout = build_moi_private_epoch_layout(result, *resources, result.warnings);
+      if (!private_layout)
+        continue;
+    }
     std::optional<VgprSpillSequence> spill;
     if (resources->source == ConSanRegisterAllocationSource::SpillRequired) {
-      spill = build_moi_spill_sequence(result, *resources, spill_managers, arch, result.warnings);
+      spill = build_moi_spill_sequence(
+          result, *resources, spill_managers, arch, result.warnings,
+          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
       if (!spill)
         continue;
-      note_spill_descriptor_requirements(private_requirements, *resources, *spill);
+    }
+    const uint32_t required_private_bytes =
+        std::max(private_layout ? private_layout->ephemeral_base : 0u,
+                 spill ? spill->total_private_bytes : 0u);
+    if (required_private_bytes != 0) {
+      for (uint64_t descriptor_offset : resources->owner_descriptor_file_offsets) {
+        auto [it, inserted] =
+            private_requirements.emplace(descriptor_offset, required_private_bytes);
+        if (!inserted)
+          it->second = std::max(it->second, required_private_bytes);
+      }
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
     note_moi_sgpr_requirements(scalar_requirements, *resources, options);
-    planned_candidates.push_back({candidate, *resources, std::move(spill)});
+    planned_candidates.push_back({candidate, *resources, std::move(private_layout),
+                                  std::move(spill), required_private_bytes});
   }
   if (planned_candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");
@@ -7420,6 +7476,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     candidate_options.scratch_vgpr = planned.resources.base;
     auto cave_words = build_inline_atomic_ordering_cave_words(
         active_bytes, candidate, candidate_options, planned.spill ? &*planned.spill : nullptr, arch,
+        planned.private_layout ? std::optional<uint32_t>(planned.private_layout->owner_offset)
+                               : std::nullopt,
+        planned.private_layout ? std::optional<uint32_t>(planned.private_layout->epoch_offset)
+                               : std::nullopt,
         layout.inline_atomic_release_slots_offset, cave_text_offset, return_text_offset,
         result.errors);
     if (!cave_words)
@@ -7457,9 +7517,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.resources.base;
     info.owner_descriptor_file_offsets = planned.resources.owner_descriptor_file_offsets;
+    if (planned.private_layout) {
+      info.persistent_owner_private_offset = planned.private_layout->owner_offset;
+      info.persistent_epoch_private_offset = planned.private_layout->epoch_offset;
+    }
+    info.required_private_segment_size = planned.required_private_bytes;
     if (planned.spill) {
       info.spilled_vgpr_count = planned.spill->vgpr_count;
-      info.required_private_segment_size = planned.spill->total_private_bytes;
     }
     patches.push_back(info);
   }

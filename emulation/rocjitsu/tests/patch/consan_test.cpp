@@ -6732,6 +6732,103 @@ TEST(ConSanMoi, Gfx950InlineAtomicOrderingEmitsReleaseAndAcquirePatches) {
             0u);
 }
 
+TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUsePrivateOwnerEpochState) {
+  std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+  });
+  ASSERT_NE(prologue, result.patches.end());
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const char *text = patched.text_sections().front()->data();
+  const auto private_owner_load = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/14, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto private_epoch_load = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/14, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto acquire_owner_load = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/12, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto private_epoch_store = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/14, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(private_owner_load);
+  ASSERT_TRUE(private_epoch_load);
+  ASSERT_TRUE(acquire_owner_load);
+  ASSERT_TRUE(private_epoch_store);
+
+  size_t atomic_patch_count = 0;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+      continue;
+    ++atomic_patch_count;
+    EXPECT_EQ(patch.persistent_epoch_private_offset, 0u);
+    EXPECT_EQ(patch.persistent_owner_private_offset, 4u);
+    EXPECT_GE(patch.required_private_segment_size, 16u);
+    std::vector<uint32_t> words(patch.trampoline_size / sizeof(uint32_t));
+    std::memcpy(words.data(), text + patch.trampoline_offset, patch.trampoline_size);
+    if (patch.anchor_offset == 0u) {
+      EXPECT_TRUE(contains_subsequence(words, *private_owner_load));
+      EXPECT_TRUE(contains_subsequence(words, *private_epoch_load));
+    } else {
+      EXPECT_TRUE(contains_subsequence(words, *acquire_owner_load));
+      EXPECT_TRUE(contains_subsequence(words, *private_epoch_store));
+    }
+  }
+  EXPECT_EQ(atomic_patch_count, 2u);
+}
+
+TEST(ConSanMoi, Gfx950PrivateInlineAtomicSpillsStayBeyondPersistentState) {
+  std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_atomics = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  size_t atomic_patch_count = 0;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
+      continue;
+    ++atomic_patch_count;
+    EXPECT_EQ(patch.persistent_epoch_private_offset, 0u);
+    EXPECT_EQ(patch.persistent_owner_private_offset, 4u);
+    EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+    EXPECT_GE(patch.required_private_segment_size, 28u);
+  }
+  EXPECT_EQ(atomic_patch_count, 2u);
+}
+
 TEST(ConSanMoi, Gfx950AtomicRecordForcedSpillUsesPlannedPrivateWindows) {
   const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
