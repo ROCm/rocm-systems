@@ -746,6 +746,19 @@ static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t s
   return ncclSuccess;
 }
 
+static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
+                                     struct ncclWindow_vidmem* winDevHost, cudaStream_t stream) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclSegmentWindow* segmentWindowsDev;
+  NCCLCHECK(ncclDevrAllocAndPopulateSegmentWindows(devr, mem, stream, &segmentWindowsDev));
+  winDevHost->ginMultiSegmentWins = segmentWindowsDev;
+  winDevHost->numSegments = mem->numGinSegments;
+  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+    winDevHost->ginWinsDefaultBackend[i] = mem->ginDevWins[i];
+  }
+  return ret;
+}
+
 // On success we take callers reference on `mem`.
 static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory* mem, size_t memOffset, void* userPtr,
                                     size_t userSize, int winFlags, void* localReg, struct ncclWindow_vidmem** outWinDev,
@@ -780,12 +793,8 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   winDevHost->worldRank = comm->rank;
   winDevHost->winHost = (void*)win;
   winDevHost->ginOffset4K = memOffset >> 12;
-  winDevHost->numSegments = mem->numGinSegments;
-  struct ncclSegmentWindow* segmentWindowsDev;
-  NCCLCHECK(ncclDevrAllocAndPopulateSegmentWindows(devr, mem, stream, &segmentWindowsDev));
-  winDevHost->ginMultiSegmentWins = segmentWindowsDev;
-  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
-    winDevHost->ginWinsDefaultBackend[i] = mem->ginDevWins[i];
+  if (devr->ginEnabled) {
+    NCCLCHECK(symWindowInitGin(devr, mem, winDevHost, stream));
   }
   CUDACHECK(cudaMemcpyAsync(winDev, winDevHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream));
 
@@ -1299,12 +1308,7 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
       struct ncclWindow_vidmem* winHost;
       NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, win->vidmem, &winHost), ret, fail_stream);
       winHost->ginOffset4K = (win->bigOffset - win->memory->bigOffset) >> 12;
-      winHost->numSegments = win->memory->numGinSegments;
-
-      NCCLCHECKGOTO(ncclDevrReplaceSegmentWindowsIfNeeded(devr, win->memory, winHost, stream), ret, fail_stream);
-      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
-        winHost->ginWinsDefaultBackend[i] = win->memory->ginDevWins[i];
-      }
+      NCCLCHECKGOTO(symWindowInitGin(devr, win->memory, winHost, stream), ret, fail_stream);
       CUDACHECKGOTO(cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice,
                                     stream),
                     ret, fail_stream);

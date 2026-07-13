@@ -67,7 +67,4 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, 
                                                     cudaStream_t stream,
                                                     struct ncclSegmentWindow** outSegmentWindowsDev);
 
-ncclResult_t ncclDevrReplaceSegmentWindowsIfNeeded(struct ncclDevrState* devr, struct ncclDevrMemory* mem,
-                                                   struct ncclWindow_vidmem* winHost, cudaStream_t stream);
-
 #endif
