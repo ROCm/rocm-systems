@@ -8,7 +8,9 @@ name: RCCL suite
 #
 # Per leg: checkout sources, provision ROCm on the head node (lib/fetch-rocm.sh),
 # then `sbatch --wait` the compute-node script and dump its logs. ROCm/OpenMPI are
-# version-keyed on the shared /apps/rccl-ci cache; RCCL/rccl-tests rebuild each run.
+# version-keyed on the cluster-local cache (cache_root); RCCL/rccl-tests rebuild
+# each run. `runs_on`, `cache_root`, and `partition` select the cluster, so a
+# self-contained suite can run on any runner.
 on:
   workflow_call:
     inputs:
@@ -16,6 +18,21 @@ on:
         description: 'Suite to run; selects lib/<suite>.sbatch (e.g. "gin", "device-api").'
         type: string
         required: true
+      runs_on:
+        description: 'Runner label(s) as a JSON array string; lets a suite target a specific cluster.'
+        type: string
+        required: false
+        default: '["ruby-linux-slurm-scale-runner"]'
+      cache_root:
+        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
+        type: string
+        required: false
+        default: '/apps/rccl-ci'
+      partition:
+        description: 'SLURM partition for the compute-node job.'
+        type: string
+        required: false
+        default: 'interactive'
       rocm_release:
         description: 'ROCm version prefix (e.g. "7.14" = newest 7.14.*; "7.14.0rc1" pins exactly). Empty = newest available.'
         type: string
@@ -50,6 +67,21 @@ on:
         options:
           - device-api
           - gin
+      runs_on:
+        description: 'Runner label(s) as a JSON array string.'
+        type: string
+        required: false
+        default: '["ruby-linux-slurm-scale-runner"]'
+      cache_root:
+        description: 'Cluster-local ROCm/OpenMPI cache root (RCCL_DEVICE_API_CACHE).'
+        type: string
+        required: false
+        default: '/apps/rccl-ci'
+      partition:
+        description: 'SLURM partition for the compute-node job.'
+        type: string
+        required: false
+        default: 'interactive'
       rocm_release:
         description: 'ROCm version prefix (e.g. "7.14"; "7.14.0rc1" pins exactly). Empty = newest available. Cascades release -> prerelease -> nightly, multiarch-first.'
         type: string
@@ -83,7 +115,7 @@ permissions:
 jobs:
   suite:
     name: Single node ${{ inputs.suite }} testing
-    runs-on: ruby-linux-slurm-scale-runner
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     continue-on-error: ${{ inputs.non_gating }}
     defaults:
@@ -91,6 +123,10 @@ jobs:
         shell: bash
     env:
       SUITE: ${{ inputs.suite }}
+      # Cluster-local ROCm/OpenMPI cache root.
+      RCCL_DEVICE_API_CACHE: ${{ inputs.cache_root }}
+      # SLURM partition for this cluster's compute-node job.
+      RCCL_SLURM_PARTITION: ${{ inputs.partition }}
       RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets }}
       ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family }}
       # ROCM_RELEASE is a version prefix (e.g. "7.14"); empty => newest available.
@@ -139,6 +175,7 @@ jobs:
           python3 "${ci_lib}/submit_slurm_job.py" \
             --script "${ci_lib}/${SUITE}.sbatch" \
             --chdir "${RCCL_DEVICE_API_WORKDIR}/.ci-out/${SUITE}-logs" \
+            --partition "${RCCL_SLURM_PARTITION}" \
             --export "ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS,RCCL_CI_DEBUG"
 
       - name: Dump compute-node logs

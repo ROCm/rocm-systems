@@ -122,6 +122,10 @@ if [[ "${resolved_hipcc}" != "${ROCM_PATH}/bin/hipcc" ]]; then
 fi
 echo "==> verified hipcc = ${resolved_hipcc}"
 
+# Ensure `import yaml` works for the build; must be sourced so the venv persists.
+# shellcheck source=/dev/null
+source "${ci_dir}/lib/ensure-python-yaml.sh"
+
 # 3) RCCL via its own install.sh (-l = local gpu arch only).
 echo "==> [3/5] build RCCL (targets=${amdgpu_targets})"
 ( cd "${workdir}/projects/rccl" \

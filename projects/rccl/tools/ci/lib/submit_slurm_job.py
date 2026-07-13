@@ -31,13 +31,20 @@ def log(*args: object) -> None:
     sys.stdout.flush()
 
 
-def submit_and_wait(script: Path, export: str, chdir: Path | None) -> tuple[int, str]:
+def submit_and_wait(
+    script: Path, export: str, chdir: Path | None, partition: str | None
+) -> tuple[int, str]:
     """Run `sbatch --parsable --wait` and return (returncode, job_id).
 
     `--parsable` makes stdout just the job id (optionally `<id>;<cluster>`);
-    `--wait` blocks until the job reaches a terminal state.
+    `--wait` blocks until the job reaches a terminal state. A non-empty
+    `partition` is passed as `--partition`, overriding the script's
+    `#SBATCH --partition` directive so one script runs on any cluster.
     """
-    cmd = ["sbatch", "--parsable", "--wait", f"--export={export}", str(script)]
+    cmd = ["sbatch", "--parsable", "--wait", f"--export={export}"]
+    if partition:
+        cmd.append(f"--partition={partition}")
+    cmd.append(str(script))
     log(f"==> {' '.join(cmd)}")
     try:
         proc = subprocess.run(
@@ -145,6 +152,13 @@ def main(argv: list[str]) -> int:
         "%%x-%%j.out/.err logs land",
     )
     parser.add_argument(
+        "--partition",
+        type=str,
+        default="",
+        help="SLURM partition; passed as sbatch --partition to override the "
+        "script's #SBATCH directive (per-cluster). Empty = use the script default.",
+    )
+    parser.add_argument(
         "--poll-retries",
         type=int,
         default=10,
@@ -163,7 +177,9 @@ def main(argv: list[str]) -> int:
     if args.chdir:
         args.chdir.mkdir(parents=True, exist_ok=True)
 
-    sbatch_rc, job_id = submit_and_wait(args.script, args.export, args.chdir)
+    sbatch_rc, job_id = submit_and_wait(
+        args.script, args.export, args.chdir, args.partition
+    )
     log(f"sbatch --wait rc={sbatch_rc}, job_id={job_id}")
 
     result = JobResult(state="", exit_code="")

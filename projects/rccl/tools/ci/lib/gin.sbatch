@@ -98,6 +98,10 @@ source "${workdir}/.ci-out/ompi.env"
 set +a
 export PATH="${MPI_HOME}/bin:${PATH}"
 
+# Ensure `import yaml` works for the build; must be sourced so the venv persists.
+# shellcheck source=/dev/null
+source "${ci_dir}/lib/ensure-python-yaml.sh"
+
 # 3) rocSHMEM (in-tree, IPC+SDMA) -> rocshmem.env (ROCSHMEM_INSTALL_DIR)
 echo "==> [3/6] build rocSHMEM"
 GPU_TARGETS="${gpu_targets}" "${ci_dir}/lib/build-rocshmem.sh"
