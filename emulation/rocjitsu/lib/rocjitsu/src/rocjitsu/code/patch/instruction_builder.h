@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/opcodes.h"
@@ -84,9 +85,6 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Build a SOPP word using the generated layout for @p arch.
-/// @details GFX1250's MRISA is maintained out of tree and this checkout does
-/// not contain its generated builder header, so that target retains the
-/// field-identical scalar packer as a narrow fallback.
 [[nodiscard]] inline constexpr uint32_t build_sopp_encoding(rj_code_arch_t arch, uint16_t op,
                                                             uint16_t simm16) {
   switch (arch) {
@@ -109,6 +107,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_sopp(op, {.simm16 = simm16})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sopp(op, {.simm16 = simm16})[0];
   default:
     return pack_sopp(op, simm16);
   }
@@ -146,6 +145,8 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
     return rdna4::build_sop1(
         op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
     return pack_sop1(op, sdst, ssrc0);
   }
@@ -193,6 +194,9 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
                                   .ssrc1 = static_cast<uint8_t>(ssrc1),
                                   .sdst = static_cast<uint8_t>(sdst)})[0];
   case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                    .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                    .sdst = static_cast<uint8_t>(sdst)})[0];
   default:
     return pack_sop2(op, sdst, ssrc0, ssrc1);
   }

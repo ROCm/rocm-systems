@@ -155,5 +155,27 @@ TEST(GeneratedInstructionBuilder, PacksCdna3FormatsFromXmlLayouts) {
   EXPECT_EQ(ds, (std::array<uint32_t, 2>{0xD86C0503u, 0x0D0C0B0Au}));
 }
 
+TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
+  constexpr uint16_t kSimm16 = 0xC07F;
+  constexpr uint16_t kSdst = 7;
+  constexpr uint16_t kSsrc0 = 8;
+  constexpr uint16_t kSsrc1 = 9;
+
+  constexpr auto sopp = gfx1250::build_sopp(gfx1250::kSBranchSopp, {.simm16 = kSimm16});
+  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSBranchSopp, kSimm16),
+            sopp[0]);
+
+  constexpr auto sop1 =
+      gfx1250::build_sop1(gfx1250::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
+  EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSMovB32Sop1, kSdst, kSsrc0),
+            sop1[0]);
+
+  constexpr auto sop2 = gfx1250::build_sop2(gfx1250::kSLshlB32Sop2,
+                                            {.ssrc0 = kSsrc0, .ssrc1 = kSsrc1, .sdst = kSdst});
+  EXPECT_EQ(build_sop2_encoding(ROCJITSU_CODE_ARCH_GFX1250, gfx1250::kSLshlB32Sop2, kSdst, kSsrc0,
+                                kSsrc1),
+            sop2[0]);
+}
+
 } // namespace
 } // namespace rocjitsu

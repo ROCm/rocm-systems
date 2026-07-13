@@ -119,6 +119,17 @@ def test_checked_in_rdna4_headers_pin_representative_generated_constants():
     assert 'Vop3BuilderFields fields = {})' in builders
 
 
+def test_checked_in_gfx1250_header_exposes_generated_scalar_builders():
+    project_root = Path(__file__).resolve().parents[4]
+    builders = (
+        project_root / 'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/gfx1250/builders.h'
+    ).read_text()
+
+    assert 'build_sopp(uint16_t op' in builders
+    assert 'build_sop1(uint16_t op' in builders
+    assert 'build_sop2(uint16_t op' in builders
+
+
 def test_instruction_builder_fixes_format_bits_and_exposes_data_fields(tmp_path):
     fields = [
         MicrocodeField('vdst', 8, 0),
