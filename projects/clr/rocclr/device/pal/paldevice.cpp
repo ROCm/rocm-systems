@@ -1946,7 +1946,9 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   if (glDevice != nullptr) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      LogWarning("Failed glDissociate()");
+      if (validateOnly) {
+        LogWarning("Failed glDissociate()");
+      }
       return false;
     }
   }

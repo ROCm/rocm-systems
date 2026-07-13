@@ -1974,7 +1974,9 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
     if (glDevice != nullptr) {
       if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
-        LogWarning("Failed GlInterop::glDissociate()");
+        if (validateOnly) {
+          LogWarning("Failed GlInterop::glDissociate()");
+        }
         success = false;
       }
     }
