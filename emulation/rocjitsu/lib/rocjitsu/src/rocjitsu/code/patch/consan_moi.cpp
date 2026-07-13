@@ -2039,6 +2039,7 @@ struct MoiKernelResourceContext {
   KernelCfgScope scope;
   std::unique_ptr<LivenessAnalysis> liveness;
   uint16_t current_vgpr_count = 0;
+  uint16_t ordinary_vgpr_limit = kMaxVgprs;
   uint16_t max_referenced_vgpr_count = 0;
   uint16_t current_sgpr_count = 0;
   uint16_t max_referenced_sgpr_count = 0;
@@ -2182,6 +2183,19 @@ struct MoiResourcePlanningState {
           stored.max_referenced_sgpr_count, moi_descriptor_abi_sgpr_count(descriptor, arch)));
       stored.current_vgpr_count =
           static_cast<uint16_t>(moi_descriptor_vgpr_allocation_count(descriptor, arch));
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
+            descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+        // The all-zero descriptor encoding is not actionable without separate
+        // proof that the kernel has accumulators. A nonzero ACCUM_OFFSET,
+        // however, is a hard upper bound on ordinary temporary VGPRs even when
+        // the descriptor's granulated allocation extends beyond it.
+        if (encoded_accum_offset != 0) {
+          const uint32_t accum_vgpr_base = (encoded_accum_offset + 1u) * 4u;
+          stored.ordinary_vgpr_limit =
+              static_cast<uint16_t>(std::min<uint32_t>(kMaxVgprs, accum_vgpr_base));
+        }
+      }
       stored.current_sgpr_count =
           static_cast<uint16_t>(moi_descriptor_sgpr_allocation_count(descriptor, arch));
       stored.original_private_segment_size = descriptor.private_segment_fixed_size;
@@ -2231,10 +2245,12 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
 
   plan.current_vgpr_count = kMaxVgprs;
   plan.current_sgpr_count = state.max_sgpr_count;
+  uint16_t ordinary_vgpr_limit = kMaxVgprs;
   RegisterSet live_before_all_owners;
   bool descriptors_valid = true;
   for (MoiKernelResourceContext *owner : owners) {
     plan.current_vgpr_count = std::min(plan.current_vgpr_count, owner->current_vgpr_count);
+    ordinary_vgpr_limit = std::min(ordinary_vgpr_limit, owner->ordinary_vgpr_limit);
     plan.max_referenced_vgpr_count =
         std::max(plan.max_referenced_vgpr_count, owner->max_referenced_vgpr_count);
     plan.current_sgpr_count = std::min(plan.current_sgpr_count, owner->current_sgpr_count);
@@ -2255,9 +2271,9 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   ConSanRegisterRequest request;
   request.reg_class = RegClass::VGPR;
   request.count = scratch_count;
-  request.current_allocation_count = plan.current_vgpr_count;
+  request.current_allocation_count = std::min(plan.current_vgpr_count, ordinary_vgpr_limit);
   request.max_referenced_count = plan.max_referenced_vgpr_count;
-  request.architecture_limit = kMaxVgprs;
+  request.architecture_limit = ordinary_vgpr_limit;
   request.explicit_base = options.scratch_vgpr;
   request.force_spill = options.force_vgpr_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
@@ -2276,7 +2292,8 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   plan.source = register_plan.source;
   plan.reason = register_plan.reason;
   plan.scratch_vgpr = register_plan.base;
-  plan.required_vgpr_count = register_plan.required_descriptor_count;
+  plan.required_vgpr_count =
+      std::max(plan.current_vgpr_count, register_plan.required_descriptor_count);
   return plan;
 }
 

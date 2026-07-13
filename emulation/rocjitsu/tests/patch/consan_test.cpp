@@ -2819,6 +2819,110 @@ TEST(ConSanMoi, Gfx950ResourcePlanDecodesEightVgprsFromZeroDescriptorField) {
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
 }
 
+[[nodiscard]] std::vector<uint8_t>
+make_gfx950_accum_pressure_code_object(std::optional<uint16_t> dead_window_base,
+                                       uint32_t encoded_accum_offset) {
+  std::vector<uint32_t> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+  };
+  for (uint16_t vgpr = 1; vgpr < 132; ++vgpr) {
+    if (dead_window_base && vgpr >= *dead_window_base && vgpr < *dead_window_base + 3u)
+      continue;
+    text_words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_accum_pressure", /*vgpr_granulated=*/16, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [&](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    encoded_accum_offset);
+  });
+  return bytes;
+}
+
+[[nodiscard]] ConSanOptions gfx950_accum_pressure_options() {
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+  return options;
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanSpillsBelowAccumBoundary) {
+  const std::vector<uint8_t> bytes =
+      make_gfx950_accum_pressure_code_object(std::nullopt, /*encoded_accum_offset=*/32u);
+
+  const ConSanResult result = try_patch_consan(bytes, gfx950_accum_pressure_options());
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.current_vgpr_count, 136u);
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  ASSERT_TRUE(plan.scratch_vgpr);
+  EXPECT_LE(static_cast<uint32_t>(*plan.scratch_vgpr) + plan.scratch_vgpr_count, 132u);
+  EXPECT_EQ(plan.required_vgpr_count, 136u);
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanPrefersDeadScratchBelowAccumBoundary) {
+  const std::vector<uint8_t> bytes = make_gfx950_accum_pressure_code_object(
+      /*dead_window_base=*/120u, /*encoded_accum_offset=*/32u);
+
+  const ConSanResult result = try_patch_consan(bytes, gfx950_accum_pressure_options());
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(plan.scratch_vgpr, 120u);
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanAllowsScratchEndingAtAccumBoundary) {
+  const std::vector<uint8_t> bytes = make_gfx950_accum_pressure_code_object(
+      /*dead_window_base=*/129u, /*encoded_accum_offset=*/32u);
+
+  const ConSanResult result = try_patch_consan(bytes, gfx950_accum_pressure_options());
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 129u);
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanRejectsExplicitScratchAtAccumBoundary) {
+  const std::vector<uint8_t> bytes =
+      make_gfx950_accum_pressure_code_object(std::nullopt, /*encoded_accum_offset=*/32u);
+  ConSanOptions options = gfx950_accum_pressure_options();
+  options.scratch_vgpr = 132u;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::ExplicitOutOfRange);
+  EXPECT_FALSE(result.modified);
+}
+
+TEST(ConSanMoi, Gfx950ResourcePlanDoesNotBoundEncodedZeroAccumOffset) {
+  const std::vector<uint8_t> bytes =
+      make_gfx950_accum_pressure_code_object(std::nullopt, /*encoded_accum_offset=*/0u);
+
+  const ConSanResult result = try_patch_consan(bytes, gfx950_accum_pressure_options());
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
+  EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 132u);
+}
+
 TEST(ConSanMoi, Gfx950PressureFixtureGrowsDescriptorAfterLiveWindow) {
   std::vector<uint32_t> text_words = {
       0xD81A0000u,
@@ -4903,12 +5007,12 @@ TEST(ConSanMoi, Gfx950AccumOverlapUsesPrivateStateForRecordReplayAndSampled) {
         text_words, "gfx950_private_record", /*vgpr_granulated=*/3, /*wave32=*/false,
         /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
     mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
     });
     ConSanOptions options;
     options.flavor = ConSanFlavor::Moi;
     options.moi_engine = test_case.engine;
-    options.scratch_vgpr = 12;
+    options.scratch_vgpr = 15;
     options.moi_runtime_sample_stride = test_case.runtime_stride;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -4961,7 +5065,7 @@ TEST(ConSanMoi, Gfx950RecordReplayPrivateStateKeepsSpillsDisjoint) {
       text_words, "gfx950_private_record_spill", /*vgpr_granulated=*/31, /*wave32=*/false,
       /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63u);
   });
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
@@ -6736,7 +6840,7 @@ TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUsePrivateOwnerEpochState) {
   std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
   });
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
@@ -6800,7 +6904,7 @@ TEST(ConSanMoi, Gfx950PrivateInlineAtomicSpillsStayBeyondPersistentState) {
   std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
-    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 2u);
   });
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
