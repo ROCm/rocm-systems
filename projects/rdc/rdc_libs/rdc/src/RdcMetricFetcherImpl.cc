@@ -1222,9 +1222,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
           value->status = Smi2RdcError(ret);
           break;
         }
-        for (uint32_t i = 0; i < num_pages; i++) {
-          if (AMDSMI_MEM_PAGE_STATUS_PENDING == bad_page_info[i].status) pending_page_num++;
-        }
+        pending_page_num = count_pending_bad_pages(bad_page_info.data(), num_pages);
       }
 
       value->status = RDC_ST_OK;
