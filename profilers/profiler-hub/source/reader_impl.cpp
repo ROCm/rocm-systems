@@ -260,8 +260,11 @@ reader_t::impl::get_all_tracks()
         // activity rows), so cpu_thread/region tracks are NOT taken from it — they are
         // synthesized from rocpd_region in synthesize_derived_tracks(). rocpd_track is
         // used here ONLY to emit counter tracks: a track is a counter track iff at least
-        // one rocpd_sample references it (Q10 — v3 counters still key on rocpd_track via
-        // rocpd_sample.track_id). Classify up front.
+        // one PMC-backed rocpd_sample references it — i.e. a sample row that joins
+        // rocpd_pmc_event (Q10 — v3 counters still key on rocpd_track via
+        // rocpd_sample.track_id). Region timer-sample tracks (samples with no
+        // rocpd_pmc_event) are excluded by distinct_sample_track_ids(). Classify up
+        // front.
         std::unordered_set<size_t> counter_track_ids;
         for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
         {
@@ -543,6 +546,98 @@ reader_t::impl::synthesize_derived_tracks()
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 
+    // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
+    // rocpd_pmc_event JOIN rocpd_kernel_dispatch. Keyed to match Optiq's
+    // GetRocprofPerformanceCountersTrackQuery GROUP BY. agent_info resolves from
+    // agent_id.
+    for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::kernel_dispatch_pmc;
+
+        auto node_it = m_node_info_utility.find(k.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(k.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto agent_it = m_agent_info_utility.find(k.agent_id);
+        if(agent_it != m_agent_info_utility.end() && agent_it->second)
+        {
+            track_info_ptr->agent_info = agent_it->second;
+        }
+
+        // pmc_info resolves from pmc_id (reader's existing pmc utility map).
+        auto pmc_it = m_pmc_info_utility.find(k.pmc_id);
+        if(pmc_it != m_pmc_info_utility.end() && pmc_it->second)
+        {
+            track_info_ptr->pmc_info = pmc_it->second;
+        }
+
+        track_info_ptr->name = "Kernel dispatch PMC";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::kernel_dispatch_pmc;
+        qi.nid      = k.nid;
+        qi.pid      = k.pid;
+        qi.agent_id = k.agent_id;
+        qi.pmc_id   = k.pmc_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // memory_activity: one scalar track per distinct (nid, pid, agent_id) from
+    // rocpd_memory_allocate. Mirrors Optiq's GetRocprofMemoryActivity* per-agent
+    // cumulative running sum (load_id 7). agent_info populated; no pmc_info.
+    for(const auto& ma : m_read_statements->distinct_mem_activity_tracks()().to_vector())
+    {
+        // Skip NULL agent_id rows — FREE rows in v3 may have agent_id=NULL; they
+        // participate in running-sum recovery but do not form their own tracks.
+        if(!ma.agent_id.has_value()) continue;
+
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::memory_activity;
+
+        auto node_it = m_node_info_utility.find(ma.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(ma.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        if(ma.agent_id.has_value())
+        {
+            auto agent_it = m_agent_info_utility.find(ma.agent_id.value());
+            if(agent_it != m_agent_info_utility.end() && agent_it->second)
+            {
+                track_info_ptr->agent_info = agent_it->second;
+            }
+        }
+
+        track_info_ptr->name = "Memory activity";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::memory_activity;
+        qi.nid      = ma.nid;
+        qi.pid      = ma.pid;
+        qi.agent_id = ma.agent_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
     // stream: one track per distinct (nid, pid, stream_id), aggregating kernel_dispatch +
     // memory_copy + memory_allocate events sharing that stream. Additive to the gpu_queue
     // and dma tracks above — the same events also appear in their per-op tracks, matching
@@ -662,11 +757,13 @@ reader_t::impl::synthesize_derived_tracks()
 // v4.0: every swimlane is a real rocpd_track row carrying the full identity tuple
 // (nid, pid, tid, agent_id, queue_id, stream_id). There is nothing to synthesize —
 // tracks are read directly and classified from which identity columns are populated,
-// with counter tracks identified by being referenced from rocpd_sample.track_id.
+// with counter tracks identified by being referenced from a PMC-backed rocpd_sample.
 void
 reader_t::impl::build_v4_tracks()
 {
-    // Counter tracks: any rocpd_track referenced by a rocpd_sample row.
+    // Counter tracks: any rocpd_track referenced by a PMC-backed rocpd_sample row (a
+    // sample that joins rocpd_pmc_event); non-PMC sample tracks are excluded by
+    // distinct_sample_track_ids().
     std::unordered_set<size_t> counter_track_ids;
     for(const auto& r : m_read_statements->distinct_sample_track_ids()().to_vector())
     {
@@ -902,6 +999,95 @@ reader_t::impl::build_v4_tracks()
         qi.nid       = s.nid;
         qi.pid       = s.pid;
         qi.stream_id = s.stream_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // kernel_dispatch_pmc: one track per distinct (nid, agent_id, pmc_id, pid) from
+    // rocpd_pmc_event JOIN rocpd_kernel_dispatch JOIN rocpd_track. Keyed to match
+    // Optiq's GetRocprofPerformanceCountersTrackQuery GROUP BY. The v4 SQL uses
+    // rocpd_track.nid/pid/agent_id (same fields as the v3 SQL, which reads them
+    // directly from rocpd_kernel_dispatch). Synthesized with ids above max real id
+    // so they never collide with the real rocpd_track classification above.
+    for(const auto& k : m_read_statements->distinct_kd_pmc_tracks()().to_vector())
+    {
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::kernel_dispatch_pmc;
+
+        auto node_it = m_node_info_utility.find(k.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(k.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        auto agent_it = m_agent_info_utility.find(k.agent_id);
+        if(agent_it != m_agent_info_utility.end() && agent_it->second)
+        {
+            track_info_ptr->agent_info = agent_it->second;
+        }
+        auto pmc_it = m_pmc_info_utility.find(k.pmc_id);
+        if(pmc_it != m_pmc_info_utility.end() && pmc_it->second)
+        {
+            track_info_ptr->pmc_info = pmc_it->second;
+        }
+
+        track_info_ptr->name = "Kernel dispatch PMC";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::kernel_dispatch_pmc;
+        qi.nid      = k.nid;
+        qi.pid      = k.pid;
+        qi.agent_id = k.agent_id;
+        qi.pmc_id   = k.pmc_id;
+        m_track_query_info.emplace(track_info_ptr->id, qi);
+    }
+
+    // memory_activity: one scalar track per distinct (nid, pid, agent_id) from
+    // rocpd_memory_allocate JOIN rocpd_track. Synthesized above max real id.
+    for(const auto& ma : m_read_statements->distinct_mem_activity_tracks()().to_vector())
+    {
+        if(!ma.agent_id.has_value()) continue;
+
+        auto track_info_ptr  = std::make_shared<reader_types::track_info_t>();
+        track_info_ptr->id   = next_id++;
+        track_info_ptr->type = reader_types::track_type_t::memory_activity;
+
+        auto node_it = m_node_info_utility.find(ma.nid);
+        if(node_it != m_node_info_utility.end() && node_it->second)
+        {
+            track_info_ptr->node_info = node_it->second;
+        }
+        auto process_it = m_process_info_utility.find(ma.pid);
+        if(process_it != m_process_info_utility.end() && process_it->second)
+        {
+            track_info_ptr->process_info = process_it->second;
+        }
+        if(ma.agent_id.has_value())
+        {
+            auto agent_it = m_agent_info_utility.find(ma.agent_id.value());
+            if(agent_it != m_agent_info_utility.end() && agent_it->second)
+            {
+                track_info_ptr->agent_info = agent_it->second;
+            }
+        }
+
+        track_info_ptr->name = "Memory activity";
+
+        m_track_info_list.push_back(track_info_ptr);
+        m_track_info_utility.emplace(track_info_ptr->id, track_info_ptr);
+
+        track_query_info_t qi;
+        qi.type     = reader_types::track_type_t::memory_activity;
+        qi.nid      = ma.nid;
+        qi.pid      = ma.pid;
+        qi.agent_id = ma.agent_id;
         m_track_query_info.emplace(track_info_ptr->id, qi);
     }
 }
@@ -1943,6 +2129,15 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                     m_read_statements->memory_alloc_interval_track_v4()(qi.real_track_id)
                         .to_vector();
                 break;
+            case reader_types::track_type_t::kernel_dispatch_pmc:
+                rows = m_read_statements
+                           ->kd_pmc_interval_track()(qi.nid,
+                                                     qi.pid,
+                                                     qi.agent_id.value_or(0),
+                                                     qi.pmc_id.value_or(0))
+                           .to_vector();
+                name_from_kernel_symbol = true;
+                break;
             case reader_types::track_type_t::stream:
                 rows = m_read_statements
                            ->stream_interval_track()(qi.stream_id.value(),
@@ -2045,6 +2240,15 @@ reader_t::impl::get_interval_track(size_t                              track_id,
                 }
                 break;
             }
+            case reader_types::track_type_t::kernel_dispatch_pmc:
+                rows = m_read_statements
+                           ->kd_pmc_interval_track()(qi.nid,
+                                                     qi.pid,
+                                                     qi.agent_id.value_or(0),
+                                                     qi.pmc_id.value_or(0))
+                           .to_vector();
+                name_from_kernel_symbol = true;
+                break;
             case reader_types::track_type_t::stream:
                 rows = m_read_statements
                            ->stream_interval_track()(qi.stream_id.value(),
@@ -2140,6 +2344,92 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
     auto qit = m_track_query_info.find(track_id);
     if(qit == m_track_query_info.end()) return {};
     const auto& qi = qit->second;
+
+    if(qi.type == reader_types::track_type_t::memory_activity)
+    {
+        // Compute per-agent cumulative running sum from all rocpd_memory_allocate rows
+        // for (nid, pid), ordered by start. Mirrors Optiq's C++ synthesis (rocprof.cpp
+        // CallbackCaptureMemoryActivity + CreateMemoryActivityTable). FREE agent_id and
+        // size are recovered via address self-join to the most recent prior ALLOC at the
+        // same address (rocprof.cpp:962-968). REALLOC/RECLAIM are no-ops (1098-1106).
+        auto raw_rows =
+            m_read_statements->mem_activity_raw_track()(qi.nid, qi.pid).to_vector();
+
+        // address → {agent_id, size} from the most recent ALLOC at that address.
+        std::unordered_map<size_t, std::pair<std::optional<size_t>, size_t>> addr_map;
+        // per-agent running sum (agent_id key; nullopt agent uses key SIZE_MAX).
+        std::unordered_map<size_t, int64_t> running;
+        constexpr size_t null_agent_key = std::numeric_limits<size_t>::max();
+
+        auto agent_key = [&](std::optional<size_t> a) -> size_t {
+            return a.has_value() ? a.value() : null_agent_key;
+        };
+        const size_t target_key = agent_key(qi.agent_id);
+
+        reader_types::scalar_event_list_t events;
+
+        for(const auto& r : raw_rows)
+        {
+            if(r.type == "ALLOC")
+            {
+                const size_t ak = agent_key(r.agent_id);
+                running[ak] += static_cast<int64_t>(r.size);
+                if(r.address.has_value())
+                    addr_map[r.address.value()] = { r.agent_id, r.size };
+                if(ak == target_key)
+                {
+                    if(filter.time_window.start.has_value() &&
+                       r.start < filter.time_window.start.value())
+                        continue;
+                    if(filter.time_window.end.has_value() &&
+                       r.start > filter.time_window.end.value())
+                        continue;
+                    reader_types::scalar_event_t ev;
+                    ev.opaque_id = r.id;
+                    ev.timestamp = r.start;
+                    ev.value     = static_cast<double>(running[ak]);
+                    events.push_back(ev);
+                }
+            }
+            else if(r.type == "FREE")
+            {
+                // Recover agent_id and size from the prior ALLOC at the same address.
+                std::optional<size_t> freed_agent = r.agent_id;
+                size_t                freed_size  = r.size;
+                if(r.address.has_value())
+                {
+                    auto it = addr_map.find(r.address.value());
+                    if(it != addr_map.end())
+                    {
+                        if(!freed_agent.has_value()) freed_agent = it->second.first;
+                        freed_size = it->second.second;
+                        addr_map.erase(it);
+                    }
+                }
+                const size_t ak = agent_key(freed_agent);
+                running[ak] -= static_cast<int64_t>(freed_size);
+                if(ak == target_key)
+                {
+                    if(filter.time_window.start.has_value() &&
+                       r.start < filter.time_window.start.value())
+                        continue;
+                    if(filter.time_window.end.has_value() &&
+                       r.start > filter.time_window.end.value())
+                        continue;
+                    reader_types::scalar_event_t ev;
+                    ev.opaque_id = r.id;
+                    ev.timestamp = r.start;
+                    ev.value     = static_cast<double>(running[ak]);
+                    events.push_back(ev);
+                }
+            }
+            // REALLOC and RECLAIM are no-ops per Optiq rocprof.cpp:1098-1106.
+        }
+
+        paginate(events, filter.pagination);
+        return events;
+    }
+
     if(qi.type != reader_types::track_type_t::counter) return {};  // Q7
 
     auto rows = m_read_statements->scalar_track()(qi.real_track_id).to_vector();
@@ -2173,6 +2463,19 @@ reader_t::impl::get_track_stats(size_t track_id)
     if(qit == m_track_query_info.end()) return {};
     const auto& qi = qit->second;
 
+    // memory_activity stats are computed from the same running-sum pass as
+    // get_scalar_track, ensuring count/bounds exactly match the scalar series.
+    if(qi.type == reader_types::track_type_t::memory_activity)
+    {
+        auto events = get_scalar_track(track_id, reader_types::event_filter_t{});
+        if(events.empty()) return {};
+        reader_types::track_stats_t stats;
+        stats.min_ts = events.front().timestamp;
+        stats.max_ts = events.back().timestamp;
+        stats.count  = events.size();
+        return stats;
+    }
+
     // Cheap MIN/MAX/COUNT aggregates over exactly the rows get_interval_track /
     // get_scalar_track would return for this track. Routing mirrors those methods so
     // bounds/count agree with a full slice load without materializing event rows.
@@ -2197,6 +2500,14 @@ reader_t::impl::get_track_stats(size_t track_id)
                 break;
             case reader_types::track_type_t::memory:
                 rows = m_read_statements->memory_alloc_stats_track_v4()(qi.real_track_id)
+                           .to_vector();
+                break;
+            case reader_types::track_type_t::kernel_dispatch_pmc:
+                rows = m_read_statements
+                           ->kd_pmc_stats_track()(qi.nid,
+                                                  qi.pid,
+                                                  qi.agent_id.value_or(0),
+                                                  qi.pmc_id.value_or(0))
                            .to_vector();
                 break;
             case reader_types::track_type_t::stream:
@@ -2297,6 +2608,14 @@ reader_t::impl::get_track_stats(size_t track_id)
                 }
                 break;
             }
+            case reader_types::track_type_t::kernel_dispatch_pmc:
+                rows = m_read_statements
+                           ->kd_pmc_stats_track()(qi.nid,
+                                                  qi.pid,
+                                                  qi.agent_id.value_or(0),
+                                                  qi.pmc_id.value_or(0))
+                           .to_vector();
+                break;
             case reader_types::track_type_t::stream:
                 rows = m_read_statements
                            ->stream_stats_track()(qi.stream_id.value(),
@@ -2333,19 +2652,35 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
     const size_t lo = filter.time_window.start.value_or(0);
     const size_t hi = filter.time_window.end.value_or(std::numeric_limits<size_t>::max());
 
-    auto run = [&](const data_storage::read_statements_base::flow_statement_set& set) {
+    auto run = [&](const data_storage::read_statements_base::flow_statement_set& set,
+                   reader_types::event_type_t source_type,
+                   reader_types::event_type_t dest_type) {
         auto rows =
             has_window ? set.time_filtered(lo, hi).to_vector() : set.base().to_vector();
         flows.reserve(flows.size() + rows.size());
         for(const auto& r : rows)
         {
-            flows.push_back(reader_types::flow_t{ r.source_id, r.dest_id });
+            flows.push_back(
+                reader_types::flow_t{ r.source_id, source_type, r.dest_id, dest_type });
         }
     };
 
-    run(m_read_statements->region_to_kernel_dispatch_flows());
-    run(m_read_statements->region_to_memory_copy_flows());
-    run(m_read_statements->region_to_memory_allocate_flows());
+    using et = reader_types::event_type_t;
+    run(m_read_statements->region_to_kernel_dispatch_flows(),
+        et::region,
+        et::kernel_dispatch);
+    run(m_read_statements->region_to_memory_copy_flows(), et::region, et::memory_copy);
+    run(m_read_statements->region_to_memory_allocate_flows(),
+        et::region,
+        et::memory_allocate);
+    run(m_read_statements->region_to_region_flows(), et::region, et::region);
+    run(m_read_statements->kernel_dispatch_sibling_flows(),
+        et::kernel_dispatch,
+        et::kernel_dispatch);
+    run(m_read_statements->memory_copy_sibling_flows(), et::memory_copy, et::memory_copy);
+    run(m_read_statements->memory_allocate_sibling_flows(),
+        et::memory_allocate,
+        et::memory_allocate);
 
     return flows;
 }

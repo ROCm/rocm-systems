@@ -268,6 +268,19 @@ struct read_statements : public read_statements_base
     {
         return m_distinct_memory_tracks;
     }
+    [[nodiscard]] const distinct_kd_pmc_func_t& distinct_kd_pmc_tracks() const override
+    {
+        return m_distinct_kd_pmc_tracks;
+    }
+    [[nodiscard]] const distinct_mem_activity_func_t& distinct_mem_activity_tracks()
+        const override
+    {
+        return m_distinct_mem_activity_tracks;
+    }
+    [[nodiscard]] const mem_activity_raw_func_t& mem_activity_raw_track() const override
+    {
+        return m_mem_activity_raw_track;
+    }
     [[nodiscard]] const distinct_region_func_t& distinct_region_tracks() const override
     {
         return m_distinct_region_tracks;
@@ -347,6 +360,10 @@ struct read_statements : public read_statements_base
     {
         return m_stream_interval_track;
     }
+    [[nodiscard]] const interval_track_4_func_t& kd_pmc_interval_track() const override
+    {
+        return m_kd_pmc_interval_track;
+    }
 
     // Track-stats accessors (aggregates matching the interval-track scoping above)
     [[nodiscard]] const stats_track_3_func_t& region_stats_track_main() const override
@@ -397,6 +414,10 @@ struct read_statements : public read_statements_base
     {
         return m_stream_stats_track;
     }
+    [[nodiscard]] const stats_track_4_func_t& kd_pmc_stats_track() const override
+    {
+        return m_kd_pmc_stats_track;
+    }
     [[nodiscard]] const stats_track_1_func_t& scalar_stats() const override
     {
         return m_scalar_stats;
@@ -429,6 +450,22 @@ struct read_statements : public read_statements_base
         const override
     {
         return m_region_to_memory_allocate_flows;
+    }
+    [[nodiscard]] const flow_statement_set& region_to_region_flows() const override
+    {
+        return m_region_to_region_flows;
+    }
+    [[nodiscard]] const flow_statement_set& kernel_dispatch_sibling_flows() const override
+    {
+        return m_kernel_dispatch_sibling_flows;
+    }
+    [[nodiscard]] const flow_statement_set& memory_copy_sibling_flows() const override
+    {
+        return m_memory_copy_sibling_flows;
+    }
+    [[nodiscard]] const flow_statement_set& memory_allocate_sibling_flows() const override
+    {
+        return m_memory_allocate_sibling_flows;
     }
 
 private:
@@ -1310,6 +1347,51 @@ private:
                 &distinct_memory_result::queue_id,
                 &distinct_memory_result::pid);
 
+        // kernel_dispatch_pmc tracks: one per distinct (nid, agent_id, pmc_id, pid) in
+        // rocpd_pmc_event INNER JOIN rocpd_kernel_dispatch, matching Optiq's
+        // GetRocprofPerformanceCountersTrackQuery v3 GROUP BY. All fields non-nullable.
+        m_distinct_kd_pmc_tracks =
+            m_backend->create_read_statement_executor<distinct_kd_pmc_result>(
+                fmt::format("SELECT DISTINCT K.nid, K.agent_id, PMC_E.pmc_id, K.pid "
+                            "FROM rocpd_pmc_event_{u} PMC_E "
+                            "INNER JOIN rocpd_kernel_dispatch_{u} K "
+                            "ON K.event_id = PMC_E.event_id",
+                            fmt::arg("u", u)),
+                &distinct_kd_pmc_result::nid,
+                &distinct_kd_pmc_result::agent_id,
+                &distinct_kd_pmc_result::pmc_id,
+                &distinct_kd_pmc_result::pid);
+
+        // memory_activity tracks: one per distinct (nid, pid, agent_id) in
+        // rocpd_memory_allocate, matching Optiq's per-agent grouping. agent_id nullable.
+        m_distinct_mem_activity_tracks =
+            m_backend->create_read_statement_executor<distinct_mem_activity_result>(
+                fmt::format("SELECT DISTINCT nid, pid, agent_id "
+                            "FROM rocpd_memory_allocate_{u}",
+                            fmt::arg("u", u)),
+                &distinct_mem_activity_result::nid,
+                &distinct_mem_activity_result::pid,
+                &distinct_mem_activity_result::agent_id);
+
+        // All rocpd_memory_allocate rows for (nid, pid), ordered by start. C++ computes
+        // per-agent running sums with FREE agent_id recovery via address self-join.
+        // type is a TEXT column directly on rocpd_memory_allocate.
+        m_mem_activity_raw_track =
+            m_backend->create_read_statement_executor<mem_activity_raw_result,
+                                                      bind_types<size_t, size_t>>(
+                fmt::format("SELECT ma.id, ma.start, ma.address, ma.size, ma.agent_id, "
+                            "ma.type "
+                            "FROM rocpd_memory_allocate_{u} ma "
+                            "WHERE ma.nid = ? AND ma.pid = ? "
+                            "ORDER BY ma.start",
+                            fmt::arg("u", u)),
+                &mem_activity_raw_result::id,
+                &mem_activity_raw_result::start,
+                &mem_activity_raw_result::address,
+                &mem_activity_raw_result::size,
+                &mem_activity_raw_result::agent_id,
+                &mem_activity_raw_result::type);
+
         // Region (cpu_thread) tracks are synthesized from rocpd_region rather than
         // rocpd_track (v3 rocpd_track is not a reliable thread registry). Each distinct
         // (nid, pid, tid, is_sample) is a track: is_sample separates region events that
@@ -1351,9 +1433,18 @@ private:
                 &distinct_stream_result::pid,
                 &distinct_stream_result::stream_id);
 
+        // Counter tracks are the sample tracks that are actually PMC-backed: a track_id
+        // is a counter iff at least one of its rocpd_sample rows joins rocpd_pmc_event on
+        // event_id. Region timer-sample tracks (rocpd_sample -> rocpd_region, zero
+        // rocpd_pmc_event) share the sample table but are NOT counters; a bare
+        // "DISTINCT track_id FROM rocpd_sample" over-includes them. The event_id join
+        // mirrors resolved_pmc_join / counter_track_names so discovery and value
+        // resolution agree on the same counter set.
         m_distinct_sample_track_ids =
             m_backend->create_read_statement_executor<sample_track_id_result>(
-                fmt::format("SELECT DISTINCT track_id FROM rocpd_sample_{}", u),
+                fmt::format("SELECT DISTINCT s.track_id FROM rocpd_sample_{u} s "
+                            "JOIN rocpd_pmc_event_{u} pe ON pe.event_id = s.event_id",
+                            fmt::arg("u", u)),
                 &sample_track_id_result::track_id);
 
         m_max_track_id = m_backend->create_read_statement_executor<max_track_id_result>(
@@ -1514,6 +1605,28 @@ private:
         m_memory_alloc_interval_neither = make_ma_interval(
             "ma.agent_id IS NULL AND ma.queue_id IS NULL", bind_types<size_t, size_t>{});
 
+        // kernel_dispatch_pmc: intervals keyed by (nid, pid, agent_id, pmc_id). name_ref
+        // is kernel_id (for kernel symbol resolution, same as gpu_queue). Category is
+        // resolved via rocpd_event/rocpd_string (LEFT JOIN, additive).
+        m_kd_pmc_interval_track = m_backend->create_read_statement_executor<
+            interval_row_result,
+            bind_types<size_t, size_t, size_t, size_t>>(
+            fmt::format("SELECT K.id, K.start, K.\"end\", K.kernel_id, CS.string "
+                        "FROM rocpd_pmc_event_{u} PMC_E "
+                        "INNER JOIN rocpd_kernel_dispatch_{u} K "
+                        "ON K.event_id = PMC_E.event_id "
+                        "LEFT JOIN rocpd_event_{u} E ON E.id = K.event_id "
+                        "LEFT JOIN rocpd_string_{u} CS ON CS.id = E.category_id "
+                        "WHERE K.nid = ? AND K.pid = ? "
+                        "AND K.agent_id = ? AND PMC_E.pmc_id = ? "
+                        "ORDER BY K.start",
+                        fmt::arg("u", u)),
+            &interval_row_result::id,
+            &interval_row_result::start,
+            &interval_row_result::end,
+            &interval_row_result::name_ref,
+            &interval_row_result::category);
+
         // stream: a single track aggregates kernel_dispatch + memory_copy +
         // memory_allocate events sharing a stream_id (inline on each table in v3). A
         // 3-way UNION ALL, one WHERE stream_id = ? per leg (stream_id bound three times).
@@ -1654,6 +1767,22 @@ private:
         m_memory_alloc_stats_neither = make_ma_stats(
             "agent_id IS NULL AND queue_id IS NULL", bind_types<size_t, size_t>{});
 
+        // kernel_dispatch_pmc: stats keyed by (nid, pid, agent_id, pmc_id), shape-matched
+        // to kd_pmc_interval_track so bounds/count agree with the interval query.
+        m_kd_pmc_stats_track = m_backend->create_read_statement_executor<
+            track_stats_result,
+            bind_types<size_t, size_t, size_t, size_t>>(
+            fmt::format("SELECT MIN(K.start), MAX(K.\"end\"), COUNT(*) "
+                        "FROM rocpd_pmc_event_{u} PMC_E "
+                        "INNER JOIN rocpd_kernel_dispatch_{u} K "
+                        "ON K.event_id = PMC_E.event_id "
+                        "WHERE K.nid = ? AND K.pid = ? "
+                        "AND K.agent_id = ? AND PMC_E.pmc_id = ?",
+                        fmt::arg("u", u)),
+            &track_stats_result::min_ts,
+            &track_stats_result::max_ts,
+            &track_stats_result::count);
+
         // stream: MIN(start)/MAX(end)/COUNT over the same 3-way UNION as the stream
         // interval query (stream_id bound three times), so bounds/count agree with a full
         // slice load.
@@ -1755,18 +1884,25 @@ private:
     {
         const auto& u = m_uuid;
 
-        // source = CPU region; dest = a GPU-side event sharing the same stack_id.
-        auto make_flow_set = [&](const std::string& dest_table,
+        // A flow leg links a SOURCE event to a DEST event sharing the same non-zero
+        // stack_id (the stack-clique join, E{s}.id != E{d}.id). source/dest may be the
+        // same table (region->region, same-type siblings) or different (region->GPU).
+        // The time window filters on the SOURCE row's start.
+        auto make_flow_set = [&](const std::string& source_table,
+                                 const std::string& source_alias,
+                                 const std::string& dest_table,
                                  const std::string& dest_alias) -> flow_statement_set {
             const auto base_sql =
-                fmt::format("SELECT R.id, {d}.id "
-                            "FROM rocpd_region_{u} R "
-                            "JOIN rocpd_event_{u} ER ON R.event_id = ER.id "
+                fmt::format("SELECT {s}.id, {d}.id "
+                            "FROM {st}_{u} {s} "
+                            "JOIN rocpd_event_{u} E{s} ON {s}.event_id = E{s}.id "
                             "JOIN rocpd_event_{u} E{d} "
-                            "  ON E{d}.stack_id = ER.stack_id AND E{d}.id != ER.id "
+                            "  ON E{d}.stack_id = E{s}.stack_id AND E{d}.id != E{s}.id "
                             "JOIN {dt}_{u} {d} ON {d}.event_id = E{d}.id "
-                            "WHERE ER.stack_id IS NOT NULL AND ER.stack_id != 0",
+                            "WHERE E{s}.stack_id IS NOT NULL AND E{s}.stack_id != 0",
                             fmt::arg("u", u),
+                            fmt::arg("s", source_alias),
+                            fmt::arg("st", source_table),
                             fmt::arg("d", dest_alias),
                             fmt::arg("dt", dest_table));
 
@@ -1778,15 +1914,27 @@ private:
             out.time_filtered =
                 m_backend->create_read_statement_executor<flow_row_result,
                                                           bind_types<size_t, size_t>>(
-                    base_sql + " AND R.start >= ? AND R.start <= ?",
+                    base_sql + fmt::format(" AND {s}.start >= ? AND {s}.start <= ?",
+                                           fmt::arg("s", source_alias)),
                     &flow_row_result::source_id,
                     &flow_row_result::dest_id);
             return out;
         };
 
-        m_region_to_kernel_dispatch_flows = make_flow_set("rocpd_kernel_dispatch", "K");
-        m_region_to_memory_copy_flows     = make_flow_set("rocpd_memory_copy", "MC");
-        m_region_to_memory_allocate_flows = make_flow_set("rocpd_memory_allocate", "MA");
+        m_region_to_kernel_dispatch_flows =
+            make_flow_set("rocpd_region", "R", "rocpd_kernel_dispatch", "K");
+        m_region_to_memory_copy_flows =
+            make_flow_set("rocpd_region", "R", "rocpd_memory_copy", "MC");
+        m_region_to_memory_allocate_flows =
+            make_flow_set("rocpd_region", "R", "rocpd_memory_allocate", "MA");
+        m_region_to_region_flows =
+            make_flow_set("rocpd_region", "R", "rocpd_region", "R2");
+        m_kernel_dispatch_sibling_flows =
+            make_flow_set("rocpd_kernel_dispatch", "K", "rocpd_kernel_dispatch", "K2");
+        m_memory_copy_sibling_flows =
+            make_flow_set("rocpd_memory_copy", "MC", "rocpd_memory_copy", "MC2");
+        m_memory_allocate_sibling_flows =
+            make_flow_set("rocpd_memory_allocate", "MA", "rocpd_memory_allocate", "MA2");
     }
 
     std::shared_ptr<sqlite_backend> m_backend;
@@ -1844,14 +1992,16 @@ private:
     time_range_func_t m_memory_alloc_time_range;
 
     // Track synthesis statements
-    distinct_gpu_queue_func_t m_distinct_gpu_queue_tracks;
-    distinct_dma_func_t       m_distinct_dma_tracks;
-    distinct_memory_func_t    m_distinct_memory_tracks;
-    distinct_region_func_t    m_distinct_region_tracks;
-    distinct_stream_func_t    m_distinct_stream_tracks;
-    sample_track_id_func_t    m_distinct_sample_track_ids;
-    max_track_id_func_t       m_max_track_id;
-    counter_track_name_func_t m_counter_track_names;
+    distinct_gpu_queue_func_t    m_distinct_gpu_queue_tracks;
+    distinct_dma_func_t          m_distinct_dma_tracks;
+    distinct_memory_func_t       m_distinct_memory_tracks;
+    distinct_kd_pmc_func_t       m_distinct_kd_pmc_tracks;
+    distinct_mem_activity_func_t m_distinct_mem_activity_tracks;
+    distinct_region_func_t       m_distinct_region_tracks;
+    distinct_stream_func_t       m_distinct_stream_tracks;
+    sample_track_id_func_t       m_distinct_sample_track_ids;
+    max_track_id_func_t          m_max_track_id;
+    counter_track_name_func_t    m_counter_track_names;
 
     // Interval-track statements
     interval_track_3_func_t m_region_interval_track_main;
@@ -1866,6 +2016,9 @@ private:
     interval_track_3_func_t m_memory_alloc_interval_a_only;
     interval_track_2_func_t m_memory_alloc_interval_neither;
     interval_track_3_func_t m_stream_interval_track;
+    interval_track_4_func_t m_kd_pmc_interval_track;
+
+    mem_activity_raw_func_t m_mem_activity_raw_track;
 
     // Track-stats statements
     stats_track_3_func_t m_region_stats_track_main;
@@ -1880,6 +2033,7 @@ private:
     stats_track_3_func_t m_memory_alloc_stats_a_only;
     stats_track_2_func_t m_memory_alloc_stats_neither;
     stats_track_3_func_t m_stream_stats_track;
+    stats_track_4_func_t m_kd_pmc_stats_track;
     stats_track_1_func_t m_scalar_stats;
 
     // Scalar-track statements
@@ -1891,5 +2045,9 @@ private:
     flow_statement_set m_region_to_kernel_dispatch_flows;
     flow_statement_set m_region_to_memory_copy_flows;
     flow_statement_set m_region_to_memory_allocate_flows;
+    flow_statement_set m_region_to_region_flows;
+    flow_statement_set m_kernel_dispatch_sibling_flows;
+    flow_statement_set m_memory_copy_sibling_flows;
+    flow_statement_set m_memory_allocate_sibling_flows;
 };
 }  // namespace profiler_hub::data_storage::schema_v3

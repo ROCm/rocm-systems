@@ -422,6 +422,42 @@ struct distinct_memory_result
     std::optional<size_t> queue_id;
 };
 
+/// Distinct kernel-dispatch PMC track topology. v3: synthesized from rocpd_pmc_event
+/// INNER JOIN rocpd_kernel_dispatch. v4.0: same joins plus rocpd_track for nid/pid.
+/// Keyed (nid, agent_id, pmc_id, pid) to match Optiq's
+/// GetRocprofPerformanceCountersTrackQuery GROUP BY exactly. All four fields are
+/// non-nullable (Optiq uses INNER JOINs with no NULL handling).
+struct distinct_kd_pmc_result
+{
+    size_t nid{};
+    size_t pid{};
+    size_t agent_id{};
+    size_t pmc_id{};
+};
+
+/// Distinct memory-activity track topology. One series per (nid, pid, agent_id) from
+/// rocpd_memory_allocate, matching Optiq's per-agent grouping. agent_id is nullable;
+/// NULL is a distinct group value (preserved, not dropped).
+struct distinct_mem_activity_result
+{
+    size_t                nid{};
+    size_t                pid{};
+    std::optional<size_t> agent_id;
+};
+
+/// One raw rocpd_memory_allocate row for memory_activity running-sum computation.
+/// agent_id is nullable (FREE rows may carry NULL agent_id; recovery is done in C++
+/// via address self-join). size is always present (schema NOT NULL).
+struct mem_activity_raw_result
+{
+    size_t                id{};
+    size_t                start{};
+    std::optional<size_t> address;
+    size_t                size{};
+    std::optional<size_t> agent_id;
+    std::string           type{};  ///< "ALLOC", "FREE", "REALLOC", "RECLAIM"
+};
+
 /// Distinct stream-track topology. v3: synthesized from the inline stream_id on
 /// rocpd_kernel_dispatch / rocpd_memory_copy / rocpd_memory_allocate. v4.0: from
 /// rocpd_track.stream_id. One row per (nid, pid, stream_id) with a non-null stream_id;
@@ -597,6 +633,15 @@ struct read_statements_base
         std::function<sqlite_backend::result_set<distinct_dma_result>()>;
     using distinct_memory_func_t =
         std::function<sqlite_backend::result_set<distinct_memory_result>()>;
+    using distinct_kd_pmc_func_t =
+        std::function<sqlite_backend::result_set<distinct_kd_pmc_result>()>;
+    using distinct_mem_activity_func_t =
+        std::function<sqlite_backend::result_set<distinct_mem_activity_result>()>;
+    // All rocpd_memory_allocate rows for (nid, pid), ordered by start. C++ computes
+    // per-agent running sums and recovers FREE agent_id via address self-join.
+    using mem_activity_raw_func_t =
+        std::function<sqlite_backend::result_set<mem_activity_raw_result>(size_t,
+                                                                          size_t)>;
     // v4.0 only: track_ids referenced by rocpd_memory_allocate, used in the generic
     // classification loop to distinguish memory tracks from gpu_queue tracks (both may
     // have agent_id + queue_id on their rocpd_track row).
@@ -670,6 +715,13 @@ struct read_statements_base
     [[nodiscard]] virtual const flow_statement_set& region_to_memory_copy_flows()
         const = 0;
     [[nodiscard]] virtual const flow_statement_set& region_to_memory_allocate_flows()
+        const = 0;
+    // Full stack-clique legs beyond region->GPU: region->region and same-type siblings.
+    [[nodiscard]] virtual const flow_statement_set& region_to_region_flows() const = 0;
+    [[nodiscard]] virtual const flow_statement_set& kernel_dispatch_sibling_flows()
+        const                                                                         = 0;
+    [[nodiscard]] virtual const flow_statement_set& memory_copy_sibling_flows() const = 0;
+    [[nodiscard]] virtual const flow_statement_set& memory_allocate_sibling_flows()
         const = 0;
 
     // ======================================================================
@@ -875,6 +927,36 @@ struct read_statements_base
         static const memory_alloc_track_ids_func_t e{};
         return e;
     }
+    // v3 + v4.0: distinct kernel-dispatch PMC tracks, one per (nid, agent_id, pmc_id,
+    // pid).
+    [[nodiscard]] virtual const distinct_kd_pmc_func_t& distinct_kd_pmc_tracks() const
+    {
+        static const distinct_kd_pmc_func_t e{};
+        return e;
+    }
+    // v4.0 only: rocpd_track ids referenced by rocpd_kernel_dispatch via rocpd_pmc_event,
+    // used in the generic classification loop to prevent gpu_queue from claiming them.
+    [[nodiscard]] virtual const sample_track_id_func_t& kd_pmc_track_ids() const
+    {
+        static const sample_track_id_func_t e{};
+        return e;
+    }
+
+    // v3 + v4.0: distinct memory-activity tracks, one per (nid, pid, agent_id).
+    [[nodiscard]] virtual const distinct_mem_activity_func_t&
+    distinct_mem_activity_tracks() const
+    {
+        static const distinct_mem_activity_func_t e{};
+        return e;
+    }
+    // All rocpd_memory_allocate rows for (nid, pid), ordered by start. Used by both
+    // get_scalar_track and get_track_stats for memory_activity (C++ computes per-agent
+    // running sums and recovers FREE agent_id via address self-join).
+    [[nodiscard]] virtual const mem_activity_raw_func_t& mem_activity_raw_track() const
+    {
+        static const mem_activity_raw_func_t e{};
+        return e;
+    }
 
     // Multi-column interval track statements (v3: keyed by identity tuples).
     // Region tracks split main (regions without a sample) vs. sample (regions with
@@ -971,6 +1053,13 @@ struct read_statements_base
         static const interval_track_1_func_t e{};
         return e;
     }
+    // kernel_dispatch_pmc interval track (both backends): keyed by (nid, pid, agent_id,
+    // pmc_id). v3 uses inline start/end; v4.0 overrides with the timestamp-spine variant.
+    [[nodiscard]] virtual const interval_track_4_func_t& kd_pmc_interval_track() const
+    {
+        static const interval_track_4_func_t e{};
+        return e;
+    }
 
     // Stream track interval query (both backends): a 3-way UNION over
     // kernel_dispatch + memory_copy + memory_allocate filtered to one stream, binding
@@ -1064,6 +1153,13 @@ struct read_statements_base
     [[nodiscard]] virtual const stats_track_1_func_t& memory_alloc_stats_track_v4() const
     {
         static const stats_track_1_func_t e{};
+        return e;
+    }
+    // kernel_dispatch_pmc stats (both backends): keyed by (nid, pid, agent_id, pmc_id).
+    // v3 uses inline start/end; v4.0 overrides with the timestamp-spine variant.
+    [[nodiscard]] virtual const stats_track_4_func_t& kd_pmc_stats_track() const
+    {
+        static const stats_track_4_func_t e{};
         return e;
     }
 

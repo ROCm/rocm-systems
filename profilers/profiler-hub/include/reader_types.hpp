@@ -288,12 +288,25 @@ enum class track_type_t
              ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
              ///< stream track's events span multiple per-type tables, so each returned
              ///< interval_event_t carries op_kind to select the get_*_details() overload.
-    memory  ///< agent_info + queue_info populated. Interval track of memory-allocate
-            ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
-            ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly. Both
-            ///< agent_id and queue_id are nullable; NULL is preserved as a distinct group
-            ///< value, not dropped. Distinct from the `dma` (memory-copy) and `stream`
-            ///< (cross-table aggregate) track types.
+    memory,  ///< agent_info + queue_info populated. Interval track of memory-allocate
+             ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
+             ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly. Both
+             ///< agent_id and queue_id are nullable; NULL is preserved as a distinct
+             ///< group value, not dropped. Distinct from the `dma` (memory-copy) and
+             ///< `stream` (cross-table aggregate) track types.
+    kernel_dispatch_pmc,  ///< agent_info populated. Interval track of kernel-dispatch PMC
+                          ///< events (rocpd_pmc_event JOIN rocpd_kernel_dispatch), keyed
+                          ///< (nid, agent_id, pmc_id, pid) to match Optiq's
+                          ///< GetRocprofPerformanceCountersTrackQuery GROUP BY exactly.
+                          ///< Distinct from the `counter` (SMI sample-based) track type.
+                          ///< Use get_interval_track(); scalar read returns empty.
+    memory_activity       ///< agent_info populated. Scalar track of cumulative bytes
+                          ///< allocated per agent over time, keyed (nid, pid, agent_id),
+                          ///< computed from rocpd_memory_allocate (ALLOC +size / FREE
+                     ///< -size; FREE agent_id and size recovered via address self-join
+                     ///< to the prior ALLOC; REALLOC/RECLAIM no-op). Mirrors Optiq's
+                     ///< GetRocprofMemoryActivity* synthesis (load_id 7). Use
+                     ///< get_scalar_track(); interval read returns empty.
 };
 
 /**
@@ -331,7 +344,8 @@ struct track_info_t
     std::shared_ptr<process_info_t> process_info;  ///< Always populated.
     std::shared_ptr<thread_info_t>  thread_info;   ///< cpu_thread, counter.
     std::shared_ptr<agent_info_t>
-        agent_info;  ///< gpu_queue, dma, memory; optionally counter.
+        agent_info;  ///< gpu_queue, dma, memory, memory_activity, kernel_dispatch_pmc;
+                     ///< optionally counter.
     std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
     std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter.
@@ -604,8 +618,17 @@ using scalar_event_list_t = std::vector<scalar_event_t>;
 struct flow_t
 {
     size_t source_opaque_id{};  ///< opaque_id of the originating event (e.g. CPU region).
-    size_t dest_opaque_id{};    ///< opaque_id of the destination event (e.g. GPU kernel
-                                ///< dispatch).
+    event_type_t source_type{
+        event_type_t::region
+    };  ///< Type of the source endpoint. Required to disambiguate
+        ///< source_opaque_id, which is a per-type-table row id and
+        ///< therefore collides across event types.
+    size_t dest_opaque_id{};  ///< opaque_id of the destination event (e.g. GPU kernel
+                              ///< dispatch).
+    event_type_t dest_type{
+        event_type_t::kernel_dispatch
+    };  ///< Type of the destination endpoint. Required to
+        ///< disambiguate dest_opaque_id (see above).
 };
 
 using flow_list_t = std::vector<flow_t>;
