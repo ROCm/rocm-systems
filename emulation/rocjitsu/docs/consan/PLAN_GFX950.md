@@ -365,12 +365,26 @@ Full gfx950 support means:
   reduction confirms that writing persistent identity into the accumulator
   window corrupts live MFMA state. T3IS remains orange while identity state is
   moved out of the overlapping VGPR window.
-- 2026-07-13: `T3IS` is `DONE`, reaching `T3G`; `T4SC` is now `ACTIVE`.
+- 2026-07-13: `T3IS` completed its first guarded selected-workload pass, but
+  semantic review reopened inline-shadow acceptance as three smaller nodes:
+  `T3IO` (stable private owner), `T3IA` (private-state atomic ordering), and
+  `T3IL` (focused and live regressions). The temporary accumulator-overlap
+  fallback is not acceptance-quality because it derives owner from mutable,
+  packed `v0` at each probe and omits atomic handoff patches. `T3IO` is
+  `ACTIVE`; `T3G` is therefore not yet reached. In parallel, the independent
+  `T4SC` compatibility sweep has started and is also `ACTIVE`.
   Accumulator-constrained CDNA4 inline-shadow kernels now select the existing
   derived-owner/private-epoch representation when five persistent identity
   VGPRs would cross a nonzero `ACCUM_OFFSET`. Private-state prologues also
   preserve paired kernarg-preload entries. All 209 focused ConSan tests pass,
   and all 10 guarded selected inline-shadow rows pass in 6.24 seconds.
+- 2026-07-13: the first broad `T4SC` sweep selected 259 IREE ROCm tests and
+  passed 244. One isolated matmul failure is reproducibly ConSan-specific; the
+  other 14 failures are being separated from parallel-resource and baseline
+  effects before classification. Broad profile executions remain mutually
+  exclusive because CTest removes a shared `test_tmpdir`, but diagnosis,
+  documentation, and independent implementation nodes may proceed in
+  parallel.
 
 ## DAG Overview
 
@@ -590,15 +604,20 @@ flowchart LR
   T3SC["T3SC: SuperCollider Selected Workloads"]:::done
   T3RR["T3RR: Record/Replay Selected Workloads"]:::done
   T3SA["T3SA: Sampled Selected Workloads"]:::done
-  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::done
+  T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
+  T3IO["T3IO: Stable Private Owner State"]:::active
+  T3IA["T3IA: Private-State Atomic Ordering"]:::todo
+  T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SC["T4SC: SuperCollider Broad IREE"]:::active
   T4RR["T4RR: Record/Replay Broad IREE"]:::todo
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
   T4G{"T4G: Broad Compatibility Accepted"}:::target
-  D2["D2: Capability And Runbook Docs"]:::todo
-  X1["X1: gfx1201 Live Regression Evidence"]:::blocked
+  D2A["D2A: Capability And Runbook Content"]:::todo
+  D2B["D2B: Final Result Tables"]:::todo
+  X1A["X1A: Local gfx1201 Synthetic Regression"]:::todo
+  X1B["X1B: gfx1201 Live Regression Evidence"]:::blocked
   M0{"M0: gfx950 Fully Supported"}:::target
 
   T1A --> T1B
@@ -625,11 +644,20 @@ flowchart LR
   T3SC --> T3G
   T3RR --> T3G
   T3SA --> T3G
-  T3IS --> T3G
-  T3G --> T4SC --> T4RR --> T4SA --> T4IS --> T4G
-  T4G --> D2
-  D2 --> M0
-  X1 --> M0
+  T3IS --> T3IO --> T3IA --> T3IL --> T3G
+  T3SC --> T4SC
+  T3RR --> T4RR
+  T3SA --> T4SA
+  T3IL --> T4IS
+  T4SC --> T4G
+  T4RR --> T4G
+  T4SA --> T4G
+  T4IS --> T4G
+  T3G --> D2A
+  T3G --> X1A
+  T4G --> D2B
+  D2A --> D2B --> M0
+  X1A --> X1B --> M0
 
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
@@ -1870,7 +1898,7 @@ Goal: run the T3A selection under guarded sampled MOI.
 Result: all 10 selected rows pass in 6.03 seconds with
 `RJ_CONSAN_REQUIRE_PATCH=1` and `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`.
 
-### T3IS: Inline-Shadow Selected Workloads - DONE
+### T3IS: Initial Inline-Shadow Selected Pass - DONE
 
 Goal: run the T3A selection under guarded inline shadow.
 
@@ -1879,6 +1907,69 @@ Result: all 10 selected rows pass in 6.24 seconds with
 nonzero CDNA4 `ACCUM_OFFSET`, inline shadow now uses derived owner plus private
 epoch state instead of writing the accumulator window. The private-state entry
 initializer preserves both kernarg-preload firmware entries.
+
+This result establishes runtime compatibility, not final semantic acceptance.
+Review found that the temporary fallback derives owner from `v0` at each probe;
+that value is mutable guest state and is not a flattened wave identity for
+multidimensional workgroups. The fallback also lacks inline atomic handoff
+patches. The following nodes close those gaps before `T3G`.
+
+### T3IO: Stable Private Owner State - ACTIVE
+
+Goal: preserve correct gfx950 owner identity without crossing `ACCUM_OFFSET`.
+
+Work:
+
+- Extend private per-lane state to hold an entry-snapshotted owner as well as
+  epoch.
+- Compute the owner from flattened `(x, y, z)` workitem identity at both normal
+  and kernarg-preload entries.
+- Load the private owner at access probes, barriers, and ordering probes; never
+  rederive it from mutable guest VGPRs.
+- Treat malformed or inaccessible owning descriptors conservatively and lock
+  down `ACCUM_OFFSET` decoding at zero, exact-boundary, overlap, and
+  multiple-owner cases.
+
+Done criteria:
+
+- Synthetic tests prove stable owner layout and paired-entry initialization,
+  including multidimensional identity and descriptor boundaries.
+
+### T3IA: Private-State Atomic Ordering - TODO
+
+Goal: retain release/acquire epoch handoff when owner and epoch live in private
+state.
+
+Work:
+
+- Teach inline atomic ordering caves to load private owner/epoch and to write
+  imported epoch back to private state.
+- Share one private layout across access, barrier, prologue, and atomic paths.
+- Make unsupported combinations a hard, typed outcome rather than silently
+  omitting requested ordering instrumentation.
+
+Done criteria:
+
+- Automatic accumulator-overlap selection emits atomic ordering patches and
+  focused release/acquire tests pass.
+
+### T3IL: Inline Semantic Regressions - TODO
+
+Goal: prove the completed private representation on synthetic and live gfx950
+workloads.
+
+Work:
+
+- Prove a same-wave `v0` clobber remains clean.
+- Prove 2D/3D workgroups do not self-conflict and distinct racing waves still
+  diagnose.
+- Prove automatic accumulator-overlap barrier and atomic handoff cases remain
+  clean, then rerun the 10 guarded selected IREE rows.
+
+Done criteria:
+
+- Focused tests and all guarded selected inline-shadow rows pass with the
+  semantically complete private representation.
 
 For each T3 profile node:
 
@@ -1896,6 +1987,14 @@ Done criteria:
 ### T4SC: SuperCollider Broad IREE - ACTIVE
 
 Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
+
+Current result: 244/259 tests pass in the first parallel sweep. Test 1810, an
+unaligned coalesced-DMA f32 matmul, also fails when rerun alone with
+SuperCollider and passes alone without instrumentation. Its B64 store
+readback selects `v70:v71` at a 72-VGPR descriptor edge; focused diagnosis is
+checking the missing descriptor-growth headroom for generated store readback.
+The remaining 14 failures require isolated baseline and instrumented reruns
+before they can be attributed to ConSan rather than sweep pressure.
 
 ### T4RR: Record/Replay Broad IREE - TODO
 
@@ -1920,10 +2019,12 @@ Done criteria:
 - The profile completes the agreed inventory without corruption or hidden
   resource-induced timeout; failures have typed ConSan outcomes.
 
-The T4 nodes are deliberately chained in the DAG to enforce one broad IREE
-sweep at a time. `T4G` is reached after all four complete.
+The T4 nodes are independent in the DAG and may be diagnosed or prepared in
+parallel. Their actual IREE CTest processes are mutually exclusive because the
+shared build directory removes one `test_tmpdir`; each individual process may
+still use CTest parallelism. `T4G` is reached after all four complete.
 
-### D2: Capability And Runbook Docs - TODO
+### D2A: Capability And Runbook Content - TODO
 
 Goal: make gfx950 support usable and accurately bounded.
 
@@ -1931,25 +2032,47 @@ Work:
 
 - Add gfx950 feature rows to `DESIGN.md` and `USAGE.md`.
 - Update `TUTORIAL.md` commands only where architecture affects selection.
-- Record current per-tier results in `LOCAL_TESTING.md` without embedding
-  machine-specific absolute paths.
 - Update `SPILLING.md` with the CDNA4 backend, waits, offset boundary, and live
   proof while preserving the shared spill contract.
 
 Done criteria:
 
-- A teammate can identify supported gfx950 features, reproduce each tier, and
-  distinguish unsupported coverage from a clean sanitizer result.
+- A teammate can identify supported gfx950 features and reproduce each tier.
 
-### X1: gfx1201 Live Regression Evidence - BLOCKED
+### D2B: Final Result Tables - TODO
+
+Goal: record the completed qualification without blocking architecture content
+on long-running sweeps.
+
+Work:
+
+- Record final per-tier results and typed exclusions in `LOCAL_TESTING.md`
+  without embedding machine-specific absolute paths.
+- Reconcile all capability tables with final T4 outcomes.
+
+Done criteria:
+
+- Documentation distinguishes unsupported coverage, compatibility passes, and
+  clean sanitizer evidence.
+
+### X1A: Local gfx1201 Synthetic Regression - TODO
+
+Goal: protect shared gfx1201 encodings and policy without requiring gfx1201
+hardware on this machine.
+
+Work:
+
+- Run architecture-neutral and gfx1201 synthetic/encoding regression tests.
+- Produce the exact focused and broad commands for the gfx1201 workspace.
+
+Done criteria:
+
+- All locally runnable gfx1201 and shared regressions are green.
+
+### X1B: gfx1201 Live Regression Evidence - BLOCKED
 
 Goal: retain the accepted gfx1201 hardware baseline while changing shared
 ConSan policy and emitters.
-
-Work available on this machine:
-
-- Run all architecture-neutral and gfx1201 synthetic/encoding regression tests.
-- Produce the exact focused and broad commands for the gfx1201 workspace.
 
 External completion requirement:
 
@@ -1971,6 +2094,7 @@ Done criteria:
   gfx950 selected-workload pass.
 - All four standard profiles complete the agreed broad compatibility tier.
 - No standard command requires register numbers or report-buffer sizing.
-- `X1` records green gfx1201 focused and broad regression tiers from the
+- `X1A` records green local synthetic regressions and `X1B` records green
+  gfx1201 focused and broad hardware tiers from the
   gfx1201 workspace.
 - The architecture capability and spilling documentation matches the code.

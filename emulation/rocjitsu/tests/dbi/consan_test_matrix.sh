@@ -112,15 +112,22 @@ run_iree_profile() {
   local engine="$2"
   local regex="$3"
   local timeout="$4"
+  local guarded="${5:-0}"
   local profile_env=(
     "HSA_TOOLS_LIB=${hook}"
     "ROCM_PATH=${rocm_dist}"
     "HIP_PATH=${rocm_dist}"
-    "LD_LIBRARY_PATH=${rocm_dist}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    "LD_LIBRARY_PATH=${rocm_dist}/lib"
     "RJ_CONSAN_FLAVOR=${flavor}"
   )
   if [[ -n "${engine}" ]]; then
     profile_env+=("RJ_CONSAN_MOI_ENGINE=${engine}")
+  fi
+  if [[ "${guarded}" == 1 ]]; then
+    profile_env+=("RJ_CONSAN_REQUIRE_PATCH=1")
+    if [[ "${engine}" == record_replay || "${engine}" == sampled ]]; then
+      profile_env+=("RJ_CONSAN_MOI_REQUIRE_RECORDS=1")
+    fi
   fi
   printf '\n=== %s%s ===\n' "${flavor}" "${engine:+/${engine}}"
   run_ctest "${iree_build}" "${regex}" "${timeout}" "${profile_env[@]}"
@@ -145,10 +152,10 @@ run_tier1() {
   printf '\n=== tier1 architecture: %s ===\n' "${gpu_arch}"
   printf '\n=== tier1: independent hip-moi semantic controls ===\n'
   run_ctest "${hip_moi_build}" '.*' 120
-  run_iree_profile supercollider '' "${regex}" 60
-  run_iree_profile moi record_replay "${regex}" 60
-  run_iree_profile moi sampled "${regex}" 60
-  run_iree_profile moi inline_shadow "${regex}" 60
+  run_iree_profile supercollider '' "${regex}" 60 1
+  run_iree_profile moi record_replay "${regex}" 60 1
+  run_iree_profile moi sampled "${regex}" 60 1
+  run_iree_profile moi inline_shadow "${regex}" 60 1
 }
 
 run_tier2() {
