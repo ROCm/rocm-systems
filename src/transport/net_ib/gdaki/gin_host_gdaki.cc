@@ -1310,7 +1310,7 @@ static ncclResult_t ncclGinGdakiQueryLastErrorPolling(struct gdaki_context* gdak
   const int nqpsPerRank = ncontexts;
   const int nqpsForComm = nqpsPerRank * nranks;  // Number of QPs for communication
 
-  for (int qpIdx = rankOff; qpIdx < nqpsForComm; qpIdx++) {
+  for (int qpIdx = rankOff; qpIdx < nqpsForComm; qpIdx += rankStride) {
     struct doca_gpu_verbs_qp* qp = gdakiCtx->gqps[qpIdx]->qp_gverbs;
     struct doca_gpu_verbs_qp_error_info errorInfo;
 
