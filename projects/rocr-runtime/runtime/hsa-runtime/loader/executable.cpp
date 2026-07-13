@@ -1646,6 +1646,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     }
     context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, len);
     void* dev = context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, buf, 0);
+    // The blob is immutable after load; flush it from the CPU cache once here so
+    // the NPU sees the freshly copied bytes. Per-dispatch flushing in the driver
+    // is unnecessary for these buffers (only kernargs change per dispatch).
+    rocr::FlushCpuCache(dev, 0, len);
     loaded_obj->device_buffers.emplace_back(buf, len);
     uint64_t dev_addr = reinterpret_cast<uint64_t>(dev);
     blob_dev_addr[key] = dev_addr;
