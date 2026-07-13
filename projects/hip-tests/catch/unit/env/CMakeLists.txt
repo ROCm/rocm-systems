@@ -9,14 +9,14 @@ if(HIP_PLATFORM MATCHES "amd")
   )
 
   # Helper executable to check runtime path (PAL vs ROCr)
-  add_executable(hipEnvGpuEnablePal_CheckRuntime EXCLUDE_FROM_ALL hipEnvGpuEnablePal_CheckRuntime.cc)
-  set_source_files_properties(hipEnvGpuEnablePal_CheckRuntime.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipEnvGpuEnablePal_CheckRuntime)
-  target_link_libraries(hipEnvGpuEnablePal_CheckRuntime ${GPGPU_LINKER_LIBRARIES})
+  add_executable(hipSetEnv_helper EXCLUDE_FROM_ALL hipSetEnv_helper.cc)
+  set_source_files_properties(hipSetEnv_helper.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipSetEnv_helper)
+  target_link_libraries(hipSetEnv_helper ${GPGPU_LINKER_LIBRARIES})
 
   hip_add_exe_to_target(NAME EnvironmentTest
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests)
 
-  add_dependencies(EnvironmentTest hipEnvGpuEnablePal_CheckRuntime)
+  add_dependencies(EnvironmentTest hipSetEnv_helper)
 endif()

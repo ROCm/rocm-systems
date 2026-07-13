@@ -43,7 +43,7 @@
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_Default_UsesPlatformDefault) {
-  hip::SpawnProc proc("hipEnvGpuEnablePal_CheckRuntime", true);
+  hip::SpawnProc proc("hipSetEnv_helper", true);
 
   int result = proc.run("GPU_ENABLE_PAL UNSET");
   std::string output = proc.getOutput();
@@ -83,7 +83,7 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_Default_UsesPlatformDefault) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_UsesPlatformDefault) {
-  hip::SpawnProc proc("hipEnvGpuEnablePal_CheckRuntime", true);
+  hip::SpawnProc proc("hipSetEnv_helper", true);
 
   int result = proc.run("GPU_ENABLE_PAL \"\"");
   std::string output = proc.getOutput();
@@ -124,10 +124,10 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_UsesPlatformDefault) {
  */
 HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
   // Test GPU_ENABLE_PAL="0" -> ROCr
-  /*   // AIRUNTIME-2370. fails rocr init and conitinues to init PAL
+  // AIRUNTIME-2370. fails rocr init and conitinues to init PAL
   // Once the issue is fixed this can be enabled
   {
-    hip::SpawnProc proc0("hipEnvGpuEnablePal_CheckRuntime", true);
+    hip::SpawnProc proc0("hipSetEnv_helper", true);
     int result0 = proc0.run("GPU_ENABLE_PAL 0");
     std::string output0 = proc0.getOutput();
     // Debug: print what we received
@@ -139,11 +139,11 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
     bool palInit0 = (output0.find("] PAL backend initialized") != std::string::npos);
     REQUIRE(rocrInit0 == true);
     REQUIRE(palInit0 == false); 
-  } */
+  }
 
   // Test GPU_ENABLE_PAL="1" -> PAL
   {
-    hip::SpawnProc proc1("hipEnvGpuEnablePal_CheckRuntime", true);
+    hip::SpawnProc proc1("hipSetEnv_helper", true);
     int result1 = proc1.run("GPU_ENABLE_PAL 1");
     std::string output1 = proc1.getOutput();
     // Debug: print what we received
@@ -165,7 +165,7 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
 
   // Test GPU_ENABLE_PAL="2" -> Auto-select
   {
-    hip::SpawnProc proc2("hipEnvGpuEnablePal_CheckRuntime", true);
+    hip::SpawnProc proc2("hipSetEnv_helper", true);
     int result2 = proc2.run("GPU_ENABLE_PAL 2");
     std::string output2 = proc2.getOutput();
     // Debug: print what we received

@@ -19,21 +19,6 @@
 // Generic helper executable to test environment variables with HIP runtime
 // AMD-only: Tests GPU_ENABLE_PAL (ROCr vs PAL backend selection)
 //
-// USAGE: ./CheckRuntime <env_var_name> <env_var_value>
-//
-// EXAMPLES:
-//   ./CheckRuntime GPU_ENABLE_PAL 1
-//   ./CheckRuntime HIP_VISIBLE_DEVICES "0,1"
-//   ./CheckRuntime GPU_ENABLE_PAL ""
-//
-// BEHAVIOR:
-//   - Sets the specified environment variable
-//   - Initializes HIP runtime with AMD_LOG_LEVEL=7
-//   - GPU_ENABLE_PAL tests parse logs for "ROCr backend initialized" / "PAL backend initialized"
-//
-// RETURN CODES:
-//   0 = success, 255 = HIP initialization failed
-
 #ifndef __HIP_PLATFORM_AMD__
 #error "This test is AMD-only (GPU_ENABLE_PAL controls ROCr vs PAL backend)"
 #endif
