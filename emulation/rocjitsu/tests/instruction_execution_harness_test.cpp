@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file instruction_execution_harness_test.cpp
-/// @brief Phase E parameterized test: execute every instruction on every ISA.
+/// @brief Phase E parameterized test: execute safe scalar encodings on every ISA.
 ///
 /// For each ISA, iterates auto-generated encodings that are safe to execute on
 /// a zeroed wavefront, decodes them, and calls execute(). Decode failures are
