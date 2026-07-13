@@ -10,6 +10,7 @@
 #include "queries/select/table_select_query.hpp"
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -778,6 +779,24 @@ reader_t::impl::build_v4_tracks()
         memory_alloc_track_ids.insert(r.track_id);
     }
 
+    // Detect track_ids that appear in both counter and memory-allocate discovery sets.
+    // Counter classification takes precedence (is_counter checked before is_memory), so
+    // an overlapping track would silently lose its memory-allocate events. No known DB
+    // triggers this today; this set is telemetry only — no precedence change.
+    std::unordered_set<size_t> ambiguous_classification_ids;
+    for(const auto& id : counter_track_ids)
+    {
+        if(memory_alloc_track_ids.count(id) > 0)
+        {
+            ambiguous_classification_ids.insert(id);
+            std::cerr << "[profiler-hub] WARNING: track_id " << id
+                      << " appears in both counter (rocpd_sample/pmc) and memory-allocate"
+                         " (rocpd_memory_allocate) discovery sets; classifying as counter"
+                         " (existing precedence). Memory-allocate events for this track"
+                         " will not appear in the memory track type.\n";
+        }
+    }
+
     // Counter display name = PMC name (Q9) and pmc_id for identity, keyed by track id.
     std::unordered_map<size_t, size_t>      counter_track_pmc_ids;
     std::unordered_map<size_t, std::string> counter_track_names;
@@ -817,6 +836,8 @@ reader_t::impl::build_v4_tracks()
         if(is_counter)
         {
             track_info_ptr->type = reader_types::track_type_t::counter;
+            if(ambiguous_classification_ids.count(track_info.id) > 0)
+                track_info_ptr->ambiguous_classification = true;
         }
         else if(is_memory)
         {

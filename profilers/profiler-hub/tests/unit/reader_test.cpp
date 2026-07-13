@@ -323,4 +323,66 @@ TEST_F(reader_test, get_event_counts_reflects_inserted_event)
     EXPECT_EQ(counts.at(reader_types::event_type_t::region), 1);
 }
 
+// Task 018: v4 track-classification ambiguity detection tests
+//
+// Fixture: rocpd_v4_amb_cls.db — a single rocpd_track row (id=1) referenced by
+//   both rocpd_sample/rocpd_pmc_event (counter set) and rocpd_memory_allocate
+//   (memory set). build_v4_tracks() must detect the overlap, log a warning, and
+//   set ambiguous_classification=true on the resulting counter track.
+
+class reader_v4_amb_cls_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        m_storage = std::make_unique<profiler_hub::storage_t>(m_database_path, "");
+        m_reader  = std::make_shared<profiler_hub::reader_t>(std::move(m_storage));
+    }
+
+    void TearDown() override
+    {
+        m_reader.reset();
+        m_storage.reset();
+    }
+
+    std::string                              m_database_path{ ROCPD_DB_V4_AMB_CLS_PATH };
+    std::unique_ptr<profiler_hub::storage_t> m_storage;
+    std::shared_ptr<profiler_hub::reader_t>  m_reader;
+};
+
+TEST_F(reader_v4_amb_cls_test, v4_ambiguous_classification_track_flagged)
+{
+    auto tracks = m_reader->get_all_tracks();
+
+    // Find the counter track (the ambiguous rocpd_track row; the fixture also
+    // yields a synthetic memory_activity track from the same rocpd_memory_allocate).
+    profiler_hub::reader_types::track_info_ptr_t counter_track;
+    for(const auto& t : tracks)
+    {
+        if(t->type == profiler_hub::reader_types::track_type_t::counter)
+        {
+            counter_track = t;
+            break;
+        }
+    }
+    ASSERT_NE(counter_track, nullptr) << "no counter track found";
+    // Counter classification wins (existing precedence).
+    EXPECT_EQ(counter_track->type, profiler_hub::reader_types::track_type_t::counter);
+    // Overlap with memory-allocate set is detected and flagged.
+    EXPECT_TRUE(counter_track->ambiguous_classification);
+}
+
+TEST_F(reader_v4_amb_cls_test, v4_non_ambiguous_track_not_flagged)
+{
+    // The main v4 fixture has no overlapping track_ids; no track should be flagged.
+    auto storage = std::make_unique<profiler_hub::storage_t>(ROCPD_DB_V4_PATH, "");
+    auto reader  = std::make_shared<profiler_hub::reader_t>(std::move(storage));
+
+    for(const auto& t : reader->get_all_tracks())
+    {
+        EXPECT_FALSE(t->ambiguous_classification)
+            << "unexpected ambiguous_classification on track id=" << t->id;
+    }
+}
+
 }  // namespace

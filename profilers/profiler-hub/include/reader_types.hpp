@@ -355,6 +355,13 @@ struct track_info_t
     std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
     std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter, kernel_dispatch_pmc.
+
+    /// v4 only. True when this track_id appeared in both the counter (rocpd_sample/pmc)
+    /// and memory-allocate (rocpd_memory_allocate) discovery sets — an ambiguous schema
+    /// state where classification as counter (current precedence) silently drops the
+    /// memory-allocate events. Callers should treat ambiguous_classification==true as a
+    /// data-integrity warning. No known real DB triggers this today.
+    bool ambiguous_classification{ false };
 };
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
