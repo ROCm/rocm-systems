@@ -3292,7 +3292,7 @@ RunNicExecutor(int const iteration, ConfigOptions const& cfg, int const exeIndex
 static std::uint32_t
 GetId(std::uint32_t hwId)
 {
-#if defined(__NVCC_)
+#if defined(__NVCC__)
     return hwId;
 #else
     // Based on instinct-mi200-cdna2-instruction-set-architecture.pdf
