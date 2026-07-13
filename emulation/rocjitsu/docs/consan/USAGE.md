@@ -210,16 +210,16 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_ENGINE` | all MOI runs | Public engine selector. |
 | `RJ_CONSAN_MOI_BACKEND` | legacy all MOI runs | Ignored when `RJ_CONSAN_MOI_ENGINE` is set. |
 | `RJ_CONSAN_MOI_REPORT_BUFFER`, `RJ_CONSAN_MOI_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | Explicit caller-owned report buffer. The layout depends on `RJ_CONSAN_MOI_ENGINE`. A multi-partition sampled buffer must initialize ABI-v2 `sampled_slots_per_partition` and declare the same value with `RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION`. |
-| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | Optional HSA-tool-owned buffer-size override. When absent, relevant code objects receive 64 KiB in `record_replay`/`sampled` and 256 KiB in `inline_shadow`; explicit zero disables auto allocation. Teardown summarizes the matching engine layout. An inline override must be at least 131,496 bytes to cover the full 64 KiB LDS range with the default diagnostics and atomic slot. |
+| `RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE` | `record_replay`, `inline_shadow`, `sampled` | Optional HSA-tool-owned buffer-size override. When absent, relevant code objects receive 64 KiB in `record_replay`/`sampled` and 256 KiB in `inline_shadow`; explicit zero disables auto allocation. Teardown summarizes the matching engine layout. Inline layout sizing is partition-aware: each configured workgroup partition needs a full 16,384-entry exact-shadow table and one atomic-release slot, and allocation fails visibly if the requested/default size cannot provide them. The one-partition minimum with default diagnostics is 131,496 bytes. |
 | `RJ_CONSAN_MOI_REQUIRE_RECORDS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if all auto report buffers contain zero visible access/barrier/atomic/diagnostic/exact-shadow/sampled records. |
 | `RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain zero visible inline diagnostics, zero host-replay diagnostics, and zero sampled conflicts. The checked inline-shadow race and sampled-conflict controls use this guard. |
 | `RJ_CONSAN_MOI_FORBID_DIAGNOSTICS` | `record_replay`, `inline_shadow`, `sampled` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto report buffers contain any visible inline diagnostic, host-replay diagnostic, or sampled conflict. The checked inline-shadow barrier-order control uses this guard. |
 | `RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT` | `record_replay` with auto report buffers | Demo guard: process exits nonzero at hook unload if auto-buffer host replay emits no conflict. |
-| `RJ_CONSAN_MOI_FORBID_OVERFLOW` | all MOI engines with auto report buffers | Optional guard: process exits nonzero at hook unload if records were dropped or a sampled workgroup coordinate exceeded its partition extents. Drops are always reported to stderr even without the guard. |
+| `RJ_CONSAN_MOI_FORBID_OVERFLOW` | all MOI engines with auto report buffers | Optional guard: process exits nonzero at hook unload if records were dropped or a sampled/inline-shadow workgroup coordinate exceeded its partition extents. Drops and typed partition overflow are reported even without the guard. |
 | `RJ_CONSAN_TMP_VGPR` | `record_replay`, `inline_shadow`, `sampled` | Optional explicit debug override. Access, barrier, and atomic probes normally choose dead, fresh descriptor-backed, or spill-preserved scratch automatically. Static access probes use three scratch VGPRs, dynamic access probes use six, barrier records use six, direct sampled probes use five or seven with in-kernel checking, inline-shadow publication/diagnostic probes use seven, and inline-shadow atomic ordering uses three. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` | `sampled` | Deterministic runtime wave selection without removing eligible static sites. The stride defaults to 1 and must be a power of two in 1..1024; the offset defaults to 0 and must be smaller than the stride. A wave publishes when `owner & (stride - 1) == offset`. |
-| `RJ_CONSAN_MOI_WORKGROUP_EXTENT_X`, `RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y`, `RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z` | `sampled` | Positive bounded workgroup extents, each defaulting to 1. Storage uses `x + Ex * (y + Ey * z)` without modulo/hash aliasing; out-of-range coordinates skip and publish typed overflow. |
+| `RJ_CONSAN_MOI_WORKGROUP_EXTENT_X`, `RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y`, `RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z` | `sampled`, `inline_shadow` | Positive bounded workgroup extents, each defaulting to 1. Both compact engines use `x + Ex * (y + Ey * z)` without modulo/hash aliasing. Sampled partitions own site slots; inline partitions own full exact-shadow tables and atomic-release slots. Bounds are checked before either engine forms a partitioned address; out-of-range coordinates skip state access and publish typed overflow. |
 | `RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION` | `sampled` with a caller-owned multi-partition buffer | Required confirmation that ABI-v2 `sampled_slots_per_partition` equals `floor(sampled_capacity / (Ex*Ey*Ez))`. Auto buffers set it themselves. |
 | `RJ_CONSAN_MOI_SAMPLED_CHECK` | `sampled` | Opt into immediate GPU-side checking against the preceding sampled site slot in the same workgroup partition. A match increments the report header event counter, exposed as `sampled_immediate_conflicts`. |
 | `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported target-native barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
@@ -289,21 +289,26 @@ them.
   least one access record. For `sampled`, this must hold the versioned header
   plus at least one packed 64-bit sampled watchpoint entry. For
   `inline_shadow`, this must hold the versioned header, the small diagnostic
-  section, and enough packed 64-bit exact-shadow entries for the LDS byte range
-  being exercised. The current prototype does not yet emit an in-kernel bounds
-  guard around exact-shadow publication. The header, access record, diagnostic
+  section, one full packed 64-bit exact-shadow table per configured workgroup
+  partition, and one atomic-release slot per partition. Inline probes check
+  X/Y/Z bounds before forming any exact-shadow or atomic-slot address; rejected
+  workgroups increment typed `partition_overflow` without touching those
+  sections. The header, access record, diagnostic
   record, exact-shadow, and sampled layouts are defined in `consan_moi.h`. When
   `RJ_CONSAN_MOI_TRACK_BARRIERS=1`, the current
   `record_replay` prototype derives equal access and barrier record capacities
   from the payload size.
-- `RJ_CONSAN_MOI_WORKGROUP_EXTENT_X/Y/Z=N`: positive sampled workgroup bounds.
-  The defaults `1,1,1` reserve the whole sampled table for workgroup `(0,0,0)`.
-  With `2,2,2`, the mixed-radix index has eight partitions (`0..7`) and each
-  partition receives `floor(sampled_capacity / 8)` consecutive slots. A run
-  that patches four sites therefore needs at least 32 sampled slots to make all
-  eight partitions non-vacuous. Coordinates outside `0..1` skip publication,
-  increment `partition_overflow`, and participate in
-  `RJ_CONSAN_MOI_FORBID_OVERFLOW` accounting.
+- `RJ_CONSAN_MOI_WORKGROUP_EXTENT_X/Y/Z=N`: positive sampled and inline-shadow
+  workgroup bounds. The defaults `1,1,1` reserve partition zero for workgroup
+  `(0,0,0)`. With `2,2,2`, the mixed-radix index has eight partitions (`0..7`).
+  In sampled mode each receives `floor(sampled_capacity / 8)` consecutive
+  slots; a four-site run therefore needs at least 32 sampled slots to make all
+  partitions non-vacuous. Inline mode instead lays out eight complete
+  exact-shadow tables for the 64-KiB LDS space plus eight address-scoped
+  atomic-release slots, so
+  its explicit or automatic report-buffer size must satisfy that checked
+  layout. Coordinates outside `0..1` skip publication/state access, increment
+  `partition_overflow`, and participate in `RJ_CONSAN_MOI_FORBID_OVERFLOW`.
 - `RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION=N`: required only for an explicit
   caller-owned sampled buffer with more than one partition. Initialize the
   report header's ABI-v2 `sampled_slots_per_partition` field to the same

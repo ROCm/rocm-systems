@@ -105,8 +105,11 @@ scalar-identity path, when a patch budget cannot cover every access site,
 record/replay, sampled, and inline-shadow use the same stable resource
 preference so a spill-free site is not hidden behind an earlier spill
 candidate. The gfx1201 `standard-v1` profiles have passed the common 209-test
-broad IREE tier; that historical count does not describe unfinished gfx950
-broad validation.
+broad IREE tier. On gfx950, focused and guarded selected tiers are complete;
+the 259-test SuperCollider inventory has no corruption, loader failure, or
+timeout, with 257 ordinary passes and two typed `s_trap 0` sanitizer outcomes.
+The three broad MOI profiles are tracked separately and must not be inferred
+from that SuperCollider result.
 
 ## Acceptance And Next Work
 
@@ -118,8 +121,9 @@ record or diagnostic guards documented in [TUTORIAL.md](TUTORIAL.md).
 
 These results establish guarded DBI execution and broad output compatibility,
 not universal opcode coverage or proof that a clean workload is race-free.
-Native gfx950 implementation exists; its remaining work is broad qualification
-and documented precision/coverage extensions. Future native-target work still
-includes `gfx942` and `gfx1250`. Narrow extensions such as more inline atomic
-forms remain capability improvements rather than hidden acceptance
-requirements.
+Native gfx950 implementation, spill/resource management, workgroup identity,
+and selected semantic qualification are in place. Remaining gfx950 work is the
+three broad MOI compatibility profiles and documented precision/coverage
+extensions. Future native-target work still includes `gfx942` and `gfx1250`.
+Narrow extensions such as more inline atomic forms remain capability
+improvements rather than hidden acceptance requirements.

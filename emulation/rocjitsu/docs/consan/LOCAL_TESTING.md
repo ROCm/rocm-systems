@@ -96,13 +96,12 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
   '--gtest_filter=ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
-Known local result:
+Known gfx950 checkpoint result at commit `bd297cdbfc`:
 
-- Full `rocjitsu_tests`, including registered benchmark-style tests: 1418/1418
-  passed after the R1D implementation.
-- Current resource/MOI/spill-manager focus: 172/172 passed after the complete
-  access/barrier/atomic planner rollout, including automatic scalar resources,
-  shared owners, bounded outcome summaries, and spill accounting.
+- Full `rocjitsu_tests`, including registered benchmark-style tests: 1539/1539.
+- The authoritative ConSan/resource/placement focused filter documented in
+  `SPILLING.md`: 263/263. The commit-qualified count makes later additions easy
+  to distinguish from this accepted checkpoint.
 
 gfx950 environment and spill baseline:
 
@@ -393,7 +392,7 @@ Recorded architecture evidence across the development workspaces:
 | Target | Workspace hardware | Tier evidence | Status |
 | --- | --- | --- | --- |
 | gfx942 | no current workspace | no current native ConSan tier | deferred |
-| gfx950 | available in the gfx950 workspace | port and native tier pending | tracked in `PLAN_GFX950.md` |
+| gfx950 | available in the gfx950 workspace | native spill/identity/compact-engine tiers and guarded selected profiles pass; broad SuperCollider classified 257/259 plus two typed traps | broad MOI profiles tracked in `PLAN_GFX950.md` |
 | gfx1201 | available in the gfx1201 workspace | tier0 183 unit + 37 live; tier1/tier2 recorded below | accepted baseline |
 | gfx1250 | no current workspace | decoder/encoder sources and synthetic dispatch coverage only | deferred |
 
@@ -415,6 +414,25 @@ where appropriate and cover spill, overflow, ordering, and unsupported-site
 reporting. Tier1 and tier2 establish output compatibility and absence of
 resource-induced hangs; they do not imply every loaded object was patchable.
 
+Current gfx950 snapshot (2026-07-13, checkpoint `bd297cdbfc`):
+
+| Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
+| --- | ---: | ---: | ---: | ---: |
+| tier0 focused | 263/263 shared unit/synthetic filter | passed guarded live controls | passed guarded live controls | passed guarded live controls |
+| tier1 selected IREE | 10/10 | 10/10 | 10/10 | 10/10 |
+| tier2 broad IREE (259 selected) | 257 ordinary passes + 2 typed `s_trap 0` mismatch outcomes | in progress | pending | pending |
+
+The complete raw/record-replay/sampled/inline omitted-coordinate live matrix is
+14/14. The inline selected row includes the former high-SGPR and load
+destination/address-overlap regressions. SuperCollider's two tier2 residuals
+are sanitizer findings with typed termination, not numerical corruption,
+replacement-object load failure, timeout, or resource failure. These broad
+compatibility results do not enlarge supported opcode coverage. Conversely,
+tier0's patch/record/diagnostic/overflow guards and the independent semantic
+controls are the evidence that instrumentation executed and that intentional
+races/order controls behaved as expected; a green known-correct IREE result
+alone is only compatibility evidence.
+
 ## rocjitsu-test-corpus
 
 Recorded gfx1201 workspace status:
@@ -431,6 +449,6 @@ Recorded gfx1201 workspace status:
 | Architecture | Live-GPU workspace coverage |
 | --- | --- |
 | `gfx1201` | Available. The recorded results above are the accepted baseline. |
-| `gfx950` | Available. Native ConSan port and qualification are tracked in [PLAN_GFX950.md](PLAN_GFX950.md). |
+| `gfx950` | Available. Native focused and selected qualification is complete; broad SuperCollider is classified and broad MOI profiles are tracked in [PLAN_GFX950.md](PLAN_GFX950.md). |
 | `gfx942` | No current live-GPU workspace. |
 | `gfx1250` | No current live-GPU workspace. |

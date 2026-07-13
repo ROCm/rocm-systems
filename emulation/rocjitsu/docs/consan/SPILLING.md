@@ -269,8 +269,8 @@ The focused CPU/synthetic suite is:
   '--gtest_filter=ConSan.*:ConSanMoi.*:ConSanResourcePlan.*:DbiPatchPlacementPlanner.*:TrampolineBuilder.*'
 ```
 
-At checkpoint commit `324f39b022`, the authoritative focused ConSan result is
-258/258. It covers allocation precedence, forbidden ranges, rollback, gfx1201
+At checkpoint commit `bd297cdbfc`, the authoritative focused ConSan result is
+263/263. It covers allocation precedence, forbidden ranges, rollback, gfx1201
 and gfx950 encodings and waits, descriptor/metadata growth, zero-private
 kernels, dynamic-stack rejection, shared-owner dead/fresh/spill layouts,
 mixed-wave rejection, persistent state and workgroup partitioning,

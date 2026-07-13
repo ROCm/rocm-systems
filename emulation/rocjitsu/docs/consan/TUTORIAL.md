@@ -8,8 +8,9 @@ covers both top-level flavors:
 - `moi`: structured memory-order instrumentation with three versioned
   `standard-v1` engine profiles. On gfx1201 these profiles are qualified over
   the same broad compatibility tier as `supercollider`; gfx950 focused and
-  selected-workload qualification is complete while broad qualification is in
-  progress. Their precision and diagnostic shapes intentionally differ.
+  selected-workload qualification is complete, its broad SuperCollider
+  inventory is classified, and its broad MOI profiles remain in progress.
+  Their precision and diagnostic shapes intentionally differ.
 
 ConSan runs through the HSA tools hook and patches final native RDNA4 /
 `gfx1201` or CDNA4 / `gfx950` GPU code objects at load time. It does not require
@@ -203,8 +204,10 @@ ctest --test-dir "$IREE_BUILD_DIR" \
 This narrower illustrative regular expression has previously selected 152
 tests. The historical gfx1201 broad tier selected 209 tests and passed under
 SuperCollider and all three MOI engines. Use the target-aware `tier2` command
-in `tests/dbi/consan_test_matrix.sh` for the current architecture; gfx950 broad
-results are not complete yet.
+in `tests/dbi/consan_test_matrix.sh` for the current architecture.
+SuperCollider currently completes that 259-test gfx950 inventory with 257
+ordinary passes and two typed sanitizer mismatch traps. The three MOI broad
+profiles remain separate qualification gates.
 
 ```text
 100% tests passed, 0 tests failed out of 152
@@ -337,9 +340,14 @@ export RJ_CONSAN_MOI_FORBID_OVERFLOW=1
 
 This creates eight mixed-radix partitions. With four patched sites, the sampled
 report needs at least 32 entries for every partition to have all four site
-slots. The dispatch must keep X/Y/Z in `0..1`; otherwise the access is skipped
-and `partition_overflow` makes the overflow guard fail. Auto buffers initialize
-the partition metadata. For a caller-owned buffer, initialize ABI-v2
+slots. Inline shadow uses the same partition index, but gives every partition a
+complete exact-shadow table for the 64-KiB LDS space and one atomic-release
+slot. The
+dispatch must keep X/Y/Z in `0..1`; otherwise either compact engine checks the
+bounds before addressing state, skips the access, and increments
+`partition_overflow`, making the overflow guard fail. Auto buffers initialize
+the sampled partition metadata and validate inline capacity. For a caller-owned
+sampled buffer, initialize ABI-v2
 `sampled_slots_per_partition` and set
 `RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION` to the same derived value.
 

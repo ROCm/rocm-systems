@@ -7,8 +7,9 @@ replacement code object when instrumentation is possible.
 
 The current implementation has native paths for RDNA4 / `gfx1201` and CDNA4 /
 `gfx950`. The gfx1201 profile has completed its broad qualification; gfx950 has
-completed focused and selected-workload qualification while its broad sweep is
-still in progress. The intended native-instrumentation target set also includes
+completed focused and selected-workload qualification. Its broad SuperCollider
+inventory is classified, while the three broad MOI profiles remain in progress.
+The intended native-instrumentation target set also includes
 `gfx942` and `gfx1250`. ConSan does not translate kernels between GPU ISAs; it
 patches the final code object for the architecture that will actually run.
 
@@ -22,13 +23,13 @@ register allocation, private-layout, ownership, and spill transaction.
 | Area | Current code | Intended direction |
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
-| Architecture | Native RDNA4 / `gfx1201` and CDNA4 / `gfx950` implementation, with gfx950 broad qualification still in progress. | Generalize the same native patching model to `gfx942` and `gfx1250`; do not translate between targets. |
+| Architecture | Native RDNA4 / `gfx1201` and CDNA4 / `gfx950` implementation. gfx950 focused and selected qualification is complete; broad SuperCollider is classified and broad MOI qualification is in progress. | Generalize the same native patching model to `gfx942` and `gfx1250`; do not translate between targets. |
 | Public flavor switch | `RJ_CONSAN_FLAVOR=supercollider|moi`. | Keep the two top-level flavors. |
 | SuperCollider | Usable redundant LDS/likely-group-flat check/trap mode. | Keep as a simple perturbation/value-check sanitizer mode. |
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
-| MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, admitted group-flat forms, barriers, and one-slot atomic ordering controls. | Broaden proven instruction/order coverage while retaining exact supported-form semantics. |
+| MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, admitted group-flat forms, barriers, and one address-scoped atomic ordering slot per workgroup partition. | Broaden proven instruction/order coverage while retaining exact supported-form semantics. |
 | MOI `sampled` | Runtime-qualified sampled entry publication, host-side conflict scan, and opt-in immediate check. | Improve sampling fidelity and overhead measurement without presenting clean samples as proof of race freedom. |
-| MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration; tier0 supplies guarded semantic evidence. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
+| MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration. On gfx950 all three pass the guarded 10-test selected tier; broad MOI qualification is tracked per engine. Tier0 supplies guarded semantic evidence on both targets. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
 | Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use target-native gfx1201 or gfx950 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. gfx950's default `workitem_id` identity normally uses five persistent VGPRs; an `ACCUM_OFFSET` overlap selects a fresh five-SGPR wave-state window. If no such scalar window exists, that default path fails visibly rather than silently changing owner semantics. Private owner/epoch state is selected separately when forced or when preserving a non-workitem owner source. Scalar paths preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
 | Diagnostics | Bounded inline and sampled diagnostics plus resource, overflow, and unsupported-site summaries; compact shadow words limit prior-lane detail. | Preserve bounded output while improving precision and presentation. |
 | Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with target-specific RDNA4 and CDNA4 group-flat address contracts. CDNA4 emission is limited to strongly classified generic-segment, zero-offset dword/dwordx2/dwordx4 forms. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
@@ -185,8 +186,9 @@ The implementation boundary is:
   and spill limits are selected explicitly. `gfx942` and `gfx1250` remain
   future targets rather than inheriting assumptions from either implemented
   architecture.
-- **Test parity.** The current focused ConSan/resource/placement filter covers
-  242 tests. The gfx950 matrix also covers 49 hip-moi controls, 10 selected
+- **Test parity.** At checkpoint `bd297cdbfc`, the focused
+  ConSan/resource/placement filter covers 263 tests. The gfx950 matrix also
+  covers 49 hip-moi controls, 10 selected
   IREE tests per profile, and a 259-test broad IREE inventory. The broader
   rocjitsu-test-corpus has
   separate local dependency limitations documented in `LOCAL_TESTING.md`.
@@ -641,6 +643,13 @@ Current implementation:
   the LDS byte offset and feeds the same cell-range publisher as native DS.
 - Uses `flat_atomic_swap_b64` to publish a packed exact-shadow word and obtain
   the prior word atomically.
+- Partitions exact shadow by the bounded workgroup coordinate
+  `p = x + Ex * (y + Ey * z)`. Every partition owns a complete 16,384-entry
+  table for the 64-KiB LDS address space; distinct in-range workgroups cannot
+  compare against one another.
+- Checks X/Y/Z against the configured extents before calculating or touching a
+  partition address. An out-of-range workgroup skips exact-shadow and atomic
+  state and increments the typed partition-overflow counter.
 - Reports a conflict when the prior entry is non-empty, from a different owner,
   in the same epoch, and not read/read.
 - Can initialize owner/epoch VGPRs at kernel entry with
@@ -650,8 +659,13 @@ Current implementation:
 - Can use `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` to initialize owner from RDNA4
   `HW_ID1` low bits through a scalar temporary. This source is unavailable on
   CDNA4; gfx950 uses the logical owner initialized at entry.
-- Has a one-slot inline atomic release/acquire prototype for a narrow no-SADDR
-  `flat_atomic*` subset.
+- Has one inline atomic release/acquire slot per workgroup partition for a
+  narrow no-SADDR `flat_atomic*` subset. Release and acquire use the same
+  mixed-radix partition as exact shadow.
+- Validates explicit and HSA-tool-owned buffer layouts against the configured
+  partition count before patch execution. Each partition requires the complete
+  exact-shadow table and an atomic slot; insufficient capacity is a visible
+  configuration/resource failure rather than aliased storage.
 
 Current diagnostic shape:
 
@@ -671,7 +685,8 @@ Important current simplifications:
   explicit register variables remain debug overrides.
 - `hw_id` owner source makes owner wave-uniform and automatically receives a
   fresh scalar temporary when the kernel has capacity.
-- The atomic ordering path has one release slot.
+- The atomic ordering path has one release slot per configured workgroup
+  partition.
 - Diagnostics are bounded first-N records, not an unbounded trace.
 
 Intended role:
@@ -810,7 +825,8 @@ Atomics:
   checks.
 - `record_replay` has host-side release/acquire modeling and a narrow DBI
   atomic-record path.
-- `inline_shadow` has a one-slot release/acquire address-matching prototype.
+- `inline_shadow` has one release/acquire address-matching slot per workgroup
+  partition.
 - `sampled` has no atomic ordering implementation yet.
 
 Current atomic support is intentionally narrow. Broader opcode coverage should
@@ -827,7 +843,7 @@ The code intentionally contains several prototype mechanisms:
 - conservative versioned engine profiles with advanced extensions kept opt-in;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
-- one-slot inline atomic release state;
+- one address-scoped inline atomic release slot per workgroup partition;
 - `inline_shadow` feature/non-vacuity coverage limited to targeted tests even
   though its broad compatibility sweep is now clean;
 - deterministic or scalar-source delay instead of randomized sampling policy;
@@ -861,7 +877,10 @@ Current evidence categories:
   inline-shadow, sampled, barriers, atomics, and owner-source controls.
 - IREE RDNA4 / `gfx1201` and CDNA4 / `gfx950` selected workloads under
   SuperCollider and MOI modes.
-- Broader IREE e2e inventory under SuperCollider patch-required mode.
+- Broader IREE e2e inventories under target-aware profiles. The current gfx950
+  SuperCollider checkpoint is 257 ordinary passes out of 259; the other two
+  rows are typed `s_trap 0` sanitizer mismatch outcomes, with no corruption,
+  replacement-object loader failure, or timeout.
 - Broader 209-test IREE e2e compatibility sweeps under all three MOI engines
   without register-number configuration.
 - Guarded TileAndFuse, scan, and softmax subsets under all three engines;
@@ -910,6 +929,7 @@ isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
 The gfx1201 profile-by-tier qualification and broad-turn-on acceptance are
-complete. gfx950 focused and selected-workload qualification is complete and
-its broad qualification is in progress. Native work for gfx942 and gfx1250
-remains deferred.
+complete. gfx950 focused and selected-workload qualification is complete, and
+its broad SuperCollider inventory is classified; record/replay, sampled, and
+inline-shadow broad qualification remain separate in-progress gates. Native
+work for gfx942 and gfx1250 remains deferred.
