@@ -4259,10 +4259,31 @@ rsmi_status_t rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_
   // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Fallback to KFD reported memory if VRAM total is 0 or sysfs read fails
-  if (mem_type == RSMI_MEM_TYPE_VRAM && (*total == 0 || ret != RSMI_STATUS_SUCCESS)) {
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
+  // Prefer the KFD-reported VRAM total when it is larger than the sysfs value.
+  //
+  // This covers two cases:
+  //   1. The sysfs read failed or returned 0 (previous behavior).
+  //   2. sysfs under-reports. On APUs (e.g. gfx1151 / Strix Halo) the sysfs
+  //      mem_info_vram_total only exposes the small BIOS VRAM carveout
+  //      (512 MiB) while the GPU actually addresses the unified pool that KFD
+  //      mem_banks reports (e.g. 110 GiB), so callers size their memory budget
+  //      against 0.5 GiB instead of the real capacity.
+  //
+  // On discrete GPUs the two sources agree, so the sysfs value is kept unchanged.
+  //
+  // The KFD node is looked up directly rather than through
+  // GET_DEV_AND_KFDNODE_FROM_INDX: that macro returns RSMI_INITIALIZATION_ERROR
+  // when no KFD node exists, which would now discard an otherwise valid sysfs
+  // value. Here a missing node simply leaves the sysfs value in place.
+  if (mem_type == RSMI_MEM_TYPE_VRAM) {
+    const uint64_t sysfs_total = (ret == RSMI_STATUS_SUCCESS) ? *total : 0;
+    GET_DEV_FROM_INDX
+    auto& kfd_nodes = smi.kfd_node_map();
+    auto kfd_it = kfd_nodes.find(dev->kfd_gpu_id());
+    uint64_t kfd_total = 0;
+    if (kfd_it != kfd_nodes.end() && kfd_it->second->get_total_memory(&kfd_total) == 0 &&
+        kfd_total > sysfs_total) {
+      *total = kfd_total;
       ss << __PRETTY_FUNCTION__ << " | inside success fallback... "
          << " | Device #: " << std::to_string(dv_ind)
          << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
