@@ -7,50 +7,58 @@
 namespace rocr {
 namespace AMD {
 
-// 'A','I','E','K' little-endian.
+/// @brief Section magic: 'A','I','E','K' little-endian.
 constexpr uint32_t kAieSectionMagic = 0x4B454941u;
+/// @brief Section format major version; a mismatch is rejected.
 constexpr uint16_t kAieSectionVersionMajor = 1;
+/// @brief Section format minor version; bumped for additive-only changes.
 constexpr uint16_t kAieSectionVersionMinor = 0;
 
-// Section header. All *_offset fields are section-relative (bytes from the start
-// of the aie2/aie2p section).
+/// @brief Header of the aie2/aie2p hsaco section.
+///
+/// All @c *_offset fields are section-relative (bytes from the section start).
 struct aie_section_header {
-  uint32_t magic;              // kAieSectionMagic
-  uint16_t version_major;      // reject on mismatch
-  uint16_t version_minor;      // additive-only
-  uint32_t header_size;        // offset from section base to kernel table
-  uint32_t kernel_count;
-  uint32_t kernel_entry_size;  // stride between kernel entries
-  uint32_t string_table_offset;
-  uint32_t string_table_size;
-  uint32_t blob_pool_offset;   // blobs live in [blob_pool_offset, section_end)
-  uint32_t reserved[4];        // must be 0
+  uint32_t magic;                ///< Must equal kAieSectionMagic.
+  uint16_t version_major;        ///< Must equal kAieSectionVersionMajor.
+  uint16_t version_minor;        ///< Minor version; additive-only.
+  uint32_t header_size;          ///< Offset from section base to the kernel table.
+  uint32_t kernel_count;         ///< Number of kernel table entries.
+  uint32_t kernel_entry_size;    ///< Stride in bytes between kernel entries.
+  uint32_t string_table_offset;  ///< Section-relative offset of the string table.
+  uint32_t string_table_size;    ///< Size of the string table in bytes.
+  uint32_t blob_pool_offset;     ///< Blob pool spans [blob_pool_offset, section_end).
+  uint32_t reserved[4];          ///< Reserved; must be 0.
 };
 
+/// @brief One kernel entry in the aie2/aie2p section's kernel table.
 struct aie_kernel_entry {
-  uint32_t name_offset;   // relative to string_table_offset; NUL-terminated
-  uint32_t insts_offset;  // section-relative; REQUIRED
-  uint32_t insts_size;    // REQUIRED, > 0
-  uint32_t pdi_offset;    // section-relative; 0 if no PDI
-  uint32_t pdi_size;      // 0 if no PDI
-  uint32_t kernarg_size;
-  uint32_t num_cols;
-  uint32_t reserved[4];   // must be 0
+  uint32_t name_offset;   ///< Kernel name offset, relative to string_table_offset; NUL-terminated.
+  uint32_t insts_offset;  ///< Section-relative offset of the instruction blob; required.
+  uint32_t insts_size;    ///< Instruction blob size in bytes; required, > 0.
+  uint32_t pdi_offset;    ///< Section-relative offset of the PDI blob; 0 if no PDI.
+  uint32_t pdi_size;      ///< PDI blob size in bytes; 0 if no PDI.
+  uint32_t kernarg_size;  ///< Kernel argument buffer size in bytes.
+  uint32_t num_cols;      ///< Number of NPU columns the kernel uses.
+  uint32_t reserved[4];   ///< Reserved; must be 0.
 };
 
-// Internal, host-side kernel descriptor. The kernel_object handle is a pointer
-// to one of these. Owned by the loaded code object; freed at executable destroy.
+/// @brief Internal, host-side kernel descriptor.
+///
+/// The @c kernel_object handle returned by HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
+/// is a pointer to one of these. Owned by the loaded code object and freed at
+/// executable destroy.
 struct AieKernelDescriptor {
-  uint32_t version;         // reserved for a future on-device format; set to 1
-  uint32_t reserved0;       // must be 0
-  uint64_t insts_dev_addr;  // device address of instruction blob (an XDNA BO)
-  uint64_t insts_size;
-  uint64_t pdi_dev_addr;    // device address of PDI blob (an XDNA BO), or 0
-  uint64_t pdi_size;        // 0 if no PDI
-  uint32_t kernarg_size;
-  uint32_t num_cols;
+  uint32_t version;         ///< Descriptor version; set to kAieKernelDescriptorVersion.
+  uint32_t reserved0;       ///< Reserved; must be 0.
+  uint64_t insts_dev_addr;  ///< Device address of the instruction blob (an XDNA BO).
+  uint64_t insts_size;      ///< Instruction blob size in bytes.
+  uint64_t pdi_dev_addr;    ///< Device address of the PDI blob (an XDNA BO), or 0.
+  uint64_t pdi_size;        ///< PDI blob size in bytes; 0 if no PDI.
+  uint32_t kernarg_size;    ///< Kernel argument buffer size in bytes.
+  uint32_t num_cols;        ///< Number of NPU columns the kernel uses.
 };
 
+/// @brief Current AieKernelDescriptor::version value.
 constexpr uint32_t kAieKernelDescriptorVersion = 1;
 
 }  // namespace AMD
