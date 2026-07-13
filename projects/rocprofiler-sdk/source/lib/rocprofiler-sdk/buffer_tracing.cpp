@@ -111,6 +111,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_PAGE_MIGRATE)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_PAGE_FAULT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_QUEUE)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_GRAPH)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -340,6 +341,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
                 operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIP_GRAPH:
+        {
+            // HIP_GRAPH has no sub-operations
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT:
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
@@ -499,6 +505,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API:
         {
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_GRAPH:
+        {
+            // HIP_GRAPH has no sub-operations
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:

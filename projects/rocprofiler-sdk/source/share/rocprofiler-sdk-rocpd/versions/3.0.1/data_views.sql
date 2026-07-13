@@ -302,8 +302,6 @@ SELECT
     K.dispatch_id,
     K.stream_id,
     K.queue_id,
-    K.graph_exec_id,
-    K.graph_node_id,
     Q.name AS queue,
     ST.name AS stream,
     K.start,
@@ -489,8 +487,6 @@ SELECT
     R.string AS region_name,
     M.stream_id,
     M.queue_id,
-    M.graph_exec_id,
-    M.graph_node_id,
     ST.name AS stream_name,
     Q.name AS queue_name,
     M.size,
@@ -529,46 +525,6 @@ FROM
     AND P.guid = M.guid
     INNER JOIN `rocpd_info_thread` T ON T.id = M.tid
     AND T.guid = M.guid;
-
---
--- HIP graph launch summary records
-CREATE VIEW IF NOT EXISTS
-    `graph_launches` AS
-SELECT
-    G.id,
-    G.guid,
-    G.nid,
-    P.pid,
-    T.tid,
-    G.agent_id,
-    A.absolute_index AS agent_abs_index,
-    A.logical_index AS agent_log_index,
-    A.type_index AS agent_type_index,
-    A.type AS agent_type,
-    G.queue_id,
-    Q.name AS queue,
-    'hipGraphLaunch' AS name,
-    G.start,
-    G.end,
-    (G.end - G.start) AS duration,
-    G.graph_exec_id,
-    G.kernel_dispatch_count,
-    G.event_id,
-    E.stack_id,
-    E.parent_stack_id,
-    E.correlation_id AS corr_id
-FROM
-    `rocpd_graph_launch` G
-    LEFT JOIN `rocpd_info_agent` A ON A.id = G.agent_id
-    AND A.guid = G.guid
-    LEFT JOIN `rocpd_info_queue` Q ON Q.id = G.queue_id
-    AND Q.guid = G.guid
-    INNER JOIN `rocpd_event` E ON E.id = G.event_id
-    AND E.guid = G.guid
-    INNER JOIN `rocpd_info_process` P ON P.id = G.pid
-    AND P.guid = G.guid
-    INNER JOIN `rocpd_info_thread` T ON T.id = G.tid
-    AND T.guid = G.guid;
 
 --
 --
