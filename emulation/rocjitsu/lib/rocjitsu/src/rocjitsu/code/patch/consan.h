@@ -291,6 +291,11 @@ struct ConSanLdsSite {
   std::optional<uint16_t> dst_vgpr;
   std::optional<uint16_t> addr_vgpr;
   std::optional<uint16_t> data_vgpr;
+  std::optional<uint16_t> secondary_data_vgpr;
+  std::optional<uint32_t> raw_offset0;
+  std::optional<uint32_t> raw_offset1;
+  std::optional<uint32_t> raw_op;
+  std::optional<bool> raw_gds;
   std::string mnemonic;
 };
 
@@ -362,6 +367,11 @@ enum class ConSanMoiCandidateSource : uint8_t {
   FlatMaybeGroup,
 };
 
+struct ConSanLdsStaticRange {
+  uint32_t byte_offset = 0;
+  uint32_t byte_count = 0;
+};
+
 struct ConSanMoiCandidate {
   std::string container_name;
   bool in_kernel = true;
@@ -375,6 +385,12 @@ struct ConSanMoiCandidate {
   std::optional<uint16_t> dst_vgpr;
   std::optional<uint16_t> addr_vgpr;
   std::optional<uint16_t> data_vgpr;
+  std::optional<uint16_t> secondary_data_vgpr;
+  std::optional<uint32_t> raw_offset0;
+  std::optional<uint32_t> raw_offset1;
+  std::optional<uint32_t> raw_op;
+  std::optional<bool> raw_gds;
+  std::vector<ConSanLdsStaticRange> native_static_ranges;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   std::optional<uint32_t> raw_saddr;
   std::optional<uint32_t> raw_vaddr;

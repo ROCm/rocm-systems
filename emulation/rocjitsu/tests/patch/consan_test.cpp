@@ -2708,6 +2708,116 @@ TEST(ConSanMoi, Gfx950BasicFixtureInventoriesNativeInstructionFamilies) {
   EXPECT_EQ(kernel.atomic_sites.size(), 1u);
 }
 
+TEST(ConSanMoi, Gfx950ExtendedLdsFormsNormalizeRegistersAndScaledRanges) {
+  struct Expected {
+    const char *mnemonic;
+    ConSanLdsAccessKind kind;
+    uint32_t width_bits;
+    uint16_t addr;
+    std::optional<uint16_t> dst;
+    std::optional<uint16_t> data;
+    std::optional<uint16_t> secondary_data;
+    std::vector<ConSanLdsStaticRange> ranges;
+  };
+  const std::array<uint32_t, 37> text_words = {
+      0xD83C0003u,
+      0x00000A04u, // ds_write_b8 v4, v10 offset:3
+      0xD83E0005u,
+      0x00000B05u, // ds_write_b16 v5, v11 offset:5
+      0xD8AC0007u,
+      0x14000006u, // ds_read_u8_d16 v20, v6 offset:7
+      0xD8B60009u,
+      0x15000007u, // ds_read_u16_d16_hi v21, v7 offset:9
+      0xD89A0010u,
+      0x00000C08u, // ds_write_b64 v8, v[12:13] offset:16
+      0xD8EC0018u,
+      0x16000009u, // ds_read_b64 v[22:23], v9 offset:24
+      0xD9BC0020u,
+      0x00000E0Au, // ds_write_b96 v10, v[14:16] offset:32
+      0xD9FC0028u,
+      0x1800000Bu, // ds_read_b96 v[24:26], v11 offset:40
+      0xD9BE0030u,
+      0x0000100Cu, // ds_write_b128 v12, v[16:19] offset:48
+      0xD9FE0040u,
+      0x1C00000Du, // ds_read_b128 v[28:31], v13 offset:64
+      0xD81C0703u,
+      0x0015140Eu, // ds_write2_b32 v14, v20, v21 offset0:3 offset1:7
+      0xD86E0904u,
+      0x2000000Fu, // ds_read2_b32 v[32:33], v15 offset0:4 offset1:9
+      0xD89C0502u,
+      0x00181610u, // ds_write2_b64 v16, v[22:23], v[24:25]
+      0xD8EE0603u,
+      0x22000011u, // ds_read2_b64 v[34:37], v17
+      0xD81E0301u,
+      0x001B1A12u, // ds_write2st64_b32 v18, v26, v27
+      0xD8700402u,
+      0x26000013u, // ds_read2st64_b32 v[38:39], v19
+      0xD89E0201u,
+      0x001E1C14u, // ds_write2st64_b64 v20, v[28:29], v[30:31]
+      0xD8F00302u,
+      0x28000015u, // ds_read2st64_b64 v[40:43], v21
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<Expected> expected = {
+      {"ds_write_b8", ConSanLdsAccessKind::Write, 8, 4, {}, 10, {}, {{3, 1}}},
+      {"ds_write_b16", ConSanLdsAccessKind::Write, 16, 5, {}, 11, {}, {{5, 2}}},
+      {"ds_read_u8_d16", ConSanLdsAccessKind::Read, 8, 6, 20, {}, {}, {{7, 1}}},
+      {"ds_read_u16_d16_hi", ConSanLdsAccessKind::Read, 16, 7, 21, {}, {}, {{9, 2}}},
+      {"ds_write_b64", ConSanLdsAccessKind::Write, 64, 8, {}, 12, {}, {{16, 8}}},
+      {"ds_read_b64", ConSanLdsAccessKind::Read, 64, 9, 22, {}, {}, {{24, 8}}},
+      {"ds_write_b96", ConSanLdsAccessKind::Write, 96, 10, {}, 14, {}, {{32, 12}}},
+      {"ds_read_b96", ConSanLdsAccessKind::Read, 96, 11, 24, {}, {}, {{40, 12}}},
+      {"ds_write_b128", ConSanLdsAccessKind::Write, 128, 12, {}, 16, {}, {{48, 16}}},
+      {"ds_read_b128", ConSanLdsAccessKind::Read, 128, 13, 28, {}, {}, {{64, 16}}},
+      {"ds_write2_b32", ConSanLdsAccessKind::Write, 32, 14, {}, 20, 21, {{12, 4}, {28, 4}}},
+      {"ds_read2_b32", ConSanLdsAccessKind::Read, 32, 15, 32, {}, {}, {{16, 4}, {36, 4}}},
+      {"ds_write2_b64", ConSanLdsAccessKind::Write, 64, 16, {}, 22, 24, {{16, 8}, {40, 8}}},
+      {"ds_read2_b64", ConSanLdsAccessKind::Read, 64, 17, 34, {}, {}, {{24, 8}, {48, 8}}},
+      {"ds_write2st64_b32", ConSanLdsAccessKind::Write, 32, 18, {}, 26, 27, {{256, 4}, {768, 4}}},
+      {"ds_read2st64_b32", ConSanLdsAccessKind::Read, 32, 19, 38, {}, {}, {{512, 4}, {1024, 4}}},
+      {"ds_write2st64_b64", ConSanLdsAccessKind::Write, 64, 20, {}, 28, 30, {{512, 8}, {1024, 8}}},
+      {"ds_read2st64_b64", ConSanLdsAccessKind::Read, 64, 21, 40, {}, {}, {{1024, 8}, {1536, 8}}},
+  };
+
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_extended_lds", /*vgpr_granulated=*/7, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::RecordReplay;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.moi_candidates.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    SCOPED_TRACE(expected[i].mnemonic);
+    const ConSanMoiCandidate &candidate = result.moi_candidates[i];
+    EXPECT_EQ(candidate.mnemonic, expected[i].mnemonic);
+    EXPECT_EQ(candidate.kind, expected[i].kind);
+    EXPECT_EQ(candidate.width_bits, expected[i].width_bits);
+    EXPECT_EQ(candidate.addr_vgpr, expected[i].addr);
+    EXPECT_EQ(candidate.dst_vgpr, expected[i].dst);
+    EXPECT_EQ(candidate.data_vgpr, expected[i].data);
+    EXPECT_EQ(candidate.secondary_data_vgpr, expected[i].secondary_data);
+    ASSERT_TRUE(candidate.raw_gds);
+    EXPECT_FALSE(*candidate.raw_gds);
+    ASSERT_EQ(candidate.native_static_ranges.size(), expected[i].ranges.size());
+    for (size_t range_index = 0; range_index < expected[i].ranges.size(); ++range_index) {
+      const ConSanLdsStaticRange &actual = candidate.native_static_ranges[range_index];
+      const ConSanLdsStaticRange &wanted = expected[i].ranges[range_index];
+      EXPECT_EQ(actual.byte_offset, wanted.byte_offset);
+      EXPECT_EQ(actual.byte_count, wanted.byte_count);
+      const ConSanMoiLdsCellRange actual_cells =
+          consan_moi_lds_cell_range_for_bytes(actual.byte_offset, actual.byte_count);
+      const ConSanMoiLdsCellRange expected_cells =
+          consan_moi_lds_cell_range_for_bytes(wanted.byte_offset, wanted.byte_count);
+      EXPECT_EQ(actual_cells.start_cell, expected_cells.start_cell);
+      EXPECT_EQ(actual_cells.cell_count, expected_cells.cell_count);
+    }
+  }
+}
+
 TEST(ConSanMoi, Gfx950InventoryOnlySampledCapabilityHasTypedSkip) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,

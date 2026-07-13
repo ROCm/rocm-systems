@@ -173,6 +173,12 @@ Full gfx950 support means:
   group; all six gfx950 MOI hardware tests pass after reboot. TTMP sources read
   as zero in ordinary compute and the ISA marks physical `HW_ID` as
   migration-unsafe, so the optional HW_ID experiment is closed as rejected.
+- 2026-07-13: `D1B` is `DONE`. CDNA4 candidates now normalize byte/short and
+  D16 accesses, B64/B96/B128 accesses, READ2/WRITE2 pairs, and ST64 pairs into
+  explicit static byte ranges. A retained LLVM-matched 18-instruction gfx950
+  fixture verifies source/destination registers, second write operands,
+  immediate fields, 4/8/256/512-byte offset scaling, byte counts, and rounded
+  shadow-cell ranges. The combined 181-test ConSan/MOI suite passes.
 
 ## DAG Overview
 
@@ -288,7 +294,7 @@ flowchart LR
 flowchart LR
   F0{"F0: Foundation Ready"}:::target
   D1A["D1A: Basic LDS Decode"]:::done
-  D1B["D1B: Extended LDS Forms"]:::todo
+  D1B["D1B: Extended LDS Forms"]:::done
   D1C["D1C: Unsupported DS Inventory"]:::todo
   P1A["P1A: Scalar Control Primitives"]:::done
   P1B["P1B: Vector And Address Primitives"]:::done
@@ -842,7 +848,7 @@ Done criteria:
 - B32 fixture tests cover reads and writes and do not classify unrelated DS
   operations as ordinary accesses.
 
-### D1B: CDNA4 Extended LDS Forms - TODO
+### D1B: CDNA4 Extended LDS Forms - DONE
 
 Goal: add bounded multi-width and two-address coverage after D1A is stable.
 
@@ -851,6 +857,14 @@ Work:
 - Decode B64/B96/B128, byte/short, d16, READ2/WRITE2, and ST64 forms selected
   for initial parity.
 - Apply the ISA-defined offset scaling and alignment rules.
+
+Result:
+
+- Native DS fields are retained in the semantic site/candidate model, and
+  every admitted form carries normalized one- or two-range byte geometry.
+- An 18-instruction gfx950 fixture uses LLVM-matched encodings to cover the
+  selected width, D16, two-address, and ST64 families, including distinct
+  WRITE2 data operands and exact rounded shadow cells.
 
 Done criteria:
 

@@ -682,6 +682,19 @@ namespace kd = rocr::llvm::amdhsa;
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic);
 
+[[nodiscard]] std::vector<ConSanLdsStaticRange>
+normalized_native_lds_ranges(const ConSanLdsSite &site) {
+  if (site.width_bits == 0 || site.width_bits % 8u != 0 || !site.raw_offset0 || !site.raw_offset1)
+    return {};
+  const uint32_t byte_count = site.width_bits / 8u;
+  if (is_single_range_native_lds_mnemonic(site.mnemonic))
+    return {{*site.raw_offset0 | (*site.raw_offset1 << 8u), byte_count}};
+  const std::optional<uint32_t> scale = two_address_native_lds_offset_scale(site.mnemonic);
+  if (!scale)
+    return {};
+  return {{*site.raw_offset0 * *scale, byte_count}, {*site.raw_offset1 * *scale, byte_count}};
+}
+
 [[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)
     return false;
@@ -792,6 +805,12 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.dst_vgpr = site.dst_vgpr;
   candidate.addr_vgpr = site.addr_vgpr;
   candidate.data_vgpr = site.data_vgpr;
+  candidate.secondary_data_vgpr = site.secondary_data_vgpr;
+  candidate.raw_offset0 = site.raw_offset0;
+  candidate.raw_offset1 = site.raw_offset1;
+  candidate.raw_op = site.raw_op;
+  candidate.raw_gds = site.raw_gds;
+  candidate.native_static_ranges = normalized_native_lds_ranges(site);
   candidate.kernel_descriptor_file_offset = descriptor_file_offset;
   candidate.mnemonic = site.mnemonic;
   return candidate;
@@ -904,16 +923,22 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
 }
 
 [[nodiscard]] bool is_single_range_native_lds_mnemonic(std::string_view mnemonic) {
-  if (equals_any(mnemonic,
-                 {"ds_load_i8", "ds_load_u8", "ds_load_i16", "ds_load_u16", "ds_load_u8_d16",
-                  "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
-                  "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
-                  "ds_store_b16_d16_hi"}))
+  if (equals_any(mnemonic, {"ds_load_i8",         "ds_load_u8",          "ds_load_i16",
+                            "ds_load_u16",        "ds_load_u8_d16",      "ds_load_u8_d16_hi",
+                            "ds_load_i8_d16",     "ds_load_i8_d16_hi",   "ds_load_u16_d16",
+                            "ds_load_u16_d16_hi", "ds_store_b8",         "ds_store_b16",
+                            "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_read_i8",
+                            "ds_read_u8",         "ds_read_i16",         "ds_read_u16",
+                            "ds_read_u8_d16",     "ds_read_u8_d16_hi",   "ds_read_i8_d16",
+                            "ds_read_i8_d16_hi",  "ds_read_u16_d16",     "ds_read_u16_d16_hi",
+                            "ds_write_b8",        "ds_write_b16",        "ds_write_b8_d16_hi",
+                            "ds_write_b16_d16_hi"}))
     return true;
 
-  return equals_any(mnemonic, {"ds_load_b32", "ds_load_b64", "ds_load_b128", "ds_read_b32",
-                               "ds_read_b64", "ds_read_b128", "ds_store_b32", "ds_store_b64",
-                               "ds_store_b128", "ds_write_b32", "ds_write_b64", "ds_write_b128"});
+  return equals_any(mnemonic, {"ds_load_b32", "ds_load_b64", "ds_load_b96", "ds_load_b128",
+                               "ds_read_b32", "ds_read_b64", "ds_read_b96", "ds_read_b128",
+                               "ds_store_b32", "ds_store_b64", "ds_store_b96", "ds_store_b128",
+                               "ds_write_b32", "ds_write_b64", "ds_write_b96", "ds_write_b128"});
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -926,35 +951,31 @@ two_address_native_lds_offset_scale(std::string_view mnemonic) {
     return 256u;
   if (mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64")
     return 512u;
+  if (mnemonic == "ds_read2_b32" || mnemonic == "ds_write2_b32")
+    return 4u;
+  if (mnemonic == "ds_read2_b64" || mnemonic == "ds_write2_b64")
+    return 8u;
+  if (mnemonic == "ds_read2st64_b32" || mnemonic == "ds_write2st64_b32")
+    return 256u;
+  if (mnemonic == "ds_read2st64_b64" || mnemonic == "ds_write2st64_b64")
+    return 512u;
   return std::nullopt;
 }
 
 [[nodiscard]] std::optional<std::vector<ConSanMoiAccessRange>>
-candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate) {
+candidate_access_ranges(const ConSanMoiCandidate &candidate) {
   const std::optional<uint32_t> byte_count = byte_count_for_candidate(candidate);
   if (!byte_count)
     return std::nullopt;
 
   if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-    const std::optional<uint32_t> word0 = read_u32(bytes, candidate.file_offset);
-    if (!word0)
+    if (candidate.native_static_ranges.empty())
       return std::nullopt;
-    if (is_single_range_native_lds_mnemonic(candidate.mnemonic)) {
-      // RDNA DS encodes the normal single-address immediate byte offset as
-      // offset0 | (offset1 << 8).
-      return std::vector<ConSanMoiAccessRange>{{*word0 & 0xffffu, *byte_count}};
-    }
-
-    const std::optional<uint32_t> two_address_scale =
-        two_address_native_lds_offset_scale(candidate.mnemonic);
-    if (!two_address_scale)
-      return std::nullopt;
-    const uint32_t offset0 = *word0 & 0xffu;
-    const uint32_t offset1 = (*word0 >> 8u) & 0xffu;
-    return std::vector<ConSanMoiAccessRange>{
-        {offset0 * *two_address_scale, *byte_count},
-        {offset1 * *two_address_scale, *byte_count},
-    };
+    std::vector<ConSanMoiAccessRange> ranges;
+    ranges.reserve(candidate.native_static_ranges.size());
+    for (const ConSanLdsStaticRange &range : candidate.native_static_ranges)
+      ranges.push_back({range.byte_offset, range.byte_count});
+    return ranges;
   }
 
   if (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
@@ -965,10 +986,10 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
 }
 
 [[nodiscard]] bool is_first_light_native_lds_candidate(const ConSanMoiCandidate &candidate,
-                                                       std::span<const uint8_t> bytes) {
+                                                       std::span<const uint8_t>) {
   if (candidate.source != ConSanMoiCandidateSource::NativeLds)
     return false;
-  return candidate_access_ranges(bytes, candidate).has_value();
+  return candidate_access_ranges(candidate).has_value();
 }
 
 [[nodiscard]] bool is_first_light_flat_candidate(const ConSanMoiCandidate &candidate) {
@@ -3088,7 +3109,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     return std::nullopt;
   }
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(candidate);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
@@ -3463,8 +3484,7 @@ append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptio
                                        consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
 }
 
-[[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate,
-                                                     std::span<const uint8_t> bytes) {
+[[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate) {
   const bool native_lds = candidate.source == ConSanMoiCandidateSource::NativeLds;
   const bool normalized_flat = (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                 candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
@@ -3476,7 +3496,7 @@ append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptio
   if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
     return false;
   const std::optional<std::vector<ConSanMoiAccessRange>> ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(candidate);
   if (!ranges || ranges->empty())
     return false;
   for (const ConSanMoiAccessRange &range : *ranges) {
@@ -3489,10 +3509,10 @@ append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptio
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const uint8_t> bytes) {
+find_inline_shadow_access_candidates(const ConSanResult &result) {
   std::vector<const ConSanMoiCandidate *> candidates;
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    if (is_inline_shadow_access_candidate(candidate, bytes))
+    if (is_inline_shadow_access_candidate(candidate))
       candidates.push_back(&candidate);
   }
   return candidates;
@@ -3749,7 +3769,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     return std::nullopt;
 
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate);
+      candidate_access_ranges(candidate);
   if (!access_ranges || access_ranges->empty()) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires a supported LDS access range");
     return std::nullopt;
@@ -3904,8 +3924,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates =
-      find_inline_shadow_access_candidates(result, bytes);
+  std::vector<const ConSanMoiCandidate *> candidates = find_inline_shadow_access_candidates(result);
   apply_test_kernel_filter(candidates, options);
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -4961,7 +4980,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-        candidate_access_ranges(bytes, candidate);
+        candidate_access_ranges(candidate);
     if (!access_ranges || access_ranges->empty())
       continue;
     const uint32_t candidate_record_count = static_cast<uint32_t>(access_ranges->size());

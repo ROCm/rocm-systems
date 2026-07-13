@@ -12,6 +12,7 @@
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
@@ -464,12 +465,12 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
   if (mnemonic.find("96") != std::string_view::npos ||
       mnemonic.find("x3") != std::string_view::npos)
     return 96;
-  if (mnemonic.find("64") != std::string_view::npos ||
-      mnemonic.find("x2") != std::string_view::npos)
-    return 64;
   if (mnemonic.find("32") != std::string_view::npos ||
       mnemonic.find("dword") != std::string_view::npos)
     return 32;
+  if (mnemonic.find("64") != std::string_view::npos ||
+      mnemonic.find("x2") != std::string_view::npos)
+    return 64;
   if (mnemonic.find("u8") != std::string_view::npos ||
       mnemonic.find("i8") != std::string_view::npos ||
       mnemonic.find("b8") != std::string_view::npos)
@@ -1039,7 +1040,8 @@ void classify_instruction(const Instruction &inst, ConSanKernelStats &stats) {
 }
 
 void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
-                     uint64_t instruction_text_offset) {
+                     uint64_t instruction_text_offset, rj_code_arch_t arch,
+                     std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("ds_"))
     return;
@@ -1057,10 +1059,27 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
   } else if (site.kind == ConSanLdsAccessKind::Write) {
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
     site.data_vgpr = vgpr_index(inst.src_operand(1));
+    site.secondary_data_vgpr = vgpr_index(inst.src_operand(2));
   } else if (site.kind == ConSanLdsAccessKind::Atomic) {
     site.dst_vgpr = vgpr_index(inst.dst_operand(0));
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
     site.data_vgpr = vgpr_index(inst.src_operand(1));
+  }
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      instruction_bytes.size() >= sizeof(cdna4::DsMachineInst)) {
+    cdna4::DsMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    site.raw_offset0 = static_cast<uint32_t>(raw.offset0);
+    site.raw_offset1 = static_cast<uint32_t>(raw.offset1);
+    site.raw_op = static_cast<uint32_t>(raw.op);
+    site.raw_gds = raw.gds != 0;
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+             instruction_bytes.size() >= sizeof(rdna4::VdsMachineInst)) {
+    rdna4::VdsMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    site.raw_offset0 = static_cast<uint32_t>(raw.offset0);
+    site.raw_offset1 = static_cast<uint32_t>(raw.offset1);
+    site.raw_op = static_cast<uint32_t>(raw.op);
   }
   site.mnemonic = std::string(mnemonic);
   kernel.lds_sites.push_back(std::move(site));
@@ -1260,7 +1279,8 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
 
     ++kernel.stats.instruction_count;
     classify_instruction(*inst, kernel.stats);
-    record_lds_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
+    record_lds_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
+                    text.subspan(offset, static_cast<size_t>(inst_size)));
     record_barrier_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     record_fence_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
     record_flat_site(*inst, flat_pointer_tracker, kernel,
