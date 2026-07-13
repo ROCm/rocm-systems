@@ -50,6 +50,18 @@ in the following table.
         | ``1``: Enabled.
         | ``-2``: Auto-detect; enable when the platform supports VMM.
 
+    * - | ``NCCL_MIN_CTAS``
+        | Minimum number of CTAs (channels) used for a collective. Overrides
+          the ``minCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
+
+    * - | ``NCCL_MAX_CTAS``
+        | Maximum number of CTAs (channels) used for a collective. Overrides
+          the ``maxCTAs`` field of ``ncclConfig_t``.
+      - | Positive integer (values ``<= 0`` are ignored).
+        | Default: unset (uses the RCCL default).
+
 Logging and debugging
 =====================
 

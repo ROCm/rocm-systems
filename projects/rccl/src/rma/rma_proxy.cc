@@ -448,8 +448,10 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   struct ncclRmaProxyState *rmaProxyState = &comm->rmaState.rmaProxyState;
   rmaProxyState->comm = comm;
   if (rmaProxyState->ncclGin == NULL) {
-    WARN("GIN not supported.");
-    return ncclInvalidUsage;
+    // Device-initiated GIN backends (e.g. rocshmem GDA) don't register an
+    // RMA plugin — the GPU posts WQEs directly without host proxy involvement.
+    // Silently skip; ginCommCount stays 0 so subsequent register calls are no-ops.
+    return ncclSuccess;
   }
   if (ncclParamGinEnable() == 0) {
     WARN("GIN is disabled.");
