@@ -77,9 +77,7 @@ AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm)
   populate_ifoe_fabric_bdf_list();
 }
 
-// Open the IFoE/UALoE generic-netlink session for this device. Called lazily
-// (see get_ualoe_handle) so a wedged IFoE driver cannot hang amdsmi_init() or
-// any query that does not need fabric data.
+// Opens the IFoE/UALoE genl session; deferred (see get_ualoe_handle).
 void AMDSmiGPUDevice::open_ualoe_session() {
   if (has_ifoe_related_bdf() && device_has_ualink()) {
     auto ifoe_bdf_str = get_ifoe_bdf_string();
