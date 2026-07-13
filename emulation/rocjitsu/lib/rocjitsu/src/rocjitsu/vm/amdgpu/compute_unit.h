@@ -225,6 +225,7 @@ public:
 
   /// @brief Return the Local Data Share (LDS).
   Lds &lds() { return lds_; }
+  const Lds &lds() const { return lds_; }
 
   /// @brief Clear LDS contents (zero-fill).
   void clear_lds() { lds_.clear(); }
