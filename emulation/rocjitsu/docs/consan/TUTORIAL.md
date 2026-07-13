@@ -98,7 +98,15 @@ On gfx950, ConSan preserves full wave64 EXEC/VCC, uses CDNA4-specific LDS,
 general-FLAT, and FLAT_SCRATCH waits, and refuses ordinary VGPR windows that
 would cross a nonzero descriptor `ACCUM_OFFSET`. Kernarg-preload kernels have
 two hardware entry paths 256 bytes apart; ConSan's identity prologues preserve
-both. These are automatic architecture contracts, not user configuration.
+both. For the default `workitem_id` owner source, the normal five-VGPR identity
+representation switches to a fresh five-SGPR owner/epoch/X/Y/Z window when
+`ACCUM_OFFSET` prevents safe ordinary VGPR placement; if none is available,
+instrumentation fails visibly. Private owner/epoch state is selected separately
+when forced or when preserving a non-workitem owner source, not after
+five-SGPR exhaustion. If the input descriptor omits any workgroup coordinate,
+entry instrumentation supplies and snapshots all X/Y/Z values while restoring
+the guest entry ABI. These are automatic architecture contracts, not user
+configuration.
 
 ## Non-Vacuity Guards
 
@@ -312,9 +320,28 @@ export RJ_CONSAN_MOI_SAMPLED_CHECK=1
 export RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1
 ```
 
-The checker compares each sampled site with the preceding site slot and logs
-`sampled_immediate_conflicts` as soon as the GPU increments the shared counter.
-It is deliberately lower fidelity than host replay.
+The checker compares each sampled site with the preceding site slot in the same
+workgroup partition and logs `sampled_immediate_conflicts` as soon as the GPU
+increments the shared counter. It is deliberately lower fidelity than host
+replay.
+
+To cover a bounded `2 x 2 x 2` workgroup grid without cross-workgroup slot
+aliasing:
+
+```sh
+export RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2
+export RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2
+export RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2
+export RJ_CONSAN_MOI_FORBID_OVERFLOW=1
+```
+
+This creates eight mixed-radix partitions. With four patched sites, the sampled
+report needs at least 32 entries for every partition to have all four site
+slots. The dispatch must keep X/Y/Z in `0..1`; otherwise the access is skipped
+and `partition_overflow` makes the overflow guard fail. Auto buffers initialize
+the partition metadata. For a caller-owned buffer, initialize ABI-v2
+`sampled_slots_per_partition` and set
+`RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION` to the same derived value.
 
 Interpretation:
 
@@ -329,7 +356,8 @@ Inline shadow is the exact GPU-side MOI engine. It performs direct exact-shadow
 updates and emits compact diagnostics for its supported instruction forms;
 unsupported forms are counted and skipped explicitly.
 
-For focused IREE patchability smoke with hardware-ID owner initialization:
+For focused RDNA4 IREE patchability smoke with hardware-ID owner
+initialization:
 
 ```sh
 export RJ_CONSAN_FLAVOR=moi
@@ -344,6 +372,10 @@ ctest --test-dir "$IREE_BUILD_DIR" \
   --parallel 8 \
   --output-on-failure
 ```
+
+`hw_id` is an RDNA4-only source. On gfx950, omit that assignment and use the
+default target-native logical owner; CDNA4 does not expose the RDNA4 `HW_ID1`
+path used here.
 
 Observed evidence in the current workspace:
 
@@ -414,8 +446,12 @@ Logs show `patches=0 modified=false`:
 
 MOI inline-shadow reports a resource-plan skip:
 
-- Direct-kernel scratch, owner, epoch, and scalar choices are automatic.
-- A full SGPR file, dynamic private stack, or unresolved shared helper is
+- Direct-kernel and reachable shared-helper scratch, owner, epoch, workgroup,
+  and scalar choices are automatic across all three MOI access engines.
+- On gfx950's automatic scalar-identity path, patch-budget ranking prefers an
+  explicit/dead site, then descriptor growth, then a spill; forced-spill tests
+  retain program order.
+- A full SGPR file, dynamic private stack, or unresolved indirect owner is
   rejected explicitly rather than instrumented with an unsafe register.
 - `SPILLING.md` describes the supported resource and failure boundary.
 

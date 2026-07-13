@@ -29,7 +29,7 @@ register allocation, private-layout, ownership, and spill transaction.
 | MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, admitted group-flat forms, barriers, and one-slot atomic ordering controls. | Broaden proven instruction/order coverage while retaining exact supported-form semantics. |
 | MOI `sampled` | Runtime-qualified sampled entry publication, host-side conflict scan, and opt-in immediate check. | Improve sampling fidelity and overhead measurement without presenting clean samples as proof of race freedom. |
 | MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration; tier0 supplies guarded semantic evidence. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
-| Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use target-native gfx1201 or gfx950 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or private persistent state when required by CDNA4 register geometry. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
+| Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use target-native gfx1201 or gfx950 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. gfx950's default `workitem_id` identity normally uses five persistent VGPRs; an `ACCUM_OFFSET` overlap selects a fresh five-SGPR wave-state window. If no such scalar window exists, that default path fails visibly rather than silently changing owner semantics. Private owner/epoch state is selected separately when forced or when preserving a non-workitem owner source. Scalar paths preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
 | Diagnostics | Bounded inline and sampled diagnostics plus resource, overflow, and unsupported-site summaries; compact shadow words limit prior-lane detail. | Preserve bounded output while improving precision and presentation. |
 | Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with target-specific RDNA4 and CDNA4 group-flat address contracts. CDNA4 emission is limited to strongly classified generic-segment, zero-offset dword/dwordx2/dwordx4 forms. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
 
@@ -134,9 +134,18 @@ The implementation boundary is:
   Kunwar Grover's
   `origin/users/Groverkss/text-relocation-land` branch, whose reusable
   contribution is the initial VGPR spill-slot allocator.
+- **Patch-budget ranking.** When automatic scalar identity is active, all three
+  access engines stably rank candidates by the shared resource outcome:
+  explicit/dead, descriptor growth, spill, then unsupported. Equal outcomes
+  retain program order. `RJ_CONSAN_MAX_PATCHES` therefore selects the best
+  available sites without changing forced-spill semantics.
 - **Owner and epoch state.** `inline_shadow` automatically uses a persistent
-  descriptor-backed pair or derived-owner/private-epoch state. The packed
-  identity contract is intentionally bounded and architecture-sensitive.
+  descriptor-backed representation, scalar wave state when gfx950 ordinary
+  VGPR placement would cross `ACCUM_OFFSET`, or derived-owner/private-epoch
+  state when forced or when needed to preserve a non-workitem owner source.
+  Exhausting the default gfx950 five-SGPR path is an explicit failure, not a
+  private-state fallback. The packed identity contract is intentionally
+  bounded and architecture-sensitive.
 - **Report-buffer capacity.** MOI can use HSA-tool-owned auto report buffers,
   which is the right direction for applications such as IREE. The HSA hook
   defaults to 64 KiB for record/replay and sampled and 256 KiB for inline
@@ -334,9 +343,13 @@ restore-before-guest-use boundaries. No gfx12 `s_wait_loadcnt`,
 CDNA4 descriptor geometry has an additional ordinary-VGPR hazard:
 `COMPUTE_PGM_RSRC3.ACCUM_OFFSET` establishes the AccVGPR alias boundary.
 Fresh or persistent ordinary VGPR windows must not cross a nonzero boundary.
-When the automatic inline-shadow identity window would cross it, ConSan uses
-its private persistent-state representation instead. AccVGPR spilling itself
-is not implemented.
+For the default `workitem_id` owner source, when the normal five-VGPR identity
+window would cross it, ConSan uses a fresh five-SGPR wave-state window
+containing owner, epoch, and X/Y/Z workgroup coordinates. If no such window is
+available, instrumentation fails visibly. Private owner/epoch state is a
+distinct representation selected when forced or when preserving a
+non-workitem owner source; it is not a fallback after five-SGPR exhaustion.
+AccVGPR spilling itself is not implemented.
 
 Finally, an AMDHSA descriptor with kernarg preloading can expose two hardware
 entry paths exactly 256 bytes apart. Entry redirection preserves both paths:
@@ -678,6 +691,17 @@ Current implementation:
 - Patches selected access sites.
 - Writes compact 64-bit sampled watchpoint entries directly from DBI probes.
 - Uses one static sampled slot per patched site.
+- Partitions sampled storage by the bounded workgroup coordinate
+  `p = x + Ex * (y + Ey * z)`. Each partition owns
+  `floor(capacity / (Ex * Ey * Ez))` consecutive site slots, so distinct
+  in-range workgroups never alias.
+- The public `RJ_CONSAN_MOI_WORKGROUP_EXTENT_X/Y/Z` knobs default to `1`.
+  For `2,2,2`, partition indices are `0..7`; a non-vacuous run needs at least
+  eight report slots per patched site and must dispatch only coordinates in
+  that bounded cube. Auto buffers publish the derived slots-per-partition in
+  the report ABI. A caller-owned sampled buffer must initialize the same ABI-v2
+  header field and confirm it with
+  `RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION`.
 - Packs valid/consumed bits, access kind, owner, epoch, generation, and LDS
   cell range.
 - Uses generation zero in direct DBI mode.
@@ -692,11 +716,15 @@ Current implementation:
   Host replay ignores entries from older generations, scans the active entries
   at HSA-tool teardown, and reports sampled conflict counts.
 - With `RJ_CONSAN_MOI_SAMPLED_CHECK=1`, site `i` checks the immediately
-  preceding sampled slot before publishing. Matching valid generation, epoch,
-  owner inequality, conflicting access kinds, and exact cell range increment
-  the report header's sampled immediate-conflict counter on the GPU. The HSA
-  summary and diagnostic guards consume that counter without waiting for host
-  pairwise replay.
+  preceding site slot in the same workgroup partition before publishing.
+  Matching valid generation, epoch, owner inequality, conflicting access
+  kinds, and exact cell range increment the report header's sampled
+  immediate-conflict counter on the GPU. The HSA summary and diagnostic guards
+  consume that counter without waiting for host pairwise replay.
+- Bounds checks precede addressing. An X/Y/Z coordinate outside its configured
+  extent skips publication without aliasing another partition and increments
+  the typed partition-overflow counter. Host replay also refuses to compare
+  entries from different partitions.
 - Keeps host-side sampled publish/replay helpers as semantic references.
 
 Important current simplifications:
@@ -706,7 +734,6 @@ Important current simplifications:
 - The in-kernel checker compares one adjacent slot and exact ranges rather than
   scanning the table or testing all overlapping ranges. Its counter is an
   immediate signal, not a structured full diagnostic record.
-- There is no in-kernel sampled conflict checker.
 - Clean sampled output is inconclusive.
 - Owner/epoch values are masked to the prototype 10-bit fields before packing.
 
@@ -715,7 +742,8 @@ Intended role:
 - Provide a low-overhead mode that can be run more broadly than exact
   instrumentation.
 - Add runtime sampling policy and generation management.
-- Add in-kernel sampled conflict checks once the table policy is settled.
+- Broaden the current adjacent-slot in-kernel check only when a stronger table
+  policy has a measured benefit.
 - Continue documenting that sampled mode can miss races.
 
 ## Owner And Workgroup Identity
@@ -727,8 +755,12 @@ MOI separates:
 
 Current workgroup identity is stronger than current owner identity. Access and
 barrier probes record target-native 3D workgroup coordinates, so host replay
-avoids cross-workgroup comparisons. gfx950 snapshots its enabled X/Y/Z system
-SGPR payload at entry.
+avoids cross-workgroup comparisons. gfx950 entry instrumentation guarantees a
+stable X/Y/Z snapshot even when the original descriptor omitted one or all
+workgroup-ID inputs: it enables the missing entry ABI inputs, snapshots all
+three coordinates into the chosen persistent VGPR or five-SGPR representation,
+and restores the guest-visible entry SGPR layout before returning to original
+code. Kernarg-preload dual entries receive matching stubs.
 
 Current owner options:
 

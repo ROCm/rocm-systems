@@ -2,8 +2,10 @@
 
 ConSan is rocJITsu's DBI sanitizer work for AMD LDS/shared-memory race
 instrumentation. It intercepts GPU code-object loads through the HSA tools
-interface, inspects final native RDNA4 / `gfx1201` machine code, and loads
-patched replacement code objects when instrumentation is possible.
+interface, inspects final native RDNA4 / `gfx1201` or CDNA4 / `gfx950` machine
+code, and loads patched replacement code objects when instrumentation is
+possible. ConSan patches the code object for the GPU that will execute it; it
+does not translate between GPU architectures.
 
 The current public flavors are:
 
@@ -17,21 +19,23 @@ is the shortest useful path: redundant-access LDS/likely-group-flat checks,
 configurable delay, and trap or marker-buffer reporting.
 
 Use `moi` for structured memory-order instrumentation. MOI has
-`record_replay`, `inline_shadow`, and `sampled` engines. On gfx1201 their
-standard paths now allocate or preserve scratch registers, owner/epoch state,
-and scalar special state automatically; explicit register variables remain
-debug overrides. Per-engine report buffers are allocated automatically when
-needed. Startup identifies the frozen conservative profile as `standard-v1`;
-advanced dynamic-record, ordering, and immediate-sampled paths remain explicit
-extensions because they change patch composition and buffer layout.
+`record_replay`, `inline_shadow`, and `sampled` engines. On gfx1201 and gfx950,
+their standard paths allocate or preserve scratch registers, owner/epoch and
+3D workgroup identity, and scalar special state automatically; explicit
+register variables remain debug overrides. Per-engine report buffers are
+allocated automatically when needed. Startup identifies the frozen
+conservative profile as `standard-v1`; advanced dynamic-record and ordering
+paths remain explicit extensions because they change patch composition and
+buffer layout. Sampled immediate checking is also opt-in, but it is an
+implemented GPU-side adjacent-slot check rather than a future placeholder.
 
 ## Documents
 
 - [TUTORIAL.md](TUTORIAL.md): team-facing commands for SuperCollider and MOI.
 - [DESIGN.md](DESIGN.md): current architecture, implemented behavior, and
   explicit capability boundaries.
-- [SPILLING.md](SPILLING.md): the R1 register allocator, gfx1201 spill backend,
-  ownership rules, provenance, and validation boundary.
+- [SPILLING.md](SPILLING.md): the R1 register allocator, gfx1201 and gfx950
+  spill backends, ownership rules, provenance, and validation boundary.
 - [USAGE.md](USAGE.md): detailed environment-variable and test runbook.
 - [PLAN.md](PLAN.md): dependency DAG, completion evidence, and deferred
   multi-architecture branch.
@@ -94,11 +98,15 @@ MOI currently supports:
 - `sampled`: runtime-qualified sampled watchpoint publication, host-side
   conflict scanning, and opt-in immediate checking.
 
-The R1 resource path is complete for the current gfx1201 MOI probes: access,
+The R1 resource path covers the current gfx1201 and gfx950 MOI probes: access,
 barrier, and atomic sites share an owner-aware dead/fresh/spill planner, and
-ordinary runs do not select register numbers. The gfx1201 `standard-v1`
-profiles have passed the common 209-test broad IREE tier; remaining work is
-native-target breadth and explicitly documented precision/coverage extensions.
+ordinary runs do not select register numbers. On gfx950's automatic
+scalar-identity path, when a patch budget cannot cover every access site,
+record/replay, sampled, and inline-shadow use the same stable resource
+preference so a spill-free site is not hidden behind an earlier spill
+candidate. The gfx1201 `standard-v1` profiles have passed the common 209-test
+broad IREE tier; that historical count does not describe unfinished gfx950
+broad validation.
 
 ## Acceptance And Next Work
 
@@ -110,8 +118,8 @@ record or diagnostic guards documented in [TUTORIAL.md](TUTORIAL.md).
 
 These results establish guarded DBI execution and broad output compatibility,
 not universal opcode coverage or proof that a clean workload is race-free.
-The next major engineering branch is `A1`: native implementation and live-GPU
-qualification for `gfx942`, `gfx950`, and `gfx1250`. It is deferred while this
-workspace has only gfx1201 hardware. Narrow extensions such as more inline
-atomic forms remain capability improvements rather than hidden acceptance
+Native gfx950 implementation exists; its remaining work is broad qualification
+and documented precision/coverage extensions. Future native-target work still
+includes `gfx942` and `gfx1250`. Narrow extensions such as more inline atomic
+forms remain capability improvements rather than hidden acceptance
 requirements.
