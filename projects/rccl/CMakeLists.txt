@@ -106,7 +106,8 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
@@ -137,7 +138,7 @@ include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
-if(ENABLE_ROCSHMEM)
+if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
 endif()
 

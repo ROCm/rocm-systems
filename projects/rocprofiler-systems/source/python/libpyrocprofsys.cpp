@@ -117,7 +117,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! rocprofsys is already initialized");
             _is_initialized = true;
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+            rocprofsys_set_mpi(_get_use_mpi());
             rocprofsys_init("trace", false, _v.c_str());
         },
         "Initialize rocprofsys");
@@ -130,7 +130,7 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
             _is_initialized = true;
             rocprofsys_set_instrumented(
                 static_cast<int>(rocprofsys::dl::InstrumentMode::PythonProfile));
-            rocprofsys_set_mpi(_get_use_mpi(), false);
+            rocprofsys_set_mpi(_get_use_mpi());
             std::string _cmd      = {};
             std::string _cmd_line = {};
             for(auto&& itr : _v)

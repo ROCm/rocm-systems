@@ -26,7 +26,7 @@ void L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid) {
     uint64_t evicted_line_addr =
         (evicted.tag << (LINE_SIZE_BITS + set_bits)) |
         (static_cast<uint64_t>(CacheStore::set_index(addr)) << LINE_SIZE_BITS);
-    l2_->writeback_line(evicted_line_addr, evicted_data, Mtype::RW, evicted.vmid);
+    l2_->write(evicted_line_addr, evicted_data, CacheStore::LINE_SIZE, Mtype::RW, evicted.vmid);
   }
 
   uint8_t line_buf[CacheStore::LINE_SIZE];
@@ -51,13 +51,14 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
         mtype = memory_->pte_mtype(chunk_addr, vmid);
 
       if (mtype == Mtype::UC) {
+        flush_line(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         copied += chunk;
         continue;
       }
 
       if (mtype == Mtype::CC) {
-        cache_.invalidate(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
         copied += chunk;
         continue;
@@ -84,9 +85,23 @@ void L1ScalarCache::writeback_all(uint32_t vmid) {
   // VA. The eviction path in ensure_line() uses evicted.vmid for the same reason.
   (void)vmid;
   cache_.for_each_dirty([this](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    l2_->writeback_line(line_addr, data, Mtype::RW, tag.vmid);
+    l2_->write(line_addr, data, CacheStore::LINE_SIZE, Mtype::RW, tag.vmid);
     tag.dirty = false;
   });
+}
+
+void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
+  simdojo::CacheTag *tag = nullptr;
+  if (!cache_.lookup(addr, &tag, vmid))
+    return;
+
+  if (tag->dirty) {
+    uint8_t line_buf[CacheStore::LINE_SIZE];
+    cache_.read_line(addr, line_buf, 0, CacheStore::LINE_SIZE, vmid);
+    l2_->write(CacheStore::line_address(addr), line_buf, CacheStore::LINE_SIZE, Mtype::RW,
+               tag->vmid);
+  }
+  cache_.invalidate(addr, vmid);
 }
 
 void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid) {
@@ -105,9 +120,10 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
         mtype = memory_->pte_mtype(chunk_addr, vmid);
 
       if (mtype == Mtype::UC) {
+        flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
       } else if (mtype == Mtype::CC) {
-        cache_.invalidate(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
       } else {
         ensure_line(chunk_addr, vmid);
@@ -131,9 +147,10 @@ void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, 
       mtype = memory_->pte_mtype(ea, vmid);
 
     if (mtype == Mtype::UC) {
+      flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
     } else if (mtype == Mtype::CC) {
-      cache_.invalidate(ea, vmid);
+      flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
     } else {
       ensure_line(ea, vmid);
