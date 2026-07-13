@@ -6965,8 +6965,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI inline atomic patch currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI inline atomic patch currently supports only RDNA4 and CDNA4");
     return;
   }
   if (!options.moi_report_buffer_address) {

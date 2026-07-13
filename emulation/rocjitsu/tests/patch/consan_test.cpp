@@ -148,7 +148,7 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.record_replay, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.group_flat_access, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.barrier, ConSanNativeSupport::InventoryOnly);
-  EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::NativeEmission);
@@ -5890,6 +5890,40 @@ TEST(ConSanMoi, InlineAtomicOrderingPatchPublishesAndImportsReleaseSlot) {
   EXPECT_TRUE(contains_subsequence(acquire_words, std::array<uint32_t, 2>{*save_scc, *save_vcc}));
   EXPECT_TRUE(contains_subsequence(
       acquire_words, std::array<uint32_t, 3>{*restore_exec, *restore_vcc, *restore_scc}));
+}
+
+TEST(ConSanMoi, Gfx950InlineAtomicOrderingEmitsReleaseAndAcquirePatches) {
+  const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 13;
+  options.moi_epoch_vgpr = 14;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
+                                  }),
+            2u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+                                  }),
+            0u);
 }
 
 TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {

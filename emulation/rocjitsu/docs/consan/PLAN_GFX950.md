@@ -181,10 +181,10 @@ Full gfx950 support means:
   shadow-cell ranges. The combined 181-test ConSan/MOI suite passes.
 - 2026-07-13: `D1C` is `DONE`. Every DS site in the representative gfx950
   fixture now has exactly one admitted candidate or typed exclusion. The
-  exclusion inventory distinguishes reserved GDS-bit encodings, LDS atomics
-  reserved for `AT1A`, permute/swizzle, transpose, unsupported access forms,
-  and other DS operations. A reserved GDS encoding is explicitly prevented
-  from entering the LDS probe path.
+  exclusion inventory distinguishes reserved GDS-bit encodings, intentionally
+  unsupported LDS atomics, permute/swizzle, transpose, unsupported access
+  forms, and other DS operations. A reserved GDS encoding is explicitly
+  prevented from entering the LDS probe path.
 - 2026-07-13: `RR1B` is `DONE`. A live 128-thread gfx950 kernel records
   same-cell writes from logical owners zero and one and requires replay to
   emit exactly one conflict diagnostic with no overflow. Its non-barrier
@@ -253,6 +253,12 @@ Full gfx950 support means:
   same-address handoff replays cleanly and changing only the acquire address
   reports the conflict. All 1,483 Rocjitsu unit tests and all 88 gfx950 CTests
   pass.
+- 2026-07-13: `AT1B` is `DONE`. The one-slot inline atomic handoff now admits
+  the proven CDNA4 FLAT forms. A same-address acquire imports the releasing
+  Wave64 owner's epoch and keeps the subsequent LDS read clean; changing only
+  the acquire address produces exactly one inline diagnostic. The gfx950
+  atomic capability is now native emission; all 196 ConSan CPU tests and all
+  91 gfx950 CTests pass.
 
 ## DAG Overview
 
@@ -327,7 +333,7 @@ flowchart LR
   SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
   B1B["B1B: Engine Barrier Semantics"]:::done
-  AT1B["AT1B: Inline Atomic Handoff"]:::todo
+  AT1B["AT1B: Inline Atomic Handoff"]:::done
   R1C["R1C: Owners And Transaction Tests"]:::done
   S7A["S7A: Sampled Spill Parity"]:::done
   S7B["S7B: Inline Access Spill Parity"]:::done
@@ -393,7 +399,7 @@ flowchart LR
   FL1X["FL1X: Typed No-Forms Result"]:::todo
   FLC{"FLC: Group-Flat Capability Closed"}:::target
   AT1A["AT1A: Atomic Decode And Records"]:::done
-  AT1B["AT1B: Inline Atomic Handoff"]:::todo
+  AT1B["AT1B: Inline Atomic Handoff"]:::done
   NP{"NP: Native Probe Parity"}:::target
 
   F0 --> D1A
@@ -974,8 +980,7 @@ misclassifying it.
 Work:
 
 - Inventory transpose, permute, GDS-reserved, and LDS atomic forms.
-- Mark each form admitted elsewhere, intentionally unsupported, or reserved for
-  AT1A.
+- Mark each form admitted elsewhere or intentionally unsupported.
 
 Result:
 
@@ -1484,7 +1489,7 @@ Done criteria:
 - Record/replay same-address handoff is clean and wrong-address handoff still
   reports.
 
-### AT1B: gfx950 Inline Atomic Handoff - TODO
+### AT1B: gfx950 Inline Atomic Handoff - DONE
 
 Goal: compose the admitted atomic contract with inline shadow.
 
