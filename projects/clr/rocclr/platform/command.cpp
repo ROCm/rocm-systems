@@ -283,7 +283,12 @@ bool Event::awaitCompletion() {
         lock_.wait();
       }
     }
-    ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    if (status() == CL_COMPLETE) {
+      ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT, "Event %p wait completed", this);
+    } else {
+      ClPrint(LOG_DETAIL_DEBUG, LOG_WAIT,
+              "Event %p wait aborted, worker thread no longer alive (status %d)", this, status());
+    }
   }
 
   return status() == CL_COMPLETE;
