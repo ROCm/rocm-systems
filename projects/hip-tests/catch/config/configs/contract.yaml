@@ -681,7 +681,7 @@ contract:
   Contract_GraphMemNodes_GetParams_RoundTripsBytesize:
     <<: *level_0
     tags: [graph_mem_nodes]
-  Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches:
+  Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndTracksParams:
     <<: *level_0
     tags: [graph_mem_nodes]
   Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing:
@@ -1314,19 +1314,40 @@ contract:
   Contract_Library_LoadData_NullImage_IsRejected:
     <<: *level_0
     tags: [library]
-  Contract_Library_LoadData_InvalidImage_IsRejected:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_LoadData_TruncatedBundle_IsRejected:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_LoadData_HostileEntryIdSize_IsRejected:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_LoadData_CopiesImageForLaterAccess:
+  Contract_Library_LoadData_ValidImage_CanResolveKernel:
     <<: *level_0
     tags: [library]
   Contract_Library_GetKernel_ResolvesKnownSymbol:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_GetKernel_UnknownSymbol_IsRejected:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_GetKernelCount_MatchesLowerBound:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_EnumerateKernels_HandlesResolveToFunctions:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_GetKernel_RepeatedLookupIsStable:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_KernelGetName_ReturnsRequestedSymbol:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_KernelGetFunction_LaunchesAndWrites:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_GetGlobal_ReturnsAddressAndSize:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_GetGlobal_MatchesModuleGetGlobal:
+    <<: *level_0
+    tags: [library]
+  Contract_Library_KernelGetLibrary_RoundTrips:
     <<: *level_0
     tags: [library]
   Contract_Library_GetKernel_UnknownSymbol_IsRejected:

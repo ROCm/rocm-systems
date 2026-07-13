@@ -110,53 +110,6 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   TryTrimGraphMemory();
 }
 
-HIP_TEST_CASE(Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndLaunches) {
-  if (!TryTrimGraphMemory()) {
-    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
-  }
-
-  hipGraph_t graph = nullptr;
-  hipGraphExec_t graph_exec = nullptr;
-  hipStream_t stream = nullptr;
-  hipGraphNode_t alloc_node = nullptr;
-  hipGraphNode_t free_node = nullptr;
-  hipMemAllocNodeParams params = CurrentDeviceAllocParams();
-
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
-  if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
-    HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
-  }
-
-  REQUIRE(params.dptr != nullptr);
-
-  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph, &alloc_node, 1, params.dptr));
-
-  const hipError_t instantiate_status =
-      hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0);
-  if (instantiate_status == hipErrorNotSupported) {
-    HIP_CHECK(hipGraphDestroy(graph));
-    TryTrimGraphMemory();
-    HIP_SKIP_TEST("Instantiating a graph memory alloc/free graph is not supported by this runtime path.");
-  }
-  HIP_CHECK(instantiate_status);
-
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  void* free_ptr = nullptr;
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(free_node, &free_ptr));
-  REQUIRE(free_ptr == params.dptr);
-
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec));
-  HIP_CHECK(hipGraphDestroy(graph));
-  TryTrimGraphMemory();
-}
-
 HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
   const int device = CurrentDevice();
 

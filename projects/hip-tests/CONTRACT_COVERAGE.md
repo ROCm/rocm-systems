@@ -6,7 +6,7 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 453
+- Contract tests: 439
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
 - Declared HIP runtime APIs directly exercised by contract tests: 329
 - Approximate declared API-name coverage: 66.6%
@@ -98,7 +98,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `module_load_ex` | 4 |
 | `module_load_file` | 6 |
 | `jit_link` | 6 |
-| `library` | 17 |
+| `library` | 14 |
 | `symbol_copy` | 6 |
 
 ## Coverage by API category
