@@ -242,6 +242,10 @@ Full gfx950 support means:
   and inline epoch advancement. The ordered live workload replays two accesses
   plus both Wave64 arrivals without conflict; inline owner one publishes epoch
   one without a diagnostic, while both unordered controls continue to report.
+- 2026-07-13: `S7B` is `DONE`. B32 and B128 inline access probes each spill
+  seven VGPRs on gfx950. A new CDNA4 hybrid keeps owner/workgroup identity in
+  persistent VGPRs while placing epoch plus ephemeral frames in one 44-byte
+  private layout; 1,024 live guest values survive and the race still reports.
 
 ## DAG Overview
 
@@ -319,7 +323,7 @@ flowchart LR
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
   R1C["R1C: Owners And Transaction Tests"]:::done
   S7A["S7A: Sampled Spill Parity"]:::done
-  S7B["S7B: Inline Access Spill Parity"]:::todo
+  S7B["S7B: Inline Access Spill Parity"]:::done
   S7C["S7C: Barrier And Atomic Spill Parity"]:::todo
   S7D["S7D: Shared-Helper Spill Layout"]:::todo
   SP{"SP: gfx950 Spill Accepted"}:::target
@@ -851,7 +855,7 @@ Result:
   live across the patched access and validates every value in all 64 lanes;
   runtime stride selection also covers the sampled path's VCC save/restore.
 
-### S7B: Inline Access Spill Parity - TODO
+### S7B: Inline Access Spill Parity - DONE
 
 Goal: cover inline-shadow access and private-epoch VGPR windows.
 
@@ -864,6 +868,18 @@ Done criteria:
 
 - Inline-shadow standard mode needs no register numbers and a guarded race
   still produces its diagnostic through a spill-backed patch.
+
+Result:
+
+- `ForcedSpillInlineShadowB32` validates eight unrelated values in all 128
+  lanes after a seven-VGPR spill/restore and requires a 28-byte private grow;
+  its two guarded Wave64 owners still produce one diagnostic.
+- `ForcedSpillInlineShadowB128` requires the four-cell race and the same
+  seven-VGPR, 28-byte spill frame.
+- `ForcedSpillInlineShadowPrivateEpoch` proves the CDNA4 hybrid transaction:
+  persistent owner plus three workgroup VGPRs, private epoch at offset zero,
+  and non-overlapping access/prologue spill slots share a bounded 44-byte
+  layout. The live-value oracle and race diagnostic both remain intact.
 
 ### S7C: Barrier And Atomic Spill Parity - TODO
 

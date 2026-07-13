@@ -84,6 +84,34 @@ __global__ __launch_bounds__(64) void gfx950_moi_forced_sampled_spill(uint32_t *
     out[base + i] = values[i];
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_forced_inline_spill(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  uint32_t values[8] = {
+      0x12500000u ^ tid, 0x23500000u ^ tid, 0x34500000u ^ tid, 0x45500000u ^ tid,
+      0x56500000u ^ tid, 0x67500000u ^ tid, 0x78500000u ^ tid, 0x89500000u ^ tid,
+  };
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  if (tid == 0u || tid == 64u) {
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(values[0])
+                 : "memory");
+  }
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  const uint32_t base = tid * 8u;
+  for (uint32_t i = 0; i < 8u; ++i)
+    out[base + i] = values[i];
+}
+
 __global__ __launch_bounds__(64) void gfx950_standalone_report_publication(uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t *slot = out + tid;
@@ -321,6 +349,29 @@ TEST(ConSanMoiGfx950Test, ForcedSampledSpillPreservesEightLiveVgprs) {
   constexpr uint32_t seeds[kValuesPerThread] = {
       0x11500000u, 0x22500000u, 0x33500000u, 0x44500000u,
       0x55500000u, 0x66500000u, 0x77500000u, 0x88500000u,
+  };
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    for (uint32_t i = 0; i < kValuesPerThread; ++i)
+      EXPECT_EQ(out[tid * kValuesPerThread + i], seeds[i] ^ tid) << "tid=" << tid << " i=" << i;
+  }
+}
+
+TEST(ConSanMoiGfx950Test, ForcedInlineSpillPreservesEightLiveVgprs) {
+  constexpr uint32_t kThreads = 128;
+  constexpr uint32_t kValuesPerThread = 8;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  gfx950_moi_forced_inline_spill<<<1, kThreads>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kThreads * kValuesPerThread);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  constexpr uint32_t seeds[kValuesPerThread] = {
+      0x12500000u, 0x23500000u, 0x34500000u, 0x45500000u,
+      0x56500000u, 0x67500000u, 0x78500000u, 0x89500000u,
   };
   for (uint32_t tid = 0; tid < kThreads; ++tid) {
     for (uint32_t i = 0; i < kValuesPerThread; ++i)

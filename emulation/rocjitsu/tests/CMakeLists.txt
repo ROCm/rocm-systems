@@ -2704,6 +2704,76 @@ if(RJ_ENABLE_HIP_TESTS)
                 PASS_REGULAR_EXPRESSION
                     "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->20"
         )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedInlineSpillPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineShadowB32"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_inline_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineShadowB32"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->28"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveB128RaceCompletes"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineShadowB128"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_b128_race"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineShadowB128"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->28"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedInlineSpillPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineShadowPrivateEpoch"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_inline_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineShadowPrivateEpoch"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->44"
+        )
 
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
