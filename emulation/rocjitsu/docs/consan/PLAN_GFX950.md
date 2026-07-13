@@ -342,6 +342,12 @@ Full gfx950 support means:
   includes B64 and two-address multi-cell forms. Unconfigured scan was removed
   because it had zero admitted sites; no selected IREE object contains Group
   FLAT, whose admitted form remains covered by the dedicated live control.
+- 2026-07-13: `T3SC` is `DONE`; `T3RR` is now `ACTIVE`. All 10 selected IREE
+  rows pass guarded SuperCollider in 6.07 seconds with patch emission required
+  for every row. The first guarded record/replay run is non-vacuous but fails:
+  every row emits an access probe plus owner/epoch prologue and then traps with
+  `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`. T3RR remains orange while a single
+  dumped replacement object is reduced at instruction level.
 
 ## DAG Overview
 
@@ -558,8 +564,8 @@ flowchart LR
   T2R["T2R: Resource And Spill Tier"]:::done
   T2G{"T2G: Focused gfx950 Accepted"}:::target
   T3A["T3A: Workload Inventory"]:::done
-  T3SC["T3SC: SuperCollider Selected Workloads"]:::active
-  T3RR["T3RR: Record/Replay Selected Workloads"]:::todo
+  T3SC["T3SC: SuperCollider Selected Workloads"]:::done
+  T3RR["T3RR: Record/Replay Selected Workloads"]:::active
   T3SA["T3SA: Sampled Selected Workloads"]:::todo
   T3IS["T3IS: Inline-Shadow Selected Workloads"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -1813,13 +1819,21 @@ Result:
   workload fact, not a silent omission; the admitted `SRC_SHARED_BASE` form is
   retained in the dedicated T2 live Group-FLAT control.
 
-### T3SC: SuperCollider Selected Workloads - ACTIVE
+### T3SC: SuperCollider Selected Workloads - DONE
 
 Goal: run the T3A selection under guarded SuperCollider.
 
-### T3RR: Record/Replay Selected Workloads - TODO
+Result: all 10 selected IREE rows pass in 6.07 seconds with
+`RJ_CONSAN_REQUIRE_PATCH=1`, so every semantic pass has emitted instrumentation.
+
+### T3RR: Record/Replay Selected Workloads - ACTIVE
 
 Goal: run the T3A selection under guarded record/replay.
+
+Current evidence: all 10 rows emit both an appended-cave access probe and a
+kernel-entry owner/epoch prologue, then fail dispatch with an illegal shader
+instruction. This is being reduced from a dumped patched softmax object; the
+node is not accepted until guarded records execute successfully.
 
 ### T3SA: Sampled Selected Workloads - TODO
 
