@@ -1206,7 +1206,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->type = INTEGER;
 
       if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
-        value->status = Smi2RdcError(ret);
+        value->status = RDC_ST_OK;
         value->value.l_int = static_cast<int64_t>(num_pages);
         break;
       }
@@ -1227,7 +1227,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         }
       }
 
-      value->status = Smi2RdcError(AMDSMI_STATUS_SUCCESS);
+      value->status = RDC_ST_OK;
       value->value.l_int = static_cast<int64_t>(pending_page_num);
       break;
     }
