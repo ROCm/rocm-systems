@@ -61,6 +61,7 @@
 #include "core/inc/amd_aie_code.hpp"
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_aie_section.h"
+#include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_code.hpp"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
@@ -733,7 +734,8 @@ bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
       memcpy(value, full_name.c_str(), full_name.size() + 1);
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
-      *static_cast<uint64_t*>(value) = descriptor_ptr;
+      // Handle is only valid once the executable is frozen; 0 before, matching GPU.
+      *static_cast<uint64_t*>(value) = frozen ? descriptor_ptr : 0;
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
       *static_cast<uint32_t*>(value) = kernarg_size;
@@ -1412,10 +1414,17 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   // Get the raw code object data.
   const void* code_data = reinterpret_cast<const void*>(code_object.handle);
 
+  // The memory-backed reader path passes code_object_size == 0; derive the ELF
+  // size from the image itself so AIE detection has a valid buffer length.
+  size_t code_data_size = code_object_size;
+  if (code_data_size == 0 && code_data) {
+    code_data_size = amd::elf::ElfSize(code_data);
+  }
+
   // Check if this is an AIE code object.
   // For AIE code objects, use a different loading path.
-  if (AMD::AieCode::IsAieCodeObject(code_data, code_object_size)) {
-    return LoadAieCodeObject(agent, code_data, code_object_size, uri, loaded_code_object);
+  if (AMD::AieCode::IsAieCodeObject(code_data, code_data_size)) {
+    return LoadAieCodeObject(agent, code_data, code_data_size, uri, loaded_code_object);
   }
 
   LoaderOptions loaderOptions;
@@ -1668,6 +1677,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size, ki->num_cols);
     kernel_sym->agent = agent;
     agent_symbols_[std::make_pair(kernel_name, agent)] = kernel_sym;
+    aie_kernel_symbols_.push_back(kernel_sym);
   }
 
   objects.push_back(loaded_obj);
@@ -2449,6 +2459,11 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
   // DMA and code-cache invalidation happen alongside the code segments.
   for (auto& ts : trampoline_segments_) {
     ts->Freeze();
+  }
+
+  // AIE kernel handles become visible only once frozen (GPU-parity contract).
+  for (auto& aie_sym : aie_kernel_symbols_) {
+    aie_sym->SetFrozen();
   }
 
   state_ = HSA_EXECUTABLE_STATE_FROZEN;
