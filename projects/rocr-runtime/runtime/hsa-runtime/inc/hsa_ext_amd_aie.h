@@ -47,7 +47,7 @@ typedef enum {
  */
 typedef enum {
   /**
-   * AIE KMQ packet.
+   * AIE KMQ packet for aie2 (XDNA) and aie2p (XDNA2).
    */
   HSA_AMD_AIE_PACKET_OPCODE_KMQ = 0,
 } hsa_amd_aie_packet_opcode_t;
@@ -100,9 +100,7 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t reserved2;
 
   /**
-   * Opaque kernel object handle obtained from
-   * HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT. Occupies the two 32-bit words that
-   * previously held the instruction-sequence address.
+   * Opaque kernel object handle obtained from HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT.
    */
   uint32_t kernel_object_low;
   uint32_t kernel_object_high;
@@ -125,7 +123,8 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    * modified once the kernel dispatch packet is enqueued until the dispatch has
    * completed execution.
    *
-   * The buffer must contain exactly 2 * ::num_kernargs consecutive `uint64_t` entries:
+   * For aie2 (XDNA) and aie2p (XDNA2) the buffer must contain exactly 2 * ::num_kernargs
+   * consecutive `uint64_t` entries:
    * - entries [0 .. ::num_kernargs - 1] are the argument addresses
    * - entries [::num_kernargs .. 2 * ::num_kernargs - 1] are the corresponding argument sizes in
    * bytes
@@ -133,21 +132,19 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Reserved. Must be 0. (Formerly the instruction sequence size; now carried in
-   * the kernel descriptor referenced by kernel_object.)
+   * Reserved. Must be 0.
    */
-  uint64_t reserved_insts_size;
-
-  /**
-   * Reserved. Must be 0. (Formerly the PDI address; now carried in the kernel
-   * descriptor referenced by kernel_object.)
-   */
-  void* reserved_pdi_addr;
+  uint64_t reserved4;
 
   /**
    * Reserved. Must be 0.
    */
-  uint64_t reserved4;
+  void* reserved5;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved6;
 } hsa_amd_aie_kernel_dispatch_packet_t;
 
 /** @} */

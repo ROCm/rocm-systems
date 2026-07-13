@@ -1141,7 +1141,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
     // context will be reconfigured. A descriptor with no PDI (pdi_dev_addr == 0) uses CU index 0.
     hsa_status_t err = HSA_STATUS_SUCCESS;
-    int cached_pdi_index = 0;
+    PDICache::size_type cached_pdi_index = 0;
     if (desc->pdi_dev_addr != 0) {
       uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
       err = ResolveBOHandle(reinterpret_cast<void*>(desc->pdi_dev_addr), agent, &pdi_handle,
@@ -1158,7 +1158,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
         }
         reconfigure_queue = true;
       }
-      cached_pdi_index = static_cast<int>(idx);
+      cached_pdi_index = idx;
     }
 
     // Add the instruction sequence BO handle. The PDI/insts blobs are immutable
@@ -1214,8 +1214,8 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     cmd->data[2] = 0x0;                      // txn opcode
     cmd->data[3] = (DEV_ADDR_BASE |
                     (reinterpret_cast<uintptr_t>(insts_addr) &
-                     DEV_ADDR_OFFSET_MASK));              // instruction sequence address (lo)
-    cmd->data[4] = 0x0;                                   // instruction sequence address (hi)
+                     DEV_ADDR_OFFSET_MASK));               // instruction sequence address (lo)
+    cmd->data[4] = 0x0;                                    // instruction sequence address (hi)
     cmd->data[5] = (desc->insts_size / sizeof(uint32_t));  // instruction sequence dword count
     for (uint32_t kernarg_idx = 0; kernarg_idx < pkt->num_kernargs; ++kernarg_idx) {
       const auto kernarg = kernarg_address[kernarg_idx];

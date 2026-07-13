@@ -43,11 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 
-#include <string>
-#include <vector>
+#include <string_view>
 
 #include "core/inc/agent.h"
-#include "core/inc/runtime.h"
 
 namespace rocr {
 namespace AMD {
@@ -91,9 +89,6 @@ public:
 
  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override { return regions_; }
 
- /// @brief Architecture name(s) accepted in hsaco section names, e.g. "aie2p".
- const std::vector<std::string>& supported_arch_names() const { return supported_arch_names_; }
-
  /// @brief Getter for the AIE system allocator.
  const std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>&
  system_allocator() const {
@@ -106,6 +101,9 @@ public:
  /// @brief Getter for the AIE node properties.
  const HsaNodeProperties& properties() const { return node_props_; }
 
+ /// @brief Architecture name accepted in hsaco section names, e.g. "aie2".
+ std::string_view arch_name() const { return arch_name_; }
+
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
@@ -114,12 +112,9 @@ private:
   void InitAllocators();
 
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
-  /// @brief Architecture name(s) this agent accepts in hsaco section names, e.g. "aie2".
-  std::vector<std::string> supported_arch_names_;
   std::function<void *(size_t size, size_t align,
                        core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
-
 
   std::function<void(void*)> system_deallocator_;
 
@@ -129,6 +124,8 @@ private:
   const uint32_t max_queues_ = 1;
 
   const HsaNodeProperties node_props_;
+  /// @brief node_props_.AMDName for use as the agent's hsaco arch name.
+  std::string_view arch_name_;
 };
 
 } // namespace AMD

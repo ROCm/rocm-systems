@@ -1,4 +1,9 @@
-// runtime/hsa-runtime/core/inc/amd_aie_section.h
+/*
+ * Copyright © Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_SECTION_H_
 

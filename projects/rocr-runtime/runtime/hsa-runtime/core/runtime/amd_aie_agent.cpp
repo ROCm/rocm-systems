@@ -46,7 +46,6 @@
 #include <cstring>
 #include <functional>
 #include <iterator>
-#include <string>
 #include <string_view>
 
 #include "core/inc/amd_aie_aql_queue.h"
@@ -59,13 +58,21 @@
 namespace rocr {
 namespace AMD {
 
+/**
+ * @brief Creates a string_view of the agent's architecture name from the node properties.
+ */
+static std::string_view GetArchName(const HsaNodeProperties& node_props) {
+  const char* name = reinterpret_cast<const char*>(node_props.AMDName);
+  return std::string_view(name, ::strnlen(name, sizeof(node_props.AMDName)));
+}
+
 AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
     : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::XDNA), node,
                   core::Agent::DeviceType::kAmdAieDevice),
-      node_props_(node_props) {
+      node_props_(node_props),
+      arch_name_(GetArchName(node_props_)) {
   InitRegionList();
   InitAllocators();
-  supported_arch_names_.push_back(std::string(reinterpret_cast<const char*>(node_props_.AMDName)));
 }
 
 AieAgent::~AieAgent() {
