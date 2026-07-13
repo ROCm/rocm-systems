@@ -1,14 +1,10 @@
 name: "CI Environment"
-description: >
-  Single source of truth for TheRock CI constants. Resolves the TheRock ref
-  to check out: uses the matching release branch (e.g. "release/therock-7.14")
-  when the workflow is running on a release/therock-* branch, otherwise falls
-  back to the pinned commit SHA below.
+description: "Single source of truth for shared CI constants (TheRock ref, Docker image)"
 
 outputs:
   therock-ref:
-    description: "TheRock git ref to check out (branch name or pinned SHA)"
-    value: ${{ steps.resolve.outputs.therock_ref }}
+    description: "TheRock ref to use (pinned SHA, or matching release branch for release/therock-* targets)"
+    value: ${{ steps.resolve-therock-ref.outputs.therock-ref }}
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
@@ -16,19 +12,21 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # If the target branch matches release/therock-*, use the corresponding TheRock
+    # release branch instead of the default pinned SHA.
+    # For PRs, github.base_ref is the target branch; for push/dispatch, github.ref_name is used.
     - name: Resolve TheRock ref
-      id: resolve
+      id: resolve-therock-ref
       shell: bash
       run: |
-        # Use base_ref for PRs; ref_name for push/dispatch events.
-        BASE_BRANCH="${{ github.base_ref || github.ref_name }}"
-        if [[ "${BASE_BRANCH}" =~ ^release/therock-.+$ ]]; then
-          # PR targets a release branch — check out the same branch in TheRock.
-          THEROCK_REF="${BASE_BRANCH}"
-        else
-          # Default: use the pinned commit SHA (updated by bump automation).
-          THEROCK_REF="f1e3fc2311fde45bf3e17b0e3349200be9caa4b4" # 2026-06-23
-        fi
-        echo "Resolved TheRock ref: ${THEROCK_REF}"
-        echo "therock_ref=${THEROCK_REF}" >> "$GITHUB_OUTPUT"
+        PINNED_REF="99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0" # 2026-07-07
+        TARGET_BRANCH="${{ github.base_ref || github.ref_name }}"
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
 
+        if [[ "$TARGET_BRANCH" == release/therock-* ]]; then
+          echo "Release branch detected: $TARGET_BRANCH - using matching TheRock branch"
+          echo "therock-ref=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+        else
+          echo "Non-release branch: $TARGET_BRANCH - using pinned ref: $PINNED_REF"
+          echo "therock-ref=$PINNED_REF" >> "$GITHUB_OUTPUT"
+        fi
