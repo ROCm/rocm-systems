@@ -153,6 +153,8 @@ test_categories:
       - "teamwgsync_.*"
       - "teamsplit2d_.*"
       - "alltoall_wave_.*"
+      - "broadcast_wave_.*"
+      - "fcollect_wave_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
