@@ -153,7 +153,7 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::NativeEmission);
-  EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.hw_id_owner, ConSanNativeSupport::Unavailable);
 
   const ConSanTargetCapabilities unknown = consan_target_capabilities(ROCJITSU_CODE_ARCH_INVALID);

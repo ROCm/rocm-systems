@@ -2525,6 +2525,72 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveRaceCompletes"
+            NAME "ConSanMoiGfx950Test.InlineShadowReportsTwoWaveRace"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_race"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveReadReadCompletes"
+            NAME "ConSanMoiGfx950Test.InlineShadowKeepsTwoWaveReadReadClean"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_read_read"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlineShadowReportsTwoWaveRace"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlineShadowKeepsTwoWaveReadReadClean"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.SameWaveProgramOrderCompletes"
+            NAME "ConSanMoiGfx950Test.InlineShadowKeepsSameWaveProgramOrderClean"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_same_wave_program_order"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlineShadowKeepsSameWaveProgramOrderClean"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.ForcedSpillPreservesLiveVgprs"
             NAME "ConSanMoiGfx950Test.ForcedSpillRecordReplay"
             TIMEOUT 30

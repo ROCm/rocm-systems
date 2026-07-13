@@ -160,7 +160,7 @@ ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture)
     capabilities.supercollider = ConSanNativeSupport::NativeEmission;
     capabilities.record_replay = ConSanNativeSupport::NativeEmission;
     capabilities.sampled = ConSanNativeSupport::NativeEmission;
-    capabilities.inline_shadow = ConSanNativeSupport::InventoryOnly;
+    capabilities.inline_shadow = ConSanNativeSupport::NativeEmission;
   }
   return capabilities;
 }

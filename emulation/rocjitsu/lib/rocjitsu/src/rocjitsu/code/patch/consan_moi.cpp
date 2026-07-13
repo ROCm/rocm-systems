@@ -3926,8 +3926,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    rj_code_arch_t arch, ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI inline-shadow probe currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back("ConSan MOI inline-shadow probe has unsupported target");
     return;
   }
 

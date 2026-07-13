@@ -229,6 +229,11 @@ Full gfx950 support means:
   standalone one-lane gfx950 control observes the exact old 64-bit value and
   final replacement; a 64-lane contention control proves all returned values
   plus the final slot form one lossless serialized exchange chain.
+- 2026-07-13: `IS1B` is `DONE`. The standard inline-shadow path now admits
+  CDNA4 and composes automatic identity, seven scratch VGPRs, scalar saves,
+  exact-cell addressing, the proven atomic swap, and bounded diagnostics. A
+  two-wave B32 write/write control reports one exact owner-0/owner-1 conflict;
+  two-wave read/read and same-owner program-order controls remain clean.
 
 ## DAG Overview
 
@@ -362,7 +367,7 @@ flowchart LR
   SA1B["SA1B: Runtime Selection And Check"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1A["IS1A: Shadow Atomic Primitive"]:::done
-  IS1B["IS1B: Single-Cell Inline Shadow"]:::todo
+  IS1B["IS1B: Single-Cell Inline Shadow"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
   FL1A["FL1A: Group-Flat Inventory"]:::todo
   FL1B["FL1B: Group-Flat Emission"]:::todo
@@ -1320,7 +1325,7 @@ Result:
   exactly the initial value and all 64 distinct replacements, proving atomic
   serialization without lost or torn updates.
 
-### IS1B: gfx950 Single-Cell Inline Shadow - TODO
+### IS1B: gfx950 Single-Cell Inline Shadow - DONE
 
 Goal: compose owner/epoch state and IS1A into the smallest exact B32 race probe.
 
@@ -1331,8 +1336,19 @@ Work:
 
 Done criteria:
 
-- A B32 unordered race reports; read/read and barrier-ordered controls remain
-  clean.
+- A B32 unordered race reports; read/read and same-owner program-order controls
+  remain clean. Barrier-ordered engine behavior is completed by downstream
+  `B1B`, which depends on this primitive.
+
+Result:
+
+- `ConSanMoiGfx950Test.InlineShadowReportsTwoWaveRace` requires two access
+  patches, visible exact shadow, and one diagnostic whose two write owners are
+  zero and one over `[0,4)`.
+- `ConSanMoiGfx950Test.InlineShadowKeepsTwoWaveReadReadClean` and
+  `ConSanMoiGfx950Test.InlineShadowKeepsSameWaveProgramOrderClean` require the
+  same native patch path and visible shadow state while forbidding diagnostics.
+  All resources and the report buffer are selected automatically.
 
 ### IS1C: gfx950 Multi-Cell Shadow And Diagnostics - TODO
 
