@@ -10690,6 +10690,33 @@ TEST(ConSan, InvalidCdna4InstructionFailsClosedWithTypedPreflightReject) {
   EXPECT_FALSE(result.modified);
 }
 
+TEST(ConSan, InvalidCdna4SuffixCannotReenterWholeTextBasicBlockDecode) {
+  const std::array<uint32_t, 4> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_store_b32 v0, v0
+      0xD3AD0000u, // unsupported standalone CDNA4 VOP3P op 45
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "invalid_suffix", /*vgpr_granulated=*/0,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.lds_write_count, 1u);
+  EXPECT_EQ(kernel.stats.decode_error_count, 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_NE(result.warnings.back().find("found no supported"), std::string::npos);
+}
+
 TEST(ConSan, InvalidCdna4KernelDoesNotContainValidCandidatePatching) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;

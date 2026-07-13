@@ -2614,7 +2614,7 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
 
 [[nodiscard]] bool has_supported_check_trap_site(const ConSanResult &result) {
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
+    if (kernel.preflight_action != ConSanPreflightAction::Candidate)
       continue;
     for (const ConSanLdsSite &site : kernel.lds_sites) {
       if (is_supported_check_trap_site(site))
@@ -2931,10 +2931,12 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   if (decoder) {
     const std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
     const std::vector<BasicBlock::CodeRange> code_ranges = preflight_candidate_code_ranges(result);
-    blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
-    block_ptrs = block_ptrs_for(blocks);
-    if (!block_ptrs.empty())
-      liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(block_ptrs));
+    if (!code_ranges.empty()) {
+      blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
+      block_ptrs = block_ptrs_for(blocks);
+      if (!block_ptrs.empty())
+        liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(block_ptrs));
+    }
   }
 
   struct LdsCheckTrapCandidate {
@@ -2977,7 +2979,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return caves;
   };
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (kernel.preflight_action == ConSanPreflightAction::Reject)
+    if (kernel.preflight_action != ConSanPreflightAction::Candidate)
       continue;
     const auto max_auto_scratch_vgpr =
         descriptor_vgpr_allocation_count(original_bytes, kernel.descriptor_file_offset, arch);
