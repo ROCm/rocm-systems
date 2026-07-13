@@ -26,8 +26,8 @@
 
 namespace {
 
-const std::filesystem::path g_pdi_path = STRINGIFY(DEFAULT_PDI_PATH);
-const std::filesystem::path g_insts_path = STRINGIFY(DEFAULT_INSTS_PATH);
+const std::filesystem::path g_hsaco_path = STRINGIFY(DEFAULT_HSACO_PATH);
+constexpr const char* g_kernel_name = "vector_scalar_add";
 
 constexpr std::size_t N = 1024;
 constexpr std::size_t DATA_SIZE = N * sizeof(std::uint32_t);
@@ -128,26 +128,54 @@ hsa_status_t find_memory_pool(hsa_amd_memory_pool_t pool, void* data) {
   return HSA_STATUS_INFO_BREAK;
 }
 
-// File loaders: read binary files into HSA device memory
-void load_binary(hsa_amd_memory_pool_t pool, const std::filesystem::path& path, void** buf,
-                 std::size_t& size_out) {
-  std::ifstream f(path, std::ios::binary | std::ios::ate);
-  if (!f) throw std::runtime_error("Cannot open file: " + path.string());
-
+// Loads an hsaco onto `agent` via the HSA executable APIs and returns the frozen
+// executable and the kernel_object handle for `kernel_name`.
+void load_kernel_object(hsa_agent_t agent, const std::filesystem::path& hsaco,
+                        const char* kernel_name, hsa_executable_t* exe_out,
+                        std::uint64_t* kernel_object_out) {
+  std::ifstream f(hsaco, std::ios::binary | std::ios::ate);
+  if (!f) throw std::runtime_error("Cannot open file: " + hsaco.string());
   auto size = static_cast<std::size_t>(f.tellg());
   f.seekg(0);
+  std::vector<char> buf(size);
+  f.read(buf.data(), size);
 
-  if (auto s = hsa_amd_memory_pool_allocate(pool, size, 0, buf); s != HSA_STATUS_SUCCESS) {
-    throw std::runtime_error("Failed to allocate buffer for: " + path.string());
+  hsa_executable_t exe{};
+  if (hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr,
+                                &exe) != HSA_STATUS_SUCCESS) {
+    throw std::runtime_error("hsa_executable_create_alt failed");
+  }
+  hsa_code_object_reader_t reader{};
+  if (hsa_code_object_reader_create_from_memory(buf.data(), size, &reader) != HSA_STATUS_SUCCESS) {
+    throw std::runtime_error("hsa_code_object_reader_create_from_memory failed");
+  }
+  if (hsa_executable_load_agent_code_object(exe, agent, reader, nullptr, nullptr) !=
+      HSA_STATUS_SUCCESS) {
+    throw std::runtime_error("hsa_executable_load_agent_code_object failed");
+  }
+  if (hsa_executable_freeze(exe, nullptr) != HSA_STATUS_SUCCESS) {
+    throw std::runtime_error("hsa_executable_freeze failed");
   }
 
-  f.read(static_cast<char*>(*buf), size);
-  size_out = size;
+  hsa_executable_symbol_t sym{};
+  if (hsa_executable_get_symbol_by_name(exe, kernel_name, &agent, &sym) != HSA_STATUS_SUCCESS) {
+    throw std::runtime_error(std::string("get_symbol_by_name failed: ") + kernel_name);
+  }
+  std::uint64_t ko = 0;
+  if (hsa_executable_symbol_get_info(sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &ko) !=
+          HSA_STATUS_SUCCESS ||
+      ko == 0) {
+    throw std::runtime_error("KERNEL_OBJECT query failed");
+  }
+
+  hsa_code_object_reader_destroy(reader);
+  *exe_out = exe;
+  *kernel_object_out = ko;
 }
 
 // Dispatch packet
-std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::size_t insts_size, void* input,
-                              void* output, uint64_t* kernargs, hsa_queue_t* q) {
+std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* output,
+                              uint64_t* kernargs, hsa_queue_t* q) {
   auto* queue = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(q->base_address);
   const auto mask = q->size - 1;
 
@@ -168,12 +196,10 @@ std::uint64_t dispatch_packet(void* pdi_buf, void* insts_buf, std::size_t insts_
   pkt->opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
   pkt->count = 24;
   pkt->completion_signal.handle = 0;
-  pkt->insts_addr_low = reinterpret_cast<std::uintptr_t>(insts_buf) & 0xFFFFFFFF;
-  pkt->insts_addr_high = reinterpret_cast<std::uintptr_t>(insts_buf) >> 32;
+  pkt->kernel_object_low = static_cast<std::uint32_t>(kernel_object & 0xFFFFFFFF);
+  pkt->kernel_object_high = static_cast<std::uint32_t>(kernel_object >> 32);
   pkt->num_kernargs = 2;
   pkt->kernarg_address = kernargs;
-  pkt->insts_size = insts_size;
-  pkt->pdi_addr = pdi_buf;
 
   return wr_idx;
 }
@@ -195,13 +221,7 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     return;
   }
 
-  // --- Discover memory pools (dev / data / kernarg) ---
-  // dev_memory: coarse-grained, non-allocatable (for PDI and instructions)
-  find_pool_data dev_pool_data{};
-  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  dev_pool_data.expected_allocatable = false;
-  hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &dev_pool_data);
-
+  // --- Discover memory pools (data / kernarg) ---
   // data_memory: coarse-grained, allocatable (for tensor data)
   find_pool_data data_pool_data{};
   data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
@@ -219,7 +239,6 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     kernarg_pool_data.pool = data_pool_data.pool;
   }
 
-  auto dev_pool = dev_pool_data.pool;
   auto data_pool = data_pool_data.pool;
   auto kernarg_pool = kernarg_pool_data.pool;
 
@@ -240,14 +259,17 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     return;
   }
 
-  // --- Load PDI and instructions into dev_memory ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  load_binary(dev_pool, g_pdi_path, &pdi_buf, pdi_size);
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  std::uint64_t kernel_object = 0;
+  try {
+    load_kernel_object(aie_agent, g_hsaco_path, g_kernel_name, &exe, &kernel_object);
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+    hsa_queue_destroy(queue);
+    hsa_shut_down();
+    return;
+  }
 
   const std::int32_t num_dispatches = state.range(0);
 
@@ -293,8 +315,7 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     std::uint64_t last_wr_idx = 0;
     for (std::int32_t i = 0; i < num_dispatches; ++i) {
       // Dispatch HSA packet
-      last_wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, inputs[i], outputs[i],
-                                    kernargs_vec[i], queue);
+      last_wr_idx = dispatch_packet(kernel_object, inputs[i], outputs[i], kernargs_vec[i], queue);
     }
 
     // Ring doorbell
@@ -310,8 +331,7 @@ static void VectorScalarAddHSA(benchmark::State& state) {
     hsa_amd_memory_pool_free(inputs[i]);
     hsa_amd_memory_pool_free(kernargs_vec[i]);
   }
-  hsa_amd_memory_pool_free(pdi_buf);
-  hsa_amd_memory_pool_free(insts_buf);
+  hsa_executable_destroy(exe);
   hsa_shut_down();
 }
 
@@ -330,13 +350,7 @@ static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
     return;
   }
 
-  // --- Discover memory pools (dev / data / kernarg) ---
-  // dev_memory: coarse-grained, non-allocatable (for PDI and instructions)
-  find_pool_data dev_pool_data{};
-  dev_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-  dev_pool_data.expected_allocatable = false;
-  hsa_amd_agent_iterate_memory_pools(aie_agent, find_memory_pool, &dev_pool_data);
-
+  // --- Discover memory pools (data / kernarg) ---
   // data_memory: coarse-grained, allocatable (for tensor data)
   find_pool_data data_pool_data{};
   data_pool_data.expected_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
@@ -354,7 +368,6 @@ static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
     kernarg_pool_data.pool = data_pool_data.pool;
   }
 
-  auto dev_pool = dev_pool_data.pool;
   auto data_pool = data_pool_data.pool;
   auto kernarg_pool = kernarg_pool_data.pool;
 
@@ -375,14 +388,17 @@ static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
     return;
   }
 
-  // --- Load PDI and instructions into dev_memory ---
-  void* pdi_buf = nullptr;
-  std::size_t pdi_size = 0;
-  load_binary(dev_pool, g_pdi_path, &pdi_buf, pdi_size);
-
-  void* insts_buf = nullptr;
-  std::size_t insts_size = 0;
-  load_binary(dev_pool, g_insts_path, &insts_buf, insts_size);
+  // --- Load kernel via HSA executable APIs ---
+  hsa_executable_t exe{};
+  std::uint64_t kernel_object = 0;
+  try {
+    load_kernel_object(aie_agent, g_hsaco_path, g_kernel_name, &exe, &kernel_object);
+  } catch (const std::exception& e) {
+    state.SkipWithError(e.what());
+    hsa_queue_destroy(queue);
+    hsa_shut_down();
+    return;
+  }
 
   const std::int32_t num_dispatches = state.range(0);
 
@@ -422,8 +438,7 @@ static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
       kernargs_vec[i][3] = DATA_SIZE;  // output size
 
       // Dispatch HSA packet
-      last_wr_idx = dispatch_packet(pdi_buf, insts_buf, insts_size, inputs[i], outputs[i],
-                                    kernargs_vec[i], queue);
+      last_wr_idx = dispatch_packet(kernel_object, inputs[i], outputs[i], kernargs_vec[i], queue);
     }
 
     // Ring doorbell
@@ -438,8 +453,7 @@ static void VectorScalarAddHSAAllocKernargs(benchmark::State& state) {
     hsa_amd_memory_pool_free(outputs[i]);
     hsa_amd_memory_pool_free(inputs[i]);
   }
-  hsa_amd_memory_pool_free(pdi_buf);
-  hsa_amd_memory_pool_free(insts_buf);
+  hsa_executable_destroy(exe);
   hsa_shut_down();
 }
 
