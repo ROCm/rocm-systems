@@ -534,6 +534,18 @@ contract:
   Contract_OccupancyExt_ClusterQueries_CapabilityGatedRange:
     <<: *level_0
     tags: [occupancy_ext]
+  Contract_OccupancyVariable_PotentialBlockSizeWithFlags_ReturnsUsableValues:
+    <<: *level_0
+    tags: [occupancy_variable]
+  Contract_OccupancyVariable_PotentialBlockSizeWithFlags_MatchesPlainVariant:
+    <<: *level_0
+    tags: [occupancy_variable]
+  Contract_OccupancyVariable_VariableSMem_ReturnsUsableValues:
+    <<: *level_0
+    tags: [occupancy_variable]
+  Contract_OccupancyVariable_VariableSMemWithFlags_ReturnsUsableValues:
+    <<: *level_0
+    tags: [occupancy_variable]
   Contract_GraphCapture_BeginEndEmptyStream_ProducesGraph:
     <<: *level_0
     tags: [graph_capture]
