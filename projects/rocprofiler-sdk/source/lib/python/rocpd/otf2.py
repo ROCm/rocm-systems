@@ -28,7 +28,7 @@ import shutil
 import time
 from collections import defaultdict
 
-from .importer import RocpdImportData
+from .importer import RocpdImportData, get_schema_version
 from . import output_config
 
 
