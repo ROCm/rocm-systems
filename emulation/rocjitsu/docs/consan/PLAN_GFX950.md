@@ -238,6 +238,10 @@ Full gfx950 support means:
   stale packed metadata after the first cell: owner, epoch, generation, and
   instruction fields are now rematerialized per cell. All four exact-shadow
   entries and all four bounded diagnostics agree on the `[0,16)` conflict.
+- 2026-07-13: `B1B` is `DONE`. CDNA4 now admits record/replay barrier records
+  and inline epoch advancement. The ordered live workload replays two accesses
+  plus both Wave64 arrivals without conflict; inline owner one publishes epoch
+  one without a diagnostic, while both unordered controls continue to report.
 
 ## DAG Overview
 
@@ -311,7 +315,7 @@ flowchart LR
   S6["S6: Forced-Spill Record/Replay"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
-  B1B["B1B: Engine Barrier Semantics"]:::todo
+  B1B["B1B: Engine Barrier Semantics"]:::done
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
   R1C["R1C: Owners And Transaction Tests"]:::done
   S7A["S7A: Sampled Spill Parity"]:::done
@@ -363,7 +367,7 @@ flowchart LR
   I1C["I1C: Optional HW_ID Experiment"]:::done
   W1["W1: Non-Scratch Wait Semantics"]:::done
   B1A["B1A: Barrier Decode And Emission"]:::done
-  B1B["B1B: Engine Barrier Semantics"]:::todo
+  B1B["B1B: Engine Barrier Semantics"]:::done
   SC1["SC1: SuperCollider Native LDS"]:::done
   RR1A["RR1A: Access Record Emission"]:::done
   RR1B["RR1B: Record/Replay Live Semantics"]:::done
@@ -1148,7 +1152,7 @@ Done criteria:
 - Fixture tests distinguish barrier decode/emission from its separate
   `S_WAITCNT` precondition.
 
-### B1B: CDNA4 Engine Barrier Semantics - TODO
+### B1B: CDNA4 Engine Barrier Semantics - DONE
 
 Goal: compose B1A with record/replay arrival and inline epoch advancement.
 
@@ -1162,6 +1166,16 @@ Done criteria:
 
 - A barrier-ordered two-wave control remains clean in record/replay and inline
   shadow, while the unordered control reports.
+
+Result:
+
+- `ConSanMoiGfx950Test.RecordReplayKeepsBarrierOrderedTwoWaveClean` requires two
+  access records and the two Wave64 arrivals at the compiler-emitted
+  `s_barrier`; replay processes all four events without a conflict.
+- `ConSanMoiGfx950Test.InlineShadowKeepsBarrierOrderedTwoWaveClean` requires the
+  native access and barrier-epoch trampolines, no diagnostics, and a visible
+  final shadow entry. Its second-wave owner publishes epoch one; the existing
+  unordered record/replay and inline-shadow controls still report one race.
 
 ### SC1: SuperCollider Native LDS - DONE
 

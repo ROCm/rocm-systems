@@ -6059,9 +6059,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
                                                  ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
     result.warnings.emplace_back(
-        "ConSan MOI inline-shadow barrier epoch patch currently supports only RDNA4");
+        "ConSan MOI inline-shadow barrier epoch patch has unsupported target");
     return;
   }
   if (!result.modified) {
@@ -6315,8 +6315,8 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     try_apply_inline_shadow_barrier_epoch_patch(options, arch, result);
     return;
   }
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI barrier record patch currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back("ConSan MOI barrier record patch has unsupported target");
     return;
   }
   if (!options.moi_report_buffer_address) {
