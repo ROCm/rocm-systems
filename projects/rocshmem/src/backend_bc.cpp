@@ -114,6 +114,8 @@ void Backend::init(void) {
       hipHostMalloc(reinterpret_cast<void**>(&done_init), sizeof(uint8_t)));
 
   psync_allocator_ = get_default_allocator();
+
+  max_symm_regions_ = envvar::max_symm_regions;
 }
 
 void Backend::init_mpi_once(MPI_Comm comm) {
@@ -412,6 +414,123 @@ int Backend::buffer_unregister(void *addr) {
 
 void Backend::buffer_unregister_all() {
   user_buffer_regions.clear();
+}
+
+int Backend::buffer_register_symmetric(void *addr, size_t length,
+                                       void **registered_addr) {
+#if HIP_VERSION >= 70000000
+  if (registered_addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  HIPAllocator *alloc = heap.get_allocator();
+
+  /*
+   * Symmetric registration is restricted to HIP VMM device memory. Validate
+   * the buffer against the heap's own allocator (mirrors NVSHMEM's per-buffer
+   * checks): this rejects non-VMM heaps, null/zero/granularity-misaligned
+   * sizes, non-VMM pointers, memory on the wrong device, and handle-type
+   * mismatches.
+   */
+  if (!alloc->ValidateVMMRegistration(addr, length, hip_dev_id)) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Enforce the configured maximum number of symmetric registrations. */
+  if (symm_buffer_regions.size() >= max_symm_regions_) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /*
+   * Overlap detection is performed against the user's *original* address
+   * range. Aliases are freshly reserved virtual addresses and never overlap,
+   * so checking them would be meaningless.
+   */
+  uintptr_t orig_start = reinterpret_cast<uintptr_t>(addr);
+
+  // Check for overflow when computing end address
+  if (orig_start > UINTPTR_MAX - length) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t orig_end = orig_start + length;
+
+  // Find first entry with base >= our base
+  auto it = symm_orig_regions.lower_bound(orig_start);
+
+  // Check entry at or after our base for overlap
+  if (it != symm_orig_regions.end() && it->first < orig_end) {
+    return ROCSHMEM_ERROR;
+  }
+
+  // Check entry just before our base for overlap
+  if (it != symm_orig_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t prev_end = prev->first + prev->second;
+    if (prev_end > orig_start) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  /*
+   * Map the user's buffer to a fresh rocSHMEM-owned virtual address. This
+   * alias refers to the same physical memory but at a distinct address that
+   * the caller uses for RMA and unregistration.
+   */
+  void *alias = nullptr;
+  if (alloc->MapLocalAlias(addr, length, &alias) != hipSuccess) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t alias_start = reinterpret_cast<uintptr_t>(alias);
+  symm_buffer_regions[alias_start] = SymmRegion{length, orig_start};
+  symm_orig_regions[orig_start] = length;
+  *registered_addr = alias;
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  (void)length;
+  (void)registered_addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+int Backend::buffer_unregister_symmetric(void *addr) {
+#if HIP_VERSION >= 70000000
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t base = reinterpret_cast<uintptr_t>(addr);
+
+  auto it = symm_buffer_regions.find(base);
+  if (it == symm_buffer_regions.end()) {
+    return ROCSHMEM_ERROR;
+  }
+
+  /* Release the rocSHMEM-owned alias mapping created at registration. */
+  (void)heap.get_allocator()->UnmapLocalAlias(addr, it->second.length);
+
+  /* Drop the original-range entry used for overlap detection. */
+  symm_orig_regions.erase(it->second.orig_base);
+
+  symm_buffer_regions.erase(it);
+  return ROCSHMEM_SUCCESS;
+#else
+  (void)addr;
+  return ROCSHMEM_ERROR;
+#endif
+}
+
+void Backend::symm_allgather(void* inout, size_t bytes_per_pe) {
+  if (backend_comm != MPI_COMM_NULL) {
+    NET_CHECK(mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes_per_pe, MPI_CHAR,
+                                       inout, bytes_per_pe, MPI_CHAR,
+                                       backend_comm));
+  } else {
+    assert(backend_bootstr != nullptr);
+    backend_bootstr->allGather(inout, bytes_per_pe);
+  }
 }
 
 }  // namespace rocshmem
