@@ -966,6 +966,27 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
       }
     }
   }
+  if (config->moi_report_buffer_address &&
+      config->moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow) {
+    const auto partitions = rocjitsu::consan_moi_workgroup_partition_layout(
+        0, config->moi_workgroup_extent_x, config->moi_workgroup_extent_y,
+        config->moi_workgroup_extent_z);
+    if (!partitions)
+      return false;
+    const auto layout = rocjitsu::consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+        config->moi_report_buffer_size, rocjitsu::kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+        partitions->partition_count);
+    const uint64_t required_exact = static_cast<uint64_t>(partitions->partition_count) *
+                                    rocjitsu::kConSanMoiInlineShadowConservativeExactShadowEntries;
+    if (layout.exact_shadow_entry_capacity < required_exact ||
+        layout.inline_atomic_release_slot_capacity < partitions->partition_count) {
+      std::fprintf(stderr,
+                   "[rocjitsu-dbi-hooks] caller-owned inline-shadow buffer is too small for "
+                   "%u workgroup partition(s)\n",
+                   partitions->partition_count);
+      return false;
+    }
+  }
   config->moi_auto_report_buffer_size_explicit =
       env_has_value("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE");
   if (config->moi_auto_report_buffer_size_explicit) {
@@ -1270,9 +1291,17 @@ public:
     }
 
     const size_t requested = static_cast<size_t>(requested_size);
+    const auto workgroup_partitions = rocjitsu::consan_moi_workgroup_partition_layout(
+        0, workgroup_extent_x, workgroup_extent_y, workgroup_extent_z);
+    if (!workgroup_partitions) {
+      log_message(kLogInfo, "ConSan MOI auto report buffer has invalid workgroup extents");
+      return false;
+    }
     const rocjitsu::ConSanMoiReportBufferLayout layout =
         inline_shadow
-            ? rocjitsu::consan_moi_inline_shadow_report_buffer_layout_for_bytes(requested_size)
+            ? rocjitsu::consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+                  requested_size, rocjitsu::kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+                  workgroup_partitions->partition_count)
         : direct_sampled
             ? rocjitsu::consan_moi_direct_sampled_report_buffer_layout_for_bytes(requested_size)
             : rocjitsu::consan_moi_report_buffer_layout_for_bytes(requested_size, track_barriers,
@@ -1281,7 +1310,11 @@ public:
         (!direct_sampled && !inline_shadow && layout.access_record_capacity == 0) ||
         (direct_sampled && layout.sampled_watchpoint_capacity == 0) ||
         (inline_shadow &&
-         (layout.diagnostic_capacity == 0 || layout.exact_shadow_entry_capacity == 0)) ||
+         (layout.diagnostic_capacity == 0 ||
+          layout.inline_atomic_release_slot_capacity < workgroup_partitions->partition_count ||
+          layout.exact_shadow_entry_capacity <
+              static_cast<uint64_t>(workgroup_partitions->partition_count) *
+                  rocjitsu::kConSanMoiInlineShadowConservativeExactShadowEntries)) ||
         (track_barriers && !inline_shadow && layout.barrier_record_capacity == 0) ||
         (track_atomics && !inline_shadow && layout.atomic_record_capacity == 0) ||
         (track_atomics && inline_shadow &&

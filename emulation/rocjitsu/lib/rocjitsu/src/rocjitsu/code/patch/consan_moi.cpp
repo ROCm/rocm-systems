@@ -1116,28 +1116,6 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   return true;
 }
 
-[[nodiscard]] bool append_load_u32_vgpr(std::vector<uint32_t> &words, uint64_t address,
-                                        uint16_t destination_vgpr, uint16_t scratch_vgpr,
-                                        rj_code_arch_t arch) {
-  const uint16_t address_lo_vgpr = scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
-
-  const auto mov_address_lo =
-      build_v_mov_b32_e64_literal(address_lo_vgpr, static_cast<uint32_t>(address), arch);
-  const auto mov_address_hi =
-      build_v_mov_b32_e64_literal(address_hi_vgpr, static_cast<uint32_t>(address >> 32u), arch);
-  const auto load = build_flat_load_b32_vaddr_vdst(address_lo_vgpr, destination_vgpr, arch);
-  const auto wait = build_s_wait_flat_load0(arch);
-  if (!mov_address_lo || !mov_address_hi || !load || !wait)
-    return false;
-
-  words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-  words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-  words.insert(words.end(), load->begin(), load->end());
-  words.push_back(*wait);
-  return true;
-}
-
 [[nodiscard]] bool append_store_u32_scalar_src(std::vector<uint32_t> &words, uint64_t address,
                                                uint16_t scalar_src, uint16_t scratch_vgpr,
                                                rj_code_arch_t arch) {
@@ -2536,13 +2514,10 @@ void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidate
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
     if (!options.moi_report_buffer_address)
       return 0;
-    const ConSanMoiReportBufferLayout layout =
-        consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
     // Four nested EXEC-save pairs, one VCC-save pair, and one SCC snapshot.
-    return layout.diagnostic_capacity != 0 || options.moi_track_atomics ||
-                   options.moi_track_barriers
-               ? 11u
-               : 0u;
+    // Bounded workgroup addressing also needs the VCC/SCC snapshot when no
+    // diagnostic, barrier, or atomic instrumentation was requested.
+    return 11u;
   }
   // One EXEC-save pair, one VCC-save pair, and one SCC snapshot.
   return options.moi_dynamic_access_records || options.moi_track_barriers ||
@@ -3956,6 +3931,112 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   return true;
 }
 
+[[nodiscard]] bool append_workgroup_source_to_vgpr(std::vector<uint32_t> &words,
+                                                   uint16_t destination,
+                                                   const ConSanMoiWorkgroupSource &source,
+                                                   rj_code_arch_t arch);
+
+[[nodiscard]] bool append_sampled_partition_bounds(std::vector<uint32_t> &words,
+                                                   const ConSanMoiWorkgroupSources &sources,
+                                                   const ConSanOptions &options,
+                                                   rj_code_arch_t arch, uint16_t extent_vgpr,
+                                                   uint16_t coordinate_vgpr,
+                                                   std::vector<size_t> &overflow_branches);
+
+[[nodiscard]] bool append_workgroup_partition_index(std::vector<uint32_t> &words,
+                                                    const ConSanMoiWorkgroupSources &sources,
+                                                    const ConSanOptions &options,
+                                                    rj_code_arch_t arch, uint16_t partition_vgpr,
+                                                    uint16_t extent_vgpr,
+                                                    uint16_t coordinate_vgpr) {
+  if (options.moi_workgroup_extent_x == 1 && options.moi_workgroup_extent_y == 1 &&
+      options.moi_workgroup_extent_z == 1) {
+    const auto zero = build_v_mov_b32_e64_literal(partition_vgpr, 0, arch);
+    if (!zero)
+      return false;
+    words.insert(words.end(), zero->begin(), zero->end());
+    return true;
+  }
+  const auto extent_y =
+      build_v_mov_b32_e64_literal(extent_vgpr, options.moi_workgroup_extent_y, arch);
+  const auto extent_x =
+      build_v_mov_b32_e64_literal(extent_vgpr, options.moi_workgroup_extent_x, arch);
+  if (!extent_y || !extent_x ||
+      !append_workgroup_source_to_vgpr(words, partition_vgpr, sources.z, arch) ||
+      !append_workgroup_source_to_vgpr(words, coordinate_vgpr, sources.y, arch)) {
+    return false;
+  }
+  words.insert(words.end(), extent_y->begin(), extent_y->end());
+  const auto yz = build_v_mad_u32_u24(partition_vgpr, vector_source_vgpr(extent_vgpr),
+                                      partition_vgpr, coordinate_vgpr, arch);
+  if (!yz)
+    return false;
+  words.insert(words.end(), yz->begin(), yz->end());
+  if (!append_workgroup_source_to_vgpr(words, coordinate_vgpr, sources.x, arch))
+    return false;
+  words.insert(words.end(), extent_x->begin(), extent_x->end());
+  const auto partition = build_v_mad_u32_u24(partition_vgpr, vector_source_vgpr(extent_vgpr),
+                                             partition_vgpr, coordinate_vgpr, arch);
+  if (!partition)
+    return false;
+  words.insert(words.end(), partition->begin(), partition->end());
+  return true;
+}
+
+[[nodiscard]] bool append_inline_partition_address(std::vector<uint32_t> &words, uint64_t base,
+                                                   uint16_t partition_vgpr, uint16_t cell_vgpr,
+                                                   uint16_t address_lo_vgpr,
+                                                   uint16_t address_hi_vgpr, uint16_t tmp_vgpr,
+                                                   rj_code_arch_t arch) {
+  // Each workgroup owns 16K four-byte LDS cells, or 128 KiB of packed
+  // exact-shadow entries. Preserve the complete byte offset as two words.
+  const auto offset_lo = build_v_lshlrev_b32_e32(address_lo_vgpr, scalar_positive_inline_u32(17),
+                                                 partition_vgpr, arch);
+  const auto offset_hi = build_v_lshrrev_b32_e32(address_hi_vgpr, scalar_positive_inline_u32(15),
+                                                 partition_vgpr, arch);
+  const auto cell_bytes =
+      build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(3), cell_vgpr, arch);
+  const auto add_cell = build_v_add_nc_u32_words(
+      address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), tmp_vgpr, arch);
+  if (!offset_lo || !offset_hi || !cell_bytes || !add_cell)
+    return false;
+  words.push_back(*offset_lo);
+  words.push_back(*offset_hi);
+  words.push_back(*cell_bytes);
+  words.insert(words.end(), add_cell->begin(), add_cell->end());
+
+  const uint32_t base_low = static_cast<uint32_t>(base);
+  const uint32_t base_high = static_cast<uint32_t>(base >> 32u);
+  if (base_low != 0) {
+    const auto limit = build_v_mov_b32_e64_literal(
+        tmp_vgpr, std::numeric_limits<uint32_t>::max() - base_low, arch);
+    const auto carry =
+        build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(address_lo_vgpr), tmp_vgpr, arch);
+    if (!limit || !carry)
+      return false;
+    words.insert(words.end(), limit->begin(), limit->end());
+    words.push_back(*carry);
+  }
+  if (!append_add_literal_field(words, address_lo_vgpr, base_low, tmp_vgpr, arch) ||
+      !append_add_literal_field(words, address_hi_vgpr, base_high, tmp_vgpr, arch)) {
+    return false;
+  }
+  if (base_low != 0) {
+    const auto increment = build_v_add_nc_u32_words(
+        address_hi_vgpr, vector_source_vgpr(address_hi_vgpr), scalar_positive_inline_u32(1), arch);
+    if (!increment ||
+        increment->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
+      return false;
+    }
+    const auto skip = build_s_cbranch_vccz(static_cast<int16_t>(increment->size()), arch);
+    if (!skip)
+      return false;
+    words.push_back(*skip);
+    words.insert(words.end(), increment->begin(), increment->end());
+  }
+  return true;
+}
+
 [[nodiscard]] bool append_inline_shadow_diagnostic_words(
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t old_value_vgpr,
@@ -3967,9 +4048,6 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
   const uint64_t report_base = *options.moi_report_buffer_address;
   const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
-
-  if (!append_save_moi_special_state(words, options, arch))
-    return false;
 
   const auto mov_zero = build_v_mov_b32_e64_literal(tmp_vgpr, 0, arch);
   const auto prior_nonempty =
@@ -4158,7 +4236,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   if (!restore_exec)
     return false;
   words.push_back(*restore_exec);
-  return append_restore_moi_special_state(words, options, arch);
+  return true;
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
@@ -4192,6 +4270,27 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
                                             scratch_count, "MOI owner", errors) ||
       reject_optional_scratch_range_overlap(options.moi_epoch_vgpr, *options.scratch_vgpr,
                                             scratch_count, "MOI epoch", errors))
+    return std::nullopt;
+  std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+  if (candidate.kernel_descriptor_file_offset) {
+    workgroup_sources = moi_probe_workgroup_sources(bytes, *candidate.kernel_descriptor_file_offset,
+                                                    options, arch, errors);
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+             (options.automatic_moi_identity_vgprs ||
+              (options.moi_workgroup_sgprs[0] && options.moi_workgroup_sgprs[1] &&
+               options.moi_workgroup_sgprs[2]))) {
+    // Shared helpers have no unique descriptor, but their common persistent
+    // identity registers have the same meaning for every owning kernel.
+    workgroup_sources = moi_probe_workgroup_sources(bytes, 0, options, arch, errors);
+  } else if (options.moi_workgroup_extent_x == 1 && options.moi_workgroup_extent_y == 1 &&
+             options.moi_workgroup_extent_z == 1) {
+    workgroup_sources = ConSanMoiWorkgroupSources{};
+  } else {
+    errors.emplace_back(
+        "ConSan MOI inline-shadow multi-workgroup partition has no stable helper identity");
+    return std::nullopt;
+  }
+  if (!workgroup_sources)
     return std::nullopt;
 
   const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
@@ -4232,6 +4331,17 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   }
   words.push_back(*wait_lds);
 
+  if (!append_save_moi_special_state(words, options, arch)) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not save VCC/SCC");
+    return std::nullopt;
+  }
+  std::vector<size_t> overflow_branch_indices;
+  if (!append_sampled_partition_bounds(words, *workgroup_sources, options, arch, address_lo_vgpr,
+                                       address_hi_vgpr, overflow_branch_indices)) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not encode workgroup partition");
+    return std::nullopt;
+  }
+
   const auto mov_low = build_v_mov_b32_e64_literal(low_vgpr, low_literal, arch);
   const auto mov_high = build_v_mov_b32_e64_literal(high_vgpr, high_literal, arch);
   if (!mov_low || !mov_high) {
@@ -4242,17 +4352,6 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     const ConSanMoiLdsCellRange cell_range =
         consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
     for (uint32_t cell_index = 0; cell_index < cell_range.cell_count; ++cell_index) {
-      const auto mov_address_lo = build_v_mov_b32_e64_literal(
-          address_lo_vgpr, static_cast<uint32_t>(exact_shadow_base), arch);
-      const auto mov_address_hi = build_v_mov_b32_e64_literal(
-          address_hi_vgpr, static_cast<uint32_t>(exact_shadow_base >> 32u), arch);
-      if (!mov_address_lo || !mov_address_hi) {
-        errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow address");
-        return std::nullopt;
-      }
-      words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-      words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
-
       uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
       if (range.static_byte_offset != 0) {
         if (!append_compute_effective_lds_byte_offset(words, tmp_vgpr, *lds_byte_offset_vgpr,
@@ -4266,22 +4365,21 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
       const auto start_cell_shift = build_v_lshrrev_b32_e32(
           tmp_vgpr, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
           effective_lds_byte_offset_vgpr, arch);
-      const auto byte_index_shift =
-          build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(3), tmp_vgpr, arch);
-      const auto address_with_cell = build_v_add_nc_u32_words(
-          address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), tmp_vgpr, arch);
-      if (!start_cell_shift || !byte_index_shift || !address_with_cell) {
+      if (!start_cell_shift) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow publish");
         return std::nullopt;
       }
       words.push_back(*start_cell_shift);
-      words.push_back(*byte_index_shift);
-      words.insert(words.end(), address_with_cell->begin(), address_with_cell->end());
       if (cell_index != 0 &&
-          !append_add_literal_field(words, address_lo_vgpr,
-                                    static_cast<uint32_t>(cell_index * sizeof(uint64_t)), tmp_vgpr,
-                                    arch)) {
+          !append_add_literal_field(words, tmp_vgpr, cell_index, address_lo_vgpr, arch)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow cell offset");
+        return std::nullopt;
+      }
+      if (!append_workgroup_partition_index(words, *workgroup_sources, options, arch, high_vgpr,
+                                            address_lo_vgpr, address_hi_vgpr) ||
+          !append_inline_partition_address(words, exact_shadow_base, high_vgpr, tmp_vgpr,
+                                           address_lo_vgpr, address_hi_vgpr, tmp_vgpr, arch)) {
+        errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow address");
         return std::nullopt;
       }
       // Diagnostic publication uses the packed-value temporaries. Rematerialize
@@ -4323,6 +4421,50 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
       }
     }
   }
+
+  const size_t normal_skip_branch_index = words.size();
+  words.push_back(build_s_branch(0, arch));
+  const size_t overflow_index = words.size();
+  if (!append_atomic_fetch_add_one_u32(
+          words,
+          *options.moi_report_buffer_address +
+              offsetof(ConSanMoiReportHeader, partition_overflow_count),
+          tmp_vgpr, address_lo_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not publish partition overflow");
+    return std::nullopt;
+  }
+  const size_t restore_index = words.size();
+  if (!append_restore_moi_special_state(words, options, arch)) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not restore VCC/SCC");
+    return std::nullopt;
+  }
+  const auto patch_branch = [&](size_t branch_index, size_t target_index,
+                                bool conditional) -> bool {
+    const int64_t displacement =
+        static_cast<int64_t>(target_index) - static_cast<int64_t>(branch_index) - 1;
+    if (displacement < std::numeric_limits<int16_t>::min() ||
+        displacement > std::numeric_limits<int16_t>::max())
+      return false;
+    if (conditional) {
+      const auto branch = build_s_cbranch_vccz(static_cast<int16_t>(displacement), arch);
+      if (!branch)
+        return false;
+      words[branch_index] = *branch;
+    } else {
+      words[branch_index] = build_s_branch(static_cast<int16_t>(displacement), arch);
+    }
+    return true;
+  };
+  for (size_t branch_index : overflow_branch_indices) {
+    if (!patch_branch(branch_index, overflow_index, true)) {
+      errors.emplace_back("ConSan MOI inline-shadow partition overflow branch is out of range");
+      return std::nullopt;
+    }
+  }
+  if (!patch_branch(normal_skip_branch_index, restore_index, false)) {
+    errors.emplace_back("ConSan MOI inline-shadow restore branch is out of range");
+    return std::nullopt;
+  }
   return words;
 }
 
@@ -4335,14 +4477,32 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
 
+  const auto partition_layout = consan_moi_workgroup_partition_layout(
+      0, options.moi_workgroup_extent_x, options.moi_workgroup_extent_y,
+      options.moi_workgroup_extent_z);
+  if (!partition_layout) {
+    result.warnings.emplace_back(
+        "ConSan MOI inline-shadow partition extents must be positive with product at most "
+        "16777215");
+    return;
+  }
+  if (partition_layout->partition_count != 1 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI inline-shadow multi-workgroup partitioning currently requires CDNA4");
+    return;
+  }
   const ConSanMoiReportBufferLayout layout =
-      consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+          options.moi_report_buffer_size, kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+          partition_layout->partition_count);
   if (options.max_patches == 0)
     return;
-  if (layout.exact_shadow_entry_capacity < kConSanMoiInlineShadowConservativeExactShadowEntries) {
+  const uint64_t required_exact_entries = static_cast<uint64_t>(partition_layout->partition_count) *
+                                          kConSanMoiInlineShadowConservativeExactShadowEntries;
+  if (layout.exact_shadow_entry_capacity < required_exact_entries) {
     result.warnings.emplace_back(
-        "ConSan MOI inline-shadow probe requires exact-shadow capacity for the full 64 KiB "
-        "LDS address range");
+        "ConSan MOI inline-shadow probe requires exact-shadow capacity for one full 64 KiB "
+        "LDS address range per workgroup partition");
     return;
   }
   const uint16_t scratch_count = inline_shadow_scratch_count(options);
@@ -7951,6 +8111,80 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
   return true;
 }
 
+[[nodiscard]] bool append_inline_atomic_partition_address(
+    std::vector<uint32_t> &words, const ConSanMoiWorkgroupSources &sources,
+    const ConSanOptions &options, uint64_t slot_base, uint32_t field_offset,
+    uint16_t address_lo_vgpr, uint16_t address_hi_vgpr, uint16_t tmp_vgpr, rj_code_arch_t arch) {
+  if (options.moi_workgroup_extent_x == 1 && options.moi_workgroup_extent_y == 1 &&
+      options.moi_workgroup_extent_z == 1) {
+    const uint64_t address = slot_base + field_offset;
+    const auto low =
+        build_v_mov_b32_e64_literal(address_lo_vgpr, static_cast<uint32_t>(address), arch);
+    const auto high =
+        build_v_mov_b32_e64_literal(address_hi_vgpr, static_cast<uint32_t>(address >> 32u), arch);
+    if (!low || !high)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    words.insert(words.end(), high->begin(), high->end());
+    return true;
+  }
+  if (!append_workgroup_partition_index(words, sources, options, arch, tmp_vgpr, address_lo_vgpr,
+                                        address_hi_vgpr))
+    return false;
+  const auto stride =
+      build_v_mov_b32_e64_literal(address_lo_vgpr, sizeof(ConSanMoiInlineAtomicReleaseSlot), arch);
+  const auto offset = build_v_mov_b32_e64_literal(address_hi_vgpr, field_offset, arch);
+  if (!stride || !offset)
+    return false;
+  words.insert(words.end(), stride->begin(), stride->end());
+  words.insert(words.end(), offset->begin(), offset->end());
+  const auto byte_offset = build_v_mad_u32_u24(tmp_vgpr, vector_source_vgpr(address_lo_vgpr),
+                                               tmp_vgpr, address_hi_vgpr, arch);
+  if (!byte_offset)
+    return false;
+  words.insert(words.end(), byte_offset->begin(), byte_offset->end());
+
+  const uint32_t base_low = static_cast<uint32_t>(slot_base);
+  const uint32_t base_high = static_cast<uint32_t>(slot_base >> 32u);
+  if (base_low == 0) {
+    const auto low = build_v_mov_b32_e64_literal(address_lo_vgpr, 0, arch);
+    const auto high = build_v_mov_b32_e64_literal(address_hi_vgpr, base_high, arch);
+    const auto add = build_v_add_nc_u32_words(address_lo_vgpr, vector_source_vgpr(address_lo_vgpr),
+                                              tmp_vgpr, arch);
+    if (!low || !high || !add)
+      return false;
+    words.insert(words.end(), low->begin(), low->end());
+    words.insert(words.end(), add->begin(), add->end());
+    words.insert(words.end(), high->begin(), high->end());
+    return true;
+  }
+
+  const auto limit = build_v_mov_b32_e64_literal(
+      address_lo_vgpr, std::numeric_limits<uint32_t>::max() - base_low, arch);
+  const auto carry =
+      build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(tmp_vgpr), address_lo_vgpr, arch);
+  const auto low = build_v_mov_b32_e64_literal(address_lo_vgpr, base_low, arch);
+  const auto add = build_v_add_nc_u32_words(address_lo_vgpr, vector_source_vgpr(address_lo_vgpr),
+                                            tmp_vgpr, arch);
+  const auto high = build_v_mov_b32_e64_literal(address_hi_vgpr, base_high, arch);
+  const auto high_carry =
+      build_v_mov_b32_e64_literal(address_hi_vgpr, static_cast<uint32_t>(base_high + 1u), arch);
+  if (!limit || !carry || !low || !add || !high || !high_carry ||
+      high_carry->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max()))
+    return false;
+  const auto skip = build_s_cbranch_vccz(static_cast<int16_t>(high_carry->size()), arch);
+  if (!skip)
+    return false;
+  words.insert(words.end(), limit->begin(), limit->end());
+  words.push_back(*carry);
+  words.insert(words.end(), low->begin(), low->end());
+  words.insert(words.end(), add->begin(), add->end());
+  words.insert(words.end(), high->begin(), high->end());
+  words.push_back(*skip);
+  words.insert(words.end(), high_carry->begin(), high_carry->end());
+  return true;
+}
+
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
     std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
     const ConSanOptions &options, const VgprSpillSequence *spill, rj_code_arch_t arch,
@@ -7991,6 +8225,22 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     errors.emplace_back("ConSan MOI inline atomic patch site exceeds ELF bytes");
     return std::nullopt;
   }
+  const bool has_persistent_workgroup_vgprs =
+      options.automatic_moi_identity_vgprs && options.moi_workgroup_vgprs[0] &&
+      options.moi_workgroup_vgprs[1] && options.moi_workgroup_vgprs[2];
+  const bool has_persistent_workgroup_sgprs = options.moi_workgroup_sgprs[0] &&
+                                              options.moi_workgroup_sgprs[1] &&
+                                              options.moi_workgroup_sgprs[2];
+  if (!candidate.kernel_descriptor_file_offset && !has_persistent_workgroup_vgprs &&
+      !has_persistent_workgroup_sgprs) {
+    errors.emplace_back(
+        "ConSan MOI inline atomic shared helper has no stable persistent workgroup identity");
+    return std::nullopt;
+  }
+  const auto workgroup_sources = moi_probe_workgroup_sources(
+      bytes, candidate.kernel_descriptor_file_offset.value_or(0), options, arch, errors);
+  if (!workgroup_sources)
+    return std::nullopt;
 
   const uint64_t slot_base =
       *options.moi_report_buffer_address + inline_atomic_release_slots_offset;
@@ -8015,52 +8265,89 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
   }
   words.push_back(*wait_flat);
 
+  if (!append_save_moi_special_state(words, options, arch)) {
+    errors.emplace_back("ConSan MOI inline atomic patch could not save VCC/SCC");
+    return std::nullopt;
+  }
+  std::vector<size_t> overflow_branch_indices;
+  if (!append_sampled_partition_bounds(
+          words, *workgroup_sources, options, arch, *options.scratch_vgpr,
+          static_cast<uint16_t>(*options.scratch_vgpr + 1u), overflow_branch_indices)) {
+    errors.emplace_back("ConSan MOI inline atomic patch could not encode partition bounds");
+    return std::nullopt;
+  }
+
+  const auto append_slot_address = [&](uint32_t field_offset) {
+    return append_inline_atomic_partition_address(
+        words, *workgroup_sources, options, slot_base, field_offset, *options.scratch_vgpr,
+        static_cast<uint16_t>(*options.scratch_vgpr + 1u), value_vgpr, arch);
+  };
+  const auto store_slot_value = [&](uint16_t source_vgpr) {
+    const auto store = build_flat_store_b32_vaddr_vsrc(*options.scratch_vgpr, source_vgpr, arch);
+    if (!store)
+      return false;
+    words.insert(words.end(), store->begin(), store->end());
+    return true;
+  };
+  const auto load_slot_value = [&](uint32_t field_offset) {
+    if (!append_slot_address(field_offset))
+      return false;
+    const auto load = build_flat_load_b32_vaddr_vdst(*options.scratch_vgpr, value_vgpr, arch);
+    const auto wait = build_s_wait_flat_load0(arch);
+    if (!load || !wait)
+      return false;
+    words.insert(words.end(), load->begin(), load->end());
+    words.push_back(*wait);
+    return true;
+  };
+
   if (atomic_event_kind_for_site(candidate.site) == ConSanMoiAtomicEventKind::Release) {
     uint16_t owner_vgpr = options.moi_owner_vgpr.value_or(value_vgpr);
-    if (private_owner_offset &&
-        !append_moi_private_load_wait(words, value_vgpr, *private_owner_offset, arch)) {
+    if (!append_slot_address(offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id)) ||
+        (private_owner_offset &&
+         !append_moi_private_load_wait(words, value_vgpr, *private_owner_offset, arch))) {
       errors.emplace_back("ConSan MOI inline atomic release could not load private owner");
       return std::nullopt;
     }
     if (options.moi_state_owner_sgpr)
       words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_state_owner_sgpr, arch));
-    if (!append_store_u32_vgpr(words,
-                               slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                               owner_vgpr, *options.scratch_vgpr, arch)) {
+    if (!store_slot_value(owner_vgpr)) {
       errors.emplace_back("ConSan MOI inline atomic release could not store owner");
       return std::nullopt;
     }
     uint16_t epoch_vgpr = options.moi_epoch_vgpr.value_or(value_vgpr);
-    if (private_epoch_offset &&
-        !append_moi_private_load_wait(words, value_vgpr, *private_epoch_offset, arch)) {
+    if (!append_slot_address(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch)) ||
+        (private_epoch_offset &&
+         !append_moi_private_load_wait(words, value_vgpr, *private_epoch_offset, arch))) {
       errors.emplace_back("ConSan MOI inline atomic release could not load private epoch");
       return std::nullopt;
     }
     if (options.moi_state_epoch_sgpr)
       words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_state_epoch_sgpr, arch));
-    if (!append_store_u32_vgpr(words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch),
-                               epoch_vgpr, *options.scratch_vgpr, arch) ||
-        !append_store_u32_vgpr(
-            words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-            address_vgpr, *options.scratch_vgpr, arch) ||
-        !append_store_u32_vgpr(
-            words,
-            slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                sizeof(uint32_t),
-            static_cast<uint16_t>(address_vgpr + 1u), *options.scratch_vgpr, arch) ||
-        !append_store_u32_literal(words,
-                                  slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, valid), 1u,
-                                  *options.scratch_vgpr, arch)) {
+    if (!store_slot_value(epoch_vgpr) ||
+        !append_slot_address(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address)) ||
+        !store_slot_value(address_vgpr) ||
+        !append_slot_address(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
+                             sizeof(uint32_t)) ||
+        !store_slot_value(static_cast<uint16_t>(address_vgpr + 1u)) ||
+        !append_slot_address(offsetof(ConSanMoiInlineAtomicReleaseSlot, valid))) {
       errors.emplace_back(
           "ConSan MOI inline atomic release patch could not encode metadata stores");
       return std::nullopt;
     }
-  } else {
-    if (!append_save_moi_special_state(words, options, arch)) {
-      errors.emplace_back("ConSan MOI inline atomic acquire patch could not save VCC/SCC");
+    const auto one = build_v_mov_b32_e64_literal(value_vgpr, 1u, arch);
+    if (!one) {
+      errors.emplace_back(
+          "ConSan MOI inline atomic release patch could not publish valid metadata");
       return std::nullopt;
     }
-
+    words.insert(words.end(), one->begin(), one->end());
+    if (!store_slot_value(value_vgpr)) {
+      errors.emplace_back(
+          "ConSan MOI inline atomic release patch could not publish valid metadata");
+      return std::nullopt;
+    }
+  } else {
     const auto narrow_if_valid =
         build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
     const auto narrow_if_low_matches = build_s_and_saveexec_b64(
@@ -8076,8 +8363,7 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
       return std::nullopt;
     }
 
-    if (!append_load_u32_vgpr(words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, valid),
-                              value_vgpr, *options.scratch_vgpr, arch)) {
+    if (!load_slot_value(offsetof(ConSanMoiInlineAtomicReleaseSlot, valid))) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load valid flag");
       return std::nullopt;
     }
@@ -8090,9 +8376,7 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     words.push_back(*valid_ne_zero);
     words.push_back(*narrow_if_valid);
 
-    if (!append_load_u32_vgpr(
-            words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address),
-            value_vgpr, *options.scratch_vgpr, arch)) {
+    if (!load_slot_value(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address))) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load address low");
       return std::nullopt;
     }
@@ -8105,11 +8389,8 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     words.push_back(*low_eq);
     words.push_back(*narrow_if_low_matches);
 
-    if (!append_load_u32_vgpr(words,
-                              slot_base +
-                                  offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
-                                  sizeof(uint32_t),
-                              value_vgpr, *options.scratch_vgpr, arch)) {
+    if (!load_slot_value(offsetof(ConSanMoiInlineAtomicReleaseSlot, atomic_address) +
+                         sizeof(uint32_t))) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load address high");
       return std::nullopt;
     }
@@ -8122,9 +8403,7 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     words.push_back(*high_eq);
     words.push_back(*narrow_if_high_matches);
 
-    if (!append_load_u32_vgpr(words,
-                              slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id),
-                              value_vgpr, *options.scratch_vgpr, arch)) {
+    if (!load_slot_value(offsetof(ConSanMoiInlineAtomicReleaseSlot, owner_id))) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load owner");
       return std::nullopt;
     }
@@ -8158,8 +8437,7 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
       words.push_back(*skip);
     }
 
-    if (!append_load_u32_vgpr(words, slot_base + offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch),
-                              value_vgpr, *options.scratch_vgpr, arch)) {
+    if (!load_slot_value(offsetof(ConSanMoiInlineAtomicReleaseSlot, epoch))) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load epoch");
       return std::nullopt;
     }
@@ -8204,10 +8482,50 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
           *build_s_cbranch_execz(static_cast<int16_t>(skipped_words), arch);
     }
     words.push_back(*restore_exec);
-    if (!append_restore_moi_special_state(words, options, arch)) {
-      errors.emplace_back("ConSan MOI inline atomic acquire patch could not restore VCC/SCC");
+  }
+
+  const size_t normal_skip_branch_index = words.size();
+  words.push_back(build_s_branch(0, arch));
+  const size_t overflow_index = words.size();
+  if (!append_atomic_fetch_add_one_u32(
+          words,
+          *options.moi_report_buffer_address +
+              offsetof(ConSanMoiReportHeader, partition_overflow_count),
+          value_vgpr, *options.scratch_vgpr, arch)) {
+    errors.emplace_back("ConSan MOI inline atomic patch could not publish partition overflow");
+    return std::nullopt;
+  }
+  const size_t restore_index = words.size();
+  if (!append_restore_moi_special_state(words, options, arch)) {
+    errors.emplace_back("ConSan MOI inline atomic patch could not restore VCC/SCC");
+    return std::nullopt;
+  }
+  const auto patch_partition_branch = [&](size_t branch_index, size_t target_index,
+                                          bool conditional) -> bool {
+    const int64_t displacement =
+        static_cast<int64_t>(target_index) - static_cast<int64_t>(branch_index) - 1;
+    if (displacement < std::numeric_limits<int16_t>::min() ||
+        displacement > std::numeric_limits<int16_t>::max())
+      return false;
+    if (conditional) {
+      const auto branch = build_s_cbranch_vccz(static_cast<int16_t>(displacement), arch);
+      if (!branch)
+        return false;
+      words[branch_index] = *branch;
+    } else {
+      words[branch_index] = build_s_branch(static_cast<int16_t>(displacement), arch);
+    }
+    return true;
+  };
+  for (size_t branch_index : overflow_branch_indices) {
+    if (!patch_partition_branch(branch_index, overflow_index, true)) {
+      errors.emplace_back("ConSan MOI inline atomic overflow branch is out of range");
       return std::nullopt;
     }
+  }
+  if (!patch_partition_branch(normal_skip_branch_index, restore_index, false)) {
+    errors.emplace_back("ConSan MOI inline atomic restore branch is out of range");
+    return std::nullopt;
   }
 
   if (spill)
@@ -8237,10 +8555,21 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires a MOI report buffer");
     return;
   }
+  const auto partition_layout = consan_moi_workgroup_partition_layout(
+      0, options.moi_workgroup_extent_x, options.moi_workgroup_extent_y,
+      options.moi_workgroup_extent_z);
+  if (!partition_layout ||
+      (partition_layout->partition_count != 1 && arch != ROCJITSU_CODE_ARCH_CDNA4)) {
+    result.warnings.emplace_back("ConSan MOI inline atomic patch has invalid workgroup partitions");
+    return;
+  }
   const ConSanMoiReportBufferLayout layout =
-      consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
-  if (layout.inline_atomic_release_slots_offset == layout.sampled_watchpoints_offset) {
-    result.warnings.emplace_back("ConSan MOI inline atomic patch has no release metadata slot");
+      consan_moi_inline_shadow_report_buffer_layout_for_bytes(
+          options.moi_report_buffer_size, kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+          partition_layout->partition_count);
+  if (layout.inline_atomic_release_slot_capacity < partition_layout->partition_count) {
+    result.warnings.emplace_back(
+        "ConSan MOI inline atomic patch has no release metadata slot per workgroup partition");
     return;
   }
   if (!options.automatic_moi_private_epoch &&
@@ -8367,8 +8696,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     note_descriptor_requirements(descriptor_requirements, *resources);
     note_moi_sgpr_requirements(scalar_requirements, *resources, options);
-    planned_candidates.push_back({candidate, *resources, std::move(private_layout),
-                                  std::move(spill), required_private_bytes});
+    planned_candidates.push_back({std::move(planned_candidate), *resources,
+                                  std::move(private_layout), std::move(spill),
+                                  required_private_bytes});
   }
   if (planned_candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch found no patchable atomics");

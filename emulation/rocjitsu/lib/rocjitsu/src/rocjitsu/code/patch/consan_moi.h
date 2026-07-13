@@ -224,6 +224,7 @@ struct ConSanMoiReportBufferLayout {
   uint32_t atomic_record_capacity = 0;
   uint32_t diagnostic_capacity = 0;
   uint32_t exact_shadow_entry_capacity = 0;
+  uint32_t inline_atomic_release_slot_capacity = 0;
   uint32_t sampled_watchpoint_capacity = 0;
   size_t access_records_offset = sizeof(ConSanMoiReportHeader);
   size_t barrier_records_offset = sizeof(ConSanMoiReportHeader);
@@ -453,7 +454,9 @@ inline constexpr uint32_t kConSanMoiInlineShadowAtomicReleaseSlotCapacity = 1;
 [[nodiscard]] constexpr ConSanMoiReportBufferLayout
 consan_moi_inline_shadow_report_buffer_layout_for_bytes(
     uint64_t report_buffer_size,
-    uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity) {
+    uint32_t requested_diagnostic_capacity = kConSanMoiInlineShadowDefaultDiagnosticCapacity,
+    uint32_t requested_atomic_release_slot_capacity =
+        kConSanMoiInlineShadowAtomicReleaseSlotCapacity) {
   ConSanMoiReportBufferLayout layout;
   if (report_buffer_size < sizeof(ConSanMoiReportHeader))
     return layout;
@@ -464,18 +467,21 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
   while (diagnostic_capacity != 0 &&
          payload_bytes -
                  static_cast<uint64_t>(diagnostic_capacity) * sizeof(ConSanMoiDiagnosticRecord) <
-             sizeof(ConSanMoiInlineAtomicReleaseSlot) + sizeof(uint64_t)) {
+             static_cast<uint64_t>(requested_atomic_release_slot_capacity) *
+                     sizeof(ConSanMoiInlineAtomicReleaseSlot) +
+                 sizeof(uint64_t)) {
     --diagnostic_capacity;
   }
 
   const uint64_t diagnostic_bytes =
       static_cast<uint64_t>(diagnostic_capacity) * sizeof(ConSanMoiDiagnosticRecord);
   const uint64_t inline_atomic_release_slot_bytes =
-      diagnostic_capacity == 0
-          ? 0
-          : static_cast<uint64_t>(kConSanMoiInlineShadowAtomicReleaseSlotCapacity) *
-                sizeof(ConSanMoiInlineAtomicReleaseSlot);
+      diagnostic_capacity == 0 ? 0
+                               : static_cast<uint64_t>(requested_atomic_release_slot_capacity) *
+                                     sizeof(ConSanMoiInlineAtomicReleaseSlot);
   layout.diagnostic_capacity = diagnostic_capacity;
+  layout.inline_atomic_release_slot_capacity =
+      diagnostic_capacity == 0 ? 0 : requested_atomic_release_slot_capacity;
   layout.exact_shadow_entry_capacity = consan_moi_clamp_u32_capacity(
       (payload_bytes - diagnostic_bytes - inline_atomic_release_slot_bytes) / sizeof(uint64_t));
   layout.diagnostic_records_offset = sizeof(ConSanMoiReportHeader);
