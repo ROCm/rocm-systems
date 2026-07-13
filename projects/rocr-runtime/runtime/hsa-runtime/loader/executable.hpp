@@ -313,6 +313,11 @@ private:
 /// is a pointer to a host-owned AieKernelDescriptor (see amd_aie_section.h).
 class AieKernelSymbol final : public SymbolImpl {
  public:
+  /// @brief Constructs a kernel symbol.
+  /// @param _symbol_name Kernel name.
+  /// @param _descriptor_ptr Host pointer to the kernel's AieKernelDescriptor.
+  /// @param _kernarg_size Kernel argument buffer size in bytes.
+  /// @param _num_cols Number of NPU columns the kernel uses.
   AieKernelSymbol(const std::string& _symbol_name, uint64_t _descriptor_ptr, uint32_t _kernarg_size,
                   uint32_t _num_cols = 1)
       : SymbolImpl(true,  // is_loaded
@@ -337,12 +342,11 @@ class AieKernelSymbol final : public SymbolImpl {
   /// @brief Marks the kernel_object handle as visible (called at executable freeze).
   void SetFrozen() { frozen = true; }
 
-  std::string full_name;
-  uint64_t descriptor_ptr;
-  uint32_t kernarg_size;
-  uint32_t num_cols;
-  // KERNEL_OBJECT returns 0 until freeze, matching the GPU symbol contract.
-  bool frozen = false;
+  std::string full_name;    ///< Kernel name.
+  uint64_t descriptor_ptr;  ///< Host pointer to the kernel's AieKernelDescriptor.
+  uint32_t kernarg_size;    ///< Kernel argument buffer size in bytes.
+  uint32_t num_cols;        ///< Number of NPU columns the kernel uses.
+  bool frozen = false;      ///< KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
 };
 
 //===----------------------------------------------------------------------===//
@@ -469,9 +473,9 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   const void* ElfData() const { return elf_data; }
   size_t ElfSize() const { return elf_size; }
 
-  // Host-owned kernel descriptors; the kernel_object handles point at these.
+  /// @brief Host-owned kernel descriptors; the kernel_object handles point at these.
   std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
-  // Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
+  /// @brief Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
   std::vector<std::pair<void*, size_t>> device_buffers;
 
   bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;

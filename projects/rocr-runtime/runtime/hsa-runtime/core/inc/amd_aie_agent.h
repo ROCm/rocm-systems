@@ -114,6 +114,7 @@ private:
   void InitAllocators();
 
   std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
+  /// @brief Architecture name(s) this agent accepts in hsaco section names, e.g. "aie2".
   std::vector<std::string> supported_arch_names_;
   std::function<void *(size_t size, size_t align,
                        core::MemoryRegion::AllocateFlags flags)>
