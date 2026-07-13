@@ -2446,7 +2446,7 @@ TEST(ConSanMoi, SharedPrivateOwnerInitializesEachDescriptorWaveSize) {
             2u);
 }
 
-TEST(ConSanMoi, Gfx950SharedOwnerUsesPrivateStateWhenAnyAccumWindowOverlaps) {
+TEST(ConSanMoi, Gfx950SharedOwnerUsesScalarStateWhenAnyAccumWindowOverlaps) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
   fixture.first_vgpr_granulated = 3;
@@ -2474,21 +2474,78 @@ TEST(ConSanMoi, Gfx950SharedOwnerUsesPrivateStateWhenAnyAccumWindowOverlaps) {
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_scalar_identity_automatic) << testing::PrintToString(result.warnings);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
-  EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
-  EXPECT_EQ(access->persistent_owner_private_offset, 4u);
+  EXPECT_FALSE(access->persistent_epoch_private_offset);
+  EXPECT_FALSE(access->persistent_owner_private_offset);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
                                     return patch.kind ==
-                                           ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+                                           ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
                                   }),
             2u);
+}
+
+TEST(ConSanMoi, Gfx950SharedRecordReplayUsesScalarWorkgroupState) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 3;
+  fixture.second_vgpr_granulated = 3;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject code_object(bytes.data(), bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+    std::memcpy(bytes.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
+  }
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::RecordReplay;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(result.moi_scalar_identity_automatic);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_TRUE(access->scratch_vgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  std::vector<uint32_t> words(access->trampoline_size / sizeof(uint32_t));
+  std::memcpy(words.data(), patched.text_sections().front()->data() + access->trampoline_offset,
+              access->trampoline_size);
+  const uint16_t value_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
+  ASSERT_TRUE(result.resolved_moi_state_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_state_epoch_sgpr);
+  EXPECT_NE(std::ranges::find(words,
+                              build_v_mov_b32_e32(value_vgpr, *result.resolved_moi_state_owner_sgpr,
+                                                  ROCJITSU_CODE_ARCH_CDNA4)),
+            words.end());
+  EXPECT_NE(std::ranges::find(words,
+                              build_v_mov_b32_e32(value_vgpr, *result.resolved_moi_state_epoch_sgpr,
+                                                  ROCJITSU_CODE_ARCH_CDNA4)),
+            words.end());
+  for (std::optional<uint16_t> workgroup_sgpr : result.resolved_moi_workgroup_sgprs) {
+    ASSERT_TRUE(workgroup_sgpr);
+    EXPECT_NE(std::ranges::find(words, build_v_mov_b32_e32(value_vgpr, *workgroup_sgpr,
+                                                           ROCJITSU_CODE_ARCH_CDNA4)),
+              words.end());
+  }
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
@@ -4852,6 +4909,80 @@ TEST(ConSanMoi, Gfx950FirstLightUsesStableEntrySnapshotsForWorkgroupAndWaveIdent
             7u);
 }
 
+TEST(ConSanMoi, Gfx950ScalarIdentityProloguePreservesPairedEntryAbi) {
+  std::array<uint32_t, 220> text_words{};
+  text_words[0] = 0xD81A0000u;
+  text_words[1] = 0x00000000u; // ds_write_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_scalar_preload", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 5u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO,
+                    1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.moi_scalar_identity_automatic);
+  ASSERT_TRUE(result.resolved_moi_state_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_state_epoch_sgpr);
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  });
+  ASSERT_NE(prologue, result.patches.end());
+  ASSERT_GT(prologue->trampoline_size, 256u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const char *text = patched.text_sections().front()->data();
+  const size_t body_size = prologue->trampoline_size - 256u;
+  EXPECT_EQ(std::memcmp(text + prologue->trampoline_offset,
+                        text + prologue->trampoline_offset + 256u, body_size),
+            0);
+  std::vector<uint32_t> words(body_size / sizeof(uint32_t));
+  std::memcpy(words.data(), text + prologue->trampoline_offset, body_size);
+  const std::vector<uint32_t> snapshots = {
+      build_s_mov_b32(*result.resolved_moi_workgroup_sgprs[0], /*shifted s5=*/7,
+                      ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(*result.resolved_moi_workgroup_sgprs[1], /*shifted s6=*/8,
+                      ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(*result.resolved_moi_workgroup_sgprs[2], /*shifted s7=*/9,
+                      ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  EXPECT_TRUE(contains_subsequence(words, snapshots));
+  const auto read_owner = build_v_readfirstlane_b32(
+      *result.resolved_moi_state_owner_sgpr, *prologue->scratch_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(read_owner);
+  EXPECT_NE(std::ranges::find(words, *read_owner), words.end());
+  EXPECT_NE(std::ranges::find(words, build_s_mov_b32(*result.resolved_moi_state_epoch_sgpr,
+                                                     scalar_positive_inline_u32(0),
+                                                     ROCJITSU_CODE_ARCH_CDNA4)),
+            words.end());
+  std::vector<uint32_t> restore;
+  for (uint16_t destination = 0; destination < 9; ++destination) {
+    restore.push_back(build_s_mov_b32(destination, static_cast<uint16_t>(destination + 2u),
+                                      ROCJITSU_CODE_ARCH_CDNA4));
+  }
+  EXPECT_TRUE(contains_subsequence(words, restore));
+}
+
 TEST(ConSanMoi, Gfx950StableOwnerTransactionEnablesDispatchPtrWithoutWorkgroupInfo) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,
@@ -4946,7 +5077,7 @@ TEST(ConSanMoi, Gfx950OwnerEpochProloguePreservesKernargPreloadEntryPair) {
             static_cast<int64_t>(patched.text_sections().front()->vaddr() + first_entry));
 }
 
-TEST(ConSanMoi, Gfx950AccumOffsetBoundarySelectsPrivateOwnerConservatively) {
+TEST(ConSanMoi, Gfx950AccumOffsetBoundarySelectsScalarOwnerConservatively) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,
       0x00000000u, // ds_write_b32 v0, v0
@@ -4954,7 +5085,7 @@ TEST(ConSanMoi, Gfx950AccumOffsetBoundarySelectsPrivateOwnerConservatively) {
   };
   struct Case {
     uint32_t encoded_accum_offset;
-    bool expect_private;
+    bool expect_scalar;
   };
   // Explicit scratch v12:v18 makes the persistent identity start at v19.
   // ACCUM base v24 is the exact non-overlap boundary; v20 overlaps it.
@@ -4977,20 +5108,78 @@ TEST(ConSanMoi, Gfx950AccumOffsetBoundarySelectsPrivateOwnerConservatively) {
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.moi_private_epoch_automatic, test_case.expect_private);
-    EXPECT_EQ(result.moi_persistent_vgprs_automatic, !test_case.expect_private);
+    EXPECT_FALSE(result.moi_private_epoch_automatic);
+    EXPECT_EQ(result.moi_scalar_identity_automatic, test_case.expect_scalar);
+    EXPECT_EQ(result.moi_persistent_vgprs_automatic, !test_case.expect_scalar);
     const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
       return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
     });
     ASSERT_NE(access, result.patches.end());
-    if (test_case.expect_private) {
-      EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
-      EXPECT_EQ(access->persistent_owner_private_offset, 4u);
-    }
+    EXPECT_FALSE(access->persistent_epoch_private_offset);
+    EXPECT_FALSE(access->persistent_owner_private_offset);
   }
 }
 
-TEST(ConSanMoi, Gfx950AccumOverlapUsesPrivateStateForRecordReplayAndSampled) {
+TEST(ConSanMoi, Gfx950AccumFallbackRejectsMissingFiveSgprWindow) {
+  const std::array<uint32_t, 4> text_words = {
+      build_s_mov_b32(95, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4),
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_scalar_window_full", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("no five-SGPR identity window") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950AccumFallbackPreservesHwIdOwnerSemanticsWithPrivateState) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_hw_id_accum", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_owner_source = ConSanMoiOwnerSource::HwId;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.moi_scalar_identity_automatic);
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("HW_ID") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950AccumOverlapUsesScalarStateForRecordReplayAndSampled) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,
       0x00000000u, // ds_write_b32 v0, v0
@@ -5021,7 +5210,8 @@ TEST(ConSanMoi, Gfx950AccumOverlapUsesPrivateStateForRecordReplayAndSampled) {
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.moi_private_epoch_automatic);
+    EXPECT_TRUE(result.moi_scalar_identity_automatic);
+    EXPECT_FALSE(result.moi_private_epoch_automatic);
     EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
     const auto access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
       if (test_case.engine == ConSanMoiEngine::RecordReplay)
@@ -5029,28 +5219,18 @@ TEST(ConSanMoi, Gfx950AccumOverlapUsesPrivateStateForRecordReplayAndSampled) {
       return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
     });
     ASSERT_NE(access, result.patches.end());
-    EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
-    EXPECT_EQ(access->persistent_owner_private_offset, 4u);
+    EXPECT_FALSE(access->persistent_epoch_private_offset);
+    EXPECT_FALSE(access->persistent_owner_private_offset);
     const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-      return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+      return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
     });
     ASSERT_NE(prologue, result.patches.end());
+    ASSERT_TRUE(prologue->scratch_vgpr);
+    EXPECT_GT(*prologue->scratch_vgpr, 0u)
+        << "the packed workitem-ID ABI input v0 cannot be an entry temporary";
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
-    ASSERT_TRUE(patched.is_valid());
-    std::vector<uint32_t> words(access->trampoline_size / sizeof(uint32_t));
-    std::memcpy(words.data(), patched.text_sections().front()->data() + access->trampoline_offset,
-                access->trampoline_size);
-    const uint16_t state_vgpr = static_cast<uint16_t>(
-        *access->scratch_vgpr + (test_case.engine == ConSanMoiEngine::RecordReplay ? 2u : 4u));
-    const auto owner_load = build_cdna4_address_free_scratch_load_b32(
-        state_vgpr, /*owner_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
-    const auto epoch_load = build_cdna4_address_free_scratch_load_b32(
-        state_vgpr, /*epoch_offset=*/0u, ROCJITSU_CODE_ARCH_CDNA4);
-    ASSERT_TRUE(owner_load);
-    ASSERT_TRUE(epoch_load);
-    EXPECT_TRUE(contains_subsequence(words, *owner_load));
-    EXPECT_TRUE(contains_subsequence(words, *epoch_load));
+    EXPECT_TRUE(result.resolved_moi_state_owner_sgpr);
+    EXPECT_TRUE(result.resolved_moi_state_epoch_sgpr);
   }
 }
 
@@ -5070,6 +5250,7 @@ TEST(ConSanMoi, Gfx950RecordReplayPrivateStateKeepsSpillsDisjoint) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::RecordReplay;
+  options.force_private_epoch = true;
   options.force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -5112,6 +5293,7 @@ TEST(ConSanMoi, Gfx950PrivateOwnerProloguePreservesKernargPreloadEntryPair) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.force_private_epoch = true;
   options.scratch_vgpr = 12;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -5126,7 +5308,8 @@ TEST(ConSanMoi, Gfx950PrivateOwnerProloguePreservesKernargPreloadEntryPair) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_EQ(prologue->persistent_epoch_private_offset, 0u);
   EXPECT_EQ(prologue->persistent_owner_private_offset, 4u);
-  EXPECT_EQ(prologue->spilled_vgpr_count, 2u);
+  EXPECT_EQ(prologue->spilled_vgpr_count, 0u);
+  EXPECT_EQ(prologue->required_private_segment_size, 16u);
   ASSERT_GT(prologue->trampoline_size, 256u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5153,6 +5336,27 @@ TEST(ConSanMoi, Gfx950PrivateOwnerProloguePreservesKernargPreloadEntryPair) {
   EXPECT_TRUE(contains_subsequence(prologue_words, std::span<const uint32_t>(&*unpack_z, 1)));
   EXPECT_TRUE(contains_subsequence(prologue_words, *flatten_yz));
   EXPECT_TRUE(contains_subsequence(prologue_words, *flatten_x));
+
+  const auto owner_store = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/12, /*owner_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto epoch_store = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/12, /*epoch_offset=*/0u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto stale_entry_load0 = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/12, /*old_spill_offset=*/16u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto stale_entry_load1 = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/13, /*old_spill_offset=*/20u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto stale_entry_store0 = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/12, /*old_spill_offset=*/16u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto stale_entry_store1 = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/13, /*old_spill_offset=*/20u, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(owner_store && epoch_store && stale_entry_load0 && stale_entry_load1 &&
+              stale_entry_store0 && stale_entry_store1);
+  EXPECT_TRUE(contains_subsequence(prologue_words, *owner_store));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *epoch_store));
+  EXPECT_FALSE(contains_subsequence(prologue_words, *stale_entry_load0));
+  EXPECT_FALSE(contains_subsequence(prologue_words, *stale_entry_load1));
+  EXPECT_FALSE(contains_subsequence(prologue_words, *stale_entry_store0));
+  EXPECT_FALSE(contains_subsequence(prologue_words, *stale_entry_store1));
 }
 
 TEST(ConSanMoi, Gfx950StableOwnerTransactionPreservesExistingDispatchPtrAbi) {
@@ -6065,6 +6269,40 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
   EXPECT_GT(result.patches.front().trampoline_size, 0u);
 }
 
+TEST(ConSanMoi, Gfx950BarrierOnlyScalarStateGetsEntryPrologue) {
+  const auto barrier_sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier_sequence);
+  const std::array<uint32_t, 3> text_words = {
+      (*barrier_sequence)[0],
+      (*barrier_sequence)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_barrier_only", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 6;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.moi_scalar_identity_automatic) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  }));
+}
+
 TEST(ConSanMoi, BarrierRecordPatchStoresDescriptorWorkgroupIds) {
   constexpr uint32_t kBarrierWait = 0xBF940000u;
   const std::array<uint32_t, 2> text_words = {
@@ -6263,6 +6501,67 @@ TEST(ConSanMoi, InlineShadowBarrierEpochPatchTrampolinesBarrierAndIncrementsEpoc
   EXPECT_EQ(trampoline_words[2], build_s_branch(*ret, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
+TEST(ConSanMoi, Gfx950ScalarBarrierPreservesSpecialState) {
+  const auto barrier_sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier_sequence);
+  const std::array<uint32_t, 5> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32
+      (*barrier_sequence)[0],
+      (*barrier_sequence)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_scalar_barrier", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_barriers = true;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x100000000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.moi_scalar_identity_automatic);
+  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(result.resolved_moi_state_epoch_sgpr);
+  const auto barrier = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
+  });
+  ASSERT_NE(barrier, result.patches.end());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  std::vector<uint32_t> words(barrier->trampoline_size / sizeof(uint32_t));
+  std::memcpy(words.data(), patched.text_sections().front()->data() + barrier->trampoline_offset,
+              barrier->trampoline_size);
+  const uint16_t save_base = *result.resolved_moi_exec_save_sgpr;
+  const uint16_t vcc_save = static_cast<uint16_t>(save_base + 8u);
+  const uint16_t scc_save = static_cast<uint16_t>(save_base + 10u);
+  const auto save_scc =
+      build_s_cselect_b32(scc_save, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0),
+                          ROCJITSU_CODE_ARCH_CDNA4);
+  const auto save_vcc = build_s_mov_b64(vcc_save, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, vcc_save, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto restore_scc =
+      build_s_cmp_lg_u32(scc_save, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(save_scc && save_vcc && restore_vcc && restore_scc);
+  const std::vector<uint32_t> expected = {
+      *save_scc,
+      *save_vcc,
+      pack_sop2(/*s_add_u32=*/0, *result.resolved_moi_state_epoch_sgpr,
+                *result.resolved_moi_state_epoch_sgpr, scalar_positive_inline_u32(1)),
+      *restore_vcc,
+      *restore_scc,
+  };
+  EXPECT_TRUE(contains_subsequence(words, expected));
+}
+
 TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_code_object();
   ASSERT_FALSE(bytes.empty());
@@ -6346,6 +6645,32 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
       trampoline_words,
       make_expected_literal_store_words(atomic_record_base + offsetof(ConSanMoiAtomicRecord, scope),
                                         2u, *options.scratch_vgpr)));
+}
+
+TEST(ConSanMoi, Gfx950AtomicRecordOnlyScalarStateGetsEntryPrologue) {
+  std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 3u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_atomics = true;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2);
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.moi_scalar_identity_automatic);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+  }));
 }
 
 TEST(ConSanMoi, Gfx950InventoriesFlatAtomicScOrderingFields) {
@@ -6836,7 +7161,7 @@ TEST(ConSanMoi, Gfx950InlineAtomicOrderingEmitsReleaseAndAcquirePatches) {
             0u);
 }
 
-TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUsePrivateOwnerEpochState) {
+TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUseScalarOwnerEpochState) {
   std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());
   mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
@@ -6855,10 +7180,11 @@ TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUsePrivateOwnerEpochState) {
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_TRUE(result.moi_scalar_identity_automatic);
+  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
-    return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   });
   ASSERT_NE(prologue, result.patches.end());
 
@@ -6866,35 +7192,36 @@ TEST(ConSanMoi, Gfx950AccumOverlapInlineAtomicsUsePrivateOwnerEpochState) {
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const char *text = patched.text_sections().front()->data();
-  const auto private_owner_load = build_cdna4_address_free_scratch_load_b32(
-      /*vdst=*/14, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto private_epoch_load = build_cdna4_address_free_scratch_load_b32(
-      /*vdst=*/14, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto acquire_owner_load = build_cdna4_address_free_scratch_load_b32(
-      /*vdst=*/12, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto private_epoch_store = build_cdna4_address_free_scratch_store_b32(
-      /*vsrc=*/14, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
-  ASSERT_TRUE(private_owner_load);
-  ASSERT_TRUE(private_epoch_load);
-  ASSERT_TRUE(acquire_owner_load);
-  ASSERT_TRUE(private_epoch_store);
+  ASSERT_TRUE(result.resolved_moi_state_owner_sgpr);
+  ASSERT_TRUE(result.resolved_moi_state_epoch_sgpr);
+  const uint32_t materialize_owner = build_v_mov_b32_e32(
+      /*vdst=*/14, *result.resolved_moi_state_owner_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t materialize_epoch = build_v_mov_b32_e32(
+      /*vdst=*/14, *result.resolved_moi_state_epoch_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
 
   size_t atomic_patch_count = 0;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       continue;
     ++atomic_patch_count;
-    EXPECT_EQ(patch.persistent_epoch_private_offset, 0u);
-    EXPECT_EQ(patch.persistent_owner_private_offset, 4u);
-    EXPECT_GE(patch.required_private_segment_size, 16u);
+    EXPECT_FALSE(patch.persistent_epoch_private_offset);
+    EXPECT_FALSE(patch.persistent_owner_private_offset);
     std::vector<uint32_t> words(patch.trampoline_size / sizeof(uint32_t));
     std::memcpy(words.data(), text + patch.trampoline_offset, patch.trampoline_size);
     if (patch.anchor_offset == 0u) {
-      EXPECT_TRUE(contains_subsequence(words, *private_owner_load));
-      EXPECT_TRUE(contains_subsequence(words, *private_epoch_load));
+      EXPECT_TRUE(std::ranges::find(words, materialize_owner) != words.end());
+      EXPECT_TRUE(std::ranges::find(words, materialize_epoch) != words.end());
     } else {
-      EXPECT_TRUE(contains_subsequence(words, *acquire_owner_load));
-      EXPECT_TRUE(contains_subsequence(words, *private_epoch_store));
+      const uint32_t materialize_acquire_owner = build_v_mov_b32_e32(
+          /*vdst=*/12, *result.resolved_moi_state_owner_sgpr, ROCJITSU_CODE_ARCH_CDNA4);
+      EXPECT_TRUE(std::ranges::find(words, materialize_acquire_owner) != words.end());
+      const auto execz = build_s_cbranch_execz(0, ROCJITSU_CODE_ARCH_CDNA4);
+      const auto import_epoch = build_v_readfirstlane_b32(*result.resolved_moi_state_epoch_sgpr,
+                                                          /*vsrc=*/14, ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_TRUE(execz && import_epoch);
+      EXPECT_TRUE(std::ranges::any_of(
+          words, [&](uint32_t word) { return (word & 0xffff0000u) == (*execz & 0xffff0000u); }));
+      EXPECT_NE(std::ranges::find(words, *import_epoch), words.end());
     }
   }
   EXPECT_EQ(atomic_patch_count, 2u);
@@ -6910,6 +7237,7 @@ TEST(ConSanMoi, Gfx950PrivateInlineAtomicSpillsStayBeyondPersistentState) {
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::InlineShadow;
   options.moi_track_atomics = true;
+  options.force_private_epoch = true;
   options.force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;

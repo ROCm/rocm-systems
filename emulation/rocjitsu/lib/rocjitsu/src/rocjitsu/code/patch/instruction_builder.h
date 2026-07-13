@@ -1006,6 +1006,16 @@ build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
   return pack_sopp(op, static_cast<uint16_t>(offset_dwords));
 }
 
+/// @brief Encode RDNA4/CDNA4 `s_cbranch_execz`.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_cbranch_execz(int16_t offset_dwords,
+                                                                             rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return std::nullopt;
+  const uint32_t op =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCbranchExeczSopp : rdna4::kSCbranchExeczSopp;
+  return pack_sopp(op, static_cast<uint16_t>(offset_dwords));
+}
+
 /// @brief Encode s_lshl_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0,
                                                          uint16_t ssrc1, rj_code_arch_t arch) {

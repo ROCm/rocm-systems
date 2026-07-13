@@ -151,6 +151,9 @@ struct ConSanOptions {
   /// Internal marker set when inline shadow keeps entry-snapshotted owner and
   /// epoch state in per-lane private memory.
   bool automatic_moi_private_epoch = false;
+  /// Internal marker set when CDNA4 accumulator pressure keeps persistent
+  /// owner, epoch, and workgroup identity in a five-SGPR wave-state window.
+  bool automatic_moi_scalar_identity = false;
   /// Internal marker set after ConSan assigns the scalar EXEC-save window.
   bool automatic_moi_exec_save_sgprs = false;
   /// Internal marker set after ConSan assigns the hw_id owner temporary SGPR.
@@ -164,6 +167,11 @@ struct ConSanOptions {
   std::optional<uint16_t> moi_owner_vgpr;
   std::optional<uint16_t> moi_epoch_vgpr;
   std::array<std::optional<uint16_t>, 3> moi_workgroup_vgprs;
+  /// Internal persistent scalar wave-state selected when CDNA4 cannot place
+  /// the five identity VGPRs below ACCUM_OFFSET.
+  std::optional<uint16_t> moi_state_owner_sgpr;
+  std::optional<uint16_t> moi_state_epoch_sgpr;
+  std::array<std::optional<uint16_t>, 3> moi_workgroup_sgprs;
   /// Internal two-SGPR window used to unpack AQL workgroup dimensions in the
   /// CDNA4 kernel-entry identity prologue.
   std::optional<uint16_t> moi_identity_sgpr;
@@ -514,10 +522,14 @@ struct ConSanResult {
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::array<std::optional<uint16_t>, 3> resolved_moi_workgroup_vgprs;
+  std::optional<uint16_t> resolved_moi_state_owner_sgpr;
+  std::optional<uint16_t> resolved_moi_state_epoch_sgpr;
+  std::array<std::optional<uint16_t>, 3> resolved_moi_workgroup_sgprs;
   std::optional<uint16_t> resolved_moi_identity_sgpr;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;
   std::optional<uint16_t> resolved_moi_owner_sgpr;
   bool moi_persistent_vgprs_automatic = false;
+  bool moi_scalar_identity_automatic = false;
   bool moi_private_epoch_automatic = false;
   bool moi_exec_save_sgprs_automatic = false;
   bool moi_owner_sgpr_automatic = false;
