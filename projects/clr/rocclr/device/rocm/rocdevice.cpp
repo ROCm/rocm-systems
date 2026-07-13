@@ -1910,11 +1910,15 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   bool success = true;
 
 #ifdef _WIN32
-  // Handle D3D10 device binding
+  // Handle D3D10 device binding. In validateOnly mode the query path only needs
+  // the LUID compatibility check, so the DXX extension caching is skipped.
   if (flags & amd::Context::Flags::D3D10DeviceKhr) {
     void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
-    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device), gfxContext, validateOnly)) {
-      LogError("Failed D3D10Interop::associateD3D10Device()");
+    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device),
+                                            gfxContext, validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D10Interop::associateD3D10Device()");
+      }
       success = false;
     }
   }
@@ -1922,18 +1926,27 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   // Handle D3D11 device binding
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
-    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device), gfxContext, validateOnly)) {
-      LogError("Failed D3D11Interop::associateD3D11Device()");
+    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device),
+                                            gfxContext, validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D11Interop::associateD3D11Device()");
+      }
       success = false;
     }
   }
 #endif  // _WIN32
 
-  // Handle GL device binding (existing code)
+  // Handle GL device binding. Query paths pass validateOnly to probe interop
+  // compatibility without starting a GL interop session.
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
-      LogError("Failed GlInterop::glAssociate()");
+    const bool bound = validateOnly
+                           ? GlInterop::glValidateInterop(this, flags, gfxContext, glDevice)
+                           : GlInterop::glAssociate(this, flags, gfxContext, glDevice);
+    if (!bound) {
+      if (!validateOnly) {
+        LogError("Failed GlInterop::glAssociate()");
+      }
       success = false;
     }
   }

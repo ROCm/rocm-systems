@@ -78,10 +78,15 @@ bool associateD3D11Device(const Device* device, ID3D11Device* pd3d11Device,
       (device->getDeviceLUID().LowPart == adapterDesc.AdapterLuid.LowPart);
 
   if (!canInteroperate) {
-    LogError("D3D11 device and ROCr device cannot interoperate (LUID mismatch)");
+    // Expected during multi-GPU probing; only log for a real bind.
+    if (!validateOnly) {
+      LogError("D3D11 device and ROCr device cannot interoperate (LUID mismatch)");
+    }
     return false;
   }
 
+  // Query paths only need the compatibility result; skip creating and caching
+  // the DXX extension objects (a real context bind will populate the cache).
   if (validateOnly) {
     return true;
   }

@@ -194,6 +194,15 @@ bool glAssociate(Device* device, uint flags, void* gfxContext, void* glDevice) {
 }
 
 // ================================================================================================
+bool glValidateInterop(Device* device, uint flags, void* GLplatformContext,
+                       void* GLdeviceContext) {
+  // The Linux glAssociate path performs no begin/attach side effect; it only
+  // queries device info and compares identity, so it already is the interop
+  // compatibility check.
+  return glAssociate(device, flags, GLplatformContext, GLdeviceContext);
+}
+
+// ================================================================================================
 bool glDissociate(Device*, void*, void*) {
   return true;
 }

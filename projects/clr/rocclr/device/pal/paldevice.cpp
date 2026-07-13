@@ -1921,11 +1921,16 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
 #endif  //_WIN32
 
   if (flags & amd::Context::Flags::GLDeviceKhr) {
-    // Attempt to associate PAL-OGL
-    if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      if (!validateOnly) {
-        LogError("Failed glAssociate()");
+    void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (validateOnly) {
+      // Query paths (e.g. clGetGLContextInfoKHR) only need a compatibility
+      // probe. Load the AMD interop extensions and check adapter match without
+      // starting a GL interop session (no wglBeginCLInteropAMD side effect).
+      if (!initGLInteropPrivateExt(pContext, glDevice) || !glCanInterop(pContext, glDevice)) {
+        return false;
       }
+    } else if (!glAssociate(pContext, glDevice)) {
+      LogError("Failed glAssociate()");
       return false;
     }
   }
@@ -1943,9 +1948,7 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   if (glDevice != nullptr) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }
