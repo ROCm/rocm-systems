@@ -14,6 +14,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   GPUs (e.g. `GPUs: 0-7 (all)`) and total output size; deep child processes
   collapse to a one-line own/cumulative summary; and a compact per-format
   viewer legend replaces the previous per-row footer.
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Removed
 
@@ -93,7 +94,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
-- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 

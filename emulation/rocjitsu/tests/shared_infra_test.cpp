@@ -61,6 +61,8 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
 #include "simdojo/sim/simulation.h"
@@ -75,6 +77,8 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 
@@ -791,6 +795,464 @@ TEST(L2CacheTest, UcWriteCrossingLineBoundaryFlushesBothDirtyResidentLines) {
       << "dirty byte outside the first-line UC store should be preserved";
   EXPECT_EQ(mem.read8(kBase + amdgpu::L2Cache::LINE_SIZE + 4), second_line[4])
       << "dirty byte outside the second-line UC store should be preserved";
+}
+
+TEST(L1ScalarCacheTest, UcReadFlushesDirtyResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 1;
+  constexpr uint64_t kAddr = 0x5000;
+  constexpr uint32_t kBackingValue = 0x11111111;
+  constexpr uint32_t kDirtyValue = 0x22222222;
+  constexpr uint32_t kReloadValue = 0x33333333;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write32(kAddr, kBackingValue, kVmid);
+  l1.store(kAddr, /*num_dwords=*/1, &kDirtyValue, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+  }
+  uint32_t read_value = 0;
+  l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
+
+  EXPECT_EQ(read_value, kDirtyValue);
+  EXPECT_EQ(mem.read32(kAddr, kVmid), kDirtyValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kReloadValue), sizeof(kReloadValue),
+           amdgpu::Mtype::RW, kVmid);
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+  }
+
+  read_value = 0;
+  l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
+  EXPECT_EQ(read_value, kReloadValue);
+}
+
+TEST(L1ScalarCacheTest, UcLoadBytesFlushesDirtyResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 4;
+  constexpr uint64_t kAddr = 0x5400;
+  constexpr uint32_t kBackingValue = 0x11111111;
+  constexpr uint32_t kDirtyValue = 0x44332211;
+  constexpr uint32_t kReloadValue = 0x88776655;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write32(kAddr, kBackingValue, kVmid);
+  l1.store(kAddr, /*num_dwords=*/1, &kDirtyValue, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+  }
+
+  std::array<uint8_t, 2> read_bytes{};
+  l1.load_bytes(kAddr + 1, read_bytes.size(), read_bytes.data(), kVmid);
+
+  EXPECT_EQ(read_bytes[0], 0x22);
+  EXPECT_EQ(read_bytes[1], 0x33);
+  EXPECT_EQ(mem.read32(kAddr, kVmid), kDirtyValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kReloadValue), sizeof(kReloadValue),
+           amdgpu::Mtype::RW, kVmid);
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+  }
+
+  read_bytes.fill(0);
+  l1.load_bytes(kAddr + 1, read_bytes.size(), read_bytes.data(), kVmid);
+  EXPECT_EQ(read_bytes[0], 0x66);
+  EXPECT_EQ(read_bytes[1], 0x77);
+}
+
+TEST(L1ScalarCacheTest, CcReadFlushesDirtyResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 5;
+  constexpr uint64_t kAddr = 0x5800;
+  constexpr uint32_t kBackingValue = 0x11111111;
+  constexpr uint32_t kDirtyValue = 0x22222222;
+  constexpr uint32_t kReloadValue = 0x33333333;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write32(kAddr, kBackingValue, kVmid);
+  l1.store(kAddr, /*num_dwords=*/1, &kDirtyValue, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+  }
+  uint32_t read_value = 0;
+  l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
+
+  EXPECT_EQ(read_value, kDirtyValue);
+  EXPECT_EQ(mem.read32(kAddr, kVmid), kDirtyValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kReloadValue), sizeof(kReloadValue),
+           amdgpu::Mtype::RW, kVmid);
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+  }
+
+  read_value = 0;
+  l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
+  EXPECT_EQ(read_value, kReloadValue);
+}
+
+TEST(L1ScalarCacheTest, CcLoadBytesFlushesDirtyResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 6;
+  constexpr uint64_t kAddr = 0x5C00;
+  constexpr uint32_t kBackingValue = 0x11111111;
+  constexpr uint32_t kDirtyValue = 0x44332211;
+  constexpr uint32_t kReloadValue = 0x88776655;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write32(kAddr, kBackingValue, kVmid);
+  l1.store(kAddr, /*num_dwords=*/1, &kDirtyValue, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+  }
+
+  std::array<uint8_t, 2> read_bytes{};
+  l1.load_bytes(kAddr + 1, read_bytes.size(), read_bytes.data(), kVmid);
+
+  EXPECT_EQ(read_bytes[0], 0x22);
+  EXPECT_EQ(read_bytes[1], 0x33);
+  EXPECT_EQ(mem.read32(kAddr, kVmid), kDirtyValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kReloadValue), sizeof(kReloadValue),
+           amdgpu::Mtype::RW, kVmid);
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+  }
+
+  read_bytes.fill(0);
+  l1.load_bytes(kAddr + 1, read_bytes.size(), read_bytes.data(), kVmid);
+  EXPECT_EQ(read_bytes[0], 0x66);
+  EXPECT_EQ(read_bytes[1], 0x77);
+}
+
+TEST(L1ScalarCacheTest, UcWriteFlushesDirtyResidentLineBeforeBypassStore) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 2;
+  constexpr uint64_t kBase = 0x6000;
+  constexpr uint64_t kStoreAddr = kBase + 4;
+  constexpr uint32_t kDirtyOutsideValue = 0x11111111;
+  constexpr uint32_t kDirtyTargetValue = 0x22222222;
+  constexpr uint32_t kUcStoreValue = 0x33333333;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kBase >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  const uint32_t dirty_values[] = {kDirtyOutsideValue, kDirtyTargetValue};
+  l1.store(kBase, /*num_dwords=*/2, dirty_values, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kBase >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+  }
+  l1.store(kStoreAddr, /*num_dwords=*/1, &kUcStoreValue, kVmid);
+  l1.writeback_all(kVmid);
+
+  EXPECT_EQ(mem.read32(kBase, kVmid), kDirtyOutsideValue);
+  EXPECT_EQ(mem.read32(kStoreAddr, kVmid), kUcStoreValue);
+}
+
+TEST(L1ScalarCacheTest, CcWriteFlushesDirtyResidentLineBeforeBypassStore) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+  l1.set_memory(&mem);
+
+  constexpr uint32_t kVmid = 7;
+  constexpr uint64_t kBase = 0x6400;
+  constexpr uint64_t kStoreAddr = kBase + 4;
+  constexpr uint32_t kBackingOutsideValue = 0x01010101;
+  constexpr uint32_t kBackingTargetValue = 0x02020202;
+  constexpr uint32_t kDirtyOutsideValue = 0x11111111;
+  constexpr uint32_t kDirtyTargetValue = 0x22222222;
+  constexpr uint32_t kCcStoreValue = 0x33333333;
+
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  KfdProcess::PageTable page_table;
+  std::shared_mutex page_table_mutex;
+  page_table[kBase >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  mem.register_process(kVmid, &page_table, &page_table_mutex);
+
+  mem.write32(kBase, kBackingOutsideValue, kVmid);
+  mem.write32(kStoreAddr, kBackingTargetValue, kVmid);
+  const uint32_t dirty_values[] = {kDirtyOutsideValue, kDirtyTargetValue};
+  l1.store(kBase, /*num_dwords=*/2, dirty_values, kVmid);
+
+  {
+    std::unique_lock lock(page_table_mutex);
+    page_table[kBase >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+  }
+  l1.store(kStoreAddr, /*num_dwords=*/1, &kCcStoreValue, kVmid);
+
+  EXPECT_EQ(mem.read32(kBase, kVmid), kDirtyOutsideValue);
+  EXPECT_EQ(mem.read32(kStoreAddr, kVmid), kCcStoreValue);
+}
+
+TEST(L1ScalarCacheTest, DirtyEvictionAndWritebackAllReachBacking) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kBase = 0x9000;
+  constexpr uint64_t kSetStride = uint64_t{1}
+                                  << (amdgpu::L1ScalarCache::LINE_SIZE_BITS +
+                                      std::bit_width(amdgpu::L1ScalarCache::NUM_SETS - 1));
+  static_assert(amdgpu::L1ScalarCache::ASSOCIATIVITY == 4);
+
+  std::array<uint64_t, 5> addrs{};
+  std::array<uint32_t, 5> values{};
+  for (uint32_t i = 0; i < addrs.size(); ++i) {
+    addrs[i] = kBase + i * kSetStride;
+    values[i] = 0x11110000u + i;
+  }
+
+  for (uint32_t i = 0; i < 4; ++i)
+    l1.store(addrs[i], /*num_dwords=*/1, &values[i]);
+
+  l1.store(addrs[4], /*num_dwords=*/1, &values[4]);
+  EXPECT_EQ(mem.read32(addrs[0]), values[0]);
+
+  l1.writeback_all();
+  for (uint32_t i = 1; i < addrs.size(); ++i)
+    EXPECT_EQ(mem.read32(addrs[i]), values[i]) << "line " << i;
+}
+
+TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x7000;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  mem.write32(kAddr, kNewValue);
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kNewValue);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8000;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
+  std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
+  l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
+           amdgpu::Mtype::UC, /*non_temporal=*/false);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8100;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kNewValue), sizeof(kNewValue),
+           amdgpu::Mtype::RW);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kNewValue);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8200;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  l2.write(kAddr, reinterpret_cast<const uint8_t *>(&kNewValue), sizeof(kNewValue),
+           amdgpu::Mtype::RW);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kNewValue);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
+}
+
+TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
+  amdgpu::GpuMemory mem("test_mem");
+  amdgpu::L2Cache l2("test_l2");
+  amdgpu::L1VectorCache l1(&l2);
+  l2.set_backing_memory(&mem);
+
+  constexpr uint64_t kAddr = 0x8300;
+  constexpr uint32_t kOldValue = 0x11111111;
+  constexpr uint32_t kNewValue = 0x22222222;
+
+  uint64_t addrs[64] = {};
+  addrs[0] = kAddr;
+  std::array<uint8_t, 64 * sizeof(uint32_t)> bytes{};
+
+  mem.write32(kAddr, kOldValue);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  uint32_t value = 0;
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  ASSERT_EQ(value, kOldValue);
+
+  std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
+  std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
+  l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
+           amdgpu::Mtype::RW, /*non_temporal=*/true);
+
+  bytes.fill(0);
+  l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+  std::memcpy(&value, bytes.data(), sizeof(value));
+  EXPECT_EQ(value, kNewValue);
 }
 
 // ---------------------------------------------------------------------------
