@@ -113,7 +113,7 @@ TEST(per_pid_file_sink, empty_bytes_is_early_return)
     // per_pid_file_sink::on_source_drained returns early on empty bytes
     // so the (uninitialised in unit tests) config singleton is never
     // queried for the output filename.
-    rocprofsys::output_summary    registry;
+    rocprofsys::output_summary          registry;
     rocprofsys::core::per_pid_file_sink sink{ static_cast<pid_t>(1), registry };
 
     EXPECT_NO_THROW(sink.on_source_drained(1, std::vector<char>{}));
@@ -210,7 +210,7 @@ TEST(single_file_sink, cross_source_preserves_seq_id_namespace)
     // seq_id=1. Each source must end up with its own disjoint effective
     // seq_id so downstream interned-data resolution does not collapse
     // the two sources' iid namespaces into one.
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
     auto bytes_a = build_framed_placeholder_packet('A');
@@ -246,7 +246,7 @@ TEST(single_file_sink, same_source_shares_base_offset)
     // Two drains from the same source share the same base offset, so
     // their outputs end up with the same effective seq_id (when their
     // original seq_ids match). The per-source allocation is sticky.
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
     sink.on_source_drained(7, build_framed_placeholder_packet('X'));
@@ -273,7 +273,7 @@ TEST(single_file_sink, append_mode_splits_rank_window_across_declared_sources)
     // Regression: fixed 1<<16 source strides collide with rank+1 after the
     // 16th cached pid. With 20 declared sources, the per-source stride must be
     // derived from the rank window so every source stays below rank 1's window.
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(
         rocprofsys::core::append_mode_config{ .seq_id_base = 0, .source_count = 20 });
@@ -313,7 +313,7 @@ TEST(single_file_sink, append_mode_splits_rank_window_across_declared_sources)
 
 TEST(single_file_sink, append_mode_single_source_keeps_legacy_base_offset)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(
         rocprofsys::core::append_mode_config{ .seq_id_base = 128, .source_count = 1 });
@@ -330,7 +330,7 @@ TEST(single_file_sink, append_mode_single_source_keeps_legacy_base_offset)
 
 TEST(single_file_sink, append_mode_drops_sources_beyond_declared_window)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
@@ -353,7 +353,7 @@ TEST(single_file_sink, append_mode_drops_sources_beyond_declared_window)
 
 TEST(single_file_sink, append_mode_rejects_slice_too_small_for_placeholder_seq_id)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 5, .source_count = 5 });
@@ -366,7 +366,7 @@ TEST(single_file_sink, append_mode_rejects_slice_too_small_for_placeholder_seq_i
 
 TEST(single_file_sink, append_mode_drops_packet_exceeding_source_slice)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(rocprofsys::core::append_mode_config{
         .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
@@ -395,7 +395,7 @@ TEST(single_file_sink, append_rank_base_helper_rejects_overflowing_rank_window)
 
 TEST(single_file_sink, append_mode_zero_declared_sources_disables_output)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
     sink.set_append_mode(rocprofsys::core::append_mode_config{ .source_count = 0 });
 
@@ -411,7 +411,7 @@ TEST(single_file_sink, finalize_creates_parent_directories)
     const auto path = root / "nested" / "trace.proto";
     std::filesystem::remove_all(root);
 
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry, path.string() };
     sink.on_source_drained(1, build_framed_placeholder_packet('A'));
     sink.finalize();
@@ -432,7 +432,7 @@ TEST(single_file_sink, finalize_creates_parent_directories)
 
 TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
     auto bytes = build_framed_placeholder_packet('A');
@@ -454,7 +454,7 @@ TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)
 
 TEST(single_file_sink, truncated_trace_packets_frame_drops_remainder)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
     auto bytes = build_framed_placeholder_packet('A');
@@ -478,7 +478,7 @@ TEST(single_file_sink, truncated_trace_packets_frame_drops_remainder)
 
 TEST(single_file_sink, malformed_inner_trace_packet_drops_remainder)
 {
-    rocprofsys::output_summary   registry;
+    rocprofsys::output_summary         registry;
     rocprofsys::core::single_file_sink sink{ registry };
 
     auto bytes = build_framed_placeholder_packet('A');

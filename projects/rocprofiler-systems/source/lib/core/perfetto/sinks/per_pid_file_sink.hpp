@@ -32,7 +32,7 @@ public:
     void finalize();
 
 private:
-    pid_t                                        m_parent_pid{ 0 };
+    pid_t                                  m_parent_pid{ 0 };
     std::reference_wrapper<output_summary> m_registry;
 };
 }  // namespace core

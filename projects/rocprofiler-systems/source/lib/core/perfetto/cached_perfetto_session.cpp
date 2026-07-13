@@ -73,9 +73,9 @@ make_sink(output_summary& registry, pid_t root_pid, bool combine_traces,
 }
 }  // namespace
 
-cached_perfetto_session::cached_perfetto_session(output_summary& registry,
-                                                 pid_t root_pid, bool combine_traces,
-                                                 const std::vector<int>&      source_pids,
+cached_perfetto_session::cached_perfetto_session(output_summary& registry, pid_t root_pid,
+                                                 bool                    combine_traces,
+                                                 const std::vector<int>& source_pids,
                                                  trace_cache::post_processor& processor)
 : m_engine{ std::make_unique<cached_perfetto_engine>(
       build_engine_config_from_settings()) }

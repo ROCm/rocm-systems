@@ -125,9 +125,9 @@ process_buffered_storage(
     // RAII lifetime guard: configure_processors registers raw references to the
     // returned processors as handlers on _coordinator. Holding _storage in scope
     // keeps those processors alive until the parse + finalize is done.
-    [[maybe_unused]] auto _storage = configure_processors(_coordinator, _config, _formats,
-                                                          _summary, _engine, _tracks);
-    storage_parser_t      _parser(_storage_filename);
+    [[maybe_unused]] auto _storage =
+        configure_processors(_coordinator, _config, _formats, _summary, _engine, _tracks);
+    storage_parser_t _parser(_storage_filename);
 
     // perfetto_processor_t::prepare_for_processing primes two thread_local
     // values on this parser thread (active track_registry + emitting pid).

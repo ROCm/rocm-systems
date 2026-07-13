@@ -28,7 +28,7 @@ public:
     // config::get_perfetto_output_filename() at finalize time. Set to a concrete
     // path to write to a different location than the configured base.
     explicit single_file_sink(output_summary& registry,
-                              std::string           output_filename_override = {});
+                              std::string     output_filename_override = {});
 
     single_file_sink(single_file_sink&&) noexcept            = default;
     single_file_sink& operator=(single_file_sink&&) noexcept = default;
@@ -55,11 +55,11 @@ private:
     static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
         static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
     std::reference_wrapper<output_summary> m_registry;
-    std::string                                  m_output_filename_override{};
-    std::vector<char>                            m_buffer{};
-    std::unordered_map<int, std::uint32_t>       m_source_seq_id_bases{};
-    std::uint64_t                                m_next_source_base{ 1 };
-    bool                                         m_append_mode{ false };
+    std::string                            m_output_filename_override{};
+    std::vector<char>                      m_buffer{};
+    std::unordered_map<int, std::uint32_t> m_source_seq_id_bases{};
+    std::uint64_t                          m_next_source_base{ 1 };
+    bool                                   m_append_mode{ false };
     std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };
     std::uint64_t m_seq_id_window_limit_exclusive{ TRUSTED_SEQ_ID_MAX_EXCLUSIVE };
     bool          m_output_disabled{ false };

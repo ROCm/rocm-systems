@@ -29,8 +29,8 @@ namespace core
 class cached_perfetto_session
 {
 public:
-    cached_perfetto_session(output_summary& registry, pid_t root_pid,
-                            bool combine_traces, const std::vector<int>& source_pids,
+    cached_perfetto_session(output_summary& registry, pid_t root_pid, bool combine_traces,
+                            const std::vector<int>&      source_pids,
                             trace_cache::post_processor& processor);
     ~cached_perfetto_session() noexcept;
 
