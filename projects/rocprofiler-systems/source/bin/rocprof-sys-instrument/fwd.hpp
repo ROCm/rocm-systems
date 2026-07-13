@@ -172,10 +172,12 @@ extern bool   instr_dynamic_callsites;
 extern bool   instr_traps;
 extern bool   instr_loop_traps;
 extern bool   exclude_internal_lib_paths;
+extern bool   exe_only;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
 extern size_t min_loop_instructions;
+extern size_t max_library_functions;
 //
 //  debug settings
 //
@@ -363,6 +365,9 @@ get_name(module_t*);
 
 symtab_func_t*
 get_symtab_function(procedure_t*);
+
+size_t
+get_object_procedure_count_lb(object_t*);
 
 std::vector<object_t*>
 filter_objects(std::vector<object_t*>* app_objects);

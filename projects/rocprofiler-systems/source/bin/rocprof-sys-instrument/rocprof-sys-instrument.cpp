@@ -85,10 +85,12 @@ bool   instr_dynamic_callsites      = false;
 bool   instr_traps                  = false;
 bool   instr_loop_traps             = false;
 bool   exclude_internal_lib_paths   = false;
+bool   exe_only                     = false;
 size_t min_address_range            = get_default_min_address_range();  // 4096
 size_t min_loop_address_range       = get_default_min_address_range();  // 4096
 size_t min_instructions             = get_default_min_instructions();   // 1024
 size_t min_loop_instructions        = get_default_min_instructions();   // 1024
+size_t max_library_functions        = 20000;
 bool   werror                       = false;
 bool   debug_print                  = false;
 bool   instr_print                  = false;
@@ -957,6 +959,21 @@ main(int argc, char** argv)
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
     parser
+        .add_argument({ "--max-library-functions" },
+                      "Skip shared libraries whose procedure count exceeds this "
+                      "threshold. Useful for keeping instrumentation overhead "
+                      "manageable. The target executable is never gated by this. "
+                      "This check is bypassed by module include/restrict regexes "
+                      "(--module-include/-MI, --module-restrict/-MR) and function "
+                      "include/restrict regexes (--function-include/-I, "
+                      "--function-restrict/-R). 0 = disabled.")
+        .count(1)
+        .dtype("int")
+        .set_default(max_library_functions)
+        .action([](parser_t& p) {
+            max_library_functions = p.get<size_t>("max-library-functions");
+        });
+    parser
         .add_argument(
             { "--coverage" },
             "Enable recording the code coverage. If instrumenting in coverage mode ('-M "
@@ -1026,6 +1043,15 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             exclude_internal_lib_paths = p.get<bool>("exclude-internal-lib-paths");
         });
+    parser
+        .add_argument(
+            { "--exe-only" },
+            "Shorthand for excluding every shared library from instrumentation, leaving "
+            "only the main executable. Only takes effect during runtime instrumentation; "
+            "ignored in binary-rewrite mode.")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) { exe_only = p.get<bool>("exe-only"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DYNINST OPTIONS]" }, "");
@@ -1204,6 +1230,14 @@ main(int argc, char** argv)
             simulate        = true;
             include_uninstr = true;
         }
+    }
+
+    // --exe-only is only meaningful for runtime instrumentation
+    if(binary_rewrite && exe_only)
+    {
+        verbprintf(0, "Note: '--exe-only' is ignored in binary-rewrite mode. Disabling "
+                      "it...\n");
+        exe_only = false;
     }
 
     if(binary_rewrite && outfile.empty())

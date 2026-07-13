@@ -640,6 +640,40 @@ rocprofsys_get_exe_realpath()
 
 //======================================================================================//
 //
+//  Get the estimated number of procedures in an object via Dyninst SymtabAPI.
+//  This is orders of magnitude quicker than querying the respective
+//  getProcedures()->size() However, we lose some accuracy.
+//
+//  We do not assume that process_module has been called.
+//
+//  E.g: With libomptarget.so, SymtabAPI reports ~49750 procedures, whilst
+//       BPatch_module::getProcedures()->size() reports ~49990.
+//
+//  Due to this, the returned value should be considered a lower bound.
+//
+
+size_t
+get_object_procedure_count_lb(object_t* _object)
+{
+    if(!_object) return 0;
+
+    SymTab::Symtab* _st = SymTab::convert(_object);
+    if(!_st)
+    {
+        verbprintf(1,
+                   "Warning! Failed to convert object %s to SymtabAPI for "
+                   "procedure count... assuming 0\n",
+                   _object->name().c_str());
+        return 0;
+    }
+
+    std::vector<symtab_func_t*> _fns;
+    _st->getAllFunctions(_fns);  // API does not return object
+    return _fns.size();
+}
+
+//======================================================================================//
+//
 //  Error callback routine.
 //
 std::vector<std::string>
@@ -875,8 +909,85 @@ filter_objects(std::vector<object_t*>* app_objects)
     {
         if(!obj) continue;
 
-        // TODO: exe-only check
-        // TODO: --max-library-functions filtering
+        // Exclude every shared library when --exe-only is requested.
+        if(exe_only && obj->isSharedLib())
+        {
+            verbprintf(0, "[filter] skipping shared lib '%s' (--exe-only)\n",
+                       obj->name().c_str());
+            continue;
+        }
+
+        // If function filtering is active, keep the object so the later
+        // function-level filtering can make the decision
+        if(!func_include.empty() || !func_restrict.empty())
+        {
+            _result.emplace_back(obj);
+            continue;
+        }
+
+        bool _is_excluded     = false;
+        bool _included_module = false;
+
+        // -MI/-MR: if any module within this object matches a
+        // module-include or module-restrict regex, keep the object so the later
+        // module-level filtering can make the final per-module decision.
+        if(!file_include.empty() || !file_restrict.empty())
+        {
+            auto _mods = std::vector<module_t*>{};
+            obj->modules(_mods);  // Inexpensive
+            for(auto* mod : _mods)
+            {
+                if(!mod) continue;
+                auto _module_name = std::string{ get_name(mod) };
+                if(!file_include.empty() &&
+                   std::any_of(file_include.begin(), file_include.end(),
+                               [&](const auto& re) {
+                                   return std::regex_search(_module_name, re);
+                               }))
+                {
+                    _included_module = true;
+                    verbprintf(2,
+                               "[filter] forcing object '%s' "
+                               "(module-include-regex matched '%s')\n",
+                               obj->name().c_str(), _module_name.c_str());
+                    break;
+                }
+
+                if(!file_restrict.empty() &&
+                   std::any_of(file_restrict.begin(), file_restrict.end(),
+                               [&](const auto& re) {
+                                   return std::regex_search(_module_name, re);
+                               }))
+                {
+                    _included_module = true;
+                    verbprintf(2,
+                               "[filter] forcing object '%s' "
+                               "(module-restrict-regex matched '%s')\n",
+                               obj->name().c_str(), _module_name.c_str());
+                    break;
+                }
+            }
+        }
+
+        // --max-library-functions: shared libs only; main executable is never gated
+        if(!_included_module && max_library_functions > 0 && obj->isSharedLib())
+        {
+            auto _proc_count = get_object_procedure_count_lb(obj);
+            if(_proc_count > max_library_functions)
+            {
+                _is_excluded = true;
+                verbprintf(0,
+                           "[filter] skipping shared lib '%s' "
+                           "(%zu functions > --max-library-functions=%zu)\n",
+                           obj->name().c_str(), _proc_count, max_library_functions);
+            }
+        }
+
+        if(_is_excluded)
+        {
+            ++_excluded_count;
+            continue;
+        }
 
         _result.emplace_back(obj);
     }
