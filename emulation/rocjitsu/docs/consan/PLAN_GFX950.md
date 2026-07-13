@@ -481,6 +481,13 @@ Full gfx950 support means:
   under both record/replay and sampled, then both guarded selected tiers pass
   10/10 with patches and nonempty records. This includes the three previously
   excluded high-SGPR batch matmuls and a clean parallel scan rerun.
+- 2026-07-13: the guarded selected inline-shadow rerun is not accepted: 3/10
+  pass, six rows fault with aperture violations, and the high-SGPR f16 batch
+  row corrupts numerics. An isolated #1813 rerun reproduces the fault while
+  its uninstrumented baseline passes. Its first 33 candidates require private
+  spills, but four later candidates have dead seven-VGPR windows; automatic
+  inline selection nevertheless patches the first four spill sites. `T3IL`
+  remains `ACTIVE` and now includes safe-candidate ranking before live rerun.
 
 ## DAG Overview
 
@@ -2189,6 +2196,14 @@ Done criteria:
 
 - Focused tests and all guarded selected inline-shadow rows pass with the
   semantically complete private representation.
+
+Current result: focused barrier/atomic/private semantics are covered, but the
+fresh guarded selected run passes only 3/10. Isolated #1813 confirms that
+automatic selection spends its four-patch budget on early spill-required
+sites even though four later dead-window sites are available; this causes a
+private-memory aperture fault while the baseline passes. Rank safe automatic
+inline candidates ahead of spill-required candidates, then repeat the focused
+and selected gates before marking this node `DONE`.
 
 For each T3 profile node:
 
