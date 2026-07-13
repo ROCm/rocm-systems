@@ -74,8 +74,16 @@ NCCL_IR_EXPORT void ncclCoopAnyInitWarp(ncclCoopAny* coop) {
 NCCL_IR_EXPORT void ncclCoopAnyInitLanes(ncclCoopAny* coop, ncclCoopMask_t lane_mask) {
   ::new (coop) ncclCoopAny(ncclCoopLanes(lane_mask));
 }
-NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id) {
+NCCL_IR_EXPORT void ncclCoopAnyInitWarpSpan(ncclCoopAny* coop, int warp0, int nWarps, int id, void* barrierLds) {
+#if defined(__HIP_PLATFORM_AMD__)
+  /* barrierLds is a kernel-owned __shared__ slot array; the bitcode build has no
+   * function-local LDS of its own (see coop.h), so the WarpSpan barrier uses this. */
+  ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id,
+                           static_cast<ncclCoopNamedBarrierSlot*>(barrierLds)));
+#else
+  (void)barrierLds;
   ::new (coop) ncclCoopAny(ncclCoopWarpSpan(warp0, nWarps, id));
+#endif
 }
 NCCL_IR_EXPORT void ncclCoopAnyInitCta(ncclCoopAny* coop) {
   ::new (coop) ncclCoopAny(ncclCoopCta{});

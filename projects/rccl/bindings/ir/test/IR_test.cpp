@@ -235,7 +235,8 @@ __global__ void k_coop_lanes_r(CoopResult* out, uint64_t mask) {
 }
 
 __global__ void k_coop_warpspan_r(CoopResult* out, int warp0, int nWarps, int id) {
-  ncclCoopAny coop; ncclCoopAnyInitWarpSpan(&coop, warp0, nWarps, id);
+  /* Data-only kernel (size/rank accessors, no sync) -> no barrier scratch needed. */
+  ncclCoopAny coop; ncclCoopAnyInitWarpSpan(&coop, warp0, nWarps, id, /*barrierLds=*/nullptr);
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   out[tid] = { ncclCoopSize(&coop),
                ncclCoopThreadRank(&coop),
@@ -257,7 +258,14 @@ __global__ void k_coop_cta_r(CoopResult* out) {
 __global__ void k_sync_thread  (int* out)                               { ncclCoopAny c; ncclCoopAnyInitThread  (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_warp    (int* out)                               { ncclCoopAny c; ncclCoopAnyInitWarp    (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 __global__ void k_sync_lanes   (int* out, uint64_t mask)                { ncclCoopAny c; ncclCoopAnyInitLanes   (&c, mask);          ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
-__global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id){ ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c,warp0,nWarps,id);ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
+__global__ void k_sync_warpspan(int* out, int warp0, int nWarps, int id){
+  /* Kernel owns the named-barrier LDS and hands it to the bitcode thunk, so the
+   * backend sizes it into THIS kernel's group segment (see coop.h rationale). */
+  __shared__ ncclCoopNamedBarrierSlot bar[ncclCoopNamedBarrierSlots];
+  ncclCoopNamedBarrierInit(bar);
+  ncclCoopAny c; ncclCoopAnyInitWarpSpan(&c, warp0, nWarps, id, bar);
+  ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1;
+}
 __global__ void k_sync_cta     (int* out)                               { ncclCoopAny c; ncclCoopAnyInitCta     (&c);                ncclCoopSync(&c); int t=blockIdx.x*blockDim.x+threadIdx.x; out[t]=1; }
 
 /* =====================================================================
