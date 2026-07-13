@@ -153,6 +153,7 @@ jobs:
       - name: Output TheRock Manifest
         run: |
           cat ${{ env.ROCM_PATH }}/share/therock/therock_manifest.json
+          exit 1
 
       - name: Install Python Requirements
         working-directory: projects/rocprofiler-compute
