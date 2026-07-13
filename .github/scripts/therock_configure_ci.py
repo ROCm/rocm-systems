@@ -144,14 +144,17 @@ SKIPPABLE_PATH_PATTERNS = [
     "experimental/python/perfxpert/*",
     ".github/CODEOWNERS",
     ".github/label*.yml",
-    ".github/workflows/labeler.yml",
-    ".github/workflows/amdsmi-manylinux-build.yml",
-    ".github/workflows/rocjitsu-corpus-tests.yml",
 ]
 
 
 def is_path_skippable(path: str) -> bool:
     """Determines if a given relative path to a file matches any skippable patterns."""
+    # A .github/workflows/ file only affects TheRock CI when it matches the
+    # CI-related patterns. Treat every other workflow file as skippable so
+    # unrelated workflows never trigger CI and don't need to be enumerated one
+    # by one.
+    if path.startswith(".github/workflows/"):
+        return not is_path_workflow_file_related_to_ci(path)
     return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
 
 
