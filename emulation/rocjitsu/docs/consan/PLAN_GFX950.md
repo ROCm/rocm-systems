@@ -436,6 +436,14 @@ Full gfx950 support means:
   every later SuperCollider admission/build loop now excludes preflight-skipped
   kernels so an invalid suffix cannot re-enter whole-text decoding. `T4SC`
   remains `ACTIVE` pending a fresh broad sweep.
+- 2026-07-13: live reduction rejected automatic private scratch as the default
+  accumulator fallback. RR #1853 passes with persistent identity and the same
+  dispatch-ABI insertion, but faults as soon as owner/epoch use an entry-time
+  private segment; moreover, the five required stable values are all
+  wave-uniform (owner, epoch, and workgroup x/y/z). `T3IR` now implements an
+  accumulator-safe five-SGPR persistent fallback, with typed exclusion if no
+  globally dead scalar window exists. Explicit force-private tests remain as
+  spill-mechanism coverage, not the automatic gfx950 acceptance path.
 
 ## DAG Overview
 
@@ -657,7 +665,7 @@ flowchart LR
   T3SA["T3SA: Sampled Selected Workloads"]:::done
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
-  T3IR["T3IR: Private Record/Sampled State"]:::active
+  T3IR["T3IR: Accumulator-Safe Scalar State"]:::active
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -2005,26 +2013,32 @@ load the snapshotted state. Exact-boundary, overlap, multiple-owner, invalid
 descriptor, shared-layout, and paired-entry regressions pass; the complete
 focused filter is 231/231.
 
-### T3IR: Private Record/Replay And Sampled State - ACTIVE
+### T3IR: Accumulator-Safe Record/Replay And Sampled State - ACTIVE
 
-Goal: reuse accumulator-safe private identity in record/replay and sampled
-access-record paths.
+Goal: preserve all wave-uniform identity state without crossing the VGPR
+accumulator window in record/replay and sampled access-record paths.
 
 Work:
 
-- Select private owner/epoch for every gfx950 MOI engine whose persistent
-  identity would cross `ACCUM_OFFSET`.
-- Teach first-light and sampled record builders to load private owner/epoch,
-  sharing the T3IO layout and entry initializer.
+- Select a globally dead five-SGPR owner/epoch/workgroup window for every
+  gfx950 MOI engine whose persistent VGPR identity would cross
+  `ACCUM_OFFSET`; return a typed exclusion if unavailable.
+- Teach first-light, sampled, inline, barrier, and atomic builders to consume
+  scalar persistent identity, materializing temporary VGPR values only within
+  each probe.
+- Initialize the scalar window at both hardware entries while preserving the
+  inserted dispatch ABI and paired kernarg-preload layout.
 - Generalize prologue discovery beyond exact-shadow access patches and keep
-  access, barrier, spill, and descriptor private-size requirements consistent.
+  access, barrier, spill, and descriptor requirements consistent. Retain the
+  explicit force-private path as independent spill-mechanism coverage.
 - Add focused record/replay and sampled boundary/spill regressions, then rerun
   the isolated MXFP4 failure and the guarded selected tiers.
 
 Done criteria:
 
-- Record/replay and sampled emit non-vacuous private-state records without
-  touching accumulator VGPRs, and the isolated MXFP4 row passes.
+- Record/replay and sampled emit non-vacuous stable-identity records without
+  touching accumulator VGPRs or requiring automatic private backing, and the
+  isolated MXFP4 row passes.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
