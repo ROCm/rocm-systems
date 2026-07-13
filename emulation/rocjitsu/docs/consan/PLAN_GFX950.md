@@ -385,6 +385,11 @@ Full gfx950 support means:
   exclusive because CTest removes a shared `test_tmpdir`, but diagnosis,
   documentation, and independent implementation nodes may proceed in
   parallel.
+- 2026-07-13: an isolated broad record/replay MXFP4 failure assigned identity
+  at `v135:v139` in a 136-VGPR MFMA kernel before a memory-aperture exception.
+  Because record/replay and sampled builders still assume persistent identity,
+  the engine-independent accumulator fix is split into `T3IR` after the
+  bounded inline private-owner node `T3IO`.
 
 ## DAG Overview
 
@@ -606,6 +611,7 @@ flowchart LR
   T3SA["T3SA: Sampled Selected Workloads"]:::done
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::active
+  T3IR["T3IR: Private Record/Sampled State"]:::todo
   T3IA["T3IA: Private-State Atomic Ordering"]:::todo
   T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -644,7 +650,7 @@ flowchart LR
   T3SC --> T3G
   T3RR --> T3G
   T3SA --> T3G
-  T3IS --> T3IO --> T3IA --> T3IL --> T3G
+  T3IS --> T3IO --> T3IR --> T3IA --> T3IL --> T3G
   T3SC --> T4SC
   T3RR --> T4RR
   T3SA --> T4SA
@@ -1916,7 +1922,7 @@ patches. The following nodes close those gaps before `T3G`.
 
 ### T3IO: Stable Private Owner State - ACTIVE
 
-Goal: preserve correct gfx950 owner/epoch identity for every MOI engine without
+Goal: preserve correct gfx950 inline-shadow owner/epoch identity without
 crossing `ACCUM_OFFSET`.
 
 Work:
@@ -1925,8 +1931,8 @@ Work:
   epoch.
 - Compute the owner from flattened `(x, y, z)` workitem identity at both normal
   and kernarg-preload entries.
-- Load private owner/epoch at record/replay, sampled, inline-shadow, barrier,
-  and ordering probes; never rederive owner from mutable guest VGPRs.
+- Load private owner/epoch at inline-shadow access and barrier probes; never
+  rederive owner from mutable guest VGPRs.
 - Treat malformed or inaccessible owning descriptors conservatively and lock
   down `ACCUM_OFFSET` decoding at zero, exact-boundary, overlap, and
   multiple-owner cases.
@@ -1935,6 +1941,27 @@ Done criteria:
 
 - Synthetic tests prove stable owner layout and paired-entry initialization,
   including multidimensional identity and descriptor boundaries.
+
+### T3IR: Private Record/Replay And Sampled State - TODO
+
+Goal: reuse accumulator-safe private identity in record/replay and sampled
+access-record paths.
+
+Work:
+
+- Select private owner/epoch for every gfx950 MOI engine whose persistent
+  identity would cross `ACCUM_OFFSET`.
+- Teach first-light and sampled record builders to load private owner/epoch,
+  sharing the T3IO layout and entry initializer.
+- Generalize prologue discovery beyond exact-shadow access patches and keep
+  access, barrier, spill, and descriptor private-size requirements consistent.
+- Add focused record/replay and sampled boundary/spill regressions, then rerun
+  the isolated MXFP4 failure and the guarded selected tiers.
+
+Done criteria:
+
+- Record/replay and sampled emit non-vacuous private-state records without
+  touching accumulator VGPRs, and the isolated MXFP4 row passes.
 
 ### T3IA: Private-State Atomic Ordering - TODO
 
