@@ -296,6 +296,14 @@ Full gfx950 support means:
   the same four-byte LDS cell. Unknown pointers and typed private/global
   segments do not emit LDS probes. All 219 focused CPU/synthetic tests and all
   81 registered `Gfx950` CTests pass with the workspace TheRock runtime.
+- 2026-07-13: `T1A` is `DONE`; `T1B` is now `ACTIVE`. The portable ConSan LDS
+  binary follows `RJ_HIP_TEST_ARCH` and is shared by native gfx1201/gfx950
+  registration instead of being compiled twice under architecture-specific
+  target names. RDNA-only inline-assembly suites remain explicitly gated on a
+  physical gfx1201 plus a gfx1201 build target, while CDNA4 suites now require
+  both gfx950 runtime support and a physically enumerated gfx950. This machine
+  discovers the native gfx950 controls and no gfx1201 live controls; the
+  consolidated clean/racy SuperCollider rows pass.
 
 ## DAG Overview
 
@@ -503,8 +511,8 @@ flowchart LR
 flowchart LR
   SP{"SP: Spill Accepted"}:::target
   NP{"NP: Native Probe Parity"}:::target
-  T1A["T1A: Target-Aware Test Registration"]:::active
-  T1B["T1B: Workload And Tier Selection"]:::todo
+  T1A["T1A: Target-Aware Test Registration"]:::done
+  T1B["T1B: Workload And Tier Selection"]:::active
   T2SC["T2SC: SuperCollider Focused Tier"]:::todo
   T2RR["T2RR: Record/Replay Focused Tier"]:::todo
   T2SA["T2SA: Sampled Focused Tier"]:::todo
@@ -1594,7 +1602,7 @@ Done criteria:
 
 ## Qualification Nodes
 
-### T1A: Target-Aware Test Registration - ACTIVE
+### T1A: Target-Aware Test Registration - DONE
 
 Goal: let one test definition register the appropriate gfx1201 or gfx950
 controls.
@@ -1610,7 +1618,17 @@ Done criteria:
 - Test discovery on either machine registers portable controls plus only the
   native ISA-specific controls supported by that GPU.
 
-### T1B: Target-Aware Workload And Tier Selection - TODO
+Result:
+
+- `hip_consan_lds_test` is built once for `RJ_HIP_TEST_ARCH`; gfx950 and
+  gfx1201 registrations reuse that portable target.
+- Physical-device discovery is composed with runtime support. CDNA4-specific
+  suites require gfx950 in `rocm_agent_enumerator`; RDNA-only suites require a
+  physical gfx1201 and a gfx1201 test architecture.
+- gfx950 discovery contains the native focused controls and no gfx1201 live
+  rows. The consolidated clean/racy SuperCollider controls pass.
+
+### T1B: Target-Aware Workload And Tier Selection - ACTIVE
 
 Goal: select equivalent semantic workloads without embedding RDNA4 names in
 the common tier harness.

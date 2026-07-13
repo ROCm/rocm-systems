@@ -899,6 +899,7 @@ if(HSA_RUNTIME64)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
         set(HAS_GFX1201_GPU FALSE)
+        set(HAS_GFX950_GPU FALSE)
         set(HAS_CDNA2_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
@@ -922,6 +923,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
                 set(HAS_GFX1201_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx950")
+                set(HAS_GFX950_GPU TRUE)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx90a")
                 set(HAS_CDNA2_GPU TRUE)
@@ -1412,23 +1416,26 @@ if(RJ_ENABLE_HIP_TESTS)
 
         rj_add_hip_test(
             hip_consan_lds_test
-            ARCH gfx1201
+            ARCH ${RJ_HIP_TEST_ARCH}
             SOURCE dbi/hip_consan_lds_test.hip
         )
         add_dependencies(hip_consan_lds_test_target rocjitsu_dbi_hooks)
-        rj_add_hip_test(
-            hip_consan_inline_shadow_test
-            ARCH gfx1201
-            SOURCE dbi/hip_consan_inline_shadow_test.hip
-        )
-        add_dependencies(hip_consan_inline_shadow_test_target rocjitsu_dbi_hooks)
-        rj_add_hip_test(
-            hip_consan_moi_test
-            ARCH gfx1201
-            SOURCE dbi/hip_consan_moi_test.hip
-        )
-        add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
-        if(HAS_GFX1201_GPU)
+        if(HAS_GFX1201_GPU AND RJ_HIP_TEST_ARCH STREQUAL "gfx1201")
+            rj_add_hip_test(
+                hip_consan_inline_shadow_test
+                ARCH gfx1201
+                SOURCE dbi/hip_consan_inline_shadow_test.hip
+            )
+            add_dependencies(
+                hip_consan_inline_shadow_test_target
+                rocjitsu_dbi_hooks
+            )
+            rj_add_hip_test(
+                hip_consan_moi_test
+                ARCH gfx1201
+                SOURCE dbi/hip_consan_moi_test.hip
+            )
+            add_dependencies(hip_consan_moi_test_target rocjitsu_dbi_hooks)
             set(
                 RJ_CONSAN_LDS_CLEAN_TEST
                 "ConSanLdsTest.PaddedCleanStoreCompletes"
@@ -2247,7 +2254,7 @@ if(RJ_ENABLE_HIP_TESTS)
         )
     endif()
 
-    if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX950 AND HAS_GFX950_GPU)
         rj_add_hip_test(
             hip_consan_spill_gfx950_test
             ARCH gfx950
@@ -2262,14 +2269,8 @@ if(RJ_ENABLE_HIP_TESTS)
             "ConSanSpillHipTest.Gfx950PartialExecVgprScratchRoundTrip"
         )
 
-        rj_add_hip_test(
-            hip_consan_lds_gfx950_test
-            ARCH gfx950
-            SOURCE dbi/hip_consan_lds_test.hip
-        )
-        add_dependencies(hip_consan_lds_gfx950_test_target rocjitsu_dbi_hooks)
         rj_add_hip_test_case(
-            hip_consan_lds_gfx950_test
+            hip_consan_lds_test
             "ConSanLdsTest.PaddedCleanStoreReportBufferStaysZero"
             NAME "ConSanLdsGfx950Test.SuperColliderCleanMarker"
             TIMEOUT 30
@@ -2281,7 +2282,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_CONSAN_REQUIRE_PATCH=1"
         )
         rj_add_hip_test_case(
-            hip_consan_lds_gfx950_test
+            hip_consan_lds_test
             "ConSanLdsTest.PaddedRacyStoreReportsMarker"
             NAME "ConSanLdsGfx950Test.SuperColliderRacyMarker"
             TIMEOUT 30
@@ -3115,7 +3116,7 @@ if(RJ_ENABLE_HIP_TESTS)
     else()
         message(
             STATUS
-            "CDNA4 HIP tests disabled (libamdhip64 does not advertise gfx950 support)"
+            "CDNA4 HIP tests disabled (gfx950 device/runtime support not both available)"
         )
     endif()
 
