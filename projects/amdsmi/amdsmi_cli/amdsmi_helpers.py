@@ -1462,26 +1462,42 @@ class AMDSMIHelpers:
                 break
         return accelerator_partition_profiles
 
+    def get_accelerator_partition_types(self):
+        # TYPE names are valid input regardless of privilege. Only the numeric
+        # profile INDEX values require sudo to enumerate.
+        return [
+            name
+            for name in amdsmi_interface.AmdSmiComputePartitionType.__members__
+            if name != "INVALID"
+        ]
+
     def get_accelerator_choices_types_indices(self):
-        return_val = ("N/A", {"profile_indices": [], "profile_types": []})
+        empty_profiles = {"profile_indices": [], "profile_types": []}
         if os.geteuid() != 0:
+            # Not root: the numeric profile INDEX values can't be enumerated, so
+            # offer the static partition TYPE names as the valid choices. The
+            # profiles stay empty, so each device is attempted individually and
+            # reports its own status instead of the command aborting up front.
             logging.debug(
-                "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles"
+                "AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, using static partition types"
             )
-            # If not root, we can't get the accelerator partition profiles
-            return return_val
-        else:
-            logging.debug(
-                "AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles"
-            )
+            return (self.get_accelerator_partition_types(), empty_profiles)
+
+        logging.debug(
+            "AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles"
+        )
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
         if len(accelerator_partition_profiles["profile_types"]) != 0:
             compute_partitions_list = (
                 accelerator_partition_profiles["profile_types"]
                 + accelerator_partition_profiles["profile_indices"]
             )
-            return_val = (compute_partitions_list, accelerator_partition_profiles)
-        return return_val
+            return (compute_partitions_list, accelerator_partition_profiles)
+        # Root, but the profiles couldn't be enumerated (e.g. a device that does
+        # not support accelerator partitions). Fall back to the static partition
+        # type names so `-C` still validates input (typos are rejected cleanly)
+        # and shows real choices in help.
+        return (self.get_accelerator_partition_types(), accelerator_partition_profiles)
 
     def get_memory_partition_types(self):
         memory_partitions_str = [
