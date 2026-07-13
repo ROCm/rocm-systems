@@ -23,7 +23,6 @@ static const float nvlinkBws[NCCL_NVLINK_BW_IDX_NUM] = {
   360.0f, // Hopper
   720.0f, // Blackwell
 };
-static constexpr float disableTime = 1.e30f;
 
 double ncclTuningGetLsaBw(struct ncclComm* comm) {
   int compCapIndex = comm->minCompCap >= 100 ? NCCL_NVLINK_BW_IDX_BLACKWELL : NCCL_NVLINK_BW_IDX_HOPPER;
@@ -292,17 +291,25 @@ static void queryModel_lsa(struct ncclTuningInput_t* input, ncclSymkKernelId k, 
     if (nMaxBlocks != 1) nMaxBlocks = roundDown(nMaxBlocks, 2);
   }
 
-  // Only use TMA if the selected CTA count is able to take advantage of the TMA fast paths.
   if (isTma) {
-    while (nMinBlocks <= nMaxBlocks && ncclSymkTmaDeepEligible(comm, k, nBytes, nMinBlocks)) {
-      nMinBlocks += (nMinBlocks == 1 ? 1 : 2);
-    }
-    while (nMaxBlocks > nMinBlocks && ncclSymkTmaDeepEligible(comm, k, nBytes, nMaxBlocks)) {
-      nMaxBlocks -= (nMaxBlocks == 2 ? 1 : 2);
-    }
-    if (nMinBlocks > nMaxBlocks) {
-      *timeUs = disableTime;
-      return;
+    // Only use TMA if the selected CTA count is able to take advantage of the TMA fast paths.
+    // Except for the case when user sets NCCL_SYM_KERNEL.
+    // If TMA is not eligible for the minimum block at the current msg size
+    // it will not be eligible for higher block count.
+    if (!ncclSymkTmaDeepEligible(comm, k, nBytes, nMinBlocks)) {
+      const char* symKernelIdEnv = ncclGetEnv("NCCL_SYM_KERNEL");
+      if (symKernelIdEnv) {
+        INFO(NCCL_TUNING, "NCCL_SYM_KERNEL set to %s. At %zu Bytes kernel will not exercise TMA paths.", symKernelIdEnv,
+             nBytes);
+      } else {
+        *nBlocks = -1;
+        return;
+      }
+    } else {
+      // Decrease max block count until it is eligible for the current msg size.
+      while (nMaxBlocks > nMinBlocks && !ncclSymkTmaDeepEligible(comm, k, nBytes, nMaxBlocks)) {
+        nMaxBlocks -= (nMaxBlocks == 2 ? 1 : 2);
+      }
     }
   }
 
@@ -361,6 +368,11 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   int kBlocks = 0;
   constexpr float smPenalty = .025f; // 2.5% percent increase in time per SM
   queryModel(inputs, (ncclSymkKernelId)tuning->symKernelId, inputs->nBytes, &kTime, &kBlocks);
+  if (kBlocks <= 0) {
+    tuning->valid = 0;
+    tuning->timeUs = -1.0;
+    return ncclSuccess;
+  }
 
   tuning->timeUs = kTime * (1.0f + smPenalty * kBlocks);
   tuning->nChannels = kBlocks;
