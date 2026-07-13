@@ -96,10 +96,15 @@ bool IsEnvFlagEnabled(const char* name) {
 
 bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 
-bool IsGfx12_5RewriteRequested() {
+bool AreEntryTrampolinesRequested() {
+  // Entry-trampoline rewriting is opt-in: disabled unless the caller sets
+  // AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES to a truthy value. Unset falls back to
+  // the compiled-in default; false-like values keep it disabled.
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  // Default-on policy owned by ROCR: only literal "0" opts out.
-  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
+  if (!os::IsEnvVarSet(kEnvName)) {
+    return kDefaultEntryTrampolinesEnabled;
+  }
+  return IsEnvFlagEnabled(kEnvName);
 }
 
 bool IsVerboseLoggingEnabled() {
@@ -278,8 +283,7 @@ std::string WithGfx1250SteppingFeature(const std::string& isa_name,
 bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
   return IsHotswapSupportedGfxRevision(gfx) ||
-         (options.gfx12_5_rewrite_enabled &&
-          IsGfx12_5Target(gfx.gfx_target));
+      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target));
 }
 
 std::optional<RewriteDecision> DecideHotswapRewrite(
@@ -293,14 +297,15 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
   const std::string target_gfx = ExtractGfxTarget(target_isa);
   if (IsHotswapSupportedGfxRevision(gfx) && source_gfx == kGfx1250 &&
       target_gfx == kGfx1250) {
-    return RewriteDecision{
-        WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
-        WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
-        false};
+    // B0->A0 retarget defaults to the legacy (non entry-trampoline) rewrite
+    // path and only requests entry trampolines when explicitly opted in.
+    return RewriteDecision{WithGfx1250SteppingFeature(source_isa, Gfx1250Stepping::kB0),
+                           WithGfx1250SteppingFeature(target_isa, Gfx1250Stepping::kA0),
+                           options.entry_trampolines_enabled};
   }
 
-  if (!options.gfx12_5_rewrite_enabled ||
-      !IsGfx12_5Target(gfx.gfx_target) || !IsGfx12_5Target(source_gfx)) {
+  if (!options.entry_trampolines_enabled || !IsGfx12_5Target(gfx.gfx_target) ||
+      !IsGfx12_5Target(source_gfx)) {
     return std::nullopt;
   }
 
@@ -439,7 +444,7 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   }
 
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
-  const RewriteOptions options{IsGfx12_5RewriteRequested()};
+  const RewriteOptions options{AreEntryTrampolinesRequested()};
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return false;
   }
