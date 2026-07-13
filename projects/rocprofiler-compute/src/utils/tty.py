@@ -599,10 +599,11 @@ def print_operator_node(
         new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
 
     args_segment = format_node_args(node)
+    source_segment = f" @ {node.source}" if node.source else ""
     if is_branching:
         print_wrapped_tree_line(
             node_prefix,
-            f"{node.name}{args_segment} {format_node_stats(node)}",
+            f"{node.name}{args_segment}{source_segment} {format_node_stats(node)}",
             continuation_prefix=new_parent_pipes,
         )
     else:
@@ -612,7 +613,7 @@ def print_operator_node(
             suffix = ""
         print_wrapped_tree_line(
             node_prefix,
-            f"{node.name}{args_segment}{suffix}",
+            f"{node.name}{args_segment}{source_segment}{suffix}",
             continuation_prefix=new_parent_pipes,
         )
 

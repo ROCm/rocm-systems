@@ -185,6 +185,7 @@ def add_general_group(
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
             "   Triton trace (--triton-trace, --list-triton-operators, "
             "--triton-operator)\n"
+            "   JAX trace (--jax-trace, --list-jax-operators, --jax-operator)\n"
             "   ML API trace (--ml-api-trace, --ml-trace-with-params)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
@@ -553,6 +554,23 @@ Examples:
         ),
     )
     profile_group.add_argument(
+        "--jax-trace",
+        dest="jax_trace",
+        required=False,
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="JAX trace",
+        help=(
+            "\t\t\tJAX trace, maps JAX compiled functions to performance\n"
+            "\t\t\tcounters. Instruments jax.jit and jax.pmap invocations.\n"
+            "\t\t\tUse when profiling JAX applications."
+        ),
+    )
+    profile_group.add_argument(
         "--ml-api-trace",
         dest="ml_api_trace",
         required=False,
@@ -784,6 +802,45 @@ Examples:
             "\t\t\t  all  or  '*'        match every kernel\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --triton-operator *matmul*,*softmax*\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
+        ),
+    )
+    analyze_group.add_argument(
+        "--list-jax-operators",
+        dest="list_jax_operators",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List jax operators",
+        help=(
+            "\t\tList JAX compiled functions as a unified call tree grouped by "
+            "source location with kernel launch stats. "
+            "Recreates ml_api_trace output directory."
+        ),
+    )
+    analyze_group.add_argument(
+        "--jax-operator",
+        metavar="",
+        type=str,
+        dest="jax_operator",
+        nargs="*",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="JAX operator filter",
+        help=(
+            "\t\tFilter JAX compiled functions using shell-style glob\n"
+            "\t\t\tpatterns (fnmatch), select their GPU kernels, and display\n"
+            "\t\t\tmetrics. With no arguments, matches all functions "
+            "(default: **).\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *train_step*        contains train_step\n"
+            "\t\t\t  all  or  '*'        match every function\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --jax-operator *matmul*,*loss*\n"
             "\t\t\tCombine with -k to intersect with kernel IDs."
         ),
     )

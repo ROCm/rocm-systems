@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import os
 import re
 import shlex
 import shutil
@@ -43,6 +44,7 @@ from vendored import yaml
 _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "torch_trace": ("torch",),
     "triton_trace": ("triton",),
+    "jax_trace": ("jax",),
     "ml_api_trace": KNOWN_ML_API_BACKENDS,
 }
 
@@ -76,6 +78,38 @@ def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
         if getattr(args, flag, False):
             selected.update(frameworks)
     return selected
+
+
+def _jax_xla_flags(output_directory: str) -> str:
+    """Return the XLA_FLAGS for a JAX trace workload.
+
+    Each module's HLO is dumped as text to the ``hlo_dump`` subdirectory of the
+    output directory, and command buffers are disabled.
+    """
+    dump_dir = str(Path(output_directory) / "hlo_dump")
+    return " ".join([
+        f"--xla_dump_to={dump_dir}",
+        "--xla_dump_hlo_as_text",
+        "--xla_dump_hlo_as_long_text",
+        "--xla_gpu_enable_command_buffer=",
+    ])
+
+
+def _jax_trace_extra_env(args: argparse.Namespace) -> Optional[dict[str, str]]:
+    """Return the JAX trace environment, or None when the flag is unset.
+
+    Any existing XLA_FLAGS is replaced, with a warning.
+    """
+    if not getattr(args, "jax_trace", False):
+        return None
+    flags = _jax_xla_flags(args.output_directory)
+    existing = os.environ.get("XLA_FLAGS", "").strip()
+    if existing:
+        console_warning(
+            "jax trace",
+            f"Replacing existing XLA_FLAGS for the workload: {existing!r}",
+        )
+    return {"XLA_FLAGS": flags}
 
 
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
@@ -417,6 +451,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
+                extra_env=_jax_trace_extra_env(args),
             )
 
             end_time = time.time()
