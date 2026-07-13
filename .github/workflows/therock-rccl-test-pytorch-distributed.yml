@@ -77,7 +77,6 @@ jobs:
       - name: Install PyTorch and test dependencies
         timeout-minutes: 15
         run: |
-          source ${{ env.VENV_DIR }}/bin/activate
           pip install --pre \
             "torch[device-gfx942]" \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
@@ -96,7 +95,6 @@ jobs:
           TORCH_NCCL_BLOCKING_WAIT: 1
           TORCH_NCCL_ASYNC_ERROR_HANDLING: 1
         run: |
-          source ${{ env.VENV_DIR }}/bin/activate
           python rocm-systems/.github/scripts/test_pytorch_c10d.py \
             --artifact-dir ${{ env.OUTPUT_ARTIFACTS_DIR }} \
             --pytorch-src ${{ env.PYTORCH_SRC }} \
