@@ -251,7 +251,7 @@ The trampolines live inside `.text`, immediately after the original kernel bytes
   ...
   [local cave, after the original bytes]
   @ trampoline_offset:
-    s_nop 0                     <-- inline-nop placeholder (becomes probe call later)
+    s_nop 0                     <-- inline-nop body (the probe-call variant is described below)
     <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
     s_branch <return>           <-- back to anchor_offset + original_size
 ```
