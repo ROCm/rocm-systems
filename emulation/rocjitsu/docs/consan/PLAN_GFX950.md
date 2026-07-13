@@ -524,6 +524,15 @@ Full gfx950 support means:
   focused gate passes 262/262; the new registered
   undersized-extents live row publishes one in-range shadow entry, reports
   exactly seven partition overflows, and completes without a GPU fault.
+- 2026-07-13: `T3IL` is `DONE` and `T3G` is reached. The SGPR-layout fix turns
+  the former #1813 aperture-fault reproducer green and restores all three
+  high-SGPR batch rows. Two remaining live faults reduced to native loads such
+  as `ds_read_b32 v3, v3`: executing the guest load before the probe replaced
+  its LDS address with loaded payload bits. Inline shadow now publishes before
+  a load whose destination overlaps its address, restores all probe state,
+  then executes and waits for the original load. The new synthetic regression
+  and focused gate pass 263/263; isolated f32 matmul and configured scan pass,
+  and the guarded selected IREE gate passes 10/10 in 5.99 seconds.
 
 ## DAG Overview
 
@@ -752,7 +761,7 @@ flowchart LR
   T3IWL["T3IWL: Omitted-Coordinate Live Gate"]:::done
   T3IW{"T3IW: Workgroup Identity Accepted"}:::done
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
-  T3IL["T3IL: Inline Semantic Regressions"]:::active
+  T3IL["T3IL: Inline Semantic Regressions"]:::done
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
   T4SC["T4SC: SuperCollider Broad IREE"]:::done
@@ -2235,7 +2244,7 @@ acquire writes imported epoch back to private memory and waits for completion,
 and atomic-only kernels receive the paired-entry-aware initializer. Shared
 layout and forced-spill regressions pass in the 233-test focused filter.
 
-### T3IL: Inline Semantic Regressions - ACTIVE
+### T3IL: Inline Semantic Regressions - DONE
 
 Goal: prove the completed private representation on synthetic and live gfx950
 workloads.
@@ -2253,13 +2262,15 @@ Done criteria:
 - Focused tests and all guarded selected inline-shadow rows pass with the
   semantically complete private representation.
 
-Current result: focused barrier/atomic/private semantics are covered, but the
-fresh guarded selected run passes only 3/10. Isolated #1813 confirms that
-automatic selection spends its four-patch budget on early spill-required
-sites even though four later dead-window sites are available; this causes a
-private-memory aperture fault while the baseline passes. Rank safe automatic
-inline candidates ahead of spill-required candidates, then repeat the focused
-and selected gates before marking this node `DONE`.
+Result: the persistent identity and special-state SGPR layout fix makes the
+former #1813 reproducer and all high-SGPR batch rows pass without candidate
+reordering. A second reduction found native loads whose destination aliases
+their LDS address, for example `ds_read_b32 v3, v3`; the probe had consumed the
+loaded payload as an address. Such loads now publish before the guest access,
+restore all probe state, then execute and wait for the original load. The
+synthetic overlap regression and complete focused filter pass 263/263. The
+isolated f32 matmul and configured scan regressions pass, followed by all 10
+guarded selected inline-shadow rows in 5.99 seconds. `T3G` is reached.
 
 For each T3 profile node:
 

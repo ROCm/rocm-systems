@@ -2721,6 +2721,61 @@ TEST(ConSanMoi, Gfx950InlineShadowPartitionsExactStateWithChecked64BitAddress) {
   EXPECT_TRUE(contains_subsequence(rewritten, *overflow_atomic));
 }
 
+TEST(ConSanMoi, Gfx950InlineShadowDefersLoadThatOverwritesItsLdsAddress) {
+  std::array<uint32_t, 300> text_words{};
+  text_words[0] = 0xD86C0180u;
+  text_words[1] = 0x03000003u; // ds_read_b32 v3, v3 offset:384
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_inline_overlapping_load", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.max_patches = 1;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_TRUE(access->scratch_vgpr);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const auto *text = patched.text_sections().front();
+  const uint64_t rewritten_offset =
+      access->trampoline_size != 0 ? access->trampoline_offset : access->anchor_offset;
+  const uint32_t rewritten_size =
+      access->trampoline_size != 0 ? access->trampoline_size : access->original_size;
+  std::vector<uint32_t> rewritten(rewritten_size / sizeof(uint32_t));
+  std::memcpy(rewritten.data(), text->data() + rewritten_offset,
+              rewritten.size() * sizeof(uint32_t));
+
+  const uint16_t scratch = *access->scratch_vgpr;
+  const uint16_t old_value = static_cast<uint16_t>((scratch + 5u) & ~uint16_t{1});
+  const auto atomic = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
+      scratch, static_cast<uint16_t>(scratch + 2u), old_value,
+      /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(atomic);
+  const std::array<uint32_t, 2> original = {text_words[0], text_words[1]};
+  const auto atomic_it =
+      std::search(rewritten.begin(), rewritten.end(), atomic->begin(), atomic->end());
+  const auto original_it =
+      std::search(rewritten.begin(), rewritten.end(), original.begin(), original.end());
+  ASSERT_NE(atomic_it, rewritten.end());
+  ASSERT_NE(original_it, rewritten.end());
+  EXPECT_LT(atomic_it, original_it);
+}
+
 TEST(ConSanMoi, Gfx950InlineShadowRejectsInsufficientPerWorkgroupExactCapacity) {
   const std::array<uint32_t, 3> text_words = {0xD81A0000u, 0x00000000u,
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};

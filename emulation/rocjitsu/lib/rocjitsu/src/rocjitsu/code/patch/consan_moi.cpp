@@ -4342,6 +4342,12 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   const uint16_t tmp_vgpr = old_value_vgpr == *options.scratch_vgpr + 4u
                                 ? static_cast<uint16_t>(*options.scratch_vgpr + 6u)
                                 : static_cast<uint16_t>(*options.scratch_vgpr + 4u);
+  const uint16_t address_vgpr_count =
+      candidate.source == ConSanMoiCandidateSource::NativeLds ? 1u : 2u;
+  const bool load_overwrites_address =
+      candidate.kind == ConSanLdsAccessKind::Read && candidate.dst_vgpr &&
+      range_overlaps(*candidate.dst_vgpr, candidate_payload_vgpr_count(candidate),
+                     *lds_byte_offset_vgpr, address_vgpr_count);
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   const uint32_t low_literal =
@@ -4355,17 +4361,26 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   std::vector<uint32_t> words;
   words.reserve(candidate.size / sizeof(uint32_t) + 64u + (options.moi_exec_save_sgpr ? 120u : 0u) +
                 (options.moi_epoch_vgpr ? 2u : 0u));
-  for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
-    words.push_back(word);
-  }
+  const auto append_original_access = [&]() {
+    for (uint64_t offset = 0; offset < candidate.size; offset += sizeof(uint32_t)) {
+      uint32_t word = 0;
+      std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
+      words.push_back(word);
+    }
+  };
+  // A load may legally write the same VGPR that supplied its LDS address.
+  // Instrument such a site before the guest load so the loaded payload cannot
+  // be mistaken for a byte offset. The original access is emitted after all
+  // probe state has been restored below.
+  if (!load_overwrites_address)
+    append_original_access();
   const auto wait_lds = build_s_wait_lds0(arch);
   if (!wait_lds) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode the LDS completion wait");
     return std::nullopt;
   }
-  words.push_back(*wait_lds);
+  if (!load_overwrites_address)
+    words.push_back(*wait_lds);
 
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not save VCC/SCC");
@@ -4488,6 +4503,10 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   if (!append_restore_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not restore VCC/SCC");
     return std::nullopt;
+  }
+  if (load_overwrites_address) {
+    append_original_access();
+    words.push_back(*wait_lds);
   }
   const auto patch_branch = [&](size_t branch_index, size_t target_index,
                                 bool conditional) -> bool {
