@@ -18,8 +18,8 @@ add_library(rocprofiler-sdk::samples-build-flags ALIAS
             rocprofiler-sdk-samples-build-flags)
 target_compile_options(rocprofiler-sdk-samples-build-flags INTERFACE -W -Wall -Wextra
                                                                      -Wshadow)
-# Standalone sample builds do not inherit the top-level PIC settings. Force
-# PIC here so ld.lld can link samples on distros that default to PIE binaries.
+# Standalone sample builds do not inherit the top-level PIC settings. Force PIC here so
+# ld.lld can link samples on distros that default to PIE binaries.
 target_compile_options(rocprofiler-sdk-samples-build-flags INTERFACE -fPIC)
 target_compile_features(rocprofiler-sdk-samples-build-flags INTERFACE cxx_std_17)
 
