@@ -1614,17 +1614,17 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
 
   auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(this, agent, data, size);
 
-  // Copy each unique blob to device memory once, keyed on (host source, size).
-  std::map<std::pair<const uint8_t*, uint64_t>, uint64_t> blob_dev_addr;
-  auto place_blob = [&](const uint8_t* src, uint64_t len, uint64_t* out_dev) -> hsa_status_t {
+  // Copy each unique blob to memory once, keyed on (host source, size).
+  std::map<std::pair<const uint8_t*, uint64_t>, void*> blob_addr;
+  auto place_blob = [&](const uint8_t* src, uint64_t len, void** out_ptr) -> hsa_status_t {
     if (len == 0) {
-      *out_dev = 0;
+      *out_ptr = nullptr;
       return HSA_STATUS_SUCCESS;
     }
     auto key = std::make_pair(src, len);
-    auto it = blob_dev_addr.find(key);
-    if (it != blob_dev_addr.end()) {
-      *out_dev = it->second;
+    auto it = blob_addr.find(key);
+    if (it != blob_addr.end()) {
+      *out_ptr = it->second;
       return HSA_STATUS_SUCCESS;
     }
     void* buf = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, len, 64, false);
@@ -1640,9 +1640,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     // is unnecessary for these buffers (only kernargs change per dispatch).
     rocr::FlushCpuCache(dev, 0, len);
     loaded_obj->device_buffers.emplace_back(buf, len);
-    uint64_t dev_addr = reinterpret_cast<uint64_t>(dev);
-    blob_dev_addr[key] = dev_addr;
-    *out_dev = dev_addr;
+    blob_addr[key] = dev;
+    *out_ptr = dev;
     return HSA_STATUS_SUCCESS;
   };
 
@@ -1663,7 +1662,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   staged_symbols.reserve(kernel_names.size());
   for (const auto& kernel_name : kernel_names) {
     const auto* ki = aie_code->GetKernel(kernel_name);
-    uint64_t insts_dev = 0, pdi_dev = 0;
+    void* insts_dev = nullptr;
+    void* pdi_dev = nullptr;
     if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS) {
       loaded_obj->Destroy();
       return s;
@@ -1676,9 +1676,9 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
     desc->reserved0 = 0;
-    desc->insts_dev_addr = insts_dev;
+    desc->insts_bo_va = insts_dev;
     desc->insts_size = ki->insts_size;
-    desc->pdi_dev_addr = pdi_dev;
+    desc->pdi_bo_va = pdi_dev;
     desc->pdi_size = ki->pdi_size;
     desc->kernarg_size = ki->kernarg_size;
     desc->num_cols = ki->num_cols;
@@ -1694,7 +1694,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // All allocations succeeded: publish symbols and take ownership of loaded_obj.
   for (size_t i = 0; i < kernel_names.size(); ++i) {
     agent_symbols_[std::make_pair(kernel_names[i], agent)] = staged_symbols[i];
-    aie_kernel_symbols_.push_back(staged_symbols[i]);
+    aie_kernel_symbols_.push_back(std::move(staged_symbols[i]));
   }
 
   // Tracked in objects (for Destroy/teardown) but intentionally NOT in
@@ -1703,9 +1703,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   // AIE objects are not enumerated by hsa_ven_amd_loader_executable_iterate_loaded_code_objects
   // and have no r_debug link-map entry.
   // Revisit if we need to discover AIE code objects generically.
-  objects.push_back(loaded_obj);
+  auto loaded_obj_ptr = loaded_obj.get();
+  objects.push_back(std::move(loaded_obj));
   if (loaded_code_object) {
-    *loaded_code_object = LoadedCodeObject::Handle(loaded_obj.get());
+    *loaded_code_object = LoadedCodeObject::Handle(loaded_obj_ptr);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -2484,7 +2485,7 @@ hsa_status_t ExecutableImpl::Freeze(const char *options) {
     ts->Freeze();
   }
 
-  // AIE kernel handles become visible only once frozen (GPU-parity contract).
+  // AIE kernel handles become visible only once frozen.
   for (auto& aie_sym : aie_kernel_symbols_) {
     aie_sym->SetFrozen();
   }

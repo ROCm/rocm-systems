@@ -1139,13 +1139,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     }
 
     // Determine if the PDI is cached, if not it will be added to the PDI cache and the hardware
-    // context will be reconfigured. A descriptor with no PDI (pdi_dev_addr == 0) uses CU index 0.
+    // context will be reconfigured. A descriptor with no PDI (pdi_bo_va == nullptr) uses CU index
+    // 0.
     hsa_status_t err = HSA_STATUS_SUCCESS;
     PDICache::size_type cached_pdi_index = 0;
-    if (desc->pdi_dev_addr != 0) {
+    if (desc->pdi_bo_va != nullptr) {
       uint32_t pdi_handle = AMDXDNA_INVALID_BO_HANDLE;
-      err = ResolveBOHandle(reinterpret_cast<void*>(desc->pdi_dev_addr), agent, &pdi_handle,
-                            nullptr, nullptr);
+      err = ResolveBOHandle(desc->pdi_bo_va, agent, &pdi_handle, nullptr, nullptr);
       if (err != HSA_STATUS_SUCCESS) {
         return err;
       }
@@ -1164,7 +1164,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_queue_t& q, void* queue_metadata,
     // Add the instruction sequence BO handle. The PDI/insts blobs are immutable
     // and were flushed from the CPU cache once at load time, so no per-dispatch
     // flush is needed here (only the mutable kernargs are flushed, below).
-    void* insts_addr = reinterpret_cast<void*>(desc->insts_dev_addr);
+    void* insts_addr = desc->insts_bo_va;
     uint32_t instr_handle = AMDXDNA_INVALID_BO_HANDLE;
     err = ResolveBOHandle(insts_addr, agent, &instr_handle, nullptr, nullptr);
     if (err != HSA_STATUS_SUCCESS) {

@@ -22,11 +22,11 @@ namespace AMD {
 struct AieKernelInfo {
   /// @brief Kernel name.
   std::string name;
-  /// @brief Instruction blob in the ELF buffer; non-null after parse.
+  /// @brief Instruction blob in the ELF buffer; non-nullptr after parse.
   const uint8_t* insts_data = nullptr;
   /// @brief Instruction blob size in bytes; > 0.
   uint64_t insts_size = 0;
-  /// @brief PDI blob in the ELF buffer; null if no PDI (full-ELF).
+  /// @brief PDI blob in the ELF buffer; nullptr if no PDI (full-ELF).
   const uint8_t* pdi_data = nullptr;
   /// @brief PDI blob size in bytes; 0 if no PDI.
   uint64_t pdi_size = 0;
@@ -38,14 +38,14 @@ struct AieKernelInfo {
 
 /// @brief Parses an AIE hsaco section and exposes its per-kernel metadata.
 ///
-/// Blob pointers in the returned AieKernelInfo alias the caller's ELF buffer, so
+/// Blob pointers in the returned @ref AieKernelInfo alias the caller's ELF buffer, so
 /// that buffer must outlive this object.
 class AieCode {
  public:
-  /// @brief Parses @p data; returns null if it is not a valid AIE code object.
+  /// @brief Parses @p data; returns nullptr if it is not a valid AIE code object.
   static std::unique_ptr<AieCode> Create(const void* data, size_t size);
 
-  /// @brief Returns true if @p data is an ELF containing an aie2/aie2p section.
+  /// @brief Returns true if @p data is an ELF containing an AIE section.
   static bool IsAieCodeObject(const void* data, size_t size);
 
   /// @brief Returns the arch section name.
@@ -54,7 +54,7 @@ class AieCode {
   /// @brief Returns the names of all kernels in the object.
   std::vector<std::string> GetKernelNames() const;
 
-  /// @brief Returns the kernel with @p name, or null if absent.
+  /// @brief Returns the kernel with @p name, or nullptr if absent.
   const AieKernelInfo* GetKernel(const std::string& name) const;
 
  private:

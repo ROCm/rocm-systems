@@ -18,7 +18,11 @@ namespace AMD {
 namespace {
 constexpr const char* kArchSectionNames[] = {"aie2", "aie2p"};
 
-// Returns the arch section (by name) if present, else nullptr, and sets out_name.
+/// @brief Returns the arch section (by name) if present, else @c nullptr, and sets out_name if not
+/// @c nullptr.
+/// @param elf ELF image to search.
+/// @param out_name Set to the matched section's name on success.
+/// @return The matched section, or @c nullptr if none of the known arch sections are present.
 amd::elf::Section* FindArchSection(amd::elf::Image* elf, std::string* out_name) {
   for (size_t i = 0; i < elf->sectionCount(); ++i) {
     amd::elf::Section* sec = elf->section(i);
@@ -26,7 +30,9 @@ amd::elf::Section* FindArchSection(amd::elf::Image* elf, std::string* out_name) 
     const std::string name = sec->Name();
     for (const char* arch : kArchSectionNames) {
       if (name == arch) {
-        *out_name = name;
+        if (out_name) {
+          *out_name = name;
+        }
         return sec;
       }
     }
@@ -42,8 +48,7 @@ bool AieCode::IsAieCodeObject(const void* data, size_t size) {
 
   auto img = std::unique_ptr<amd::elf::Image>(amd::elf::NewElf64Image());
   if (!img || !img->initAsBuffer(data, size)) return false;
-  std::string name;
-  return FindArchSection(img.get(), &name) != nullptr;
+  return FindArchSection(img.get(), nullptr) != nullptr;
 }
 
 std::unique_ptr<AieCode> AieCode::Create(const void* data, size_t size) {
