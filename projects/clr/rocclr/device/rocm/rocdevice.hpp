@@ -25,6 +25,7 @@
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+
 #include <atomic>
 #include <iostream>
 #include <memory>
@@ -249,7 +250,8 @@ class NullDevice : public amd::Device {
   }
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) override {
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) override {
     ShouldNotReachHere();
     return false;
   }
@@ -460,6 +462,14 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
+  //! Whether host-resident NUMA VMM allocation is supported for the given node.
+  //! Queries the CPU agent's HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED; returns
+  //! false against a ROCr that predates the query (graceful degrade).
+  bool hostVmemSupported(int numaNode) const;
+  //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
+  //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
+  uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
+
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
   void* reserveMemory(size_t size, size_t alignment) const;
@@ -484,7 +494,8 @@ class Device : public NullDevice {
   virtual cl_int virtualUnmap(void* va, size_t size) override;
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
-                            VmmLocationType = VmmLocationType::kDevice) override;
+                            VmmLocationType = VmmLocationType::kDevice,
+                            int numaNode = -1) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
@@ -561,6 +572,12 @@ class Device : public NullDevice {
   //! Returns the lock object for the virtual gpus list
   std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
+#ifdef _WIN32
+  //! D3D interop accessors - return adapter LUID for device matching
+  const LUID& getDeviceLUID() const { return deviceLuid_; }
+  bool hasValidLUID() const { return luidValid_; }
+#endif
+
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
   const VirtualGPUs& vgpus() const { return vgpus_; }
@@ -612,6 +629,10 @@ class Device : public NullDevice {
   virtual amd::Memory* GetArenaMemObj(const void* ptr, size_t& offset, size_t size = 0) override;
 
   virtual uint32_t getPreferredNumaNode() const final { return preferred_numa_node_; }
+
+  virtual uint32_t numHostNumaNodes() const final {
+    return static_cast<uint32_t>(cpu_agents_.size());
+  }
 
   const bool isFineGrainSupported() const override;
 
@@ -719,6 +740,12 @@ class Device : public NullDevice {
   //! Pre-computed metadata packet version header bits
   uint32_t metadata_version_header_ = 0;
   bool metadata_version_queried_ = false;
+
+#ifdef _WIN32
+  // D3D interop device properties
+  LUID deviceLuid_;     //!< Adapter LUID for D3D interop validation
+  bool luidValid_;      //!< True if LUID was successfully extracted from HSA
+#endif
 
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared

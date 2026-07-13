@@ -16,8 +16,8 @@
 # The result has the standard prefix layout under /opt/mirage:
 #   /opt/mirage/bin/mirage                  (Rust CLI/host)
 #   /opt/mirage/bin/rocjitsu                (rocjitsu CLI)
-#   /opt/mirage/lib/librocjitsu.so          (combined rocjitsu library)
-#   /opt/mirage/lib/librocjitsu_kmd.so      (KMD interposer)
+#   /opt/mirage/lib/librocjitsu.so          (combined rocjitsu library:
+#                                            VM API + KMD interposer)
 #   /opt/mirage/lib/librocjitsu_hooks.so    (DBT HSA hooks)
 #   /opt/mirage/share/rocjitsu/configs/*.json
 # `mirage` searches `../lib` relative to its own binary, so

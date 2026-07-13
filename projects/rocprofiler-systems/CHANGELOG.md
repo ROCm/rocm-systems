@@ -4,6 +4,18 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
+
+### Changed
+
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
+### Removed
+
+- Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
+  an already running process. Use the `rocprof-sys-attach` executable instead, which
+  attaches to and profiles running processes via the rocprofiler-sdk rocattach API.
+
 ## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
 
 ### Added
@@ -164,6 +176,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed an issue where the `--rocm-domains` CLI option for `rocprof-sys-run` was not recognized.
+- Fixed invalid strongly typed configuration values for `ROCPROFSYS_MODE`,
+  `ROCPROFSYS_PERFETTO_BACKEND`, `ROCPROFSYS_TRACE`,
+  `ROCPROFSYS_TRACE_DURATION`, and `ROCPROFSYS_SAMPLING_FREQ` being silently
+  accepted or failing later during runtime instead of reporting clear
+  configuration diagnostics.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 

@@ -33,6 +33,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "memory_allocator.hpp"
+#include "hip_allocator_vmm_common.hpp"
 
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
@@ -142,6 +143,228 @@ class HIPAllocator : public MemoryAllocator {
     return sizeof(hipIpcMemHandle_t);
   }
 
+#if HIP_VERSION >= 70000000
+  /**
+   * @brief HIP VMM handle type used by this allocator's symmetric heap.
+   *
+   * Returns hipMemHandleTypeNone for non-VMM allocators. The VMM allocators
+   * override this so callers can verify that a user buffer's requested handle
+   * type matches the one used by the symmetric heap.
+   */
+  virtual hipMemAllocationHandleType GetVMMHandleType() const
+  {
+    return hipMemHandleTypeNone;
+  }
+
+  /**
+   * @brief Validate that a user buffer can be registered as symmetric.
+   *
+   * Performs the single-PE checks required before a buffer can be registered
+   * as a symmetric region: non-zero and granularity-aligned size, allocated
+   * via the HIP VMM APIs, device memory residing on the given device, and a
+   * requested handle type matching this allocator's.
+   *
+   * Non-VMM allocators report hipMemHandleTypeNone and therefore reject all
+   * registrations.
+   *
+   * @param[in] ptr        Pointer to validate
+   * @param[in] size       Registered length in bytes
+   * @param[in] device_id  This PE's device ordinal
+   * @return true if all local checks pass, false otherwise
+   */
+  bool ValidateVMMRegistration(const void *ptr, size_t size, int device_id) const
+  {
+    /* Non-VMM allocators cannot back symmetric registrations. */
+    hipMemAllocationHandleType handle_type = GetVMMHandleType();
+    if (handle_type == hipMemHandleTypeNone) {
+      return false;
+    }
+
+    /* Non-zero size. */
+    if (ptr == nullptr || size == 0) {
+      return false;
+    }
+
+    /* Granularity-aligned size. */
+    size_t granularity = get_granularity();
+    if (granularity == 0) {
+      granularity = 1;
+    }
+    if (size % granularity != 0) {
+      return false;
+    }
+
+    /*
+     * Confirm the pointer is HIP VMM memory before doing anything else.
+     * hipMemRetainAllocationHandle can fault on non-VMM pointers (e.g.
+     * hipMalloc or host memory), whereas hipMemGetAccess fails gracefully with
+     * an error, so use it as a safe gate.
+     */
+    hipMemLocation location = {};
+    location.type = hipMemLocationTypeDevice;
+    location.id = device_id;
+    unsigned long long access_flags = 0;
+    if (hipMemGetAccess(&access_flags, &location, const_cast<void *>(ptr)) !=
+        hipSuccess) {
+      return false;
+    }
+
+    /*
+     * This PE's device must have read/write access to the buffer; RMA
+     * (puts/gets) would otherwise fault. VMM memory can be mapped without
+     * hipMemSetAccess having been called for this device, in which case the
+     * call above still succeeds but reports no access.
+     */
+    if (access_flags != hipMemAccessFlagsProtReadWrite) {
+      return false;
+    }
+
+    /*
+     * Now safe to retain the backing VMM handle to inspect its properties.
+     */
+    hipMemGenericAllocationHandle_t handle;
+    if (hipMemRetainAllocationHandle(&handle, const_cast<void *>(ptr)) !=
+        hipSuccess) {
+      return false;
+    }
+
+    hipMemAllocationProp prop = {};
+    hipError_t err = hipMemGetAllocationPropertiesFromHandle(&prop, handle);
+    (void)hipMemRelease(handle);
+    if (err != hipSuccess) {
+      return false;
+    }
+
+    /* Right device: device memory must live on this PE's device. */
+    if (prop.location.id != device_id) {
+      return false;
+    }
+
+    /* Matching handle type: must match this allocator's symmetric heap. */
+    if (prop.requestedHandleTypes != handle_type) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * @brief Map an existing VMM allocation to a fresh, distinct virtual address.
+   *
+   * Retains the generic allocation handle backing @p dev_ptr and maps the same
+   * physical memory at a newly reserved virtual address. The alias refers to
+   * the same data as @p dev_ptr but at a different address owned by rocSHMEM.
+   * Used so symmetric registration can return a rocSHMEM-managed address
+   * distinct from the user's pointer.
+   *
+   * @param[in]  dev_ptr VMM allocation to alias
+   * @param[in]  length  Length in bytes (granularity-aligned)
+   * @param[out] alias   Filled with the newly mapped virtual address
+   * @return hipSuccess, or an error (hipErrorNotSupported for non-VMM allocators)
+   */
+  hipError_t MapLocalAlias(void *dev_ptr, size_t length, void **alias)
+  {
+    if (GetVMMHandleType() == hipMemHandleTypeNone) {
+      return hipErrorNotSupported;
+    }
+    if (dev_ptr == nullptr || alias == nullptr || length == 0) {
+      return hipErrorInvalidValue;
+    }
+
+    hipMemGenericAllocationHandle_t handle;
+    hipError_t err = hipMemRetainAllocationHandle(&handle, dev_ptr);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    void *va = nullptr;
+    err = hipMemAddressReserve(&va, length, 0, 0, 0);
+    if (err != hipSuccess) {
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    err = hipMemMap(va, length, 0, handle, 0);
+    if (err != hipSuccess) {
+      (void)hipMemAddressFree(va, length);
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    int device_id = 0;
+    err = hipGetDevice(&device_id);
+    if (err == hipSuccess) {
+      hipMemAccessDesc access_desc[2];
+      access_desc[0].location.type = hipMemLocationTypeDevice;
+      access_desc[0].location.id = device_id;
+      access_desc[0].flags = hipMemAccessFlagsProtReadWrite;
+      access_desc[1].location.type = hipMemLocationTypeHost;
+      access_desc[1].location.id = 0;
+      access_desc[1].flags = hipMemAccessFlagsProtReadWrite;
+      err = hipMemSetAccess(va, length, access_desc, 2);
+    }
+    if (err != hipSuccess) {
+      (void)hipMemUnmap(va, length);
+      (void)hipMemAddressFree(va, length);
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    /* The mapping holds its own reference; drop ours from the retain above. */
+    (void)hipMemRelease(handle);
+
+    *alias = va;
+    return hipSuccess;
+  }
+
+  /**
+   * @brief Unmap and free a virtual address alias created by MapLocalAlias().
+   *
+   * @param[in] alias  Alias virtual address returned by MapLocalAlias()
+   * @param[in] length Length in bytes used when the alias was created
+   * @return hipSuccess or the first error encountered
+   */
+  hipError_t UnmapLocalAlias(void *alias, size_t length)
+  {
+    if (alias == nullptr || length == 0) {
+      return hipErrorInvalidValue;
+    }
+    hipError_t err = hipMemUnmap(alias, length);
+    hipError_t free_err = hipMemAddressFree(alias, length);
+    return (err != hipSuccess) ? err : free_err;
+  }
+#endif
+
+  /**
+   * @brief Export an IPC handle for an arbitrary (caller-owned) pointer.
+   *
+   * Unlike GetIpcHandle(), this does not require the pointer to have been
+   * produced by this allocator. It is used to register user-supplied
+   * symmetric buffers. Only implemented by the VMM allocators.
+   *
+   * @param[in]  dev_ptr Pointer to the (VMM) allocation to export
+   * @param[in]  length  Length of the region in bytes
+   * @param[out] handle  Filled with the shareable IPC handle
+   */
+  virtual hipError_t GetIpcHandleFromPtr(void * /*dev_ptr*/, size_t /*length*/,
+                                         void * /*handle*/)
+  {
+    return hipErrorNotSupported;
+  }
+
+  /**
+   * @brief Release a handle previously produced by GetIpcHandleFromPtr().
+   *
+   * For POSIX-fd based handles this closes the exported file descriptor.
+   * Default implementation is a no-op.
+   *
+   * @param[in] handle Handle previously filled by GetIpcHandleFromPtr()
+   */
+  virtual hipError_t CloseExportedHandle(void * /*handle*/)
+  {
+    return hipSuccess;
+  }
+
   virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
   {
     HIPIpcHandleLegacyVec* vec = new HIPIpcHandleLegacyVec();
@@ -208,6 +431,11 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   static hipError_t VMMAlloc(void** ptr, size_t size);
   static hipError_t VMMFree(void* ptr);
 
+  // Export a generic VMM handle to a POSIX shareable fd and fill the IPC handle
+  // struct. The exported fd is returned via out_fd.
+  hipError_t ExportToPosixHandle(hipMemGenericAllocationHandle_t generic_handle,
+                                 size_t size, void *handle, int *out_fd);
+
  public:
   HIPAllocatorVMMPosixFd();
 
@@ -217,6 +445,13 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+  hipError_t GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle) override;
+  hipError_t CloseExportedHandle(void *handle) override;
+
+  hipMemAllocationHandleType GetVMMHandleType() const override
+  {
+    return hipMemHandleTypePosixFileDescriptor;
+  }
 };
 
 // Forward declarations for fabric handle support (part of future HIP releases)
@@ -276,6 +511,11 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   static hipError_t VMMAlloc(void** ptr, size_t size);
   static hipError_t VMMFree(void* ptr);
 
+  // Export a generic VMM handle to a fabric handle and fill the IPC handle
+  // struct.
+  hipError_t ExportToFabricHandle(hipMemGenericAllocationHandle_t generic_handle,
+                                  size_t size, void *handle);
+
  public:
   HIPAllocatorVMMFabric();
 
@@ -285,6 +525,12 @@ class HIPAllocatorVMMFabric : public HIPAllocator {
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
   hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
+  hipError_t GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle) override;
+
+  hipMemAllocationHandleType GetVMMHandleType() const override
+  {
+    return hipMemHandleTypeFabric;
+  }
 };
 #endif
 
