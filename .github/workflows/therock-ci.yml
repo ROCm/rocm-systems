@@ -66,13 +66,13 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0 # 2026-07-07 commit
+          ref: 9165e6e864a1643d4804e24935e8eb663633f4a3 # 2026-07-10
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/therock-ci-config
-          ref: main
+          ref: users/geomin12/expect-fail-mi455
           path: ci-config
         continue-on-error: true
 
@@ -157,9 +157,7 @@ jobs:
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
-      # TODO(geomin12): Re-enable MI455 tests once bringup is complete
-      # run_mi455_test: ${{ matrix.target_bundle.amdgpu_family == 'gfx125X-dcgpu' && needs.setup.outputs.run_mi455_test || 'false' }}
-      run_mi455_test: "false"
+      run_mi455_test: ${{ matrix.target_bundle.amdgpu_family == 'gfx125X-dcgpu' && needs.setup.outputs.run_mi455_test || 'false' }}
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux

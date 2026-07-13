@@ -24,7 +24,6 @@ on:
         default: "false"
         description: "Set to 'true' to run MI455 tests for gfx125X builds"
 
-
 permissions:
   contents: read
 
@@ -54,7 +53,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0 # 2026-07-07 commit
+          ref: 9165e6e864a1643d4804e24935e8eb663633f4a3 # 2026-07-10
 
       - name: Install python deps
         run: |
