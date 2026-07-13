@@ -48,6 +48,28 @@ class TestCliBase(unittest.TestCase):
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
 
+    # CLI exit codes for the structured AmdSmi*Exception types (192-255 range).
+    # A test may pass one of these as the expected ``cond`` to assert the exact
+    # exit code, instead of the generic ``FAIL`` ("any non-zero").
+    InvalidCommand = 193
+    InvalidParameter = 194
+    DeviceNotFound = 195
+    InvalidFilePath = 196
+    InvalidParameterValue = 197
+    MissingParameterValue = 198
+    CommandNotSupported = 199
+    ParameterNotSupported = 200
+    RequiredCommand = 201
+    InvalidSubcommand = 202
+    PermissionDenied = 203
+    UnknownError = 255
+
+    # Codes that count as a pass for a command expected to succeed: a device may
+    # legitimately not support a feature.
+    #      2: from amdsmi.h, AMDSMI_STATUS_NOT_SUPPORTED
+    #    199: from amd-smi,  AmdSmiCommandNotSupportedException
+    not_supported_error_codes = [2, 199]
+
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
     # natively through normal attribute inheritance -- no dynamic ``setattr``
@@ -160,7 +182,9 @@ class TestCliBase(unittest.TestCase):
         self.AddLogLevel = "--loglevel DEBUG"
 
         self.PASS = 0
-        self.FAIL = 1
+        # FAIL is negative so RunCmds can treat it as "expect any non-zero exit"
+        # while a positive ``cond`` asserts that exact exit code.
+        self.FAIL = -1
         self.tab = "    "
         self.tmp_filename = self.TMP_FILENAME
         self.tmp_folder = self.TMP_FOLDER
@@ -722,6 +746,81 @@ class TestCliBase(unittest.TestCase):
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
+    @staticmethod
+    def _str_to_number(num_str):
+        rc = 0
+        num_str = num_str.strip()
+        try:
+            value = int(num_str)
+        except ValueError:
+            try:
+                value = float(num_str)
+                if value.is_integer():
+                    value = int(value)
+            except ValueError:
+                rc = 1
+                value = num_str
+        return (rc, value)
+
+    def _get_error_code(self, std_out, std_err, cond):
+        """Extract the trailing exit code the CLI prints ("... Error code: N")."""
+        error_code = 0
+        items = []
+        output_stream = None
+        if std_out and "Error code" in std_out:
+            output_stream = "std_out"
+            items = std_out.strip().split()
+        elif std_err and "Error code" in std_err:
+            output_stream = "std_err"
+            items = std_err.strip().split()
+        elif cond != self.PASS:
+            if std_out:
+                output_stream = "std_out"
+                items = std_out.strip().split()
+            elif std_err:
+                output_stream = "std_err"
+                items = std_err.strip().split()
+        if items:
+            _rc, error_code = self._str_to_number(items[-1])
+        return (error_code, output_stream)
+
+    def _get_command_return_msg(self, rc_num, ec_num, cond):
+        """Classify a run against ``cond``.
+
+        ``cond == PASS`` expects exit 0 (or a not-supported code); ``cond < 0``
+        (``FAIL``) expects any non-zero exit; ``cond > 0`` expects that exact
+        exit code.
+        """
+        msg = ""
+        if cond == self.PASS:
+            if rc_num in self.not_supported_error_codes:
+                msg = "Success: PASS Not Supported   "
+            elif rc_num == 0 and ec_num == 0:
+                msg = "Success: Expected PASS (0)"
+            elif rc_num != 0:
+                msg = "Failure: Expected PASS (0)"
+            elif ec_num != 0:
+                msg = "Failure: Expected PASS (0)"
+            msg = f"{msg}; Received rc={rc_num:3d}, ec={str(ec_num):3s}"
+        else:
+            if cond < 0:
+                if rc_num > 0:
+                    msg = "Success: Expected FAIL (> 0)"
+                else:
+                    msg = "Failure: Expected FAIL (> 0)"
+            else:
+                if rc_num > 0 and (rc_num == ec_num):
+                    if rc_num == cond:
+                        msg = "Success: Expected FAIL (> 0)"
+                    else:
+                        msg = f"Failure: Expected FAIL ({cond})"
+                else:
+                    msg = "Failure: Expected FAIL (> 0)"
+            msg = f"{msg}; Received rc={rc_num:3d}, ec={str(ec_num):3s}"
+
+        passed = "Success" in msg
+        return (msg, passed)
+
     def RunCmds(self, cmds):
         errors = []
         msg_len = 0
@@ -736,49 +835,30 @@ class TestCliBase(unittest.TestCase):
             if self.PrintCmdsOnly:
                 continue
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-            error_code = rc
-            if rc and std_err:
-                items = std_err.split()
-                if "amdsmi_exception" in std_err:
-                    # error code from amdsmi library exception
-                    for index, item in enumerate(items):
-                        if item == "Error":
-                            error_code_str = items[index + 4]
-                            error_code = error_code_str
-                            # break
-                else:
-                    # error code from amd-smi CLI
-                    error_code = items[-1]
-                    # Check for parse error 'choice'
-                    if "CRITICAL" in error_code:
-                        error_code = "Bad loglevel"
+            if rc:
+                error_code, output_stream = self._get_error_code(std_out, std_err, cond)
+            else:
+                error_code = 0
+                output_stream = None
+            _msg, passed = self._get_command_return_msg(rc, error_code, cond)
 
             msg = f"{cmd:{msg_len}s}:"
             if "--file" in cmd:
                 if not os.path.exists(self.tmp_filename):
-                    _msg = f"{msg} Failure: File {self.tmp_filename} does not exist"
-                    errors.append(_msg)
+                    _fmsg = f"{msg} Failure: File {self.tmp_filename} does not exist"
+                    errors.append(_fmsg)
                 else:
                     with open(self.tmp_filename, "r") as fin:
                         std_out = fin.read()
                     if not len(std_out):
-                        _msg = f"{msg} Failure: File {self.tmp_filename} was empty"
-                        errors.append(_msg)
+                        _fmsg = f"{msg} Failure: File {self.tmp_filename} was empty"
+                        errors.append(_fmsg)
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            if rc and cond == self.PASS:
-                msg += f" Failure: Received FAIL ({error_code}), expected PASS (0)"
+            msg += f" {_msg}"
+            if not passed:
                 errors.append(msg)
-            elif not rc and cond != self.PASS:
-                msg += " Failure: Received PASS (0), expected FAIL (!0)"
-                errors.append(msg)
-            else:
-                if not rc:
-                    expected = "PASS"
-                else:
-                    expected = "FAIL"
-                msg += f" Success: Received and Expected {expected} ({error_code})"
 
             self.common.print(f"{self.tab}{msg}")
             if self.Debug:

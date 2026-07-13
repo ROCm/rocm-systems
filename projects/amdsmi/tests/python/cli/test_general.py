@@ -80,26 +80,27 @@ class TestGeneral(TestCliBase):
             bad_uuid = self.list_data[0]["uuid"][:-1] + "0"
 
         cmds = [
-            # Test invalid command
-            ("amd-smi invalid_cmd", self.FAIL),
-            # Test invalid sub command
-            ("amd-smi version --invalid", self.FAIL),
-            ("amd-smi list --invalid", self.FAIL),
-            ("amd-smi static --invalid", self.FAIL),
-            ("amd-smi firmware --invalid", self.FAIL),
-            ("amd-smi bad_pages --invalid", self.FAIL),
-            ("amd-smi metric --invalid", self.FAIL),
-            ("amd-smi process --invalid", self.FAIL),
-            ("amd-smi event --invalid", self.FAIL),
-            ("amd-smi topology --invalid", self.FAIL),
-            ("amd-smi set --invalid", self.FAIL),
-            ("amd-smi reset", self.FAIL),
-            ("amd-smi reset --invalid", self.FAIL),
-            ("amd-smi monitor --invalid", self.FAIL),
-            ("amd-smi xgmi --invalid", self.FAIL),
-            ("amd-smi partition --invalid", self.FAIL),
-            ("amd-smi ras --invalid", self.FAIL),
-            ("amd-smi node --invalid", self.FAIL),
+            # Test invalid command (unknown top-level command)
+            ("amd-smi invalid_cmd", self.InvalidCommand),
+            # Test invalid sub command (unrecognized flag on a valid command)
+            ("amd-smi version --invalid", self.InvalidParameter),
+            ("amd-smi list --invalid", self.InvalidParameter),
+            ("amd-smi static --invalid", self.InvalidParameter),
+            ("amd-smi firmware --invalid", self.InvalidParameter),
+            ("amd-smi bad-pages --invalid", self.InvalidParameter),
+            ("amd-smi metric --invalid", self.InvalidParameter),
+            ("amd-smi process --invalid", self.InvalidParameter),
+            ("amd-smi event --invalid", self.InvalidParameter),
+            ("amd-smi topology --invalid", self.InvalidParameter),
+            ("amd-smi set --invalid", self.InvalidParameter),
+            # reset with no target argument reports a missing required command
+            ("amd-smi reset", self.RequiredCommand),
+            ("amd-smi reset --invalid", self.InvalidParameter),
+            ("amd-smi monitor --invalid", self.InvalidParameter),
+            ("amd-smi xgmi --invalid", self.InvalidParameter),
+            ("amd-smi partition --invalid", self.InvalidParameter),
+            ("amd-smi ras --invalid", self.InvalidParameter),
+            ("amd-smi node --invalid", self.InvalidParameter),
             # Test invalid gpu value
             ("amd-smi version --gpu 0", self.FAIL),
             ("amd-smi version --gpu -1", self.FAIL),
