@@ -4160,16 +4160,27 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
     core::Agent* agent = nullptr;
     int mmap_fd = -1;
+    uint64_t mmap_offset = mappedHandle->mem_handle->driver_handle.mmap_offset;
 
-    /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
-     * The driver_handle created during import should have the correct mmap_offset. */
-    if (mappedHandle->mem_handle->imported) {
+    /* For host memory backed by DMA-BUF, use the DMA-BUF fd directly with offset 0.
+     * For GPU memory or imported handles, use the render node fd with GEM mmap offset. */
+    if (mappedHandle->mem_handle->driver_handle.dmabuf_fd >= 0) {
+      /* Host memory with DMA-BUF: use the dmabuf fd and offset 0 */
+      mmap_fd = mappedHandle->mem_handle->driver_handle.dmabuf_fd;
+      mmap_offset = 0;
+      fprintf(stderr,
+              "[VMEM DBG] EnableAccess CPU: Using DMA-BUF fd=%d for host memory\n",
+              mmap_fd);
+    } else if (mappedHandle->mem_handle->imported) {
+      /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
+       * The driver_handle created during import should have the correct mmap_offset. */
       const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
       if (!gpus.empty()) {
         agent = gpus.front();
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
+      /* GPU memory: use the render node fd with GEM mmap offset */
       agent = mappedHandle->mem_handle->drmAgent();
       /* Do not check the return value of GetDeviceFd. We do not need mmap_fd in some cases, so it is valid for mmap_fd to be -1*/
       agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
@@ -4177,9 +4188,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 
     fprintf(stderr,
             "[VMEM DBG] EnableAccess CPU: MapMemory va=%p size=0x%zx mmap_fd=%d mmap_offset=0x%lx\n",
-            va, size, mmap_fd, mappedHandle->mem_handle->driver_handle.mmap_offset);
-    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd,
-                             mappedHandle->mem_handle->driver_handle.mmap_offset)) {
+            va, size, mmap_fd, mmap_offset);
+    if (!rocr::os::MapMemory(va, size, PermissionsToMemProt(perms), mmap_fd, mmap_offset)) {
       fprintf(stderr, "[VMEM DBG] EnableAccess CPU: MapMemory FAILED va=%p\n", va);
       return HSA_STATUS_ERROR;
     }
@@ -4341,9 +4351,27 @@ Runtime::VMemorySetAccessPerHandle(void *va, MappedHandle &mappedHandle,
     fprintf(stderr, "[VMEM DBG] VMemorySetAccessPerHandle: lazy export dmabuf_fd=%d\n", dmabuf_fd);
   }
 
+  /* Check if any target agent is a CPU - if so, we need to keep the dmabuf_fd open
+   * for mmap. Only close it if all agents are GPUs. */
+  bool has_cpu_agent = false;
+  for (int i = 0; i < desc_cnt; i++) {
+    Agent *targetAgent = Agent::Convert(desc[i].agent_handle);
+    if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
+      has_cpu_agent = true;
+      break;
+    }
+  }
+
   MAKE_SCOPE_GUARD([&]() {
-    if (created_dmabuf_fd) {
+    if (created_dmabuf_fd && !has_cpu_agent) {
+      fprintf(stderr,
+              "[VMEM DBG] VMemorySetAccessPerHandle: closing lazily exported dmabuf_fd (no CPU "
+              "access)\n");
       os::DmaBufClose(&memHandle->driver_handle.dmabuf_fd);
+    } else if (created_dmabuf_fd && has_cpu_agent) {
+      fprintf(stderr,
+              "[VMEM DBG] VMemorySetAccessPerHandle: keeping dmabuf_fd=%d open for CPU mmap\n",
+              memHandle->driver_handle.dmabuf_fd);
     }
   });
 
