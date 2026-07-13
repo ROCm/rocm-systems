@@ -3930,5 +3930,19 @@ TEST(GeneratedInstDefUse, D16TbufferLoadReadsDestination) {
   EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+// Negative case: D16 stores share the d16 flags but are not in
+// _D16_LOAD_CLASSES, so no implicit_uses override is emitted. The data operand
+// (FLAT 'vsrc' at word1[23:30], set to v5 = 5 << 23) is a plain source: it must
+// be a use, never a def. vaddr at word2[7:0] stays v0.
+TEST(GeneratedInstDefUse, D16StoreDoesNotDefineData) {
+  auto inst = decode_rdna4({0xEC094000U, 0x02800000U}); // flat_store_d16_hi_b16, vsrc=5
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "flat_store_d16_hi_b16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_FALSE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+}
+
 } // namespace
 } // namespace rocjitsu
