@@ -777,6 +777,15 @@ contract:
   Contract_GraphNodeSetters_KernelNodeCopyAttributes_PropagatesToDestination:
     <<: *level_0
     tags: [graph_node_setters]
+  Contract_GraphSymbolCopyNodes_AddToFromSymbol_RoundTripsValue:
+    <<: *level_0
+    tags: [graph_symbol_copy_nodes]
+  Contract_GraphSymbolCopyNodes_SetParamsToFromSymbol_UpdatesGraphNodes:
+    <<: *level_0
+    tags: [graph_symbol_copy_nodes]
+  Contract_GraphSymbolCopyNodes_ExecSetParamsToFromSymbol_UpdatesExecutable:
+    <<: *level_0
+    tags: [graph_symbol_copy_nodes]
   Contract_HostMemory_HostMalloc_ReturnsUsablePointer:
     <<: *level_0
     tags: [host_memory]

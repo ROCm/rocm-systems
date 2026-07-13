@@ -57,6 +57,7 @@ The first domains are:
 - `graph_node_attributes`: graph kernel node attribute set/get and invalid-input contracts
 - `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `graph_node_setters`: pre-instantiation graph node parameter setter and attribute-copy contracts
+- `graph_symbol_copy_nodes`: graph memcpy-to/from-symbol node add, set-params, and exec-set-params contracts
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
