@@ -31,6 +31,7 @@ The first domains are:
 - `error_api`: error name and string API contracts without backend-specific text assumptions
 - `driver_error`: driver-style error name and string API contracts
 - `kernel`: tiny in-source kernel launch contracts
+- `call_config`: legacy configure/setup/launch-by-pointer call-configuration contracts
 - `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `kernel_launch`: cooperative, extended, symbol, and AMD extension kernel launch contracts
 - `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts

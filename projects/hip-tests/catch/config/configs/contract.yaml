@@ -429,6 +429,12 @@ contract:
   Contract_Kernel_InvalidConfiguration_RecordsReturnedError:
     <<: *level_0
     tags: [kernel]
+  Contract_CallConfig_ConfigureSetupLaunch_WritesExpectedValue:
+    <<: *level_0
+    tags: [call_config]
+  Contract_CallConfig_ConfigureSetupLaunch_RepeatedStagingIsIndependent:
+    <<: *level_0
+    tags: [call_config]
   Contract_FuncAttributes_GetAttributes_ReturnsSaneStruct:
     <<: *level_0
     tags: [func_attributes]
@@ -679,9 +685,6 @@ contract:
     <<: *level_0
     tags: [graph_mem_nodes]
   Contract_GraphMemNodes_GetParams_RoundTripsBytesize:
-    <<: *level_0
-    tags: [graph_mem_nodes]
-  Contract_GraphMemNodes_AllocFreeGraph_InstantiatesAndTracksParams:
     <<: *level_0
     tags: [graph_mem_nodes]
   Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing:
