@@ -47,6 +47,7 @@
 
 #include "containers/free_list.hpp"
 #include "memory/hip_allocator.hpp"
+#include "gda/gda_symm_table.hpp"
 
 #include <map>
 
@@ -161,14 +162,19 @@ class QueuePair {
   virtual ~QueuePair();
 
   /**
-   * @brief Create and enqueue a non-blocking put work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking put to a symmetric destination.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] length Size in bytes of data transmission.
+   * The target PE is this QP's connected peer (@ref dest_pe). Resolves the
+   * remote address and remote key for @p dest and the local key for @p source
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only. Small transfers are inlined (no source key).
+   *
+   * @param[in] dest    Symmetric destination address (local address space).
+   * @param[in] source  Local source address.
+   * @param[in] nelems  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void put_nbi(void *dest, const void *source, size_t length,
+  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
       ActiveWFInfo &wf_info);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
@@ -197,14 +203,19 @@ class QueuePair {
       size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
 
   /**
-   * @brief Create and enqueue a non-blocking get work queue entry (wqe).
+   * @brief Create and enqueue a non-blocking get from a symmetric source.
    *
-   * @param[in] dest Destination address for data transmission.
-   * @param[in] source Source address for data transmission.
-   * @param[in] length Size in bytes of data transmission.
+   * The target PE is this QP's connected peer (@ref dest_pe). Resolves the
+   * remote address and remote key for @p source and the local key for @p dest
+   * internally (heap or registered buffer), so callers pass symmetric addresses
+   * only.
+   *
+   * @param[in] dest    Local destination address.
+   * @param[in] source  Symmetric source address (local address space).
+   * @param[in] nelems  Size in bytes of data transmission.
    * @param[in] wf_info Wavefront information.
    */
-  __device__ void get_nbi(void *dest, const void *source, size_t length,
+  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
       ActiveWFInfo &wf_info);
 
   __device__ void get_nbi_single(void *dest, const void *source, size_t length,
@@ -291,8 +302,116 @@ class QueuePair {
   __device__ int64_t atomic_cas_nofetch(void *dest, int64_t atomic_data,
       int64_t atomic_cmp, ActiveWFInfo &wf_info);
 
+  /**
+   * @brief Explicit remote-key atomic variants.
+   *
+   * Used when the destination is a symmetrically-registered user buffer whose
+   * remote key differs from the QP's default heap key. Mirror the default-key
+   * versions above but forward the caller-supplied @p rkey.
+   */
+  __device__ int64_t atomic_fetch(void *dest, uint32_t rkey, int64_t value,
+      int64_t cond, ActiveWFInfo &wf_info);
+
+  __device__ void atomic_nofetch(void *dest, uint32_t rkey, int64_t value,
+      int64_t cond, ActiveWFInfo &wf_info);
+
+  __device__ int64_t atomic_cas(void *dest, uint32_t rkey, int64_t atomic_data,
+      int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  __device__ int64_t atomic_cas_nofetch(void *dest, uint32_t rkey,
+      int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info);
+
+  /**
+   * @brief Explicit-key non-blocking put/get.
+   *
+   * get_nbi's default-key form derives the remote key from the QP heap key and
+   * the local key via get_lkey; this form takes both explicitly for symmetric
+   * user-buffer transfers. (put_nbi already provides an explicit-key overload.)
+   */
+  __device__ void get_nbi(void *dest, uint32_t lkey, const void *source,
+      uint32_t rkey, size_t length, ActiveWFInfo &wf_info);
+
   uintptr_t base_heap = 0;
   size_t base_heap_size = 0;
+
+  /**
+   * @brief Shared symmetric address space (per-PE heap bases + registration
+   * table). Set once at QP setup; used by the key/address resolvers below.
+   */
+  const SymmAddrSpace *addr_space_{nullptr};
+
+  /**
+   * @brief Find the registered symmetric region containing @p addr, if any.
+   */
+  __device__ __forceinline__ GDASymmRegion *find_symm_region(uintptr_t addr) {
+    GDASymmTable *table = addr_space_ ? addr_space_->symm_table : nullptr;
+    if (table == nullptr) {
+      return nullptr;
+    }
+    int n = table->count;
+    for (int i = 0; i < n; ++i) {
+      GDASymmRegion &r = table->regions[i];
+      if (addr >= r.local_base && addr < r.local_base + r.length) {
+        return &r;
+      }
+    }
+    return nullptr;
+  }
+
+  /**
+   * @brief Resolve the remote address and remote key for a symmetric target.
+   *
+   * The target PE is this QP's connected peer (@ref dest_pe). Common case is a
+   * symmetric-heap address, translated from this QP's local heap base and using
+   * its default heap key. Otherwise the address is matched against the
+   * registered-buffer table and this QP's per-NIC remote key (and the peer's
+   * registered base) are used.
+   *
+   * @param[in]  sym_addr  Symmetric address (valid in the local address space)
+   * @param[out] rkey_out  Filled with the remote key to use
+   * @return Remote address in the connected peer's address space
+   */
+  __device__ __forceinline__ uintptr_t translate_remote(const void *sym_addr,
+      uint32_t *rkey_out) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    if ((addr - base_heap) < base_heap_size) {
+      *rkey_out = rkey;
+      return reinterpret_cast<uintptr_t>(addr_space_->heap_bases[dest_pe]) +
+             (addr - base_heap);
+    }
+    GDASymmRegion *r = find_symm_region(addr);
+    if (r != nullptr) {
+      *rkey_out =
+          r->rkeys[dest_pe * addr_space_->symm_table->num_nics + nic_idx];
+      return r->remote_bases[dest_pe] + (addr - r->local_base);
+    }
+    /*
+     * Neither a heap address nor a registered buffer: the caller passed a
+     * non-symmetric pointer (undefined in SHMEM). Return an invalid target
+     * (address 0 / key 0) so the NIC rejects the transfer, rather than
+     * fabricating a heap offset that could silently corrupt peer memory.
+     */
+    *rkey_out = 0;
+    return 0;
+  }
+
+  /**
+   * @brief Resolve the local key for a locally-sourced symmetric buffer.
+   *
+   * Heap buffers use this QP's default heap key; registered buffers use their
+   * per-NIC local key; anything else falls back to the user-buffer lookup.
+   */
+  __device__ __forceinline__ uint32_t local_lkey(const void *local_addr) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(local_addr);
+    if ((addr - base_heap) < base_heap_size) {
+      return lkey;
+    }
+    GDASymmRegion *r = find_symm_region(addr);
+    if (r != nullptr) {
+      return r->lkeys[nic_idx];
+    }
+    return get_lkey(addr);
+  }
 
  private:
   /**
@@ -513,6 +632,23 @@ class QueuePair {
   uint32_t qp_num{0};
   uint32_t rkey{0};
   uint32_t lkey{0};
+
+  /**
+   * @brief Index of the NIC backing this QP.
+   *
+   * Used to select the correct per-NIC remote/local key for symmetric
+   * user-buffer registrations (see GDASymmRegion), mirroring how the symmetric
+   * heap picks heap_rkey[pe * num_nics + nic_idx].
+   */
+  int nic_idx{0};
+
+  /**
+   * @brief Remote PE this QP is connected to (conn_num % num_pes).
+   *
+   * Set once at setup. The resolvers use it to index the per-PE arrays (heap
+   * bases and registered-region remote bases/keys).
+   */
+  int dest_pe{0};
 
   uint64_t* nonfetching_atomic{nullptr};
   uint32_t nonfetching_atomic_lkey{0};

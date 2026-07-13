@@ -539,28 +539,22 @@ class Backend {
   /**
    * @brief Create the rocSHMEM-managed symmetric address for a registration.
    *
-   * The default implementation maps the user's buffer to a fresh
-   * rocSHMEM-owned virtual address (an "alias") via the heap allocator, so the
-   * returned symmetric address is distinct from and owned independently of the
-   * user's pointer. This is required by the IPC backend, which maps peer
-   * buffers into this address space.
-   *
-   * Backends may override this: the GDA backend reaches registered buffers
-   * over the NIC and uses the user's pointer directly, which avoids a
-   * secondary VMM mapping (HIP cannot reliably unmap such a mapping once its
-   * physical allocation has been dmabuf-imported by the NIC).
+   * Maps the user's buffer to a rocSHMEM-owned virtual address (an "alias")
+   * via the heap allocator, so the returned symmetric address is
+   * distinct from and owned independently of the user's pointer. Both the IPC
+   * and GDA backends use this alias as the symmetric address.
    *
    * @param[in]  addr   User's buffer to register.
    * @param[in]  length Length in bytes.
    * @param[out] alias  Filled with the symmetric address to return to caller.
    */
-  virtual hipError_t create_symm_alias(void *addr, size_t length, void **alias);
+  hipError_t create_symm_alias(void *addr, size_t length, void **alias);
 
   /**
    * @brief Release a symmetric address previously produced by
-   *        create_symm_alias(). Default unmaps the alias mapping.
+   *        create_symm_alias() (unmaps the alias mapping).
    */
-  virtual void destroy_symm_alias(void *alias, size_t length);
+  void destroy_symm_alias(void *alias, size_t length);
 
   /**
    * @brief Dumps derived class statistics. Default is a no-op.

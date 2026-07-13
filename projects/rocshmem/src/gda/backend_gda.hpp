@@ -26,11 +26,14 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
+#include <map>
+#include <vector>
 #include "ibv_core.hpp"
 #include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
 #include "gda_enums.hpp"
+#include "gda/gda_symm_table.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp" //TODO useless?
 #include "memory/hip_allocator.hpp"
@@ -85,6 +88,49 @@ class GDABackend : public Backend {
   GDAProvider gda_provider = GDAProvider::UNSET;
 
   uint32_t *heap_rkey = nullptr;
+
+  /**
+   * @brief Device-visible table of symmetric user-buffer registrations.
+   *
+   * Allocated in setup_symm_registration() and shared (by pointer) with every
+   * context. Null when symmetric registration is unavailable (pre-ROCm-7.0).
+   */
+  GDASymmTable *symm_table_{nullptr};
+
+  /**
+   * @brief Device-resident descriptor of the symmetric address space.
+   *
+   * Allocated once in setup_gpu_qps() and pointed to by every QueuePair
+   * (QueuePair::addr_space_) so QPs can resolve remote addresses and NIC keys.
+   * Populated via hipMemcpy at init (heap_bases, then the symm_table pointer in
+   * setup_symm_registration()) and effectively read-only thereafter: buffer
+   * register/unregister mutate the table contents, not this descriptor. Plain
+   * device memory (not managed) since it sits on the RMA read hot path.
+   */
+  SymmAddrSpace *symm_addr_space_{nullptr};
+
+  /**
+   * @brief GDA-specific per-registration state kept on the host.
+   *
+   * The common alias/length bookkeeping lives in Backend::symm_buffer_regions;
+   * this holds the transport-specific resources needed to tear a registration
+   * down, keyed by the registered alias base address.
+   */
+  struct GdaSymmRecord {
+    int slot{-1};                       // index into the device symm_table
+    std::vector<struct ibv_mr*> mrs{};  // per-NIC MRs for the buffer
+    std::vector<int> mr_fds{};          // per-NIC dmabuf fds (kept open for MR lifetime)
+    hipMemGenericAllocationHandle_t gen_handle{};  // retained backing handle
+    bool has_gen_handle{false};         // whether gen_handle must be released
+    uintptr_t* dev_remote_bases{nullptr};  // device array[num_pes]
+    uint32_t* dev_rkeys{nullptr};          // device array[num_pes*num_nics]
+    uint32_t* dev_lkeys{nullptr};          // device array[num_nics]
+  };
+
+  /**
+   * @brief Host-side map of GDA-specific symmetric registration state.
+   */
+  std::map<uintptr_t, GdaSymmRecord> gda_symm_records_{};
 
   std::vector<NicDevice> nic_devices_;
   int num_nics_{0};
@@ -244,6 +290,32 @@ class GDABackend : public Backend {
   void buffer_unregister_all() override;
 
   /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Collective. Restricted to VMM allocations. Registered buffers are reached
+   * over the NIC (including for node-local peers), so registration exchanges a
+   * per-PE alias base and per-PE/per-NIC remote keys and publishes them into a
+   * device-visible table consulted by the RMA/AMO paths.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Collective.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
+
+  /**
+   * @brief Accessor for the device-visible symmetric registration table.
+   *
+   * Contexts copy this pointer so register/unregister updates are observed
+   * without re-propagation. Null when symmetric registration is unavailable.
+   */
+  GDASymmTable *get_symm_table() { return symm_table_; }
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
@@ -391,6 +463,52 @@ class GDABackend : public Backend {
    */
   void setup_ipc();
   void cleanup_ipc();
+
+  /**
+   * @brief Allocate the device-visible symmetric-registration table.
+   */
+  void setup_symm_registration();
+
+  /**
+   * @brief Unregister all symmetric buffers and free the registration table.
+   */
+  void cleanup_symm_registration();
+
+  /**
+   * @brief Register a symmetric alias buffer with one NIC's protection domain.
+   *
+   * Uses the dmabuf path (matching the symmetric heap MR) when supported so
+   * the GPUDirect-RDMA-capable VMM alias can be reached by the NIC.
+   *
+   * @param[in]  pd          Protection domain of the NIC.
+   * @param[in]  gen_handle  Backing VMM allocation handle (retained by the
+   *                         caller and kept alive for the MR's lifetime, so the
+   *                         dmabuf export does not leave the user unable to
+   *                         later hipMemUnmap the buffer). Unused when
+   *                         @p use_dmabuf is false.
+   * @param[in]  use_dmabuf  Whether to register via the dmabuf path.
+   * @param[in]  iova        Buffer virtual address registered as the MR iova.
+   * @param[in]  length      Length in bytes.
+   * @param[out] out_fd      Filled with the dmabuf fd backing the MR (or -1 for
+   *                         the plain path). The fd must stay open for the MR's
+   *                         lifetime and is closed only after deregistration.
+   * @return The registered ibv_mr on success, nullptr otherwise.
+   */
+#if HIP_VERSION >= 70000000
+  struct ibv_mr *register_symm_buffer_mr(
+      struct ibv_pd *pd, hipMemGenericAllocationHandle_t gen_handle,
+      bool use_dmabuf, void *iova, size_t length, int *out_fd);
+#endif
+
+  /**
+   * @brief Tear down the NIC-side state of a symmetric registration.
+   *
+   * Deregisters the per-NIC MRs, closes their dmabuf fds, releases the retained
+   * VMM handle, compacts the device NIC table, frees the per-registration
+   * device arrays, and drops the GDA record. Used by both the normal
+   * unregister path and the registration rollback path.
+   */
+  void gda_nic_unregister(uintptr_t key);
 
   /**
    * @brief Allocate and initialize barrier operation addresses on

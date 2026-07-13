@@ -292,11 +292,14 @@ __device__ void QueuePair::quiet_single() {
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
-    size_t length, ActiveWFInfo &wf_info) {
-  uint32_t dst_rkey = rkey;
-  uint32_t src_lkey = (static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold))
-      ? 0 : get_lkey(reinterpret_cast<uintptr_t>(source));
-  put_nbi(dest, dst_rkey, source, src_lkey, length, wf_info);
+    size_t nelems, ActiveWFInfo &wf_info) {
+  uint32_t dst_rkey;
+  uintptr_t raddr = translate_remote(dest, &dst_rkey);
+  uint32_t src_lkey =
+      (static_cast<int32_t>(nelems) <= static_cast<int32_t>(inline_threshold))
+          ? 0 : local_lkey(source);
+  put_nbi(reinterpret_cast<void *>(raddr), dst_rkey, source, src_lkey, nelems,
+          wf_info);
 }
 
 __device__ void QueuePair::put_nbi(void *raddr, uint32_t rkey,
@@ -338,13 +341,12 @@ __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t
 
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
-    size_t length, ActiveWFInfo &wf_info) {
-  uint32_t src_rkey = rkey;
-  uint32_t dst_lkey = get_lkey(reinterpret_cast<uintptr_t>(dest));
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
-  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma(static_cast<int32_t>(length), src, src_rkey, dst, dst_lkey,
-               gda_op_rdma_read, wf_info, true);
+    size_t nelems, ActiveWFInfo &wf_info) {
+  uint32_t src_rkey;
+  uintptr_t raddr = translate_remote(source, &src_rkey);
+  uint32_t dst_lkey = local_lkey(dest);
+  get_nbi(dest, dst_lkey, reinterpret_cast<void *>(raddr), src_rkey, nelems,
+          wf_info);
 }
 
 __device__ int64_t QueuePair::atomic_cas(void *dest, int64_t atomic_data,
@@ -373,6 +375,40 @@ __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo(dst, rkey, gda_op_atomic_fa, atomic_data,
                atomic_cmp, wf_info);
+}
+
+__device__ int64_t QueuePair::atomic_fetch(void *dest, uint32_t rkey,
+    int64_t value, int64_t cond, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_fa, value, cond, wf_info, true);
+}
+
+__device__ void QueuePair::atomic_nofetch(void *dest, uint32_t rkey,
+    int64_t value, int64_t cond, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_amo(dst, rkey, gda_op_atomic_fa, value, cond, wf_info);
+}
+
+__device__ int64_t QueuePair::atomic_cas(void *dest, uint32_t rkey,
+    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_cs, atomic_data, atomic_cmp,
+                      wf_info, true);
+}
+
+__device__ int64_t QueuePair::atomic_cas_nofetch(void *dest, uint32_t rkey,
+    int64_t atomic_data, int64_t atomic_cmp, ActiveWFInfo &wf_info) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  return post_wqe_amo(dst, rkey, gda_op_atomic_cs, atomic_data, atomic_cmp,
+                      wf_info);
+}
+
+__device__ void QueuePair::get_nbi(void *dest, uint32_t lkey,
+    const void *source, uint32_t rkey, size_t length, ActiveWFInfo &wf_info) {
+  uintptr_t src = reinterpret_cast<uintptr_t>(source);
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_rma(static_cast<int32_t>(length), src, rkey, dst, lkey,
+               gda_op_rdma_read, wf_info, true);
 }
 
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {

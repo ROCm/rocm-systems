@@ -85,6 +85,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* Export Memory Keys */
   gpu_qp->lkey = nic.heap_mr->lkey;
   gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
+  gpu_qp->nic_idx = nic_idx;
 
   /* Export Inline Threshold */
   gpu_qp->inline_threshold = inline_threshold;
