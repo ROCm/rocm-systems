@@ -329,6 +329,11 @@ Full gfx950 support means:
   barrier ordering, atomic handoff, private epoch, and bounded diagnostics. A
   new five-cell B128-plus-B32 race produces five diagnostics with four visible
   and one dropped, directly proving GPU-side overflow accounting.
+- 2026-07-13: `T2R` is `DONE`, reaching `T2G`; `T3A` is now `ACTIVE`. All 24
+  selected resource/spill rows pass: dead allocation, descriptor growth,
+  zero/nonzero-private layouts, forced spills for every engine and
+  synchronization path, partial EXEC, dynamic-stack rollback, and multi-owner
+  shared-helper commit/rollback. Every live row preserves guest values.
 
 ## DAG Overview
 
@@ -542,9 +547,9 @@ flowchart LR
   T2RR["T2RR: Record/Replay Focused Tier"]:::done
   T2SA["T2SA: Sampled Focused Tier"]:::done
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::done
-  T2R["T2R: Resource And Spill Tier"]:::active
+  T2R["T2R: Resource And Spill Tier"]:::done
   T2G{"T2G: Focused gfx950 Accepted"}:::target
-  T3A["T3A: Workload Inventory"]:::todo
+  T3A["T3A: Workload Inventory"]:::active
   T3SC["T3SC: SuperCollider Selected Workloads"]:::todo
   T3RR["T3RR: Record/Replay Selected Workloads"]:::todo
   T3SA["T3SA: Sampled Selected Workloads"]:::todo
@@ -1747,7 +1752,7 @@ controls stay clean; wrong-address atomic reports; private epoch survives
 forced spill. The five-cell overflow control reports five total, four visible,
 and one dropped diagnostic.
 
-### T2R: gfx950 Resource And Spill Focused Tier - ACTIVE
+### T2R: gfx950 Resource And Spill Focused Tier - DONE
 
 Required rows:
 
@@ -1759,9 +1764,14 @@ Done criteria:
 - Every resource path reports its expected typed outcome, and forced-spill
   rows require an emitted spill patch and preserved guest values.
 
+Result: all 24 selected resource and spill CTests pass. The slice covers dead,
+growth, forced-spill, zero/nonzero-private, partial-EXEC, dynamic-stack
+rollback, and shared-owner layouts. Every forced live engine row requires a
+patch and verifies all guest values after dispatch.
+
 `T2G` is reached only when T2SC, T2RR, T2SA, T2IS, and T2R all pass.
 
-### T3A: gfx950 Real-Workload Inventory - TODO
+### T3A: gfx950 Real-Workload Inventory - ACTIVE
 
 Goal: choose bounded, representative compiler output before running profiles.
 
