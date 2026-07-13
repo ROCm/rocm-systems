@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 458
+- Contract tests: 463
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 338
-- Approximate declared API-name coverage: 68.4%
+- Declared HIP runtime APIs directly exercised by contract tests: 344
+- Approximate declared API-name coverage: 69.6%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -65,6 +65,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_mem_nodes` | 4 |
 | `graph_node_attributes` | 3 |
 | `graph_node_params` | 7 |
+| `graph_node_setters` | 5 |
 | `graph_node_find` | 3 |
 | `graph_user_objects` | 4 |
 | `graph_node_enabled` | 3 |
@@ -110,7 +111,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Error handling | 5 | 5 | 100.0% |
 | Event | 8 | 8 | 100.0% |
 | Occupancy | 13 | 13 | 100.0% |
-| Graph / capture | 65 | 96 | 67.7% |
+| Graph / capture | 71 | 96 | 74.0% |
 | Stream | 23 | 23 | 100.0% |
 | Runtime / device | 34 | 45 | 75.6% |
 | Kernel launch / function attrs | 15 | 19 | 78.9% |
@@ -487,6 +488,12 @@ hipGraphNodeSetEnabled
 hipGraphNodeGetEnabled
 hipGraphKernelNodeSetAttribute
 hipGraphKernelNodeGetAttribute
+hipGraphKernelNodeSetParams
+hipGraphHostNodeSetParams
+hipGraphMemcpyNodeSetParams1D
+hipGraphEventRecordNodeSetEvent
+hipGraphEventWaitNodeSetEvent
+hipGraphKernelNodeCopyAttributes
 ```
 
 ### Occupancy
@@ -534,7 +541,7 @@ hipIpcOpenEventHandle
 2. Texture and surface APIs beyond current basics: runtime and driver-style texture object create/destroy with resource, texture, and resource-view descriptor round-trips, image-gated device texture-width queries, surface object create/destroy, and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: module load from file/fat-binary, HIPRTC-backed module load-from-data, load-from-data-with-options (`hipModuleLoadDataEx`, including JIT option handling), unload, function and global lookup, module kernel launch (with `hipFuncGetAttribute`), function-count queries, cooperative module launch, and module occupancy helpers (max potential block size and max active blocks per multiprocessor, including both with-flags variants), and JIT linker lifecycle and invalid-input paths are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name), plus the `hipKernel_t` attribute accessors and parameter-info query (`hipKernelGetAttribute`, `hipKernelSetAttribute` accepted-or-unsupported, `hipKernelGetParamInfo` first-parameter layout). Tex-ref queries and multi-device cooperative module launch remain.
 4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Driver-style context configuration and peer access are now covered as well: per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access enable/disable (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`). This brings the driver-style context (`hipCtx*`) API family to full name coverage. PCI bus-id-to-device round-trips, device selection (`hipChooseDevice`), single-device peer-access queries (`hipDeviceCanAccessPeer`), peer-attribute queries (`hipDeviceGetP2PAttribute`), and peer-access enable/disable contracts (`hipDeviceEnablePeerAccess`, `hipDeviceDisablePeerAccess`) are now covered too. Remaining driver-style device-management gaps are the primary-context reset/set-flags helpers.
-5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, stream capture-mode exchange and v2 capture-info queries, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, graph node parameter get/set round-trips and event getter contracts, graph node destruction, executable-graph instantiate-with-flags/upload/flag query paths, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; remaining node attribute variants and debug dot export remain.
+5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, stream capture-mode exchange and v2 capture-info queries, memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, graph node parameter get/set round-trips and event getter contracts, graph node destruction, executable-graph instantiate-with-flags/upload/flag query paths, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; the pre-instantiation node parameter setters are covered too (`hipGraphKernelNodeSetParams`, `hipGraphHostNodeSetParams`, `hipGraphMemcpyNodeSetParams1D`, `hipGraphEventRecordNodeSetEvent`, `hipGraphEventWaitNodeSetEvent`, and kernel-node attribute propagation via `hipGraphKernelNodeCopyAttributes`), verified by set-then-get round-trips and launched observable effects. Remaining node attribute variants and debug dot export remain.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, driver-entry-point lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch variants, and logging controls remain.
 8. Occupancy APIs: the occupancy API family is now at full name coverage. Beyond the earlier basics — max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`), max-potential-block-size, available-dynamic-shared-memory-per-block, and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) — the non-module with-flags potential-block-size variant (`hipOccupancyMaxPotentialBlockSizeWithFlags`) and the variable-shared-memory potential-block-size helpers (`hipOccupancyMaxPotentialBlockSizeVariableSMem`, `hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags`) are now covered too, exercising the with-flags/plain equivalence and a zero-dynamic-shared-memory functor.
