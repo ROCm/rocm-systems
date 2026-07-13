@@ -135,6 +135,12 @@ Full gfx950 support means:
   cave-size preflight, and rollback. Synthetic gfx1201 and gfx950 patches now
   prove the required save, original access, probe, restore, and return order;
   the focused 190-test resource/builder/MOI/spill suite passes.
+- 2026-07-13: `S6` is `DONE`. A guarded gfx950 hardware test forces a
+  three-VGPR record/replay spill in a zero-private kernel, observes a visible
+  wave64 access record, verifies four independently live values in all 64
+  lanes after restoration, and requires the runtime log to prove AQL
+  dispatch-private growth from 0 to 12 bytes. Explicit kernel filters keep all
+  four gfx950 CTests isolated; the full group passes.
 
 ## DAG Overview
 
@@ -205,7 +211,7 @@ flowchart LR
   S4["S4: Standalone Live VGPR Round Trip"]:::done
   S5["S5: Target-Dispatched Spill Backend"]:::done
   RR1A["RR1A: Access Record Emission"]:::done
-  S6["S6: Forced-Spill Record/Replay"]:::todo
+  S6["S6: Forced-Spill Record/Replay"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::todo
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
@@ -704,7 +710,7 @@ Done criteria:
 - Synthetic patch shapes contain save, original access, probe, restore, and
   return in the required order for both gfx950 and gfx1201.
 
-### S6: Forced-Spill Record/Replay - TODO
+### S6: Forced-Spill Record/Replay - DONE
 
 Goal: prove one complete gfx950 ConSan spill-backed vertical slice.
 

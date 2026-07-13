@@ -2281,6 +2281,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
                 "RJ_CONSAN_FLAVOR=moi"
                 "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_single_lds_store"
                 "RJ_CONSAN_LOG=1"
                 "RJ_CONSAN_MAX_PATCHES=1"
                 "RJ_CONSAN_REQUIRE_PATCH=1"
@@ -2301,6 +2302,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_CONSAN_FLAVOR=moi"
                 "RJ_CONSAN_MOI_ENGINE=record_replay"
                 "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_single_lds_store"
                 "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
                 "RJ_CONSAN_LOG=1"
                 "RJ_CONSAN_MAX_PATCHES=1"
@@ -2311,6 +2313,28 @@ if(RJ_ENABLE_HIP_TESTS)
             PROPERTIES
                 PASS_REGULAR_EXPRESSION
                     "index=0 event_index=0 kind=2 wave=0 epoch=0 inst=0x[0-9a-f]+ lds_offset=0 lds_bytes=4 cells=\\[0,1\\) lane_mask=0xffffffffffffffff"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedSpillPreservesLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->12"
         )
 
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly

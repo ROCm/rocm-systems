@@ -35,6 +35,29 @@ __global__ __launch_bounds__(64) void gfx950_moi_single_lds_store(uint32_t *out)
     out[0] = lds[0];
 }
 
+__global__ __launch_bounds__(64) void gfx950_moi_forced_spill(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  const uint32_t value = 0x95030000u | tid;
+  uint32_t victim0 = 0x10500000u ^ tid;
+  uint32_t victim1 = 0x20500000u ^ (tid * 3u);
+  uint32_t victim2 = 0x30500000u ^ (tid * 5u);
+  uint32_t victim3 = 0x40500000u ^ (tid * 7u);
+  asm volatile("ds_write_b32 %4, %5\n\t"
+               ".rept 128\n\t"
+               "s_nop 0\n\t"
+               ".endr\n\t"
+               : "+v"(victim0), "+v"(victim1), "+v"(victim2), "+v"(victim3)
+               : "v"(address), "v"(value)
+               : "memory");
+  const uint32_t base = tid * 4u;
+  out[base + 0u] = victim0;
+  out[base + 1u] = victim1;
+  out[base + 2u] = victim2;
+  out[base + 3u] = victim3;
+}
+
 TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
@@ -46,6 +69,28 @@ TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
   HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_out));
   EXPECT_EQ(out & 0xffff0000u, 0x95020000u);
+}
+
+TEST(ConSanMoiGfx950Test, ForcedSpillPreservesLiveVgprs) {
+  constexpr uint32_t kThreads = 64;
+  constexpr uint32_t kValuesPerThread = 4;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  gfx950_moi_forced_spill<<<1, kThreads>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kThreads * kValuesPerThread);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    const uint32_t base = tid * kValuesPerThread;
+    EXPECT_EQ(out[base + 0u], 0x10500000u ^ tid) << "tid=" << tid;
+    EXPECT_EQ(out[base + 1u], 0x20500000u ^ (tid * 3u)) << "tid=" << tid;
+    EXPECT_EQ(out[base + 2u], 0x30500000u ^ (tid * 5u)) << "tid=" << tid;
+    EXPECT_EQ(out[base + 3u], 0x40500000u ^ (tid * 7u)) << "tid=" << tid;
+  }
 }
 
 } // namespace
