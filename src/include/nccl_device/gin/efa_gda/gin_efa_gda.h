@@ -790,6 +790,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_EFA_GDA> {
     (void)hasDescriptor;
     (void)descriptor;
     nccl::gin::efa_gda::flushImpl<true>(ctx, coop, ord, abortFlag, timeoutCycles);
+    return ncclSuccess;
   };
 };
 
