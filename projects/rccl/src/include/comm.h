@@ -240,10 +240,14 @@ struct ncclTaskColl {
   uint64_t opCount;
   // number of elements in planner->ipcMemQueue associated with this collective
   int nCleanupQueueElts;
-
+ 
   struct ncclDevrWindow* sendWin;
   struct ncclDevrWindow* recvWin;
   ncclSymRegType_t winRegType;
+  void*  ddaUserRecvBuff;    // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
+  size_t ddaCopyBackBytes;  // bytes to copy scratch -> user recvbuff 
+  bool useDda; // true if CE is using DDA staging
+  void** ddaPeerBases; // host-side table of every rank's DDA scratch base pointer
   void* sendMhandle;
   void* recvMhandle;
   void** sendNetHandles;
@@ -945,6 +949,8 @@ struct ncclComm {
   bool enableDirectReduceScatter;
   // Temporary Buffer [RCCL]
   void* tempBuff;
+
+  void* ddaPeerPtrsHost[nccl_dda_detail::kDdaNranks];
 
   uint64_t endMagic;
 };

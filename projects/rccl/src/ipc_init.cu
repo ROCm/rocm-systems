@@ -156,6 +156,19 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  cudaError_t ddaCe = cudaMemcpy(
+    comm->ddaPeerPtrsHost,
+    h_ptrs,
+    kDdaNranks * sizeof(void*),
+    cudaMemcpyHostToHost);
+  if (ddaCe != cudaSuccess) {
+    WARN(
+        "ncclDdaIpcCommInit: cudaMemcpy(host peer table) failed (%s)",
+        cudaGetErrorString(ddaCe));
+    return ncclSuccess;
+  }
+
+
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
       kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);

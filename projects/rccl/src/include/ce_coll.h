@@ -67,6 +67,10 @@ struct alignas(16) ncclCeCollArgs {
   struct ncclDevrWindow* recvWin;
   void* collApiEventHandle;  // Parent API event handle for profiler hierarchy
   void* ceCollProfHandle;    // CE collective profiler event handle
+  bool useDda;
+  void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
+  void*  ddaUserRecvBuff;   // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
+  size_t ddaCopyBackBytes;  // bytes to copy scratch -> user recvbuff 
   ncclRedOp_t redOp;         // Only used for AllReduce
 };
 
@@ -84,6 +88,8 @@ struct ncclCeBatchOpsParams {
 };
 
 bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
+
+bool ncclCeScartchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType);
 
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 

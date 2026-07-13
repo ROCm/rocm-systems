@@ -504,8 +504,8 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
          count, (int)datatype, (int)op, comm->rank, comm->nRanks);
     return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
   }
-
-  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
+  size_t msgBytes = count * ncclTypeSize(datatype);
+  if (rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608) &&  msgBytes < NCCL_CE_AR_MIN_MSG_BYTES) {
     if (IsArchMatch(comm->archName, "gfx1250")) {
       // Small-message fast lane: LL protocol (no GPU barrier).
       if (rcclParamDdaAllReduceLL() &&
