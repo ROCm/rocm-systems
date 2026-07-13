@@ -82,8 +82,8 @@ class MemoryRegion : public core::MemoryRegion {
 
   ~MemoryRegion();
 
-  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, void** address,
-                        uint32_t agent_node_id, core::DriverMemoryHandle* handle) const override;
+  hsa_status_t Allocate(size_t& size, AllocateFlags alloc_flags, uint32_t agent_node_id,
+                        core::DriverMemoryHandle* handle) const override;
 
   hsa_status_t Free(const core::DriverMemoryHandle& handle) const override;
 
@@ -197,8 +197,8 @@ private:
                                              const core::Runtime::LinkInfo& link_info) const;
 
   // Operational body for Allocate.  Recursive.
-  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** address,
-                            uint32_t agent_node_id, core::DriverMemoryHandle* handle) const;
+  hsa_status_t AllocateImpl(size_t& size, AllocateFlags alloc_flags, uint32_t agent_node_id,
+                            core::DriverMemoryHandle* handle) const;
 
   // Operational body for Free.  Recursive.
   hsa_status_t FreeImpl(const core::DriverMemoryHandle& handle) const;

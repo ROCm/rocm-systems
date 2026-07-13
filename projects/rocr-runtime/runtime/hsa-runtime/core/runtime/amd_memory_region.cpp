@@ -133,17 +133,16 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem,
-                                    uint32_t agent_node_id,
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, uint32_t agent_node_id,
                                     core::DriverMemoryHandle* handle) const {
   std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
-  return AllocateImpl(size, alloc_flags, mem, agent_node_id, handle);
+  return AllocateImpl(size, alloc_flags, agent_node_id, handle);
 }
 
-hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags, void** mem,
+hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
                                         uint32_t agent_node_id,
                                         core::DriverMemoryHandle* handle) const {
-  if (mem == NULL) {
+  if (handle == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -163,7 +162,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id, handle);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, size, agent_node_id, handle);
 }
 
 hsa_status_t MemoryRegion::Free(const core::DriverMemoryHandle& handle) const {
@@ -647,21 +646,19 @@ hsa_status_t MemoryRegion::AssignAgent(void* ptr, size_t size,
 void MemoryRegion::Trim() const { fragment_allocator_.trim(); }
 
 void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
-  void* ret;
   size_t bsize = AlignUp(request_size, block_size());
 
   // The block's driver identity is reconstructed from base address and length
   // on free (see BlockAllocator::free), so the handle is not retained here.
   core::DriverMemoryHandle handle{};
   hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, &ret, 0,
-      &handle);
+      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, 0, &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
-  assert(ret != nullptr && "Region returned nullptr on success.");
+  assert(handle.vaddr != nullptr && "Region returned nullptr on success.");
 
   allocated_size = bsize;
-  return ret;
+  return handle.vaddr;
 }
 
 }  // namespace amd

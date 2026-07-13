@@ -338,9 +338,10 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      void** address, int agent_node_id) {
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
   DriverMemoryHandle driver_handle{};
-  hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id, &driver_handle);
+  hsa_status_t status = region->Allocate(size, alloc_flags, agent_node_id, &driver_handle);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
+    *address = driver_handle.vaddr;
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
     allocation_map_[*address] =
         AllocationRegion(region, size, size_requested, alloc_flags, driver_handle);
@@ -3982,10 +3983,9 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
   }
 
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  void *mem;
   core::DriverMemoryHandle driver_handle = {};
 
-  hsa_status_t status = region->Allocate(size, alloc_flags, &mem, 0, &driver_handle);
+  hsa_status_t status = region->Allocate(size, alloc_flags, 0, &driver_handle);
   if (status == HSA_STATUS_SUCCESS) {
     // TODO: Combine the Allocate and CreateShareableHandle into a single function.
     uint64_t offset;

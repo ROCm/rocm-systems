@@ -1082,7 +1082,8 @@ class Runtime {
     bool imported; // True if this BO was imported from another process
     bool is_fabric_handle;
     MemoryRegion::AllocateFlags alloc_flag;
-    core::Agent* drm_owner; // Gpu agent used for import of host memory, NULL for device memory/imported handles
+    core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
+                             // memory/imported handles
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied

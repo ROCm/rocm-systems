@@ -686,9 +686,8 @@ hsa_status_t XdnaDriver::GetCacheProperties(uint32_t node_id, uint32_t processor
 }
 
 hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
-                                        core::MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                                        size_t size, uint32_t node_id,
-                                        core::DriverMemoryHandle* handle) {
+                                        core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                        uint32_t node_id, core::DriverMemoryHandle* handle) {
   const MemoryRegion& m_region = static_cast<const MemoryRegion&>(mem_region);
 
   if (!m_region.IsSystem()) {
@@ -749,8 +748,6 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   }
 
   bo_guard.Dismiss();
-
-  *mem = bo_handle.vaddr;
 
   // The handle word is the driver-native BO id. vaddr is set only when the driver
   // owns the mapping (share BOs), so FreeMemory unmaps exactly those; dev-SVM

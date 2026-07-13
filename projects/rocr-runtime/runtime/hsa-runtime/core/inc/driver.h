@@ -160,8 +160,6 @@ public:
                                           std::vector<HsaCacheProperties>& cache_props) const = 0;
 
   /// @brief Allocate agent-accessible memory (system or agent-local memory).
-  /// @param[out] mem pointer to newly allocated memory (virtual address), or the
-  /// opaque memory-only handle when AllocateMemoryOnly is set.
   /// @param[out] handle driver identity for this allocation. The handle word and
   /// size are populated; export-only fields (dmabuf_fd/mmap_offset/fabric_handle)
   /// are left unset and filled lazily by ExportMemoryHandle/CreateShareableHandle.
@@ -169,9 +167,8 @@ public:
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
   virtual hsa_status_t AllocateMemory(const MemoryRegion& mem_region,
-                                      MemoryRegion::AllocateFlags alloc_flags, void** mem,
-                                      size_t size, uint32_t node_id,
-                                      DriverMemoryHandle* handle) = 0;
+                                      MemoryRegion::AllocateFlags alloc_flags, size_t size,
+                                      uint32_t node_id, DriverMemoryHandle* handle) = 0;
 
   /// @brief Free memory allocated by @ref AllocateMemory.
   /// @param[in] handle driver identity returned by @ref AllocateMemory.
