@@ -122,6 +122,13 @@ Full gfx950 support means:
   private wave offset); and fails closed when no five-SGPR special-state save
   window remains. This also corrected the S3/S4 edge: isolated live scratch
   proof S4 and transaction audit S3 independently gate S5.
+- 2026-07-13: `S3` is `DONE`. A shared private-dispatch requirement tracker
+  now carries each patched kernel's spill size through executable/name
+  association, symbol binding, kernel-object lookup, and grow-only AQL packet
+  rewriting. Synthetic coverage applies one requirement consistently to the
+  descriptor, AMDGPU MessagePack metadata, and dispatch packet; covers zero
+  and nonzero existing private sizes; and proves rejected descriptor or
+  metadata growth leaves the input unchanged.
 
 ## DAG Overview
 
@@ -188,7 +195,7 @@ flowchart LR
   F0{"F0: Foundation Ready"}:::target
   S1["S1: CDNA4 Scratch ISA Contract"]:::done
   S2["S2: Scratch Encoders And Decode Tests"]:::done
-  S3["S3: Private-Segment Transaction Audit"]:::todo
+  S3["S3: Private-Segment Transaction Audit"]:::done
   S4["S4: Standalone Live VGPR Round Trip"]:::done
   S5["S5: Target-Dispatched Spill Backend"]:::active
   RR1A["RR1A: Access Record Emission"]:::done
@@ -641,7 +648,7 @@ Done criteria:
 - No live GPU is required to prove exact emitted bytes and failure bounds.
 - gfx1201 encoder tests remain byte-for-byte unchanged.
 
-### S3: Private-Segment Transaction Audit - TODO
+### S3: Private-Segment Transaction Audit - DONE
 
 Goal: carry spill capacity through every host/runtime representation.
 

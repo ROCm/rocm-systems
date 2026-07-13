@@ -600,4 +600,73 @@ SpillMetadataUpdate update_amdgpu_metadata_for_spills(std::span<uint8_t> image,
   return saw_metadata ? SpillMetadataUpdate::KernelNotFound : SpillMetadataUpdate::NoMetadata;
 }
 
+void PrivateDispatchRequirements::note_kernel(uint64_t executable, std::string_view kernel_name,
+                                              uint32_t required_private_bytes) {
+  if (required_private_bytes == 0)
+    return;
+  const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
+    return candidate.executable == executable && candidate.kernel_name == kernel_name;
+  });
+  if (pending == pending_.end()) {
+    pending_.push_back({executable, std::string(kernel_name), required_private_bytes});
+  } else {
+    pending->required_private_bytes =
+        std::max(pending->required_private_bytes, required_private_bytes);
+  }
+}
+
+std::optional<uint32_t> PrivateDispatchRequirements::bind_symbol(uint64_t executable,
+                                                                 std::string_view symbol_name,
+                                                                 uint64_t symbol,
+                                                                 uint64_t kernel_object) {
+  const auto normalize = [](std::string_view name) {
+    if (name.ends_with(".kd"))
+      name.remove_suffix(3);
+    return name;
+  };
+  const std::string_view normalized = normalize(symbol_name);
+  const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
+    return candidate.executable == executable && normalize(candidate.kernel_name) == normalized;
+  });
+  if (pending == pending_.end())
+    return std::nullopt;
+
+  const auto bound = std::ranges::find_if(
+      bound_, [&](const Bound &candidate) { return candidate.symbol == symbol; });
+  if (bound == bound_.end()) {
+    bound_.push_back({symbol, kernel_object, pending->required_private_bytes});
+  } else {
+    bound->kernel_object = kernel_object;
+    bound->required_private_bytes =
+        std::max(bound->required_private_bytes, pending->required_private_bytes);
+  }
+  return pending->required_private_bytes;
+}
+
+std::optional<uint32_t> PrivateDispatchRequirements::required_for_symbol(uint64_t symbol) const {
+  const auto bound = std::ranges::find_if(
+      bound_, [&](const Bound &candidate) { return candidate.symbol == symbol; });
+  return bound == bound_.end() ? std::nullopt
+                               : std::optional<uint32_t>(bound->required_private_bytes);
+}
+
+std::optional<uint32_t>
+PrivateDispatchRequirements::required_for_kernel_object(uint64_t kernel_object) const {
+  const auto bound = std::ranges::find_if(
+      bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
+  return bound == bound_.end() ? std::nullopt
+                               : std::optional<uint32_t>(bound->required_private_bytes);
+}
+
+void PrivateDispatchRequirements::clear() {
+  pending_.clear();
+  bound_.clear();
+}
+
+uint32_t required_dispatch_private_segment_size(uint32_t packet_private_bytes,
+                                                std::optional<uint32_t> required_private_bytes) {
+  return required_private_bytes ? std::max(packet_private_bytes, *required_private_bytes)
+                                : packet_private_bytes;
+}
+
 } // namespace rocjitsu

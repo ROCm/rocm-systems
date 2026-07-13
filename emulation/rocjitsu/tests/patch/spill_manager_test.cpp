@@ -718,8 +718,10 @@ TEST(SpillManager, MetadataGrowthUpdatesOnlyNamedKernelInPlace) {
 
 TEST(SpillManager, MetadataGrowthRejectsIntegerWidthChangeAndAllowsNoMetadataElf) {
   std::vector<uint8_t> image = make_metadata_note_elf();
+  const auto before = image;
   EXPECT_EQ(update_amdgpu_metadata_for_spills(image, "target", 128),
             SpillMetadataUpdate::UnencodableGrowth);
+  EXPECT_EQ(image, before);
 
   Elf64_Ehdr header{};
   std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
@@ -727,6 +729,63 @@ TEST(SpillManager, MetadataGrowthRejectsIntegerWidthChangeAndAllowsNoMetadataElf
   std::memcpy(no_metadata.data(), &header, sizeof(header));
   EXPECT_EQ(update_amdgpu_metadata_for_spills(no_metadata, "target", 12),
             SpillMetadataUpdate::NoMetadata);
+}
+
+TEST(SpillManager, PrivateDispatchRequirementsFollowKernelSymbolAndObject) {
+  PrivateDispatchRequirements requirements;
+  requirements.note_kernel(/*executable=*/7, "kernel_a", 20);
+  requirements.note_kernel(/*executable=*/7, "kernel_a", 28);
+  requirements.note_kernel(/*executable=*/7, "kernel_b", 12);
+  requirements.note_kernel(/*executable=*/8, "kernel_a", 44);
+
+  EXPECT_EQ(requirements.bind_symbol(7, "kernel_a.kd", /*symbol=*/70, /*kernel_object=*/700), 28u);
+  EXPECT_EQ(requirements.bind_symbol(7, "kernel_b", /*symbol=*/71, /*kernel_object=*/701), 12u);
+  EXPECT_EQ(requirements.bind_symbol(8, "kernel_a", /*symbol=*/80, /*kernel_object=*/800), 44u);
+  EXPECT_FALSE(requirements.bind_symbol(7, "unrelated", /*symbol=*/72, /*kernel_object=*/702));
+  EXPECT_EQ(requirements.required_for_symbol(70), 28u);
+  EXPECT_EQ(requirements.required_for_kernel_object(700), 28u);
+  EXPECT_EQ(requirements.required_for_kernel_object(701), 12u);
+  EXPECT_EQ(requirements.required_for_kernel_object(800), 44u);
+  EXPECT_FALSE(requirements.required_for_kernel_object(702));
+
+  requirements.clear();
+  EXPECT_FALSE(requirements.required_for_symbol(70));
+  EXPECT_FALSE(requirements.required_for_kernel_object(700));
+}
+
+TEST(SpillManager, DispatchPrivateRewriteOnlyGrowsPackets) {
+  EXPECT_EQ(required_dispatch_private_segment_size(0, std::nullopt), 0u);
+  EXPECT_EQ(required_dispatch_private_segment_size(16, 12u), 16u);
+  EXPECT_EQ(required_dispatch_private_segment_size(16, 28u), 28u);
+}
+
+TEST(SpillManager, PrivateSegmentTransactionCarriesOneRequirementEndToEnd) {
+  constexpr uint32_t required_private_bytes = 28;
+
+  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  KD descriptor{};
+  std::array<uint8_t, sizeof(KD)> descriptor_image{};
+  std::memcpy(descriptor_image.data(), &descriptor, sizeof(descriptor));
+  ASSERT_EQ(update_kernel_descriptor_for_spills(descriptor_image, 0, required_private_bytes, false),
+            SpillDescriptorUpdate::Updated);
+  std::memcpy(&descriptor, descriptor_image.data(), sizeof(descriptor));
+  EXPECT_EQ(descriptor.private_segment_fixed_size, required_private_bytes);
+
+  std::vector<uint8_t> metadata_image = make_metadata_note_elf();
+  ASSERT_EQ(update_amdgpu_metadata_for_spills(metadata_image, "target", required_private_bytes),
+            SpillMetadataUpdate::Updated);
+  EXPECT_EQ(update_amdgpu_metadata_for_spills(metadata_image, "target", required_private_bytes),
+            SpillMetadataUpdate::Unchanged);
+
+  PrivateDispatchRequirements requirements;
+  requirements.note_kernel(/*executable=*/7, "target", required_private_bytes);
+  ASSERT_EQ(requirements.bind_symbol(7, "target.kd", /*symbol=*/70, /*kernel_object=*/700),
+            required_private_bytes);
+  const auto dispatch_requirement = requirements.required_for_kernel_object(700);
+  ASSERT_TRUE(dispatch_requirement);
+  EXPECT_EQ(
+      required_dispatch_private_segment_size(/*packet_private_bytes=*/0, dispatch_requirement),
+      required_private_bytes);
 }
 
 // End-to-end smoke test: feed a real LivenessAnalysis result into SpillManager.

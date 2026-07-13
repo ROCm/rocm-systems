@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility> // for std::pair
@@ -162,6 +163,38 @@ enum class SpillMetadataUpdate : uint8_t {
 [[nodiscard]] SpillMetadataUpdate
 update_amdgpu_metadata_for_spills(std::span<uint8_t> image, std::string_view kernel_name,
                                   uint32_t required_private_bytes);
+
+/// Pure bookkeeping used to carry patched-kernel private requirements from
+/// code-object load through symbol binding to AQL dispatch rewriting.
+class PrivateDispatchRequirements final {
+public:
+  void note_kernel(uint64_t executable, std::string_view kernel_name,
+                   uint32_t required_private_bytes);
+  [[nodiscard]] std::optional<uint32_t> bind_symbol(uint64_t executable,
+                                                    std::string_view symbol_name, uint64_t symbol,
+                                                    uint64_t kernel_object);
+  [[nodiscard]] std::optional<uint32_t> required_for_symbol(uint64_t symbol) const;
+  [[nodiscard]] std::optional<uint32_t> required_for_kernel_object(uint64_t kernel_object) const;
+  void clear();
+
+private:
+  struct Pending {
+    uint64_t executable = 0;
+    std::string kernel_name;
+    uint32_t required_private_bytes = 0;
+  };
+  struct Bound {
+    uint64_t symbol = 0;
+    uint64_t kernel_object = 0;
+    uint32_t required_private_bytes = 0;
+  };
+  std::vector<Pending> pending_;
+  std::vector<Bound> bound_;
+};
+
+[[nodiscard]] uint32_t
+required_dispatch_private_segment_size(uint32_t packet_private_bytes,
+                                       std::optional<uint32_t> required_private_bytes);
 
 } // namespace rocjitsu
 

@@ -13,6 +13,7 @@
 
 #include "rocjitsu/code/patch/consan.h"
 #include "rocjitsu/code/patch/consan_moi.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "util/arena_alloc.h"
 #include "util/intrusive_list.h"
 
@@ -1807,15 +1808,8 @@ public:
       });
       if (kernel == result.kernels.end())
         continue;
-      const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
-        return candidate.executable == executable.handle && candidate.kernel_name == kernel->name;
-      });
-      if (pending == pending_.end()) {
-        pending_.push_back({executable.handle, kernel->name, patch.required_private_segment_size});
-      } else {
-        pending->required_private_bytes =
-            std::max(pending->required_private_bytes, patch.required_private_segment_size);
-      }
+      requirements_.note_kernel(executable.handle, kernel->name,
+                                patch.required_private_segment_size);
     }
   }
 
@@ -1825,79 +1819,41 @@ public:
     if (original_get_info == nullptr)
       return;
     std::lock_guard lock(mutex_);
-    const std::string_view normalized = normalize_kernel_name(symbol_name);
-    const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
-      return candidate.executable == executable.handle &&
-             normalize_kernel_name(candidate.kernel_name) == normalized;
-    });
-    if (pending == pending_.end())
-      return;
-
     uint64_t kernel_object = 0;
     if (original_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object) !=
         HSA_STATUS_SUCCESS) {
       return;
     }
-    const auto bound = std::ranges::find_if(
-        bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
-    if (bound == bound_.end()) {
-      bound_.push_back({symbol.handle, kernel_object, pending->required_private_bytes});
-    } else {
-      bound->kernel_object = kernel_object;
-      bound->required_private_bytes =
-          std::max(bound->required_private_bytes, pending->required_private_bytes);
-    }
+    const auto required =
+        requirements_.bind_symbol(executable.handle, symbol_name, symbol.handle, kernel_object);
+    if (!required)
+      return;
     log_message(kLogInfo,
                 "ConSan dispatch-private binding executable=%llu symbol=%llu kernel_object=0x%llx "
                 "private_bytes=%u",
                 static_cast<unsigned long long>(executable.handle),
                 static_cast<unsigned long long>(symbol.handle),
-                static_cast<unsigned long long>(kernel_object), pending->required_private_bytes);
+                static_cast<unsigned long long>(kernel_object), *required);
   }
 
   [[nodiscard]] std::optional<uint32_t> required_for_symbol(hsa_executable_symbol_t symbol) const {
     std::lock_guard lock(mutex_);
-    const auto bound = std::ranges::find_if(
-        bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_private_bytes);
+    return requirements_.required_for_symbol(symbol.handle);
   }
 
   [[nodiscard]] std::optional<uint32_t> required_for_kernel_object(uint64_t kernel_object) const {
     std::lock_guard lock(mutex_);
-    const auto bound = std::ranges::find_if(
-        bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
-    return bound == bound_.end() ? std::nullopt
-                                 : std::optional<uint32_t>(bound->required_private_bytes);
+    return requirements_.required_for_kernel_object(kernel_object);
   }
 
   void clear() {
     std::lock_guard lock(mutex_);
-    pending_.clear();
-    bound_.clear();
+    requirements_.clear();
   }
 
 private:
-  struct Pending {
-    uint64_t executable = 0;
-    std::string kernel_name;
-    uint32_t required_private_bytes = 0;
-  };
-  struct Bound {
-    uint64_t symbol = 0;
-    uint64_t kernel_object = 0;
-    uint32_t required_private_bytes = 0;
-  };
-
-  [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
-    if (name.ends_with(".kd"))
-      name.remove_suffix(3);
-    return name;
-  }
-
   mutable std::mutex mutex_;
-  std::vector<Pending> pending_;
-  std::vector<Bound> bound_;
+  rocjitsu::PrivateDispatchRequirements requirements_;
 };
 
 hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
@@ -2377,12 +2333,14 @@ void rj_dbi_queue_write_interceptor(const void *packets, uint64_t packet_count,
       continue;
     const auto required =
         KernelPrivateDispatchRegistry::instance().required_for_kernel_object(packet->kernel_object);
-    if (!required || *required <= packet->private_segment_size)
+    const uint32_t rewritten_private_size =
+        rocjitsu::required_dispatch_private_segment_size(packet->private_segment_size, required);
+    if (rewritten_private_size == packet->private_segment_size)
       continue;
     log_message(kLogInfo, "ConSan dispatch-private grow kernel_object=0x%llx private_bytes=%u->%u",
                 static_cast<unsigned long long>(packet->kernel_object),
-                packet->private_segment_size, *required);
-    packet->private_segment_size = *required;
+                packet->private_segment_size, rewritten_private_size);
+    packet->private_segment_size = rewritten_private_size;
   }
   writer(rewritten.data(), packet_count);
 }
