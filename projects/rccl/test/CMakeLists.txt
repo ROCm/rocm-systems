@@ -265,6 +265,7 @@ if(BUILD_TESTS)
       ParamTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
