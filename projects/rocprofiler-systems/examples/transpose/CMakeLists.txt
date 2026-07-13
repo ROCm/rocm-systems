@@ -60,6 +60,10 @@ endif()
 add_executable(transpose transpose.cpp)
 target_link_libraries(transpose PRIVATE Threads::Threads)
 
+if(COMMAND rocprofiler_systems_example_enable_relr)
+    rocprofiler_systems_example_enable_relr(transpose)
+endif()
+
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(transpose PRIVATE --offload-arch=${arch})

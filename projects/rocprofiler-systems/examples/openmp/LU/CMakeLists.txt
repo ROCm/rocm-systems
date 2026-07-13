@@ -11,6 +11,10 @@ include(${CMAKE_CURRENT_LIST_DIR}/../openmp-helper.cmake)
 add_executable(openmp-lu lu.cpp)
 target_link_libraries(openmp-lu PRIVATE openmp-common)
 
+if(COMMAND rocprofiler_systems_example_enable_relr)
+    rocprofiler_systems_example_enable_relr(openmp-lu)
+endif()
+
 rocprofiler_systems_custom_compilation(
     COMPILER ${amdclangpp_EXECUTABLE}
     TARGET openmp-lu

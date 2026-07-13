@@ -75,6 +75,8 @@ endif()
 set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
+# defines rocprofiler_systems_example_enable_relr() for RELR relocation builds
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/relr-helpers.cmake)
 
 # List of all example directories
 set(ROCPROFSYS_EXAMPLE_DIRS

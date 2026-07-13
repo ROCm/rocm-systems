@@ -25,6 +25,9 @@ endif()
 # Include causal-helpers.cmake for causal profiling examples
 include(${ROCPROFSYS_EXAMPLE_ROOT_DIR}/causal-helpers.cmake OPTIONAL)
 
+# Include relr-helpers.cmake for RELR relocation builds
+include(${CMAKE_CURRENT_LIST_DIR}/relr-helpers.cmake OPTIONAL)
+
 # ----------------------------------------------------------------------------
 # rocprofiler_systems_message()
 # Wrapper around message() with project prefix
