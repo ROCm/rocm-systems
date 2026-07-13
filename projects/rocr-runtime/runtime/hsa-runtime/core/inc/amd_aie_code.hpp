@@ -79,6 +79,8 @@ class AieCode {
   bool Parse();
 
   std::unique_ptr<amd::elf::Image> elf_;
+  const uint8_t* elf_base_ = nullptr;      // start of the caller's ELF buffer
+  size_t elf_size_ = 0;                    // size of the caller's ELF buffer
   const uint8_t* section_base_ = nullptr;  // start of arch section in ELF buffer
   uint64_t section_size_ = 0;
   std::string arch_section_name_;
