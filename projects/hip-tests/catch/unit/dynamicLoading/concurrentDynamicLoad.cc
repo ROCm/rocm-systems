@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <atomic>
@@ -88,23 +89,20 @@ struct WorkerCtx {
 static void* worker_fn(void* arg) {
   WorkerCtx* ctx = static_cast<WorkerCtx*>(arg);
 
+  if (hipSetDevice(0) != hipSuccess) {
+    g_failure.store(true);
+    return nullptr;
+  }
+
   const int n = ctx->n;
   const size_t nbytes = static_cast<size_t>(n) * sizeof(int);
 
-  /* Allocate per-thread device and host buffers. */
-  int* d_data = nullptr;
-  int* h_in = new int[n];
-  int* h_out = new int[n];
-
+  /* Per-thread RAII-managed host and device buffers. */
+  std::vector<int> h_in(n);
+  std::vector<int> h_out(n);
   for (int i = 0; i < n; ++i) h_in[i] = i;
 
-  hipError_t err = hipMalloc(reinterpret_cast<void**>(&d_data), nbytes);
-  if (err != hipSuccess) {
-    g_failure.store(true);
-    delete[] h_in;
-    delete[] h_out;
-    return nullptr;
-  }
+  LinearAllocGuard<int> d_data(LinearAllocs::hipMalloc, nbytes);
 
   /* Wait until all threads are ready to maximise contention. */
   pthread_barrier_wait(ctx->barrier);
@@ -114,15 +112,28 @@ static void* worker_fn(void* arg) {
 
   for (int iter = 0; iter < ctx->iters && !g_failure.load(); ++iter) {
     /* Reset device buffer to known input. */
-    (void)hipMemcpy(d_data, h_in, nbytes, hipMemcpyHostToDevice);
+    if (hipMemcpy(d_data.ptr(), h_in.data(), nbytes, hipMemcpyHostToDevice) != hipSuccess) {
+      g_failure.store(true);
+      break;
+    }
 
     /* Launch the kernel from THIS file's module (StatCO::GetFunc lookup). */
-    hipLaunchKernelGGL(increment_kernel, dim3(blocks), dim3(threadsPerBlock),
-                       0, 0, d_data, n);
-    (void)hipDeviceSynchronize();
+    hipLaunchKernelGGL(increment_kernel, dim3(blocks), dim3(threadsPerBlock), 0, 0, d_data.ptr(),
+                       n);
+    if (hipGetLastError() != hipSuccess) {
+      g_failure.store(true);
+      break;
+    }
+    if (hipDeviceSynchronize() != hipSuccess) {
+      g_failure.store(true);
+      break;
+    }
 
     /* Copy result back and validate. */
-    (void)hipMemcpy(h_out, d_data, nbytes, hipMemcpyDeviceToHost);
+    if (hipMemcpy(h_out.data(), d_data.ptr(), nbytes, hipMemcpyDeviceToHost) != hipSuccess) {
+      g_failure.store(true);
+      break;
+    }
 
     for (int i = 0; i < n; ++i) {
       if (h_out[i] != h_in[i] + 1) {
@@ -132,9 +143,6 @@ static void* worker_fn(void* arg) {
     }
   }
 
-  (void)hipFree(d_data);
-  delete[] h_in;
-  delete[] h_out;
   return nullptr;
 }
 
