@@ -1,4 +1,13 @@
-# General guidelines:
+# Guidelines
+*Note: delete this section from an actual HLD.*
+
+## HLD purpose and target audience
+The purpose of HLD is to communicate the design and major decisions which could potentially impact other parts of the system or product users.
+And the target audience are both engineers inside and outside of the team.
+
+Therefore, the content of HLD shall contain enough information to make it understandable by people who may not know internal implementation details of the product. This includes files/classes/function names and non commonly used abbreviations or terms.
+
+## Other guidelines
 - Use AI tools as an instrument but avoid producing HLD via AI tools, especially for complex problems.
 ```
 "Writing is thinking. To write well is to think clearly. That's why it's so hard." 
@@ -15,6 +24,7 @@
 - Avoid adding information which becomes outdated fast, ex code locations, variable and class names are changing rather fast.
 - Formatting matters - use bullet lists, tables, indentation and break down on paragraphs to accent the points. Don't use formatting where it just adds a visual noise.
 - Outlining how the system currently works ("System Context") and what problem you aim to solve ("Problem Statement" and "Requirements") is the most important part. Quality of the design directly depends on how well you articulate what problems you are solving and why.
+
 
 # Template
 ## System Context

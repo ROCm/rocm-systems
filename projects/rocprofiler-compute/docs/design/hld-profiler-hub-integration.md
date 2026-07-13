@@ -10,7 +10,12 @@ Rocprof-compute produces two types of artifacts:
 Profiler Hub is targeted to abstract both of these types of data. However, only profiling data is a focus of this HLD at the first step.
 
 Profiling phase currently supports two output formats CSV and ROCPD. Currently CSV format is planned to be deprecated as part of another HLD.
-**Therefore, scope of HLD is current ROCPD data collection on profiling phase only, and how to extend it switch it Profiler Hub.**
+
+**Therefore, scope of HLD is current ROCPD data collection on profiling phase only, and how to switch it on Profiler Hub.** 
+
+Partially this HLD also covers next steps:
+- Usage of Parquet format under Profiler Hub interface.
+- Extension of Profiler Hub interface to support storage of PC sampling and ISA data.
 
 
 ### Profiling phase
