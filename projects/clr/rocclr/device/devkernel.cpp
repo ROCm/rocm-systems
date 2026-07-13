@@ -79,7 +79,7 @@ bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& r
 uint32_t getUintFromIsaMeta(const std::string& isa, const char* key, uint32_t defaultValue) {
   // Ensure comgr is loaded first: PAL can populate device info before comgr init, leaving its
   // entry points null. Fall back to |defaultValue| if unavailable.
-  if (!amd::Comgr::IsReady() && !amd::Comgr::LoadLib()) {
+  if (!amd::Comgr::EnsureLoaded()) {
     return defaultValue;
   }
   std::string value;

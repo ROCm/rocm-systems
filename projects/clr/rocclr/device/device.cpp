@@ -227,20 +227,26 @@ std::string Isa::processorName() const {
 std::string Isa::isaName() const { return std::string(hsaIsaNamePrefix) + targetId(); }
 
 namespace {
-// Caches per-ISA integer properties queried from comgr at runtime (keeps unreleased-target info
-// out of source). Cached because hot callers like HIP occupancy hit these accessors often.
+// Caches immutable per-ISA integer properties queried from comgr at runtime. A concurrent miss may
+// perform the same idempotent query more than once, but the comgr call must not run under this
+// process-wide cache lock.
 uint32_t cachedIsaMetaUint(const Isa& isa, const char* key, uint32_t defaultValue) {
   static std::mutex mutex;
   static std::map<std::string, uint32_t> cache;
   const std::string cacheKey = isa.isaName() + '/' + key;
-  std::lock_guard<std::mutex> lock(mutex);
-  auto it = cache.find(cacheKey);
-  if (it != cache.end()) {
-    return it->second;
+
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = cache.find(cacheKey);
+    if (it != cache.end()) {
+      return it->second;
+    }
   }
+
   const uint32_t value = amd::device::getUintFromIsaMeta(isa.isaName(), key, defaultValue);
-  cache.emplace(cacheKey, value);
-  return value;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  return cache.emplace(cacheKey, value).first->second;
 }
 }  // namespace
 
@@ -954,10 +960,7 @@ Device::~Device() {
   delete[] info_.extensions_;
 }
 
-bool Device::ValidateComgr() {
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
-  return amd::Comgr::IsReady();
-}
+bool Device::ValidateComgr() { return amd::Comgr::EnsureLoaded(); }
 
 size_t GetMaxStackSize(const std::string& procName) {
   if (procName.find("gfx9") != std::string::npos || procName.find("gfx8") != std::string::npos) {

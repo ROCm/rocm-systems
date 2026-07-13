@@ -13,6 +13,11 @@ std::once_flag Comgr::initialized;
 ComgrEntryPoints Comgr::cep_;
 bool Comgr::is_ready_ = false;
 
+bool Comgr::EnsureLoaded() {
+  std::call_once(initialized, [] { Comgr::LoadLib(); });
+  return IsReady();
+}
+
 bool Comgr::LoadLib() {
 #if defined(COMGR_DYN_DLL)
 #if defined(_WIN64) && defined(COMGR_DLL_NAME)
