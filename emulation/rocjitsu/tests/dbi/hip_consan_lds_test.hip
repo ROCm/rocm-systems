@@ -70,51 +70,53 @@ __global__ __launch_bounds__(64) void padded_lds_store(uint32_t *out, uint32_t r
   __shared__ uint32_t lds[64];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
 
-  if (tid == 0)
-    lds[0] = 0x12345678u;
-  __syncthreads();
-
   const auto clean_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[tid]) & 0xFFFFu);
   const auto racy_addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xFFFFu);
   const uint32_t lds_addr = racy != 0 ? racy_addr : clean_addr;
   const uint32_t value = 0xC0FFEE00u | tid;
   // Keep enough slack for the larger marker-buffer mismatch action.
-  asm volatile("ds_store_b32 %0, %1\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
-               "s_nop 0\n\t"
+#if defined(__gfx950__)
+#define RJ_CONSAN_LDS_STORE_B32 "ds_write_b32"
+#else
+#define RJ_CONSAN_LDS_STORE_B32 "ds_store_b32"
+#endif
+  asm volatile(RJ_CONSAN_LDS_STORE_B32 " %0, %1\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
+                                       "s_nop 0\n\t"
                :
                : "v"(lds_addr), "v"(value)
                : "memory");
+#undef RJ_CONSAN_LDS_STORE_B32
 
   __syncthreads();
   if (racy != 0) {

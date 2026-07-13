@@ -151,7 +151,7 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.atomic, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::NativeEmission);
-  EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.hw_id_owner, ConSanNativeSupport::Unavailable);
@@ -2669,6 +2669,72 @@ TEST(ConSanMoi, Gfx950InventoriesBasicLdsReadWriteAndExcludesAtomic) {
   EXPECT_EQ(result.moi_candidates[1].addr_vgpr, 0u);
   EXPECT_EQ(result.moi_candidates[1].dst_vgpr, 1u);
   EXPECT_EQ(result.moi_candidates[1].width_bits, 32u);
+}
+
+TEST(ConSan, Gfx950SuperColliderRewritesPaddedStoreWithNativeReadback) {
+  const std::array<uint32_t, 12> text_words = {
+      0xD81A000Cu,
+      0x00000100u, // ds_write_b32 v0, v1 offset:12
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_supercollider_store",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
+  EXPECT_EQ(result.patches.front().anchor_offset, 0u);
+  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+
+  std::array<uint32_t, 11> words{};
+  std::memcpy(words.data(), result.elf_bytes.data() + 0x100, sizeof(words));
+  EXPECT_EQ(words[0], 0xD81A000Cu);
+  EXPECT_EQ(words[1], 0x00000100u);
+  EXPECT_EQ(words[2], *build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[3], 0xD86C000Cu);
+  EXPECT_EQ(words[4], 0x03000000u);
+  EXPECT_EQ(words[5], *build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[7],
+            *build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[8], *build_s_cbranch_vccz(1, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[9], *build_s_trap(0, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
+TEST(ConSan, Gfx950SuperColliderUsesAppendedCaveWithoutPadding) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000100u, // ds_write_b32 v0, v1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_supercollider_appended",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 3;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
+  EXPECT_EQ(result.patches.front().anchor_offset, 0u);
+  EXPECT_EQ(result.patches.front().trampoline_offset, text_words.size() * sizeof(uint32_t));
+  EXPECT_GT(result.elf_bytes.size(), bytes.size());
 }
 
 TEST(ConSanMoi, Gfx950BasicFixtureInventoriesNativeInstructionFamilies) {

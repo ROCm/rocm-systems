@@ -2263,6 +2263,37 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         rj_add_hip_test(
+            hip_consan_lds_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/hip_consan_lds_test.hip
+        )
+        add_dependencies(hip_consan_lds_gfx950_test_target rocjitsu_dbi_hooks)
+        rj_add_hip_test_case(
+            hip_consan_lds_gfx950_test
+            "ConSanLdsTest.PaddedCleanStoreReportBufferStaysZero"
+            NAME "ConSanLdsGfx950Test.SuperColliderCleanMarker"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=supercollider"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_DELAY=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_lds_gfx950_test
+            "ConSanLdsTest.PaddedRacyStoreReportsMarker"
+            NAME "ConSanLdsGfx950Test.SuperColliderRacyMarker"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=supercollider"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_DELAY=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+
+        rj_add_hip_test(
             hip_consan_moi_gfx950_test
             ARCH gfx950
             SOURCE dbi/hip_consan_moi_gfx950_test.hip

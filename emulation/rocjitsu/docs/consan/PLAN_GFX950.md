@@ -218,6 +218,12 @@ Full gfx950 support means:
   one emitted spill patch and one visible sampled entry, verifies AQL private
   growth from zero to 20 bytes, and proves eight independently live values are
   unchanged in all 64 lanes.
+- 2026-07-13: `SC1` is `DONE`. SuperCollider now emits native CDNA4 redundant
+  LDS checks with target-dispatched readback opcodes, waits, VOPC operands,
+  branches, traps, and marker stores. Guarded clean and racy gfx950 controls use
+  automatic registers and require a patch; the clean marker stays zero and the
+  racy marker is observed. Synthetic tests cover inline and appended placement,
+  and all 193 ConSan CPU regressions pass.
 
 ## DAG Overview
 
@@ -344,7 +350,7 @@ flowchart LR
   W1["W1: Non-Scratch Wait Semantics"]:::done
   B1A["B1A: Barrier Decode And Emission"]:::done
   B1B["B1B: Engine Barrier Semantics"]:::todo
-  SC1["SC1: SuperCollider Native LDS"]:::todo
+  SC1["SC1: SuperCollider Native LDS"]:::done
   RR1A["RR1A: Access Record Emission"]:::done
   RR1B["RR1B: Record/Replay Live Semantics"]:::done
   SA1A["SA1A: Static Sampled Publication"]:::done
@@ -1143,7 +1149,7 @@ Done criteria:
 - A barrier-ordered two-wave control remains clean in record/replay and inline
   shadow, while the unordered control reports.
 
-### SC1: SuperCollider Native LDS - TODO
+### SC1: SuperCollider Native LDS - DONE
 
 Goal: obtain the first non-destructive native gfx950 sanitizer patch.
 
@@ -1157,6 +1163,18 @@ Done criteria:
 
 - Clean and racy marker-buffer controls pass with `REQUIRE_PATCH=1`; the racy
   case reports without relying on a destructive proof probe.
+
+Result:
+
+- `ConSanLdsGfx950Test.SuperColliderCleanMarker` and
+  `ConSanLdsGfx950Test.SuperColliderRacyMarker` both use automatic scratch and
+  scalar selection with a required native patch. The clean control leaves the
+  marker at zero, while the same check reports the intentional same-cell race.
+- CDNA4 store checks wait for write visibility before issuing native
+  `ds_read_*` readback, encode the original VGPR as a vector VOPC source, and
+  use the target-specific LDS wait and marker-store sequence. Synthetic tests
+  cover padded inline and unpadded appended-cave placement; the shared local
+  cave planner remains covered by the architecture-neutral placement suite.
 
 ### RR1A: gfx950 Access Record Emission - DONE
 

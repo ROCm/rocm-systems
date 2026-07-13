@@ -157,7 +157,7 @@ ConSanTargetCapabilities consan_target_capabilities(rj_code_arch_t architecture)
     capabilities.scratch_spill = ConSanNativeSupport::NativeEmission;
     capabilities.non_scratch_wait = ConSanNativeSupport::NativeEmission;
     capabilities.report_publication = ConSanNativeSupport::NativeEmission;
-    capabilities.supercollider = ConSanNativeSupport::InventoryOnly;
+    capabilities.supercollider = ConSanNativeSupport::NativeEmission;
     capabilities.record_replay = ConSanNativeSupport::NativeEmission;
     capabilities.sampled = ConSanNativeSupport::NativeEmission;
     capabilities.inline_shadow = ConSanNativeSupport::InventoryOnly;
@@ -1664,30 +1664,19 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return std::nullopt;
 }
 
-[[nodiscard]] uint32_t build_sopp_word(uint32_t op, uint16_t simm16) {
-  return pack_sopp(op, simm16);
-}
-
 [[nodiscard]] std::optional<uint32_t> build_s_trap_word(uint16_t simm16, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
-    return std::nullopt;
-  constexpr uint32_t kRdna4STrapOp = 16;
-  return build_sopp_word(kRdna4STrapOp, simm16);
+  return build_s_trap(simm16, arch);
 }
 
 [[nodiscard]] std::optional<uint32_t> build_s_cbranch_vccz_word(int16_t offset_dwords,
                                                                 rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
-    return std::nullopt;
-  constexpr uint32_t kRdna4SCbranchVcczOp = 35;
-  return build_sopp_word(kRdna4SCbranchVcczOp, static_cast<uint16_t>(offset_dwords));
+  return build_s_cbranch_vccz(offset_dwords, arch);
 }
 
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (count != 0)
     return std::nullopt;
-  constexpr uint32_t kRdna4SWaitDscntOp = 70;
-  return build_sopp_word(kRdna4SWaitDscntOp, count);
+  return build_s_wait_lds0(arch);
 }
 
 [[nodiscard]] const char *delay_mode_name(ConSanDelayMode mode) {
@@ -1768,27 +1757,25 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 
 [[nodiscard]] std::optional<uint32_t> build_v_cmp_ne_u32_e32_word(uint16_t src0, uint16_t vsrc1,
                                                                   rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || src0 > 255 || vsrc1 > 255)
+  if (src0 > 255)
     return std::nullopt;
-  constexpr uint32_t kRdna4VCmpNeU32E32Base = 0x7C9A0000u;
-  const uint32_t encoded_vsrc1 = (static_cast<uint32_t>(vsrc1) << 1u) | 1u;
-  return kRdna4VCmpNeU32E32Base | (encoded_vsrc1 << 8u) | src0;
+  return build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(src0), vsrc1, arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>
 build_ds_load_word0_from_vds_word0(uint32_t word0, uint32_t width_bits, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     return std::nullopt;
   uint32_t base = 0;
   switch (width_bits) {
   case 32:
-    base = 0xD8D80000u;
+    base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0xD86C0000u : 0xD8D80000u;
     break;
   case 64:
-    base = 0xD9D80000u;
+    base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0xD8EC0000u : 0xD9D80000u;
     break;
   case 128:
-    base = 0xDBFC0000u;
+    base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0xD9FE0000u : 0xDBFC0000u;
     break;
   default:
     return std::nullopt;
@@ -1802,11 +1789,14 @@ build_ds_load_word0_from_vds_word0(uint32_t word0, uint32_t width_bits, rj_code_
 }
 
 [[nodiscard]] std::optional<uint16_t> lds_dword_count(const ConSanLdsSite &site) {
-  const bool is_two_addr_load = site.mnemonic == "ds_load_2addr_b32" ||
-                                site.mnemonic == "ds_load_2addr_b64" ||
-                                site.mnemonic == "ds_load_2addr_stride64_b32" ||
-                                site.mnemonic == "ds_load_2addr_stride64_b64";
-  if (site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi")
+  const bool is_two_addr_load =
+      site.mnemonic == "ds_load_2addr_b32" || site.mnemonic == "ds_load_2addr_b64" ||
+      site.mnemonic == "ds_load_2addr_stride64_b32" ||
+      site.mnemonic == "ds_load_2addr_stride64_b64" || site.mnemonic == "ds_read2_b32" ||
+      site.mnemonic == "ds_read2_b64" || site.mnemonic == "ds_read2st64_b32" ||
+      site.mnemonic == "ds_read2st64_b64";
+  if (site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+      site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi")
     return 1;
   if (site.width_bits == 32 || site.width_bits == 64 || site.width_bits == 128)
     return static_cast<uint16_t>((site.width_bits / 32u) * (is_two_addr_load ? 2u : 1u));
@@ -2346,16 +2336,22 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
     return false;
   if (site.kind == ConSanLdsAccessKind::Read) {
     if (site.mnemonic != "ds_load_b32" && site.mnemonic != "ds_load_b64" &&
-        site.mnemonic != "ds_load_b128" && site.mnemonic != "ds_load_2addr_b32" &&
-        site.mnemonic != "ds_load_2addr_b64" && site.mnemonic != "ds_load_2addr_stride64_b32" &&
-        site.mnemonic != "ds_load_2addr_stride64_b64" && site.mnemonic != "ds_load_u16_d16" &&
-        site.mnemonic != "ds_load_u16_d16_hi")
+        site.mnemonic != "ds_load_b128" && site.mnemonic != "ds_read_b32" &&
+        site.mnemonic != "ds_read_b64" && site.mnemonic != "ds_read_b128" &&
+        site.mnemonic != "ds_load_2addr_b32" && site.mnemonic != "ds_load_2addr_b64" &&
+        site.mnemonic != "ds_load_2addr_stride64_b32" &&
+        site.mnemonic != "ds_load_2addr_stride64_b64" && site.mnemonic != "ds_read2_b32" &&
+        site.mnemonic != "ds_read2_b64" && site.mnemonic != "ds_read2st64_b32" &&
+        site.mnemonic != "ds_read2st64_b64" && site.mnemonic != "ds_load_u16_d16" &&
+        site.mnemonic != "ds_load_u16_d16_hi" && site.mnemonic != "ds_read_u16_d16" &&
+        site.mnemonic != "ds_read_u16_d16_hi")
       return false;
     return site.dst_vgpr.has_value() && static_cast<uint32_t>(*site.dst_vgpr) + *dword_count <= 256;
   }
   if (site.kind == ConSanLdsAccessKind::Write) {
     if (site.mnemonic != "ds_store_b32" && site.mnemonic != "ds_store_b64" &&
-        site.mnemonic != "ds_store_b128")
+        site.mnemonic != "ds_store_b128" && site.mnemonic != "ds_write_b32" &&
+        site.mnemonic != "ds_write_b64" && site.mnemonic != "ds_write_b128")
       return false;
     return site.data_vgpr.has_value() &&
            static_cast<uint32_t>(*site.data_vgpr) + *dword_count <= 256;
@@ -2594,16 +2590,21 @@ reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
 }
 
 [[nodiscard]] bool is_d16_lds_load(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi";
+  return site.mnemonic == "ds_load_u16_d16" || site.mnemonic == "ds_load_u16_d16_hi" ||
+         site.mnemonic == "ds_read_u16_d16" || site.mnemonic == "ds_read_u16_d16_hi";
 }
 
-[[nodiscard]] uint32_t lds_check_trap_predelay_setup_words(const ConSanLdsSite &site) {
-  return is_d16_lds_load(site) ? 2u : 0u;
+[[nodiscard]] uint32_t lds_check_trap_predelay_setup_words(const ConSanLdsSite &site,
+                                                           rj_code_arch_t arch) {
+  if (is_d16_lds_load(site))
+    return 2u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 && site.kind == ConSanLdsAccessKind::Write ? 1u : 0u;
 }
 
 [[nodiscard]] std::optional<uint32_t>
 build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 || src_vgpr > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vdst > 255 ||
+      src_vgpr > 255)
     return std::nullopt;
   return build_v_mov_b32_e32(vdst, vector_source_vgpr(src_vgpr), arch);
 }
@@ -2618,12 +2619,11 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
                                                                  std::string_view context) {
   if (!options.report_buffer_address)
     return 1u;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    errors.emplace_back(std::string(context) +
-                        " report-buffer action currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    errors.emplace_back(std::string(context) + " report-buffer action has unsupported target");
     return std::nullopt;
   }
-  return 12u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? 8u : 12u;
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>>
@@ -2740,12 +2740,14 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
 
   const uint32_t total_words =
-      static_cast<uint32_t>(2u + lds_check_trap_predelay_setup_words(site) + delay_words + 2u + 1u +
-                            1u + (2u + mismatch_action->size()) * *required_vgprs + 1u);
+      static_cast<uint32_t>(2u + lds_check_trap_predelay_setup_words(site, arch) + delay_words +
+                            2u + 1u + 1u + (2u + mismatch_action->size()) * *required_vgprs + 1u);
   std::vector<uint32_t> words;
   words.reserve(total_words);
   words.push_back(original_access[0]);
   words.push_back(original_access[1]);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && site.kind == ConSanLdsAccessKind::Write)
+    words.push_back(*wait_dscnt);
   if (d16_seed_scratch) {
     words.push_back(*wait_dscnt);
     words.push_back(*d16_seed_scratch);
@@ -2773,8 +2775,8 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
 
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                          const ConSanOptions &options, ConSanResult &result) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan LDS check/trap proof currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported target");
     return;
   }
 
@@ -2878,7 +2880,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (!action_words)
         return;
       const uint32_t scratch_vgprs = *required_vgprs + report_action_scratch_vgprs(options);
-      const uint64_t requested_words = 2u + lds_check_trap_predelay_setup_words(site) +
+      const uint64_t requested_words = 2u + lds_check_trap_predelay_setup_words(site, arch) +
                                        static_cast<uint64_t>(*delay_words) + 2u + 1u + 1u +
                                        (2u + *action_words) * *required_vgprs + 1u;
       if (requested_words > 256u) {
