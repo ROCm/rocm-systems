@@ -36,8 +36,7 @@ namespace
 std::uint64_t
 file_size_or_zero(const std::string& path) noexcept
 {
-    struct stat st
-    {};
+    struct stat st{};
     if(::stat(path.c_str(), &st) != 0) return 0;
     return static_cast<std::uint64_t>(st.st_size);
 }
@@ -73,11 +72,6 @@ configure_processors(
         {
             const auto gpu_agents =
                 _config->_agent_manager->get_agents_by_type(agent_type::GPU);
-            for(const auto& gpu_agent : gpu_agents)
-            {
-                if(gpu_agent)
-                    proc_meta.gpu_ids.push_back(gpu_agent->logical_node_type_id);
-            }
             _summary.set_node_gpu_count(gpu_agents.size());
         }
         _summary.record_process(std::move(proc_meta));

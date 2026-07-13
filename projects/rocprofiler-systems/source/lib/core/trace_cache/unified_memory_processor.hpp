@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <sys/types.h>
 #include <unordered_map>
 #include <utility>
 
@@ -26,15 +27,17 @@ namespace trace_cache
 class output_file_sink_view
 {
 public:
-    using register_file_fn_t = void (*)(void*, std::string, output_format);
+    using register_file_fn_t = void (*)(void*, std::string, output_format,
+                                        std::optional<pid_t>);
 
     template <typename SinkT>
     // Non-owning sink view. The referenced sink object must outlive any
     // unified_memory_processor_t storing this view.
     explicit output_file_sink_view(SinkT& sink) noexcept
     : m_object{ std::addressof(sink) }
-    , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
-        static_cast<SinkT*>(obj)->register_file(std::move(path), format);
+    , m_register_file_impl{ +[](void* obj, std::string path, output_format format,
+                                std::optional<pid_t> pid) {
+        static_cast<SinkT*>(obj)->register_file(std::move(path), format, pid);
     } }
     {}
 
@@ -43,9 +46,13 @@ public:
     output_file_sink_view& operator=(const output_file_sink_view&) noexcept = default;
     output_file_sink_view& operator=(output_file_sink_view&&) noexcept      = default;
 
-    void register_file(std::string path, output_format format) const
+    // `pid` is the actual owning process for this report; left as nullopt
+    // defers to the sink's own default (output_summary falls back to
+    // getpid(), which is only correct for the root/reporting process).
+    void register_file(std::string path, output_format format,
+                       std::optional<pid_t> pid = std::nullopt) const
     {
-        m_register_file_impl(m_object, std::move(path), format);
+        m_register_file_impl(m_object, std::move(path), format, pid);
     }
 
 private:

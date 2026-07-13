@@ -52,15 +52,17 @@ using TestProcessor = unified_memory_processor_t;
 
 struct registered_file
 {
-    std::string   path;
-    output_format format;
+    std::string          path;
+    output_format        format;
+    std::optional<pid_t> pid;
 };
 
 struct recording_output_sink
 {
-    void register_file(std::string path, output_format format)
+    void register_file(std::string path, output_format format,
+                       std::optional<pid_t> pid = std::nullopt)
     {
-        files.push_back({ std::move(path), format });
+        files.push_back({ std::move(path), format, pid });
     }
 
     void clear() { files.clear(); }
@@ -420,6 +422,9 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
     {
         EXPECT_THAT(e.path, HasSubstr("unified_memory"));
         EXPECT_THAT(e.path, HasSubstr(std::to_string(kPid)));
+        // Regression: the sink must attribute this report to the process
+        // that produced it, not fall back to the reporting process's pid.
+        EXPECT_EQ(e.pid, std::optional<pid_t>{ kPid });
         if(e.format == output_format::text)
         {
             EXPECT_THAT(e.path, ::testing::EndsWith(".txt"));
