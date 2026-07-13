@@ -400,6 +400,9 @@ Full gfx950 support means:
   produce wrong numerical results instead. One logged MXFP4 row selects
   scratch `v132` in a 136-VGPR MFMA kernel, exposing a second accumulator alias
   hazard. `T4SV` is `ACTIVE`; these seven are not accepted as diagnostics.
+- 2026-07-13: `D2A` is `DONE`. The present-facing design, usage, tutorial, and
+  spilling documents now cover gfx950/CDNA4 capability and workspace runtime
+  contracts. Final per-tier results remain separated in `D2B`.
 
 ## DAG Overview
 
@@ -631,7 +634,7 @@ flowchart LR
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
   T4G{"T4G: Broad Compatibility Accepted"}:::target
-  D2A["D2A: Capability And Runbook Content"]:::todo
+  D2A["D2A: Capability And Runbook Content"]:::done
   D2B["D2B: Final Result Tables"]:::todo
   X1A["X1A: Local gfx1201 Synthetic Regression"]:::todo
   X1B["X1B: gfx1201 Live Regression Evidence"]:::blocked
@@ -670,7 +673,8 @@ flowchart LR
   T4RR --> T4G
   T4SA --> T4G
   T4IS --> T4G
-  T3G --> D2A
+  SP --> D2A
+  NP --> D2A
   T3G --> X1A
   T4G --> D2B
   D2A --> D2B --> M0
@@ -2116,7 +2120,7 @@ parallel. Their actual IREE CTest processes are mutually exclusive because the
 shared build directory removes one `test_tmpdir`; each individual process may
 still use CTest parallelism. `T4G` is reached after all four complete.
 
-### D2A: Capability And Runbook Content - TODO
+### D2A: Capability And Runbook Content - DONE
 
 Goal: make gfx950 support usable and accurately bounded.
 
@@ -2130,6 +2134,12 @@ Work:
 Done criteria:
 
 - A teammate can identify supported gfx950 features and reproduce each tier.
+
+Result: `DESIGN.md`, `USAGE.md`, `TUTORIAL.md`, and `SPILLING.md` now describe
+the native gfx950 capability boundary, CDNA4 wait and spill contracts, wave64
+state preservation, accumulator alias hazard, paired entry paths, and
+workspace-only runtime commands. Final qualification numbers remain isolated
+in `D2B`.
 
 ### D2B: Final Result Tables - TODO
 
