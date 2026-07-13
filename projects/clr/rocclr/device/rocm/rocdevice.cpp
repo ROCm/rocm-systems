@@ -3161,6 +3161,7 @@ VirtualGPU* Device::xferQueue() const {
     }
   });
   if (!xferQueue_) {
+    LogError("Couldn't create the device transfer manager!");
     return nullptr;
   }
   xferQueue_->enableSyncBlit();
