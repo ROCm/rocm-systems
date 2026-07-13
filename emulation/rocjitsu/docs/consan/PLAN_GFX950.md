@@ -1916,7 +1916,8 @@ patches. The following nodes close those gaps before `T3G`.
 
 ### T3IO: Stable Private Owner State - ACTIVE
 
-Goal: preserve correct gfx950 owner identity without crossing `ACCUM_OFFSET`.
+Goal: preserve correct gfx950 owner/epoch identity for every MOI engine without
+crossing `ACCUM_OFFSET`.
 
 Work:
 
@@ -1924,8 +1925,8 @@ Work:
   epoch.
 - Compute the owner from flattened `(x, y, z)` workitem identity at both normal
   and kernarg-preload entries.
-- Load the private owner at access probes, barriers, and ordering probes; never
-  rederive it from mutable guest VGPRs.
+- Load private owner/epoch at record/replay, sampled, inline-shadow, barrier,
+  and ordering probes; never rederive owner from mutable guest VGPRs.
 - Treat malformed or inaccessible owning descriptors conservatively and lock
   down `ACCUM_OFFSET` decoding at zero, exact-boundary, overlap, and
   multiple-owner cases.
@@ -2016,6 +2017,13 @@ data-tiled/MXFP4 and dot workloads, including memory-aperture exceptions; a
 simultaneous GPU exception can contaminate other subprocesses, so these are
 being rerun individually before attribution. This broad profile deliberately
 does not require a patch or record from every object.
+
+An isolated logged MXFP4 row reproduces the memory-aperture exception after
+record/replay assigns persistent CDNA4 identity at `v135:v139` in a 136-VGPR
+MFMA kernel. This extends `T3IO`: accumulator-safe private owner/epoch state is
+required by record/replay and sampled access records too, not only inline
+shadow. The private representation and `ACCUM_OFFSET` boundary tests must
+therefore be engine-independent.
 
 ### T4SA: Sampled Broad IREE - TODO
 
