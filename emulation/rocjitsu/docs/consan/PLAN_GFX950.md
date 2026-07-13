@@ -346,7 +346,7 @@ flowchart LR
   S7A["S7A: Sampled Spill Parity"]:::done
   S7B["S7B: Inline Access Spill Parity"]:::done
   S7C["S7C: Barrier And Atomic Spill Parity"]:::done
-  S7D["S7D: Shared-Helper Spill Layout"]:::todo
+  S7D["S7D: Shared-Helper Spill Layout"]:::active
   SP{"SP: gfx950 Spill Accepted"}:::target
 
   F0 --> S1
@@ -927,7 +927,7 @@ Result:
   barrier or atomic events; ordered controls stay clean, while changing only
   the acquire address produces one diagnostic in each atomic engine.
 
-### S7D: Shared-Helper Spill Layout - TODO
+### S7D: Shared-Helper Spill Layout - ACTIVE
 
 Goal: close spill parity with a reachable helper shared by multiple kernels.
 

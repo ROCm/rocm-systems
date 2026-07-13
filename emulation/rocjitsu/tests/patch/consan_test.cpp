@@ -605,6 +605,8 @@ struct TwoKernelSharedFixtureOptions {
   uint32_t second_private_bytes = 0;
   bool first_wave32 = false;
   bool second_wave32 = false;
+  bool first_uses_dynamic_stack = false;
+  bool second_uses_dynamic_stack = false;
   bool first_continuation_uses_v1 = false;
   bool helper_keeps_v1_v3_live = false;
 };
@@ -672,11 +674,17 @@ make_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &o
   const uint32_t first_kd_name = add_elf_name(strtab, "shared_owner_0.kd");
   const uint32_t second_kd_name = add_elf_name(strtab, "shared_owner_1.kd");
   const uint32_t unrelated_kd_name = add_elf_name(strtab, "unrelated_kernel.kd");
+  const uint32_t first_dynamic_stack_name =
+      add_elf_name(strtab, "shared_owner_0.has_dyn_sized_stack");
+  const uint32_t second_dynamic_stack_name =
+      add_elf_name(strtab, "shared_owner_1.has_dyn_sized_stack");
+  const uint32_t unrelated_dynamic_stack_name =
+      add_elf_name(strtab, "unrelated_kernel.has_dyn_sized_stack");
 
   const uint64_t rodata_offset = text_offset + text_size;
   const uint64_t strtab_offset = rodata_offset + 3u * descriptor_size;
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
-  constexpr size_t symbol_count = 8;
+  constexpr size_t symbol_count = 11;
   const uint64_t shstrtab_offset = symtab_offset + symbol_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -777,6 +785,18 @@ make_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &o
   symbols[7].st_shndx = 2;
   symbols[7].st_value = rodata_vaddr + 2u * descriptor_size;
   symbols[7].st_size = descriptor_size;
+  symbols[8].st_name = first_dynamic_stack_name;
+  symbols[8].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeNotype);
+  symbols[8].st_shndx = SHN_ABS;
+  symbols[8].st_value = options.first_uses_dynamic_stack ? 1u : 0u;
+  symbols[9].st_name = second_dynamic_stack_name;
+  symbols[9].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeNotype);
+  symbols[9].st_shndx = SHN_ABS;
+  symbols[9].st_value = options.second_uses_dynamic_stack ? 1u : 0u;
+  symbols[10].st_name = unrelated_dynamic_stack_name;
+  symbols[10].st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeNotype);
+  symbols[10].st_shndx = SHN_ABS;
+  symbols[10].st_value = 0u;
   std::memcpy(image.data() + symtab_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
 
   std::array<Elf64_Shdr, section_count> sections{};
@@ -2003,6 +2023,123 @@ TEST(ConSanMoi, Gfx950SharedHelperSpillUsesEveryOwnerResourceAndPrivateLayout) {
     else if (kernel.name == "unrelated_kernel")
       EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
   }
+}
+
+TEST(ConSanMoi, Gfx950SharedHelperSampledSpillUsesEveryOwnerPrivateLayout) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 0;
+  fixture.second_vgpr_granulated = 1;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  fixture.helper_keeps_v1_v3_live = true;
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::Sampled;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = sizeof(ConSanMoiReportHeader) + 2u * sizeof(uint64_t);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 5u);
+  EXPECT_EQ(patch->required_private_segment_size, 52u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+  }
+}
+
+TEST(ConSanMoi, Gfx950SharedHelperInlineSpillUsesEveryOwnerPrivateLayout) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 0;
+  fixture.second_vgpr_granulated = 1;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  fixture.helper_keeps_v1_v3_live = true;
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(patch->spilled_vgpr_count, 7u);
+  EXPECT_EQ(patch->required_private_segment_size, 60u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+                                  }),
+            2u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 60u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+  }
+}
+
+TEST(ConSanMoi, Gfx950SharedHelperSpillRollsBackWhenOneOwnerUsesDynamicStack) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 0;
+  fixture.second_vgpr_granulated = 1;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  fixture.second_uses_dynamic_stack = true;
+  fixture.helper_keeps_v1_v3_live = true;
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("dynamic-stack") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnchanged) {
