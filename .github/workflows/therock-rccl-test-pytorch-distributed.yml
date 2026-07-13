@@ -49,6 +49,7 @@ jobs:
       VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
       OUTPUT_ARTIFACTS_DIR: "./build"
+      PYTORCH_SRC: ${{ github.workspace }}/pytorch-src
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -87,12 +88,20 @@ jobs:
             echo "ROCM_LIB_DIR=$ROCM_LIB_DIR" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install PyTorch ROCm nightly
-        timeout-minutes: 10
+      - name: Install PyTorch and test dependencies
+        timeout-minutes: 15
         run: |
           source ${{ env.VENV_DIR }}/bin/activate
-          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm7.2
-          pip install pytest
+          pip install --pre \
+            "torch[device-gfx942]" \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+          pip install \
+            pytest \
+            pytest-timeout \
+            "expecttest>=0.3.0" \
+            hypothesis \
+            numpy \
+            psutil
 
       - name: Verify RCCL override
         run: |
@@ -110,25 +119,25 @@ jobs:
           echo "CI-built RCCL: $(ls -la $CI_RCCL)"
           echo "PyTorch bundled RCCL: $(ls -la $TORCH_RCCL 2>/dev/null || echo 'not found')"
 
-      - name: Fetch PyTorch test files
+      - name: Clone PyTorch test sources
         run: |
           source ${{ env.VENV_DIR }}/bin/activate
           TORCH_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0])")
           echo "PyTorch version: ${TORCH_VERSION}"
 
-          mkdir -p pytorch_tests
-          cd pytorch_tests
-
-          BASE_URL="https://raw.githubusercontent.com/pytorch/pytorch/v${TORCH_VERSION}"
-          if ! curl -sfL "${BASE_URL}/test/distributed/test_c10d_nccl.py" -o test_c10d_nccl.py; then
-            echo "Tag v${TORCH_VERSION} not found, using main branch"
-            BASE_URL="https://raw.githubusercontent.com/pytorch/pytorch/main"
-            curl -sfL "${BASE_URL}/test/distributed/test_c10d_nccl.py" -o test_c10d_nccl.py
+          GIT_REF="v${TORCH_VERSION}"
+          if ! git ls-remote --tags https://github.com/pytorch/pytorch.git "$GIT_REF" | grep -q .; then
+            echo "Tag ${GIT_REF} not found, using nightly branch"
+            GIT_REF="nightly"
           fi
-          curl -sfL "${BASE_URL}/test/distributed/test_c10d_common.py" -o test_c10d_common.py
 
-          echo "Downloaded test files:"
-          ls -la *.py
+          git clone --depth=1 --branch "$GIT_REF" --filter=blob:none \
+            --sparse https://github.com/pytorch/pytorch.git "${{ env.PYTORCH_SRC }}"
+          cd "${{ env.PYTORCH_SRC }}"
+          git sparse-checkout set test/ torch/testing/
+
+          echo "Test files:"
+          ls -la test/distributed/test_c10d_nccl.py test/distributed/test_c10d_common.py
 
       - name: Run PyTorch c10d NCCL tests
         timeout-minutes: 60
@@ -139,8 +148,12 @@ jobs:
         run: |
           set -o pipefail
           export LD_LIBRARY_PATH="${{ steps.rccl_path.outputs.RCCL_LIB_DIR }}:${{ steps.rccl_path.outputs.ROCM_LIB_DIR }}:${LD_LIBRARY_PATH}"
+          export MIOPEN_USER_DB_PATH="/tmp/miopen_cache_$$"
+          mkdir -p "$MIOPEN_USER_DB_PATH"
           source ${{ env.VENV_DIR }}/bin/activate
-          cd pytorch_tests
+
+          cd ${{ env.PYTORCH_SRC }}
+          export PYTHONPATH="${PWD}/test:${PYTHONPATH:-}"
 
           NUM_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
           echo "Detected GPUs: ${NUM_GPUS}"
@@ -153,14 +166,11 @@ jobs:
           print(f'LD_LIBRARY_PATH: {os.environ.get(\"LD_LIBRARY_PATH\", \"\")}')
           "
 
-          torchrun \
-            --nproc_per_node=${NUM_GPUS} \
-            --nnodes=1 \
-            --standalone \
-            test_c10d_nccl.py \
-            --use-pytest \
+          python -m pytest test/distributed/test_c10d_nccl.py \
             -v \
-            -k "test_allreduce or test_allgather_base or test_broadcast or test_reduce_scatter_base or test_barrier" \
+            --timeout=600 \
+            --tb=short \
+            -k "not NCCLTraceTestDumpOnTimeout" \
             2>&1 | tee pytorch_c10d_results.log
 
       - name: Upload test results
@@ -168,5 +178,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pytorch-c10d-results-${{ inputs.amdgpu_families }}
-          path: pytorch_tests/pytorch_c10d_results.log
+          path: ${{ env.PYTORCH_SRC }}/pytorch_c10d_results.log
           retention-days: 14
