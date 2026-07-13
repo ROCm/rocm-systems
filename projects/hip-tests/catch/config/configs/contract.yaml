@@ -1365,33 +1365,12 @@ contract:
   Contract_Library_KernelGetLibrary_RoundTrips:
     <<: *level_0
     tags: [library]
-  Contract_Library_GetKernel_UnknownSymbol_IsRejected:
+  Contract_KernelObjectAttributes_GetAttribute_ReturnsSaneValues:
     <<: *level_0
-    tags: [library]
-  Contract_Library_GetKernelCount_MatchesLowerBound:
+    tags: [kernel_object_attributes]
+  Contract_KernelObjectAttributes_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported:
     <<: *level_0
-    tags: [library]
-  Contract_Library_EnumerateKernels_ZeroMax_LeavesBufferUntouched:
+    tags: [kernel_object_attributes]
+  Contract_KernelObjectAttributes_GetParamInfo_ReturnsFirstParamLayout:
     <<: *level_0
-    tags: [library]
-  Contract_Library_EnumerateKernels_HandlesResolveToFunctions:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_GetKernel_RepeatedLookupIsStable:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_KernelGetName_ReturnsRequestedSymbol:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_KernelGetFunction_LaunchesAndWrites:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_GetGlobal_ReturnsAddressAndSize:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_GetGlobal_MatchesModuleGetGlobal:
-    <<: *level_0
-    tags: [library]
-  Contract_Library_KernelGetLibrary_RoundTrips:
-    <<: *level_0
-    tags: [library]
+    tags: [kernel_object_attributes]
