@@ -4106,6 +4106,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         ::_exit(128 + signo);
     }
 
+    // record the owning thread so that a recursive re-entry (e.g. a chained handler that re-raises
+    // the signal) is detected above instead of deadlocking in call_once.
+    _owner_tid.store(_self_tid, std::memory_order_release);
+
     ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {}...",
                                 this_ppid,
                                 this_pid,
@@ -4115,11 +4119,6 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     static auto _once = std::once_flag{};
     std::call_once(_once, [&]() {
-        // record the owning thread so that a recursive re-entry (e.g. a chained
-        // handler that re-raises the signal) is detected at the top of the
-        // handler instead of deadlocking here.
-        _owner_tid.store(_self_tid, std::memory_order_release);
-
         auto get_children = [&this_pid]() {
             auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
             auto ifs      = std::ifstream{fname};

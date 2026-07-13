@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,35 +112,35 @@ thread_trace_parameter_pack::are_params_valid() const
     // so we can fail early with a descriptive message.
     if(shader_cb_fn == nullptr)
     {
-        ROCP_ERROR << "Thread trace shader callback cannot be null";
+        ROCP_WARNING << "Thread trace shader callback cannot be null";
         return false;
     }
 
     if(shader_engine_mask == 0)
     {
-        ROCP_ERROR << "Invalid thread trace shader engine mask: 0 (must be non-zero)";
+        ROCP_WARNING << "Invalid thread trace shader engine mask: 0 (must be non-zero)";
         return false;
     }
 
     if(buffer_size < MIN_BUFFER_SIZE)
     {
-        ROCP_ERROR << "Invalid thread trace buffer size: " << buffer_size << " (minimum is "
-                   << MIN_BUFFER_SIZE << " bytes / 1 MB)";
+        ROCP_WARNING << "Invalid thread trace buffer size: " << buffer_size << " (minimum is "
+                     << MIN_BUFFER_SIZE << " bytes / 1 MB)";
         return false;
     }
 
     // Only 16 CUs (0x0-0xF) and 4 SIMDs (0x0-0xF) are addressable.
     if(target_cu > 0xF)
     {
-        ROCP_ERROR << "Invalid thread trace target CU: " << static_cast<uint32_t>(target_cu)
-                   << " (valid range is 0-15 / 0x0-0xF)";
+        ROCP_WARNING << "Invalid thread trace target CU: " << static_cast<uint32_t>(target_cu)
+                     << " (valid range is 0-15 / 0x0-0xF)";
         return false;
     }
 
     if(simd_select > 0xF)
     {
-        ROCP_ERROR << "Invalid thread trace SIMD select mask: "
-                   << static_cast<uint32_t>(simd_select) << " (valid range is 0x0-0xF)";
+        ROCP_WARNING << "Invalid thread trace SIMD select mask: "
+                     << static_cast<uint32_t>(simd_select) << " (valid range is 0x0-0xF)";
         return false;
     }
 
