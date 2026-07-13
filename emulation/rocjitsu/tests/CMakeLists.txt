@@ -344,11 +344,12 @@ add_executable(
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
     patch/instruction_builder_test.cpp
+    patch/kernarg_extension_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
-    dbt/code_placement_test.cpp
+    dbt/semantic_scratch_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp
     sysfs_test.cpp
@@ -690,6 +691,7 @@ target_include_directories(
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
         ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
         ${CMAKE_SOURCE_DIR}/lib/util/include
+        ${CMAKE_BINARY_DIR}/include
         ${GENERATED_DIR}
 )
 target_include_directories(
@@ -1175,10 +1177,13 @@ if(HSA_RUNTIME64)
 
         set(RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS
             DynamicCopyLoopTranslates
+            VCvtPkBf16F32Translates
             TritonDynamicMatmulTranslates
             TritonBufferAsyncMatmulTranslates
             TritonFlashAttentionNoAsyncTranslates
             TritonFlashAttentionBufferAsyncTranslates
+            HipKittensBf16Matmul16x32TranslatesWithVirtualLdsMetadata
+            HipKittensBf16Matmul32x16TranslatesWithVirtualLdsMetadata
         )
         foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_TRANSLATE_TESTS)
             rj_add_test(
@@ -1194,89 +1199,15 @@ if(HSA_RUNTIME64)
             )
         endforeach()
 
-        _rj_path_from_installed_test_bin(
-            _rj_installed_cdna3_kmd_config
-            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
-            "${RJ_CDNA3_KMD_CONFIG_NAME}"
-        )
-        _rj_path_from_installed_test_bin(
-            _rj_installed_cdna4_to_cdna3_sim_dbt_config
-            "${CMAKE_INSTALL_DATADIR}/rocjitsu/configs"
-            "${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG_NAME}"
-        )
-
-        set(RJ_CDNA4_TO_CDNA3_SIM_SUPPORTED_TESTS DynamicCopyLoopDispatchAndRun)
-        set(RJ_CDNA4_TO_CDNA3_SIM_EXPERIMENTAL_TESTS
-            TritonDynamicMatmulDispatchAndRun
-            TritonBufferAsyncMatmulDispatchAndRun
-            TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
-            TritonFlashAttentionNoAsyncDispatchAndRun
-            TritonFlashAttentionBufferAsyncDispatchAndRun
-        )
-        option(
-            RJ_ENABLE_EXPERIMENTAL_CDNA3_SIM_DBT_TESTS
-            "Register known-unsupported CDNA4-to-CDNA3 Triton simulator dispatch tests"
-            OFF
-        )
-        set(RJ_CDNA4_TO_CDNA3_SIM_REGISTERED_TESTS
-            ${RJ_CDNA4_TO_CDNA3_SIM_SUPPORTED_TESTS}
-        )
-        if(RJ_ENABLE_EXPERIMENTAL_CDNA3_SIM_DBT_TESTS)
-            list(
-                APPEND RJ_CDNA4_TO_CDNA3_SIM_REGISTERED_TESTS
-                ${RJ_CDNA4_TO_CDNA3_SIM_EXPERIMENTAL_TESTS}
-            )
-        else()
-            message(
-                STATUS
-                "CDNA4->CDNA3 Triton simulator dispatch tests built but NOT registered "
-                "(known simulator/semantic gaps; set "
-                "RJ_ENABLE_EXPERIMENTAL_CDNA3_SIM_DBT_TESTS=ON to run)"
-            )
-        endif()
-        foreach(_test_name IN LISTS RJ_CDNA4_TO_CDNA3_SIM_REGISTERED_TESTS)
-            rj_add_test(
-                NAME "Cdna4ToCdna3SimulatedDispatchTest.${_test_name}"
-                COMMAND
-                    ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
-                    $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
-                    --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
-                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                TIMEOUT 300
-                INSTALL_COMMAND
-                    "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                    "--config"
-                    "${_rj_installed_cdna3_kmd_config}"
-                    "--"
-                    "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
-                    "--gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}"
-            )
-        endforeach()
-
-        rj_add_test(
-            NAME "Cdna4ToCdna3DbtGuestTest.DynamicCopyLoopDispatchAndRun"
-            COMMAND
-                ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
-                $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
-                --gtest_filter=Cdna4ToCdna3DbtGuestTest.DynamicCopyLoopDispatchAndRun
-            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-            TIMEOUT 300
-            INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                "--config"
-                "${_rj_installed_cdna4_to_cdna3_sim_dbt_config}"
-                "--"
-                "bin/${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}"
-                "--gtest_filter=Cdna4ToCdna3DbtGuestTest.DynamicCopyLoopDispatchAndRun"
-        )
-
         if(HAS_CDNA3_GPU)
-            foreach(
-                _test_name
-                IN
-                LISTS
-                    RJ_CDNA4_TO_CDNA3_SIM_SUPPORTED_TESTS
-                    RJ_CDNA4_TO_CDNA3_SIM_EXPERIMENTAL_TESTS
+            set(RJ_CDNA4_TO_CDNA3_DISPATCH_RUN_TESTS
+                DynamicCopyLoopDispatchAndRun
+                VCvtPkBf16F32DispatchAndRun
+                TritonDynamicMatmulDispatchAndRun
+                TritonBufferAsyncMatmulDispatchAndRun
+                TritonBufferAsyncMatmulConservativeLivenessDispatchAndRun
+                TritonFlashAttentionNoAsyncDispatchAndRun
+                TritonFlashAttentionBufferAsyncDispatchAndRun
             )
                 rj_add_test(
                     NAME "Cdna4ToCdna3DispatchTest.${_test_name}"
@@ -1689,6 +1620,64 @@ if(RJ_ENABLE_HIP_TESTS)
         # generic HIP smoke tests are built for a local RDNA host such as
         # gfx1201.
         rj_add_hip_test(hip_ds_transpose_acc_test ARCH gfx950)
+
+        rj_add_hip_test(hip_lds_copy_test ARCH gfx950)
+        add_dependencies(hip_lds_copy_test_target rocjitsu_hooks)
+        rj_add_hip_test(hip_hipkittens_bf16_matmul_test ARCH gfx950)
+        add_dependencies(
+            hip_hipkittens_bf16_matmul_test_target
+            device_kernels
+            rocjitsu_hooks
+        )
+        if(DEFINED HAS_CDNA3_GPU AND HAS_CDNA3_GPU)
+            foreach(
+                TC
+                IN
+                ITEMS
+                    LargeStaticLdsCopyLowOffset
+                    LargeStaticLdsCopyHighOffset
+                    LargeStaticLdsCopyHighOffsetWithBorrowedHighSgpr
+                    LargeStaticLdsReverseHighOffset
+                    LargeStaticLdsMultiBlockHighOffset
+                    LargeStaticLdsCrossWaveExchangeHighOffset
+                    LargeStaticLdsB128ReverseHighOffset
+                    LargeStaticLdsB128ReverseImmediateOffset
+                    LargeStaticLdsReadB64TrB16
+                    LargeStaticLdsZeroKernargDispatchPacketState
+                    Static64Dynamic64ZeroKernargDispatchPacketState
+                    Static64Dynamic64ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                    MiopenC220ZeroKernargDispatchPacketState
+                    MiopenC220ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                    MiopenC220V116ZeroKernargDispatchPacketState
+                    MiopenC220V116ZeroKernargDispatchPacketStateWithBorrowedHighSgpr
+                    Static64Dynamic64DispatchPacketState
+                    Static64Dynamic64DispatchPacketStateWithBorrowedHighSgpr
+            )
+                rj_add_hip_test_case(
+                    hip_lds_copy_test
+                    "HipLdsCopyDbtTest.${TC}"
+                    CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+                    NAME "HipLdsCopyDbtTest.${TC}"
+                    TIMEOUT 120
+                )
+            endforeach()
+            foreach(
+                TC
+                IN
+                ITEMS
+                    With16x32DispatchesAndMatchesReference
+                    With32x16DispatchesAndMatchesReference
+            )
+                rj_add_hip_test_case(
+                    hip_hipkittens_bf16_matmul_test
+                    "HipKittensBf16MatmulDbtTest.${TC}"
+                    CONFIG ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx942.json
+                    NAME "HipKittensBf16MatmulDbtTest.${TC}"
+                    TIMEOUT 240
+                    ENVIRONMENT "ROCJITSU_HIPKITTENS_KERNEL_DIR=${KERNEL_OUTPUT_DIR}"
+                )
+            endforeach()
+        endif()
 
         rj_add_hip_test(hip_bfe_2d_test ARCH gfx950)
         rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")

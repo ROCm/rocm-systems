@@ -698,8 +698,6 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
 
   result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
 
-  result.dbt_guest = dbt_guest_from_fb(fb_config->dbt_guest());
-
   if (fb_config->vm() && fb_config->vm()->gpu())
     result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
 

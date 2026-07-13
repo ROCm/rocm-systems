@@ -66,33 +66,10 @@ ExpandResult SemanticTranslator::try_lower_expand(const Instruction &inst, uint6
                                                   std::span<const uint8_t> source_text,
                                                   const LivenessAnalysis &liveness,
                                                   TranslationContext &context) const {
-  return try_lower_expand_with_opcode(inst, offset, liveness, context, inst.opcode());
-}
-
-ExpandResult SemanticTranslator::try_lower_expand_with_opcode(const Instruction &inst,
-                                                              uint64_t offset,
-                                                              const LivenessAnalysis &liveness,
-                                                              TranslationContext &context,
-                                                              uint16_t opcode) const {
-  const uint16_t eid = inst.encoding_id();
-  auto try_rule = [&](uint16_t rule_opcode) -> ExpandResult {
-    TranslationRule key{eid,     rule_opcode, RuleAction::Expand, 0, 0, nullptr, nullptr,
-                        nullptr, nullptr};
-    auto it = std::lower_bound(expand_rules_.begin(), expand_rules_.end(), key);
-    if (it == expand_rules_.end() || it->src_encoding_id != eid || it->src_opcode != rule_opcode ||
-        !it->expand_fn)
-      return ExpandResult::not_handled();
-    return it->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, liveness, context,
-                         it->guest_layout, it->host_layout);
-  };
-
-  ExpandResult exact = try_rule(opcode);
-  if (exact.status != ExpandStatus::NotHandled)
-    return exact;
-
-  ExpandResult wildcard = try_rule(kAnyTranslationOpcode);
-  if (wildcard.status != ExpandStatus::NotHandled)
-    return wildcard;
+  const TranslationRule *rule = find_expand_rule(inst);
+  if (rule != nullptr)
+    return rule->expand_fn(inst, static_cast<uint32_t>(host_arch_), offset, source_text, liveness,
+                           context, rule->guest_layout, rule->host_layout);
   return ExpandResult::not_handled();
 }
 

@@ -274,9 +274,9 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
 
   const RegisterSet &live = live_it->second;
   const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
-  for (size_t base = first_candidate; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
-    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count) &&
-        !any_live_in_range(scratch_reserved_, RegClass::VGPR, static_cast<uint16_t>(base), count))
+  for (size_t base = util::align_up(first_candidate, static_cast<size_t>(base_alignment));
+       base + count <= REGISTER_SET_MAX_VGPRS; base += base_alignment) {
+    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
       return static_cast<uint16_t>(base);
   }
   return std::nullopt;

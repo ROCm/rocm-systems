@@ -73,16 +73,18 @@ public:
                                               const LivenessAnalysis &liveness,
                                               TranslationContext &context) const;
 
-  /// @brief Try to expand/lower an instruction using an explicit opcode key.
+  /// @brief Whether @p inst has a registered semantic expansion rule.
   ///
-  /// @details Some generated decoders split a physical encoding into multiple
-  /// encoding ids and leave the raw opcode field out of Instruction::opcode().
-  /// Callers that already recovered the raw opcode can use this overload so
-  /// semantic rule lookup still keys on the architectural operation.
-  [[nodiscard]] ExpandResult try_lower_expand_with_opcode(const Instruction &inst, uint64_t offset,
-                                                          const LivenessAnalysis &liveness,
-                                                          TranslationContext &context,
-                                                          uint16_t opcode) const;
+  /// @details A true result means the instruction may query instruction-level
+  /// liveness during try_lower_expand(). The rule can still decline expansion
+  /// after inspecting operands or payload bits.
+  [[nodiscard]] bool has_expand_rule(const Instruction &inst) const;
+  [[nodiscard]] bool has_expand_rule(uint16_t encoding_id, uint16_t opcode) const {
+    if (!has_expand_rule_encoding(encoding_id))
+      return false;
+    return std::binary_search(expand_rule_keys_.begin(), expand_rule_keys_.end(),
+                              packed_rule_key(encoding_id, opcode));
+  }
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 

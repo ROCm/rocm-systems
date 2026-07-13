@@ -12,30 +12,21 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string_view>
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
 
-struct KernelDescriptorResourceOverride {
-  uint64_t entry_text_offset = 0;
+/// @brief Architecture-neutral descriptor resource requests.
+struct KernelDescriptorResourceOptions {
+  /// @brief Minimum ordinary VGPR count requested by instruction lowering.
   uint32_t minimum_vgprs = 0;
-  uint32_t target_vgpr_count_override = 0;
-  uint32_t minimum_sgprs = 0;
-  uint32_t group_segment_fixed_size_addend = 0;
-  uint32_t private_segment_fixed_size_addend = 0;
-};
-
-/// @brief Additional descriptor resource requirements from instruction lowering.
-struct KernelDescriptorTranslationOptions {
-  uint32_t minimum_vgprs = 0;
-  uint32_t target_vgpr_count_override = 0;
+  /// @brief Minimum SGPR count requested by instruction lowering.
   uint32_t minimum_sgprs = 0;
   /// @brief Additional per-lane private bytes requested by DBT or DBI.
   uint32_t private_segment_fixed_size_addend = 0;
   /// @brief Additional workgroup LDS bytes requested by DBT or DBI.
   uint32_t group_segment_fixed_size_addend = 0;
-  std::span<const KernelDescriptorResourceOverride> kernel_overrides;
 };
 
 /// @brief Descriptor policy owned by the virtual-LDS feature.
@@ -154,16 +145,9 @@ struct KernelResourcePlan {
 
   /// @brief Encoded target SGPR allocation granule.
   uint32_t target_sgpr_granulated = 0;
-  uint32_t sgpr_spill_count = 0;
-  int16_t rdna4_grid_x_sgpr = -1;
-  int16_t rdna4_grid_yz_sgpr = -1;
 
   /// @brief Hardware LDS bytes encoded in GROUP_SEGMENT_FIXED_SIZE.
   uint32_t target_lds_size = 0;
-  uint32_t lds_spill_zone_base = 0;
-  uint32_t lds_spill_zone_bytes = 0;
-  uint32_t lds_overflow_size = 0;
-  bool needs_lds_overflow_buf = false;
 
   /// @brief Per-lane private segment size encoded in the target descriptor.
   uint32_t target_private_size = 0;
@@ -176,24 +160,7 @@ struct KernelResourcePlan {
   /// @brief True when ABI translation explicitly forces wave64 execution.
   bool force_wave64 = false;
 
-  uint8_t target_user_sgpr_count = 0;
-  uint32_t target_abi_sgpr_count = 0;
-  uint32_t target_source_sgpr_count = 0;
-  bool needs_flat_scratch_init_sgpr = false;
-  std::vector<uint32_t> user_sgpr_shuffle;
-
-  /// All kernel-entry instructions required by descriptor ABI translation.
-  /// BinaryTranslator places these words in the kernel-local .text cave and
-  /// records the final descriptor entry offset.
-  std::vector<uint32_t> prologue_words;
-
-  /// @brief Clear the target descriptor's source kernarg-preload request.
-  ///
-  /// @details GFX1250 preload is rebuilt explicitly in @c prologue_words for
-  /// RDNA4. Leaving the source descriptor bit set lets the runtime/CP treat the
-  /// redirected entry as a preload-special entry instead of the DBT prologue.
-  bool clears_kernarg_preload = false;
-
+  /// @brief Guest and host wave sizes used for resource accounting.
   uint8_t guest_wavefront_size = 64;
   uint8_t host_wavefront_size = 64;
 
