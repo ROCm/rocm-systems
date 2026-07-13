@@ -3836,19 +3836,6 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not encode exact-shadow literals");
     return std::nullopt;
   }
-  words.insert(words.end(), mov_low->begin(), mov_low->end());
-  if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, arch,
-                                        private_owner_input, errors)) {
-    errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
-    return std::nullopt;
-  }
-  if (!append_inline_shadow_epoch_field(words, options, private_epoch_offset, low_vgpr, tmp_vgpr,
-                                        arch, errors)) {
-    errors.emplace_back("ConSan MOI inline-shadow probe could not encode epoch field");
-    return std::nullopt;
-  }
-  words.insert(words.end(), mov_high->begin(), mov_high->end());
-
   for (const ConSanMoiAccessRange &range : *access_ranges) {
     const ConSanMoiLdsCellRange cell_range =
         consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
@@ -3895,6 +3882,21 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow cell offset");
         return std::nullopt;
       }
+      // Diagnostic publication uses the packed-value temporaries. Rematerialize
+      // the complete entry for each cell so a wide access cannot publish stale
+      // metadata after diagnosing an earlier cell.
+      words.insert(words.end(), mov_low->begin(), mov_low->end());
+      if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, arch,
+                                            private_owner_input, errors)) {
+        errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
+        return std::nullopt;
+      }
+      if (!append_inline_shadow_epoch_field(words, options, private_epoch_offset, low_vgpr,
+                                            tmp_vgpr, arch, errors)) {
+        errors.emplace_back("ConSan MOI inline-shadow probe could not encode epoch field");
+        return std::nullopt;
+      }
+      words.insert(words.end(), mov_high->begin(), mov_high->end());
       const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
           address_lo_vgpr, low_vgpr, old_value_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice,
           arch);

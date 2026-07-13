@@ -234,6 +234,10 @@ Full gfx950 support means:
   exact-cell addressing, the proven atomic swap, and bounded diagnostics. A
   two-wave B32 write/write control reports one exact owner-0/owner-1 conflict;
   two-wave read/read and same-owner program-order controls remain clean.
+- 2026-07-13: `IS1C` is `DONE`. A live two-wave B128 conflict exposed and fixed
+  stale packed metadata after the first cell: owner, epoch, generation, and
+  instruction fields are now rematerialized per cell. All four exact-shadow
+  entries and all four bounded diagnostics agree on the `[0,16)` conflict.
 
 ## DAG Overview
 
@@ -306,7 +310,7 @@ flowchart LR
   RR1A["RR1A: Access Record Emission"]:::done
   S6["S6: Forced-Spill Record/Replay"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::done
-  IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
+  IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
   B1B["B1B: Engine Barrier Semantics"]:::todo
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
   R1C["R1C: Owners And Transaction Tests"]:::done
@@ -368,7 +372,7 @@ flowchart LR
   SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1A["IS1A: Shadow Atomic Primitive"]:::done
   IS1B["IS1B: Single-Cell Inline Shadow"]:::done
-  IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
+  IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
   FL1A["FL1A: Group-Flat Inventory"]:::todo
   FL1B["FL1B: Group-Flat Emission"]:::todo
   FL1X["FL1X: Typed No-Forms Result"]:::todo
@@ -1350,7 +1354,7 @@ Result:
   same native patch path and visible shadow state while forbidding diagnostics.
   All resources and the report buffer are selected automatically.
 
-### IS1C: gfx950 Multi-Cell Shadow And Diagnostics - TODO
+### IS1C: gfx950 Multi-Cell Shadow And Diagnostics - DONE
 
 Goal: extend the proven single-cell path without changing the host ABI.
 
@@ -1361,8 +1365,19 @@ Work:
 
 Done criteria:
 
-- B32 and multi-cell unordered races report; read/read and barrier-ordered
-  controls remain clean.
+- B32 and multi-cell unordered races report; read/read and same-owner
+  program-order controls remain clean. Barrier-ordered engine behavior is
+  completed by downstream `B1B`.
+
+Result:
+
+- `ConSanMoiGfx950Test.InlineShadowReportsTwoWaveB128Race` requires the four
+  normalized cells of one B128 access to produce four visible exact-shadow
+  entries and the report ABI's bounded four diagnostics.
+- The live proof also verifies in logs that every cell retains the same write
+  kind, owner, generation, and instruction offset. An encoding-level unit test
+  requires packed low/high metadata to be materialized four times, preventing
+  the stale-temporary defect found during this node from recurring.
 
 ### FL1A: gfx950 Group-Flat Inventory - TODO
 

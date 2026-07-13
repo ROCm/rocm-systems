@@ -1169,6 +1169,13 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   ASSERT_TRUE(byte_index_shift);
   ASSERT_TRUE(address_add);
   ASSERT_TRUE(atomic_swap);
+  expected_publish_prefix.insert(expected_publish_prefix.end(), mov_address_lo->begin(),
+                                 mov_address_lo->end());
+  expected_publish_prefix.insert(expected_publish_prefix.end(), mov_address_hi->begin(),
+                                 mov_address_hi->end());
+  expected_publish_prefix.push_back(*start_cell_shift);
+  expected_publish_prefix.push_back(*byte_index_shift);
+  expected_publish_prefix.push_back(*address_add);
   expected_publish_prefix.insert(expected_publish_prefix.end(), mov_low->begin(), mov_low->end());
   expected_publish_prefix.insert(expected_publish_prefix.end(), owner_mask->begin(),
                                  owner_mask->end());
@@ -1179,13 +1186,6 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   expected_publish_prefix.push_back(*epoch_shift);
   expected_publish_prefix.push_back(*epoch_add);
   expected_publish_prefix.insert(expected_publish_prefix.end(), mov_high->begin(), mov_high->end());
-  expected_publish_prefix.insert(expected_publish_prefix.end(), mov_address_lo->begin(),
-                                 mov_address_lo->end());
-  expected_publish_prefix.insert(expected_publish_prefix.end(), mov_address_hi->begin(),
-                                 mov_address_hi->end());
-  expected_publish_prefix.push_back(*start_cell_shift);
-  expected_publish_prefix.push_back(*byte_index_shift);
-  expected_publish_prefix.push_back(*address_add);
   expected_publish_prefix.insert(expected_publish_prefix.end(), atomic_swap->begin(),
                                  atomic_swap->end());
   expected_publish_prefix.push_back(0xBFC00000u);
@@ -1494,6 +1494,18 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(atomic_swap);
   EXPECT_EQ(count_subsequence(text_words, *atomic_swap), 4u);
+
+  const auto mov_shadow_low = build_v_mov_b32_e64_literal(
+      /*vdst=*/18,
+      static_cast<uint32_t>(ConSanMoiShadowAccessKind::Write) |
+          (1u << consan_moi_exact_shadow::generation_shift),
+      ROCJITSU_CODE_ARCH_RDNA4);
+  const auto mov_shadow_high = build_v_mov_b32_e64_literal(
+      /*vdst=*/19, /*literal=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(mov_shadow_low);
+  ASSERT_TRUE(mov_shadow_high);
+  EXPECT_EQ(count_subsequence(text_words, *mov_shadow_low), 4u);
+  EXPECT_EQ(count_subsequence(text_words, *mov_shadow_high), 4u);
 
   const auto mov_cell_offset =
       build_v_mov_b32_e64_literal(/*vdst=*/20, /*literal=*/24, ROCJITSU_CODE_ARCH_RDNA4);
