@@ -207,6 +207,11 @@ Full gfx950 support means:
   bounded immediate checker now assigns successful sampled patches sequential
   slots (instead of aliasing every patch), compares slot one against slot zero,
   and reports exactly one same-cell two-owner conflict on gfx950.
+- 2026-07-13: `SA1C` is `DONE`. With immediate checking disabled, the sampled
+  host scan consumes the same two-wave/same-cell seed used by `RR1B`, sees two
+  current-generation entries from distinct owners, and reports exactly one
+  overlap conflict with zero immediate conflicts. This isolates the host
+  oracle and directly agrees with record/replay on the same native kernel.
 
 ## DAG Overview
 
@@ -278,7 +283,7 @@ flowchart LR
   S5["S5: Target-Dispatched Spill Backend"]:::done
   RR1A["RR1A: Access Record Emission"]:::done
   S6["S6: Forced-Spill Record/Replay"]:::done
-  SA1C["SA1C: Sampled Host Oracle"]:::todo
+  SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
@@ -338,7 +343,7 @@ flowchart LR
   RR1B["RR1B: Record/Replay Live Semantics"]:::done
   SA1A["SA1A: Static Sampled Publication"]:::done
   SA1B["SA1B: Runtime Selection And Check"]:::done
-  SA1C["SA1C: Sampled Host Oracle"]:::todo
+  SA1C["SA1C: Sampled Host Oracle"]:::done
   IS1A["IS1A: Shadow Atomic Primitive"]:::todo
   IS1B["IS1B: Single-Cell Inline Shadow"]:::todo
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
@@ -1229,7 +1234,7 @@ Done criteria:
 - Deterministic controls select and reject the expected owners, and a selected
   conflict produces an immediate signal.
 
-### SA1C: gfx950 Sampled Host Oracle - TODO
+### SA1C: gfx950 Sampled Host Oracle - DONE
 
 Goal: retain host scan as the broader sampled oracle and compare it with the
 record/replay reference.
@@ -1238,6 +1243,14 @@ Work:
 
 - Decode generation-qualified entries and ignore stale generations.
 - Compare overlap and owner decisions with RR1B on the same seeds.
+
+Result:
+
+- The isolated host-oracle CTest disables the in-kernel checker, requires two
+  visible current-generation entries and one host conflict, and observes zero
+  immediate conflicts.
+- It reuses the exact `RR1B` two-wave race kernel, so owner/range overlap
+  decisions are compared without changing the workload seed.
 
 Done criteria:
 

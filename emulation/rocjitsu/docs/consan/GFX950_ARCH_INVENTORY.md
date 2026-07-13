@@ -39,7 +39,7 @@ standalone CDNA4 scratch tests use the same TheRock distribution under
 | `consan_moi.cpp`: SGPR allocation helpers | groups of 8 and limit 106 | CDNA4 ordinary user SGPR geometry and special-state split | R1A/R1B |
 | `consan_moi.cpp`: owner derivation | RDNA4 lane count plus TTMP/HW_ID inputs | CDNA4 packed workitem ID plus AQL workgroup dimensions; reject HW_ID and TTMP as standard sources | I1B/I1C |
 | `consan_moi.cpp`: inline-shadow backend | blanket RDNA4 gate; gfx12 FLAT atomics/waits | target capability after CDNA4 atomic publication | IS1A-IS1C |
-| `consan_moi.cpp`: sampled backend | wave owner and VCC/SCC save convention | Static publication, runtime owner selection, VCC preservation, sequential slots, and bounded immediate conflict checking are proven; host oracle remains | SA1A-SA1B done; SA1C |
+| `consan_moi.cpp`: sampled backend | wave owner and VCC/SCC save convention | Static publication, runtime selection, bounded immediate checking, and the generation-qualified host oracle agree with record/replay on gfx950 | SA1A-SA1C done |
 | `consan_moi.cpp`: access-record backend | blanket RDNA4 gate and gfx12 global stores | target capability after CDNA4 publication/identity | RR1A/RR1B |
 | `consan_moi.cpp`: owner/private-epoch prologues | RDNA4 state and direct gfx12 scratch accesses | target capability; use SpillManager CDNA4 backend | I1B/S5 |
 | `consan_moi.cpp`: barrier record/epoch backends | blanket RDNA4 gate | CDNA4 barrier decode, pre-wait, then engine policy | B1A/B1B |
