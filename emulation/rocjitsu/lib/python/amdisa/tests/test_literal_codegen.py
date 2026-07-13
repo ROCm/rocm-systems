@@ -347,10 +347,12 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(ssrc0.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(src2.read_scalar(wf))' in body
-    assert 'std::bit_cast<float>(ssrc1.read_scalar(wf))' in body
-    assert body.index('src2.read_scalar(wf)') < body.index('ssrc1.read_scalar(wf)')
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(src2))' in body
+    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
+    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(src2)') < body.index(
+        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
+    )
 
 
 def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
@@ -384,11 +386,11 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'ssrc0.read_scalar64(wf)' in body
-    assert 'ssrc1.read_scalar64(wf)' in body
-    assert 'sdst.write_scalar64(wf, result);' in body
-    assert 'ssrc0.read_scalar(wf)' not in body
-    assert 'ssrc1.read_scalar(wf)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
+    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
 
 
 def test_literal_fma_mnemonics_are_not_shared_across_isa_layouts():

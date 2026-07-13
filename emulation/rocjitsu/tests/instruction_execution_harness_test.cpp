@@ -663,8 +663,8 @@ TEST(Cdna4Vop3Test, CmpClassF16WritesWave64UpperMaskDword) {
 
     const uint32_t vb = wf->vgpr_alloc().base;
     const uint32_t sb = wf->sgpr_alloc().base;
-    auto &src0 = cu->vgpr_reg<64>(vb + 0);
-    auto &src1 = cu->vgpr_reg<64>(vb + 1);
+    auto &src0 = cu->raw_vgpr_reg<64>(vb + 0);
+    auto &src1 = cu->raw_vgpr_reg<64>(vb + 1);
 
     uint64_t active_mask = 0;
     uint64_t expected_mask = 0;

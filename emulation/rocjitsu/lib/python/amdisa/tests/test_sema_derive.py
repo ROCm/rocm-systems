@@ -415,9 +415,9 @@ class TestDeriveScalarBitcmp:
         )
         ctx = LoweringContext(exec_model=block.pragma, operand_map=omap)
         cpp = lower_sema_block(block, ctx)
-        assert 'ssrc0.read_scalar64(wf)' in cpp
-        assert 'ssrc1.read_scalar(wf)' in cpp
-        assert 'ssrc1.read_scalar64(wf)' not in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' in cpp
+        assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' not in cpp
         assert '& 63' in cpp
 
 
@@ -986,10 +986,13 @@ class TestDeriveVectorUnary:
         assert encode_helper in cpp
         assert 'util::e8m0_to_f32' in cpp
         assert '((inst_.opsel & 0x3u) * 8u)' in cpp
-        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' not in cpp
+        assert (
+            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
+            not in cpp
+        )
         assert 'read_scaled_src(index) * scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
-        assert 'wf.cu().write_vgpr' in cpp
+        assert 'amdgpu::RegisterAccess(wf.cu()).write_vgpr' in cpp
 
     @pytest.mark.parametrize(
         ('name', 'op', 'read_helper', 'encode_helper'),
@@ -1021,7 +1024,10 @@ class TestDeriveVectorUnary:
         )
         assert read_helper in cpp
         assert encode_helper in cpp
-        assert 'std::bit_cast<float>(src1.read_lane(wf, lane))' in cpp
+        assert (
+            'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
+            in cpp
+        )
         assert 'util::e8m0_to_f32' not in cpp
         assert 'pack_scaled_dst(index' in cpp
         assert 'read_scaled_input(index) / scale' in cpp
@@ -1072,10 +1078,12 @@ class TestDeriveVectorBinop:
 
                 cpp = lower_sema_block(block)
                 assert (
-                    f'static_cast<{cpp_type}>(inst.src0.read_lane(wf, lane))' not in cpp
+                    f'static_cast<{cpp_type}>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))'
+                    not in cpp
                 )
                 assert (
-                    f'static_cast<{cpp_type}>(inst.src1.read_lane(wf, lane))' not in cpp
+                    f'static_cast<{cpp_type}>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))'
+                    not in cpp
                 )
 
     def test_lshlrev(self):
@@ -1204,7 +1212,8 @@ class TestDeriveVectorTernary:
 
         assert '::rocjitsu::amdgpu::lshl_masked' in cpp
         assert (
-            'inst.src0.read_lane(wf, lane) << inst.src1.read_lane(wf, lane)' not in cpp
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane) << amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane)'
+            not in cpp
         )
 
     def test_i24_mad_lowers_through_unsigned_helper(self):
@@ -1225,15 +1234,24 @@ class TestDeriveVectorTernary:
             'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>('
             not in cpp
         )
-        assert 'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *' not in cpp
-        assert 'static_cast<uint16_t>(inst.src1.read_lane(wf, lane))' not in cpp
-        assert 'static_cast<uint16_t>(inst.src2.read_lane(wf, lane))' not in cpp
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) *'
+            not in cpp
+        )
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane))'
+            not in cpp
+        )
+        assert (
+            'static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane))'
+            not in cpp
+        )
         compact_cpp = ''.join(cpp.split())
         assert (
             '::rocjitsu::amdgpu::mad_lo_u16('
-            'inst.src0.read_lane(wf,lane),'
-            'inst.src1.read_lane(wf,lane),'
-            'inst.src2.read_lane(wf,lane))' in compact_cpp
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src0,lane),'
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src1,lane),'
+            'amdgpu::RegisterAccess(wf).read_lane(inst.src2,lane))' in compact_cpp
         )
 
     def test_signed_bfe_keeps_braced_one_literal(self):
@@ -1287,11 +1305,20 @@ class TestDeriveVectorCmp:
 
         cpp = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in cpp
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in cpp
+        assert (
+            '((inst_.opsel & 0x1u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(src0, lane) >> 16)'
+            in cpp
+        )
+        assert (
+            '((inst_.opsel & 0x2u) != 0 ? (amdgpu::RegisterAccess(wf).read_lane(src1, lane) >> 16)'
+            in cpp
+        )
         assert 'vcc &= ~(1ULL << lane)' not in cpp
-        assert 'vdst.write_scalar(wf, static_cast<uint32_t>(vcc));' in cpp
-        assert 'vdst.write_scalar64(wf, vcc);' in cpp
+        assert (
+            'amdgpu::RegisterAccess(wf).write_scalar(vdst, static_cast<uint32_t>(vcc));'
+            in cpp
+        )
+        assert 'amdgpu::RegisterAccess(wf).write_scalar64(vdst, vcc);' in cpp
 
 
 class TestDeriveVectorCmpx:
@@ -1990,8 +2017,14 @@ class TestDerivePacked:
         assert 'uint32_t lo = (inst.inst_.op_sel & 1)' in cpp
         assert 'uint32_t hi = (inst.inst_.op_sel & 2)' in cpp
         assert 'uint32_t hi = (inst.inst_.op_sel_hi & 2)' not in cpp
-        assert 'uint64_t s0_pair_w = inst.src0.read_lane64(wf, lane)' in cpp
-        assert 'uint64_t s1_pair_w = inst.src1.read_lane64(wf, lane)' in cpp
+        assert (
+            'uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane)'
+            in cpp
+        )
+        assert (
+            'uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane)'
+            in cpp
+        )
         assert 'encoding_value_ >= 256' not in cpp
 
 

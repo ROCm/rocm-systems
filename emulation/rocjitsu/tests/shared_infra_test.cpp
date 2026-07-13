@@ -73,6 +73,7 @@
 
 #include <gtest/gtest.h>
 
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -3170,7 +3171,7 @@ TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
   gfx1250::Operand flat_scratch_base(
       64, gfx1250::OperandType::OPR_SRC,
       static_cast<int>(gfx1250::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
-  ASSERT_EQ(flat_scratch_base.read_scalar64(*wf), kScratchBase);
+  ASSERT_EQ(amdgpu::RegisterAccess(*wf).read_scalar64(flat_scratch_base), kScratchBase);
 
   const uint64_t private_offsets[] = {0x10, 0x14, kPrivateSegmentSize + 0x20};
   uint32_t vbase = wf->vgpr_alloc().base;
