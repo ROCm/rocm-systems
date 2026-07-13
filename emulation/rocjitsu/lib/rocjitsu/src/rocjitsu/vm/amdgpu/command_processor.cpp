@@ -1043,7 +1043,7 @@ static const uint8_t *find_elf_base(const uint8_t *ptr, const uint8_t *limit) {
   return nullptr;
 }
 
-void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
+bool CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt,
                                           const HwQueue &queue, uint64_t pkt_addr, HwQueueState &qs,
                                           ClusterDispatchShape cluster_shape) {
   bool host_accessible = queue.host_accessible;
@@ -1113,16 +1113,24 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   const uint64_t aligned_lds =
       (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
   if (dp.wgp_mode && placement_lds_capacity == 0) {
-    throw std::runtime_error(
-        "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured");
+    constexpr uint32_t kInvalidGroupMemoryException = 17;
+    constexpr std::string_view message =
+        "WGP-mode kernel dispatch requires a sibling-CU pair, but none is configured";
+    if (report_queue_exception(queue, qs, kInvalidGroupMemoryException, message))
+      return false;
+    throw std::runtime_error(std::string(message));
   }
   if (aligned_lds > addressable_lds_limit) {
-    throw std::runtime_error(std::format(
+    std::string message = std::format(
         "kernel dispatch requests {} bytes of LDS ({} bytes after alignment) in {} mode, but "
         "the per-workgroup addressable LDS limit is {} bytes ({} bytes aggregate for "
         "placement)",
         dp.group_segment_fixed_size, aligned_lds, dp.wgp_mode ? "WGP" : "CU", addressable_lds_limit,
-        placement_lds_capacity));
+        placement_lds_capacity);
+    constexpr uint32_t kInvalidGroupMemoryException = 17;
+    if (report_queue_exception(queue, qs, kInvalidGroupMemoryException, message))
+      return false;
+    throw std::runtime_error(message);
   }
 
   // For KFD dispatches, provide pointers the kernel may need via user SGPRs.
@@ -1246,10 +1254,46 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   });
 
   qs.entries.push_back(std::move(dp));
+  return true;
+}
+
+bool CommandProcessor::report_queue_exception(const HwQueue &queue, HwQueueState &qs,
+                                              uint32_t exception_code, std::string_view message) {
+  // KFD puts HsaUserContextSaveAreaHeader at the start of the CWSR allocation.
+  // Keep these ABI offsets local rather than depending on libhsakmt's private
+  // headers: six uint32_t fields precede ErrorReason, followed by ErrorEventId.
+  constexpr uint64_t kErrorReasonOffset = 24;
+  constexpr uint64_t kErrorEventIdOffset = 32;
+  constexpr uint32_t kFirstQueueException = 1;
+  constexpr uint32_t kLastQueueException = 64;
+
+  if (!memory_ || queue.context_save_restore_va == 0 || exception_code < kFirstQueueException ||
+      exception_code > kLastQueueException)
+    return false;
+
+  uint64_t error_reason_va =
+      read_gpu_u64(queue.context_save_restore_va + kErrorReasonOffset, queue.process_id);
+  uint32_t error_event_id =
+      memory_->read32(queue.context_save_restore_va + kErrorEventIdOffset, queue.process_id);
+  if (error_reason_va == 0 || error_event_id == 0)
+    return false;
+
+  const uint64_t exception_mask = uint64_t{1} << (exception_code - 1);
+  memory_->write64(error_reason_va, exception_mask, queue.process_id);
+  qs.status = HwQueueState::Status::BLOCKED;
+
+  util::Logger::warn("QUEUE_EXCEPTION: pid=", queue.process_id, " qid=", queue.queue_id,
+                     " code=", exception_code, " mask=0x", std::hex, exception_mask, std::dec,
+                     " event_id=", error_event_id, ": ", message);
+  if (interrupt_cb_)
+    interrupt_cb_(queue.process_id, error_event_id);
+  return true;
 }
 
 void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
   if (!memory_)
+    return;
+  if (qs.status == HwQueueState::Status::BLOCKED)
     return;
   if (queue.host_accessible ? (queue.doorbell_base == nullptr) : (queue.doorbell_va == 0))
     return;
@@ -1334,7 +1378,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
     }
 
     if (pkt_type == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      process_aql_packet(pkt, queue, pkt_addr, qs);
+      if (!process_aql_packet(pkt, queue, pkt_addr, qs)) {
+        process_limit = read_idx;
+        break;
+      }
     } else if (pkt_type == HSA_PACKET_TYPE_BARRIER_AND || pkt_type == HSA_PACKET_TYPE_BARRIER_OR) {
       constexpr uint32_t DEP_OFF = 8;
       constexpr uint32_t SIG_OFF = 56;
@@ -1433,7 +1480,10 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         cluster_shape.size_x = ext.cluster_size_x;
         cluster_shape.size_y = ext.cluster_size_y;
         cluster_shape.size_z = ext.cluster_size_z;
-        process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape);
+        if (!process_aql_packet(dispatch, queue, pkt_addr, qs, cluster_shape)) {
+          process_limit = read_idx;
+          break;
+        }
       } else {
         constexpr uint32_t SIG_OFF = 56;
         uint64_t sig = 0;

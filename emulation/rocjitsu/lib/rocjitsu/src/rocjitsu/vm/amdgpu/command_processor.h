@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -70,6 +71,9 @@ struct HwQueue {
   bool host_accessible = false;
   bool is_sdma = false;
   uint64_t queue_desc_va = 0;
+  /// GPU VA of the KFD context-save area. Its header carries the ROCR
+  /// exception signal and event ID used to report asynchronous queue errors.
+  uint64_t context_save_restore_va = 0;
 };
 
 enum class SdmaPacketDialect {
@@ -212,9 +216,15 @@ private:
   void flush_gpu_caches();
 
   /// @brief Parse an AQL dispatch packet, read its kernel descriptor, and create a DispatchEntry.
-  void process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
+  /// @returns true when the packet was accepted, false when a KFD queue exception was reported.
+  bool process_aql_packet(const hsa_kernel_dispatch_packet_t &pkt, const HwQueue &queue,
                           uint64_t pkt_addr, HwQueueState &qs,
                           ClusterDispatchShape cluster_shape = {});
+
+  /// @brief Report a CP queue exception through KFD's CWSR error signal.
+  /// @returns true when the queue has exception metadata and the error was reported.
+  bool report_queue_exception(const HwQueue &queue, HwQueueState &qs, uint32_t exception_code,
+                              std::string_view message);
 
   rocr::llvm::amdhsa::kernel_descriptor_t
   read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid, bool host_accessible = false);

@@ -1264,8 +1264,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                 args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
                 args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
   // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-  if (!hw.is_sdma)
+  if (!hw.is_sdma) {
     hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
+    hw.context_save_restore_va = args->ctx_save_restore_address;
+  }
   if (hw.is_sdma && !daemon_mode_) {
     auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
     auto *rptr = reinterpret_cast<uint64_t *>(args->read_pointer_address);

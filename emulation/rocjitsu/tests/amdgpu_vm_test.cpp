@@ -587,6 +587,40 @@ TEST(RdnaDispatchTest, WgpModeRejects128KiBPerWorkgroupRequest) {
   }
 }
 
+TEST(RdnaDispatchTest, OversizedLdsReportsKfdQueueException) {
+  constexpr uint64_t kContextSaveRestoreAddr = 0xF0020000ULL;
+  constexpr uint64_t kErrorReasonAddr = 0xF0021000ULL;
+  constexpr uint32_t kErrorEventId = 7;
+  constexpr uint64_t kInvalidGroupMemoryMask = uint64_t{1} << (17 - 1);
+  const uint32_t code[] = {SOPP_S_ENDPGM};
+
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, 0, 4, 0, 128 * 1024,
+                               /*wgp_mode=*/true);
+  f.mem()->write64(kContextSaveRestoreAddr + 24, kErrorReasonAddr);
+  f.mem()->write32(kContextSaveRestoreAddr + 32, kErrorEventId);
+  f.mem()->write64(kErrorReasonAddr, 0);
+
+  uint32_t reported_process_id = std::numeric_limits<uint32_t>::max();
+  uint32_t reported_event_id = 0;
+  f.cp()->set_interrupt_callback([&](uint32_t process_id, uint32_t event_id) {
+    reported_process_id = process_id;
+    reported_event_id = event_id;
+  });
+  test::AqlQueue queue(
+      f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+      test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+      test::AqlQueue::DEFAULT_DOORBELL_ADDR, /*process_id=*/0, kContextSaveRestoreAddr);
+  queue.dispatch(ko, 64, 64);
+
+  EXPECT_NO_THROW((void)f.engine->step());
+  EXPECT_EQ(f.mem()->read64(kErrorReasonAddr), kInvalidGroupMemoryMask);
+  EXPECT_EQ(reported_process_id, 0u);
+  EXPECT_EQ(reported_event_id, kErrorEventId);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
+  EXPECT_EQ(f.cp()->dispatched_count(), 0u);
+}
+
 TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
   VmFixture f("rdna4", 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
