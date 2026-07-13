@@ -1437,3 +1437,12 @@ contract:
   Contract_KernelObjectAttributes_GetParamInfo_ReturnsFirstParamLayout:
     <<: *level_0
     tags: [kernel_object_attributes]
+  Contract_LibraryFile_LoadFromFile_ResolvesKnownKernel:
+    <<: *level_0
+    tags: [library_file]
+  Contract_LibraryFile_LoadFromFile_MissingFile_IsRejected:
+    <<: *level_0
+    tags: [library_file]
+  Contract_LibraryFile_GetManaged_UnknownSymbol_IsRejected:
+    <<: *level_0
+    tags: [library_file]
