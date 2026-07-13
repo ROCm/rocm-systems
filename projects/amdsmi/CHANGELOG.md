@@ -74,7 +74,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
+- **Reworked `amd-smi` CLI exit codes for failed commands**.
+  - Errors now exit with distinct positive codes (192-206, 255) instead of negative
+    values or a generic `sys.exit(1)`, and error messages are written to `stderr`.
+  - Library failures surface the underlying `AMDSMI_STATUS_*` code as the exit code.
+  - `set` and `reset` operations now report a non-zero exit code when any sub-operation
+    fails, instead of printing the error and exiting `0`.
+  - Scripts that checked for the previous negative exit codes must be updated.
+
+- **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
   - Human-readable output is unchanged, since it uppercases all keys.
 
