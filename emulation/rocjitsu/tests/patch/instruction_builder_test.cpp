@@ -173,6 +173,45 @@ TEST(InstructionBuilder, BuildSplitScratchWaits) {
   EXPECT_FALSE(build_s_wait_loadcnt0(ROCJITSU_CODE_ARCH_CDNA4));
 }
 
+TEST(InstructionBuilder, BuildCdna4AddressFreeScratchB32) {
+  const auto store = build_cdna4_address_free_scratch_store_b32(
+      /*vsrc=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load = build_cdna4_address_free_scratch_load_b32(
+      /*vdst=*/7, /*byte_offset=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(store);
+  ASSERT_TRUE(load);
+  EXPECT_EQ(*store, (std::array<uint32_t, 2>{0xdc704004u, 0x007f0700u}));
+  EXPECT_EQ(*load, (std::array<uint32_t, 2>{0xdc504004u, 0x077f0000u}));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> store_inst(decoder->decode(store->data()));
+  std::unique_ptr<Instruction> load_inst(decoder->decode(load->data()));
+  ASSERT_NE(store_inst, nullptr);
+  ASSERT_NE(load_inst, nullptr);
+  EXPECT_EQ(store_inst->mnemonic(), "scratch_store_dword");
+  EXPECT_EQ(load_inst->mnemonic(), "scratch_load_dword");
+  EXPECT_EQ(store_inst->size(), 8u);
+  EXPECT_EQ(load_inst->size(), 8u);
+
+  EXPECT_EQ(build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4), 0xbf8c0f70u);
+  EXPECT_FALSE(build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_RDNA4));
+}
+
+TEST(InstructionBuilder, Cdna4AddressFreeScratchOffsetBoundary) {
+  EXPECT_TRUE(build_cdna4_address_free_scratch_store_b32(
+      255, kMaxCdna4AddressFreeScratchDwordOffset, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_TRUE(build_cdna4_address_free_scratch_load_b32(255, kMaxCdna4AddressFreeScratchDwordOffset,
+                                                        ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(
+      0, kMaxCdna4AddressFreeScratchPrivateBytes, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_load_b32(0, kMaxCdna4AddressFreeScratchPrivateBytes,
+                                                         ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(0, 2, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_load_b32(0, 2, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_cdna4_address_free_scratch_store_b32(0, 0, ROCJITSU_CODE_ARCH_RDNA4));
+}
+
 TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
   constexpr uint16_t kDst = 4;
   constexpr uint16_t kSrc = 8;
@@ -215,8 +254,6 @@ TEST(InstructionBuilder, BuildVLshlrevB32E32) {
       build_v_lshlrev_b32_e32(/*vdst=*/10, /*src0=*/512, /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_lshlrev_b32_e32(/*vdst=*/10, scalar_positive_inline_u32(16),
                                        /*vsrc1=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_lshlrev_b32_e32(/*vdst=*/10, scalar_positive_inline_u32(16),
-                                       /*vsrc1=*/10, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVReadfirstlaneB32) {
@@ -232,7 +269,6 @@ TEST(InstructionBuilder, BuildVReadfirstlaneB32) {
 
   EXPECT_FALSE(build_v_readfirstlane_b32(/*sdst=*/128, /*vsrc=*/8, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_readfirstlane_b32(/*sdst=*/20, /*vsrc=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_readfirstlane_b32(/*sdst=*/20, /*vsrc=*/8, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildSGetregB32) {
@@ -286,8 +322,6 @@ TEST(InstructionBuilder, BuildVMbcntLaneIdSequence) {
                                         ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(
       build_v_mbcnt_hi_u32_b32(/*vdst=*/13, /*src0=*/0xC1, /*src1=*/512, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_mbcnt_hi_u32_b32(/*vdst=*/13, /*src0=*/0xC1, vector_source_vgpr(13),
-                                        ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVCmpEqU32E32Vcc) {
@@ -305,8 +339,6 @@ TEST(InstructionBuilder, BuildVCmpEqU32E32Vcc) {
   EXPECT_FALSE(build_v_cmp_eq_u32_e32_vcc(/*src0=*/512, /*vsrc1=*/13, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), /*vsrc1=*/256,
                                           ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), /*vsrc1=*/13,
-                                          ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVAddNcU32E32) {
@@ -327,8 +359,6 @@ TEST(InstructionBuilder, BuildVAddNcU32E32) {
       build_v_add_nc_u32_e32(/*vdst=*/13, /*src0=*/512, /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_add_nc_u32_e32(/*vdst=*/13, vector_source_vgpr(13), /*vsrc1=*/256,
                                       ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_add_nc_u32_e32(/*vdst=*/13, vector_source_vgpr(13), /*vsrc1=*/14,
-                                      ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVAndB32E32) {
@@ -358,14 +388,10 @@ TEST(InstructionBuilder, BuildVAndB32E32) {
       build_v_and_b32_e32(/*vdst=*/3, /*src0=*/512, /*vsrc1=*/5, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_and_b32_e32(/*vdst=*/3, vector_source_vgpr(4), /*vsrc1=*/256,
                                    ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_and_b32_e32(/*vdst=*/3, vector_source_vgpr(4), /*vsrc1=*/5,
-                                   ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_v_and_b32_e32_literal(/*vdst=*/256, /*literal=*/0x1ff8, /*vsrc1=*/4,
                                            ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_and_b32_e32_literal(/*vdst=*/3, /*literal=*/0x1ff8, /*vsrc1=*/256,
                                            ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_and_b32_e32_literal(/*vdst=*/3, /*literal=*/0x1ff8, /*vsrc1=*/4,
-                                           ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVCmpGtU32E32Vcc) {
@@ -383,8 +409,6 @@ TEST(InstructionBuilder, BuildVCmpGtU32E32Vcc) {
   EXPECT_FALSE(build_v_cmp_gt_u32_e32_vcc(/*src0=*/512, /*vsrc1=*/10, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(4), /*vsrc1=*/256,
                                           ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(4), /*vsrc1=*/10,
-                                          ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildVCmpNeU32E32Vcc) {
@@ -402,8 +426,6 @@ TEST(InstructionBuilder, BuildVCmpNeU32E32Vcc) {
   EXPECT_FALSE(build_v_cmp_ne_u32_e32_vcc(/*src0=*/512, /*vsrc1=*/2, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(
       build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(
-      build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(1), /*vsrc1=*/2, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildExecNarrowingScalarOps) {
@@ -427,10 +449,8 @@ TEST(InstructionBuilder, BuildExecNarrowingScalarOps) {
 
   EXPECT_FALSE(build_s_and_saveexec_b64(/*sdst=*/127, /*ssrc0=*/106, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/106, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(build_s_mov_b64(/*sdst=*/127, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_s_mov_b64(/*sdst=*/126, /*ssrc0=*/30, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildSccSnapshotAndRestoreOps) {
@@ -458,12 +478,8 @@ TEST(InstructionBuilder, BuildSccSnapshotAndRestoreOps) {
                                    scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_s_cselect_b32(/*sdst=*/20, /*ssrc0=*/256, scalar_positive_inline_u32(0),
                                    ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_s_cselect_b32(/*sdst=*/20, scalar_positive_inline_u32(1),
-                                   scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_FALSE(
       build_s_cmp_lg_u32(/*ssrc0=*/256, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(
-      build_s_cmp_lg_u32(/*ssrc0=*/20, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildSCbranchVccz) {
@@ -480,7 +496,6 @@ TEST(InstructionBuilder, BuildSCbranchVccz) {
   const auto backwards = build_s_cbranch_vccz(/*offset_dwords=*/-1, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(backwards);
   EXPECT_EQ(*backwards, 0xBFA3FFFFu);
-  EXPECT_FALSE(build_s_cbranch_vccz(/*offset_dwords=*/3, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildFlatStoreB32) {
@@ -502,7 +517,6 @@ TEST(InstructionBuilder, BuildFlatStoreB32) {
       build_flat_store_b32_vaddr_vsrc(/*vaddr=*/256, /*vsrc=*/10, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(
       build_flat_store_b32_vaddr_vsrc(/*vaddr=*/8, /*vsrc=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_flat_store_b32_vaddr_vsrc(/*vaddr=*/8, /*vsrc=*/10, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildFlatLoadB32) {
@@ -523,7 +537,6 @@ TEST(InstructionBuilder, BuildFlatLoadB32) {
   EXPECT_FALSE(
       build_flat_load_b32_vaddr_vdst(/*vaddr=*/256, /*vdst=*/10, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_FALSE(build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/256, ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_flat_load_b32_vaddr_vdst(/*vaddr=*/8, /*vdst=*/10, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildFlatAtomicAddU32ReturnDeviceScope) {
@@ -554,9 +567,6 @@ TEST(InstructionBuilder, BuildFlatAtomicAddU32ReturnDeviceScope) {
   EXPECT_FALSE(build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true, /*scope=*/4,
       ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/10, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(InstructionBuilder, BuildFlatAtomicSwapB64ReturnDeviceScope) {
@@ -587,9 +597,71 @@ TEST(InstructionBuilder, BuildFlatAtomicSwapB64ReturnDeviceScope) {
   EXPECT_FALSE(build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
       /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/12, /*return_old_value=*/true, /*scope=*/4,
       ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_FALSE(build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
-      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/12, /*return_old_value=*/true, /*scope=*/2,
-      ROCJITSU_CODE_ARCH_CDNA4));
+}
+
+TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
+  const auto lshl =
+      build_v_lshlrev_b32_e32(10, scalar_positive_inline_u32(3), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto readfirst = build_v_readfirstlane_b32(20, 8, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mbcnt_lo =
+      build_v_mbcnt_lo_u32_b32(13, 0xC1, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mbcnt_hi =
+      build_v_mbcnt_hi_u32_b32(13, 0xC1, vector_source_vgpr(13), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cmp_eq =
+      build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cmp_ne =
+      build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto cmp_gt =
+      build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(7), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto add = build_v_add_nc_u32_e32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto bit_and =
+      build_v_and_b32_e32(10, scalar_positive_inline_u32(7), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(lshl && readfirst && mbcnt_lo && mbcnt_hi && cmp_eq && cmp_ne && cmp_gt && add &&
+              bit_and);
+  EXPECT_EQ(*lshl, 0x24140683u);
+  EXPECT_EQ(*readfirst, 0x7e280508u);
+  EXPECT_EQ(*mbcnt_lo, (std::array<uint32_t, 2>{0xd28c000du, 0x000100c1u}));
+  EXPECT_EQ(*mbcnt_hi, (std::array<uint32_t, 2>{0xd28d000du, 0x00021ac1u}));
+  EXPECT_EQ(*cmp_eq, 0x7d940680u);
+  EXPECT_EQ(*cmp_ne, 0x7d9a0702u);
+  EXPECT_EQ(*cmp_gt, 0x7d980687u);
+  EXPECT_EQ(*add, 0x68140702u);
+  EXPECT_EQ(*bit_and, 0x26140687u);
+
+  const auto literal = build_v_mov_b32_e64_literal(10, 0x12345678u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto store = build_flat_store_b32_vaddr_vsrc(2, 4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load = build_flat_load_b32_vaddr_vdst(2, 4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto atomic_add =
+      build_flat_atomic_add_u32_vaddr_vsrc_vdst(2, 4, 5, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto atomic_swap =
+      build_flat_atomic_swap_b64_vaddr_vsrc_vdst(2, 4, 6, true, 2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(literal && store && load && atomic_add && atomic_swap);
+  EXPECT_EQ(*literal, (std::vector<uint32_t>{0x7e1402ffu, 0x12345678u}));
+  EXPECT_EQ(*store, (std::vector<uint32_t>{0xdc700000u, 0x00000402u}));
+  EXPECT_EQ(*load, (std::vector<uint32_t>{0xdc500000u, 0x04000002u}));
+  EXPECT_EQ(*atomic_add, (std::vector<uint32_t>{0xdd090000u, 0x05000402u}));
+  EXPECT_EQ(*atomic_swap, (std::vector<uint32_t>{0xdd810000u, 0x06000402u}));
+
+  const auto save_exec = build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto restore_exec = build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto save_scc = build_s_cselect_b32(
+      20, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto restore_scc =
+      build_s_cmp_lg_u32(20, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto branch = build_s_cbranch_vccz(1, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(save_exec && restore_exec && save_scc && restore_scc && branch);
+  EXPECT_EQ(*save_exec, 0xbe942016u);
+  EXPECT_EQ(*restore_exec, 0xbe940116u);
+  EXPECT_EQ(*save_scc, 0x85148081u);
+  EXPECT_EQ(*restore_scc, 0xbf078014u);
+  EXPECT_EQ(*branch, 0xbf860001u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto *words : {&*literal, &*store, &*load, &*atomic_add, &*atomic_swap}) {
+    std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
+    ASSERT_NE(inst, nullptr);
+  }
 }
 
 } // namespace

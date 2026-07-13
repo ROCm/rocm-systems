@@ -447,7 +447,7 @@ std::optional<uint32_t> SpillManager::offset_for(RegisterRef reg) const {
 std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager,
                                                            uint16_t vgpr_base, uint16_t vgpr_count,
                                                            rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vgpr_count == 0 ||
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vgpr_count == 0 ||
       static_cast<uint32_t>(vgpr_base) + vgpr_count > REGISTER_SET_MAX_VGPRS) {
     return std::nullopt;
   }
@@ -455,12 +455,17 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
   SpillManager planned_manager = manager;
   const auto first_offset =
       planned_manager.allocate_slots(RegisterRef{RegClass::VGPR, vgpr_base, 1}, vgpr_count);
-  if (!first_offset || planned_manager.total_private_bytes() > kMaxAddressFreeScratchPrivateBytes) {
+  const uint32_t max_private_bytes = arch == ROCJITSU_CODE_ARCH_CDNA4
+                                         ? kMaxCdna4AddressFreeScratchPrivateBytes
+                                         : kMaxAddressFreeScratchPrivateBytes;
+  if (!first_offset || planned_manager.total_private_bytes() > max_private_bytes) {
     return std::nullopt;
   }
 
-  const auto wait_store = build_s_wait_storecnt0(arch);
-  const auto wait_load = build_s_wait_loadcnt0(arch);
+  const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                           : build_s_wait_storecnt0(arch);
+  const auto wait_load = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                          : build_s_wait_loadcnt0(arch);
   if (!wait_store || !wait_load)
     return std::nullopt;
 
@@ -475,13 +480,22 @@ std::optional<VgprSpillSequence> build_vgpr_spill_sequence(SpillManager &manager
     const auto offset = planned_manager.offset_for(RegisterRef{RegClass::VGPR, vgpr, 1});
     if (!offset)
       return std::nullopt;
-    const auto store = build_address_free_scratch_store_b32(vgpr, *offset, arch);
-    const auto load = build_address_free_scratch_load_b32(vgpr, *offset, arch);
-    if (!store || !load)
-      return std::nullopt;
     sequence.slot_offsets.push_back(*offset);
-    sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
-    sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      const auto store = build_cdna4_address_free_scratch_store_b32(vgpr, *offset, arch);
+      const auto load = build_cdna4_address_free_scratch_load_b32(vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    } else {
+      const auto store = build_address_free_scratch_store_b32(vgpr, *offset, arch);
+      const auto load = build_address_free_scratch_load_b32(vgpr, *offset, arch);
+      if (!store || !load)
+        return std::nullopt;
+      sequence.save_words.insert(sequence.save_words.end(), store->begin(), store->end());
+      sequence.restore_words.insert(sequence.restore_words.end(), load->begin(), load->end());
+    }
   }
   sequence.save_words.push_back(*wait_store);
   sequence.restore_words.push_back(*wait_load);

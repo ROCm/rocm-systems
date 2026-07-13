@@ -1,0 +1,1311 @@
+# ConSan gfx950 Native Port Plan
+
+This plan tracks native ConSan support for CDNA4 / `gfx950`. It is separate
+from [PLAN.md](PLAN.md) so gfx950 work can proceed without creating conflicts
+with ongoing gfx1201 work. The target is feature and qualification parity with
+the accepted gfx1201 `standard-v1` profiles, subject to explicit ISA-specific
+capability differences.
+
+ConSan must patch the final gfx950 code object that will execute. Translating a
+gfx950 kernel to another ISA is not part of sanitizer correctness.
+
+[DESIGN.md](DESIGN.md) describes the sanitizer architecture,
+[SPILLING.md](SPILLING.md) defines the resource and private-memory contract,
+and [LOCAL_TESTING.md](LOCAL_TESTING.md) supplies workspace-relative paths.
+The workspace-local `$WORKSPACE_ROOT/amd-instinct-cdna4-instruction-set-architecture.pdf`
+is the primary ISA reference for native CDNA4 contracts.
+
+## Status Legend
+
+- `DONE`: implemented, reviewed, and covered by its stated tests.
+- `ACTIVE`: current work.
+- `TODO`: ready when its incoming dependencies are complete.
+- `TARGET`: an acceptance milestone reached through incoming edges.
+- `BLOCKED`: cannot progress without an external dependency or decision.
+
+## ISA Facts That Bound This Plan
+
+The CDNA4 ISA reference establishes several non-negotiable constraints:
+
+- gfx950 is wave64. `EXEC` and `VCC` are 64-bit architectural state, and
+  vector, vector-memory, and LDS operations are masked by `EXEC`.
+- User SGPRs are numbered 0-101 and allocated in groups of 16. `VCC` aliases
+  SGPRs 106-107. Regular VGPRs are numbered 0-255 and allocated in groups of
+  eight; AccVGPRs are a distinct architectural class.
+- `FLAT_SCRATCH` occupies architectural operands 102-103. Scratch instructions
+  have a signed 13-bit byte offset, cannot access LDS, and contribute only to
+  `VM_CNT`.
+- General FLAT instructions contribute to both `VM_CNT` and `LGKM_CNT`; the
+  manual says the only sensible post-FLAT wait target is zero for both.
+- `S_BARRIER` does not wait on memory counters. Any required `S_WAITCNT` must
+  precede the barrier.
+- `HW_ID` is documented as debug-only and unsafe as a stable identity because
+  its values may change during a wave's lifetime. It cannot be the required
+  standard owner source.
+- Workgroup IDs and wave-in-workgroup information are available through
+  descriptor-enabled system SGPRs. TTMP state is privileged or runtime-owned
+  and is not assumed to be an ordinary probe resource.
+
+Project rules:
+
+- Keep gfx1201 behavior and tests green while adding gfx950 support.
+- Keep architecture-independent policy shared; isolate native instruction
+  encoders and architectural constants behind explicit target capabilities.
+- Use LLVM assembly/disassembly and rocJITsu decode as independent encoding
+  checks before executing injected code.
+- Test focused CPU/synthetic behavior before every live-GPU step.
+- Fail closed when a gfx950 probe family lacks a proven encoder, resource
+  convention, ownership source, or wait sequence.
+- Treat a clean workload as compatibility evidence only. Require patch,
+  record, or diagnostic guards for semantic evidence.
+- Keep GPU test parallelism near eight, but run initial spill and trap bring-up
+  serially.
+- Commit in small slices. Update this file when a node changes status.
+
+## Completion Target
+
+Full gfx950 support means:
+
+- SuperCollider and all three MOI `standard-v1` engines patch and execute
+  native gfx950 code objects.
+- Ordinary runs require no hand-selected VGPR, SGPR, owner, epoch, or report
+  buffer resources.
+- Dead, descriptor-growth, and spill-backed resource outcomes work on gfx950;
+  unsupported cases remain typed and bounded.
+- Native LDS accesses, relevant flat/group accesses, barriers, and the narrow
+  atomic ordering features have explicit gfx950 capability results.
+- Focused live tests prove positive race diagnostics and clean ordered
+  controls, not merely successful process exit.
+- Selected and broad IREE tiers complete without corruption or resource hangs.
+- Documentation contains a truthful per-architecture capability table.
+
+## Progress Log
+
+- 2026-07-13: `E0`, `A1A-A1C`, `S1`, `S2`, and `S4` completed. The closed
+  architecture inventory is in
+  [GFX950_ARCH_INVENTORY.md](GFX950_ARCH_INVENTORY.md). CDNA4 scratch emission
+  round-trips through the decoder and passes 10 repeated full-EXEC plus 10
+  repeated partial-EXEC hardware runs on the MI355X. `A2`, `P1A`, `P1B`, `W1`,
+  and `S5` are active in the first implementation slice.
+
+## DAG Overview
+
+The DAG is split into panels for readability. Repeated nodes refer to the same
+work item. `A --> B` means `A` is a hard prerequisite of `B`.
+
+### Foundation and architecture model
+
+```mermaid
+flowchart LR
+  B0["B0: gfx1201 Accepted Baseline"]:::done
+  E0["E0: gfx950 Local Environment"]:::todo
+  A1A["A1A: Locate Architecture Assumptions"]:::todo
+  A1B["A1B: Classify Assumptions"]:::todo
+  A1C["A1C: Close Inventory"]:::todo
+  A2["A2: Capability And Target Dispatch"]:::todo
+  A3A["A3A: Basic ISA Fixtures"]:::todo
+  A3B["A3B: Private And Pressure Fixtures"]:::todo
+  A3C["A3C: Shared-Helper Fixture"]:::todo
+  R1A["R1A: Limits And Descriptor Geometry"]:::todo
+  R1B["R1B: Scalar And Special State"]:::todo
+  R1C["R1C: Owners And Transaction Tests"]:::todo
+  F0{"F0: gfx950 Foundation Ready"}:::target
+
+  B0 --> A1A
+  E0 --> A3A
+  A1A --> A1B --> A1C
+  A1C --> A2
+  A2 --> A3A
+  A3A --> A3B --> A3C
+  A1C --> R1A
+  A2 --> R1A
+  R1A --> R1B --> R1C
+  A3C --> F0
+  R1C --> F0
+
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+```
+
+### Critical spill path
+
+```mermaid
+flowchart LR
+  F0{"F0: Foundation Ready"}:::target
+  S1["S1: CDNA4 Scratch ISA Contract"]:::todo
+  S2["S2: Scratch Encoders And Decode Tests"]:::todo
+  S3["S3: Private-Segment Transaction Audit"]:::todo
+  S4["S4: Standalone Live VGPR Round Trip"]:::todo
+  S5["S5: Target-Dispatched Spill Backend"]:::todo
+  RR1A["RR1A: Access Record Emission"]:::todo
+  S6["S6: Forced-Spill Record/Replay"]:::todo
+  SA1C["SA1C: Sampled Host Oracle"]:::todo
+  IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
+  B1B["B1B: Engine Barrier Semantics"]:::todo
+  AT1B["AT1B: Inline Atomic Handoff"]:::todo
+  R1C["R1C: Owners And Transaction Tests"]:::todo
+  S7A["S7A: Sampled Spill Parity"]:::todo
+  S7B["S7B: Inline Access Spill Parity"]:::todo
+  S7C["S7C: Barrier And Atomic Spill Parity"]:::todo
+  S7D["S7D: Shared-Helper Spill Layout"]:::todo
+  SP{"SP: gfx950 Spill Accepted"}:::target
+
+  F0 --> S1
+  F0 --> S3
+  S1 --> S2
+  S2 --> S4
+  S3 --> S4
+  S4 --> S5
+  S5 --> S6
+  RR1A --> S6
+  S6 --> S7A
+  SA1C --> S7A
+  S6 --> S7B
+  IS1C --> S7B
+  S6 --> S7C
+  B1B --> S7C
+  AT1B --> S7C
+  S7A --> S7D
+  S7B --> S7D
+  S7C --> S7D
+  R1C --> S7D
+  S7D --> SP
+
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+```
+
+### Native probes and engine rollout
+
+```mermaid
+flowchart LR
+  F0{"F0: Foundation Ready"}:::target
+  D1A["D1A: Basic LDS Decode"]:::todo
+  D1B["D1B: Extended LDS Forms"]:::todo
+  D1C["D1C: Unsupported DS Inventory"]:::todo
+  P1A["P1A: Scalar Control Primitives"]:::todo
+  P1B["P1B: Vector And Address Primitives"]:::todo
+  P1C["P1C: Report Publication Primitives"]:::todo
+  I1A["I1A: Workgroup Identity"]:::todo
+  I1B["I1B: Stable Wave64 Owner"]:::todo
+  I1C["I1C: Optional HW_ID Experiment"]:::todo
+  W1["W1: Non-Scratch Wait Semantics"]:::todo
+  B1A["B1A: Barrier Decode And Emission"]:::todo
+  B1B["B1B: Engine Barrier Semantics"]:::todo
+  SC1["SC1: SuperCollider Native LDS"]:::todo
+  RR1A["RR1A: Access Record Emission"]:::todo
+  RR1B["RR1B: Record/Replay Live Semantics"]:::todo
+  SA1A["SA1A: Static Sampled Publication"]:::todo
+  SA1B["SA1B: Runtime Selection And Check"]:::todo
+  SA1C["SA1C: Sampled Host Oracle"]:::todo
+  IS1A["IS1A: Shadow Atomic Primitive"]:::todo
+  IS1B["IS1B: Single-Cell Inline Shadow"]:::todo
+  IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
+  FL1A["FL1A: Group-Flat Inventory"]:::todo
+  FL1B["FL1B: Group-Flat Emission"]:::todo
+  FL1X["FL1X: Typed No-Forms Result"]:::todo
+  FLC{"FLC: Group-Flat Capability Closed"}:::target
+  AT1A["AT1A: Atomic Decode And Records"]:::todo
+  AT1B["AT1B: Inline Atomic Handoff"]:::todo
+  NP{"NP: Native Probe Parity"}:::target
+
+  F0 --> D1A
+  F0 --> P1A
+  F0 --> I1A
+  F0 --> W1
+  D1A --> D1B --> D1C
+  P1A --> P1B --> P1C
+  W1 --> P1C
+  W1 --> B1A
+  I1A --> I1B
+  I1B --> I1C
+  D1A --> SC1
+  P1B --> SC1
+  P1C --> SC1
+  D1B --> RR1A
+  P1C --> RR1A
+  I1B --> RR1A
+  W1 --> RR1A
+  RR1A --> RR1B
+  RR1B --> SA1A
+  I1B --> SA1A
+  SA1A --> SA1B --> SA1C
+  W1 --> IS1A
+  P1B --> IS1A
+  I1B --> IS1B
+  IS1A --> IS1B --> IS1C
+  B1A --> B1B
+  RR1B --> B1B
+  IS1B --> B1B
+  D1C --> FL1A
+  FL1A --> FL1B
+  FL1A --> FL1X
+  P1B --> FL1B
+  RR1B --> FL1B
+  IS1C --> FL1B
+  FL1B --> FLC
+  FL1X --> FLC
+  D1C --> AT1A
+  W1 --> AT1A
+  RR1A --> AT1A
+  AT1A --> AT1B
+  IS1B --> AT1B
+  SC1 --> NP
+  RR1B --> NP
+  SA1C --> NP
+  IS1C --> NP
+  B1B --> NP
+  FLC --> NP
+  AT1B --> NP
+
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+```
+
+### Qualification and acceptance
+
+```mermaid
+flowchart LR
+  SP{"SP: Spill Accepted"}:::target
+  NP{"NP: Native Probe Parity"}:::target
+  T1A["T1A: Target-Aware Test Registration"]:::todo
+  T1B["T1B: Workload And Tier Selection"]:::todo
+  T2SC["T2SC: SuperCollider Focused Tier"]:::todo
+  T2RR["T2RR: Record/Replay Focused Tier"]:::todo
+  T2SA["T2SA: Sampled Focused Tier"]:::todo
+  T2IS["T2IS: Inline-Shadow Focused Tier"]:::todo
+  T2R["T2R: Resource And Spill Tier"]:::todo
+  T2G{"T2G: Focused gfx950 Accepted"}:::target
+  T3A["T3A: Workload Inventory"]:::todo
+  T3SC["T3SC: SuperCollider Selected Workloads"]:::todo
+  T3RR["T3RR: Record/Replay Selected Workloads"]:::todo
+  T3SA["T3SA: Sampled Selected Workloads"]:::todo
+  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::todo
+  T3G{"T3G: Selected Workloads Accepted"}:::target
+  T4SC["T4SC: SuperCollider Broad IREE"]:::todo
+  T4RR["T4RR: Record/Replay Broad IREE"]:::todo
+  T4SA["T4SA: Sampled Broad IREE"]:::todo
+  T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
+  T4G{"T4G: Broad Compatibility Accepted"}:::target
+  D2["D2: Capability And Runbook Docs"]:::todo
+  X1["X1: gfx1201 Live Regression Evidence"]:::blocked
+  M0{"M0: gfx950 Fully Supported"}:::target
+
+  T1A --> T1B
+  SP --> T2R
+  NP --> T2SC
+  NP --> T2RR
+  NP --> T2SA
+  NP --> T2IS
+  T1B --> T2SC
+  T1B --> T2RR
+  T1B --> T2SA
+  T1B --> T2IS
+  T1B --> T2R
+  T2SC --> T2G
+  T2RR --> T2G
+  T2SA --> T2G
+  T2IS --> T2G
+  T2R --> T2G
+  T2G --> T3A
+  T3A --> T3SC
+  T3A --> T3RR
+  T3A --> T3SA
+  T3A --> T3IS
+  T3SC --> T3G
+  T3RR --> T3G
+  T3SA --> T3G
+  T3IS --> T3G
+  T3G --> T4SC --> T4RR --> T4SA --> T4IS --> T4G
+  T4G --> D2
+  D2 --> M0
+  X1 --> M0
+
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+  classDef blocked fill:#e06666,stroke:#660000,stroke-width:2px,color:#000;
+```
+
+## Recommended Execution Order
+
+1. Establish the local environment and freeze representative gfx950 code
+   objects before changing emitters.
+2. Inventory all RDNA4 assumptions and introduce explicit capability dispatch.
+3. Audit the CDNA4 descriptor/register model.
+4. Complete the initial spill path through S6: standalone hardware round-trip,
+   target-dispatched backend, and forced-spill record/replay.
+5. In parallel with later spill-family rollout, implement native LDS decode and
+   the common CDNA4 probe primitives.
+6. Bring up SuperCollider and record/replay first. Use record/replay as the
+   semantic oracle for sampled and inline shadow.
+7. Add group-flat, barrier, and atomic features only after their gfx950 native
+   contracts are tested independently. Close group-flat through FL1B or FL1X
+   according to the observed inventory.
+8. Complete S7A-S7D only after the corresponding engines and synchronization
+   probes exist; spill parity is an integration gate, not an early prerequisite.
+9. Run the per-profile focused, selected, and broad qualification nodes in that
+   order. Keep broad IREE sweeps serialized.
+
+## Foundation Nodes
+
+### E0: gfx950 Local Environment - DONE
+
+Goal: create a reproducible workspace using the layout in
+[LOCAL_TESTING.md](LOCAL_TESTING.md).
+
+Work:
+
+- Build or identify the TheRock ROCm distribution used by HIP and HSA tests.
+- Configure rocJITsu for the detected gfx950 agent and build its tests and HSA
+  hook.
+- Configure hip-moi and a HIP-enabled IREE tree for gfx950.
+- Record compiler, runtime, firmware, GPU agent, and target-feature strings.
+- Verify an uninstrumented HIP smoke and HSA-tools hook load.
+
+Done criteria:
+
+- Paths required by `consan_test_matrix.sh` exist and use one ROCm runtime.
+- `rocminfo`, a HIP kernel, and an unmodified HSA-tools hook agree on gfx950.
+
+### A1A: Locate Architecture Assumptions - DONE
+
+Goal: produce a mechanically checkable list of ConSan dependencies on gfx1201
+machine behavior.
+
+Work:
+
+- Classify architecture references in `consan.cpp`, `consan_moi.cpp`,
+  `instruction_builder.*`, `spill_manager.*`, the HSA hook, and live tests.
+- Record each reference by source location and affected probe family.
+
+Done criteria:
+
+- The source-location inventory is complete enough that later classification
+  does not require another repository-wide search.
+
+### A1B: Classify Architecture Assumptions - DONE
+
+Goal: assign a disposition to every item found by A1A.
+
+Work:
+
+- Cover DS/flat layouts, scalar/vector encodings, waits, barriers, atomics,
+  scratch, special registers, TTMP payloads, register limits, wave size, and
+  descriptor granularity.
+- Mark each assumption shared, target-parametric, or requiring a CDNA4
+  implementation.
+
+Done criteria:
+
+- Every inventory row has one classification and an implementation/test owner.
+
+### A1C: Close Architecture Inventory - DONE
+
+Goal: turn the classified inventory into enforceable port boundaries.
+
+Work:
+
+- Reconcile the inventory with target gates and capability declarations.
+- Add focused assertions or tests for assumptions that must remain gfx1201-only.
+
+Done criteria:
+
+- Every existing `RDNA4` gate in an active ConSan path has an owner and planned
+  disposition; no gate is removed merely because a generic decoder exists.
+
+### A2: Capability And Target Dispatch - ACTIVE
+
+Goal: make unsupported native probe families explicit per architecture.
+
+Work:
+
+- Define capabilities for native LDS, flat/group, barriers, atomics, owner
+  sources, workgroup sources, scratch spilling, and required waits.
+- Route builders through target-specific implementations without duplicating
+  engine policy.
+- Produce typed skip reasons for missing capabilities.
+
+Done criteria:
+
+- gfx950 inventory never enters an RDNA4 encoder accidentally.
+- Synthetic tests distinguish supported inventory from supported emission.
+
+### A3A: gfx950 Basic ISA Fixtures - TODO
+
+Goal: retain small deterministic instruction inputs for decoder and patch-shape
+tests.
+
+Work:
+
+- Build minimal kernels containing representative DS reads/writes, barriers,
+  flat accesses, and atomics.
+- Save assembly expectations or generated fixture sources rather than relying
+  only on large compiler outputs.
+
+Done criteria:
+
+- CPU-only tests can inventory the initial gfx950 native instruction families
+  without a GPU.
+
+### A3B: gfx950 Private And Pressure Fixtures - TODO
+
+Goal: retain deterministic resource and private-memory inputs separately from
+the basic instruction fixtures.
+
+Work:
+
+- Build zero-private, nonzero-private, descriptor-pressure, and dynamic-stack
+  marker objects.
+- Record kernel descriptor and AMDGPU MessagePack expectations.
+
+Done criteria:
+
+- CPU-only tests can distinguish dead, growth, spill-required, and rejected
+  private-layout outcomes.
+
+### A3C: gfx950 Shared-Helper Fixture - TODO
+
+Goal: retain one object that proves all-owner behavior for shared helper text.
+
+Work:
+
+- Build at least two kernel descriptors that reach one shared helper containing
+  an admitted LDS access.
+- Give the owners deliberately different resource pressure and private layouts.
+
+Done criteria:
+
+- CPU-only patch planning computes one compatible helper plan across every
+  reachable owner.
+
+### R1A: CDNA4 Limits And Descriptor Geometry - TODO
+
+Goal: prove the ordinary register limits and descriptor count geometry used by
+the allocator.
+
+Work:
+
+- Verify wave size, ordinary VGPR/SGPR limits, allocation granularities, and
+  descriptor fields.
+- Remove RDNA wave32 assumptions from MOI descriptor helpers.
+
+Done criteria:
+
+- Unit tests cover boundary count encodings and reject the first unrepresentable
+  VGPR/SGPR allocation.
+
+### R1B: CDNA4 Scalar And Special State - TODO
+
+Goal: prove scalar-resource and architectural-state inputs independently of
+ordinary descriptor growth.
+
+Work:
+
+- Verify special-register numbering and the EXEC/VCC/SCC preservation model.
+- Verify workgroup system-SGPR layout and private-segment enablement.
+
+Done criteria:
+
+- Synthetic allocation covers scalar-full, special-state, and system-SGPR
+  boundary cases without emitting a probe.
+
+### R1C: CDNA4 Owners And Resource Transactions - TODO
+
+Goal: prove shared ownership and transactional allocation outcomes using the
+audited R1A/R1B model.
+
+Work:
+
+- Retain the all-owner rule for shared helper text.
+- Exercise dead, descriptor-growth, spill-required, and rollback outcomes.
+
+Done criteria:
+
+- Unit tests cover gfx950 dead, growth, spill-required, scalar-full, and shared
+  owner outcomes with correct descriptor counts.
+
+## Spill Critical Path
+
+### S1: CDNA4 Scratch ISA Contract - DONE
+
+Goal: define the native save/restore sequence before writing an encoder.
+
+Work:
+
+- Determine the gfx950 scratch load/store forms, operands, address source, and
+  immediate range suitable for per-lane VGPR preservation.
+- Determine ordering and wait-counter requirements for save-before-clobber and
+  restore-before-guest-use.
+- Verify behavior under partial and empty EXEC masks.
+- Compare the CDNA3 reference emitter with CDNA4 ISA and LLVM output; do not
+  assume binary compatibility.
+
+Done criteria:
+
+- The chosen sequence is documented with LLVM-assembled bytes, decoded fields,
+  signed 13-bit offset bounds, clobbers, `VM_CNT` waits, and EXEC behavior.
+
+### S2: Scratch Encoders And Decode Tests - DONE
+
+Goal: implement a standalone, transactional gfx950 B32 VGPR spill sequence.
+
+Work:
+
+- Add CDNA4 scratch store/load and wait builders.
+- Keep stable four-byte per-lane slots and rollback on multi-slot failure.
+- Test zero, aligned nonzero, maximum accepted, and first rejected offsets.
+- Round-trip emitted words through the CDNA4 decoder and compare with LLVM.
+
+Done criteria:
+
+- No live GPU is required to prove exact emitted bytes and failure bounds.
+- gfx1201 encoder tests remain byte-for-byte unchanged.
+
+### S3: Private-Segment Transaction Audit - TODO
+
+Goal: carry spill capacity through every host/runtime representation.
+
+Work:
+
+- Verify gfx950 descriptor private-size and enable-bit updates.
+- Verify in-place AMDGPU MessagePack private-size updates.
+- Verify loaded-kernel association and AQL dispatch private-size rewriting.
+- Cover kernels compiled with zero and nonzero private bytes.
+- Retain dynamic-stack rejection until the CDNA4 stack convention is proven.
+
+Done criteria:
+
+- Synthetic tests prove descriptor, metadata, and dispatch requirements agree,
+  and failed growth leaves the object unchanged.
+
+### S4: Standalone Live VGPR Round Trip - DONE
+
+Goal: validate the exact S1/S2 sequence on gfx950 independently of ConSan.
+
+Work:
+
+- Keep a VGPR value live, save it to private scratch, clobber it, restore it,
+  and verify all active lanes.
+- Test zero-origin and nonzero-origin private segments where practical.
+- Add a partial-EXEC control without making inactive lanes observable.
+
+Done criteria:
+
+- Repeated serial runs preserve every active-lane value with no trap, hang, or
+  memory fault.
+
+### S5: Target-Dispatched Spill Backend - ACTIVE
+
+Goal: integrate CDNA4 emission beneath the existing `SpillManager` contract.
+
+Work:
+
+- Preserve allocation, stable-slot, ownership, and private-layout policy.
+- Select native save/restore emission by architecture.
+- Include save/restore byte counts in cave preflight and transactional commit.
+- Keep typed failures for offset, stack, ownership, descriptor, and placement
+  errors.
+
+Done criteria:
+
+- Synthetic patch shapes contain save, original access, probe, restore, and
+  return in the required order for both gfx950 and gfx1201.
+
+### S6: Forced-Spill Record/Replay - TODO
+
+Goal: prove one complete gfx950 ConSan spill-backed vertical slice.
+
+Work:
+
+- Force a three-VGPR record/replay probe to borrow live guest registers.
+- Keep several victim values live across the patched access.
+- Require a visible record and verify all guest values after restoration.
+- Exercise a kernel whose original private size is zero.
+
+Done criteria:
+
+- The test proves patch execution, record publication, value preservation, and
+  dispatch-private growth in one run.
+
+### S7A: Sampled Spill Parity - TODO
+
+Goal: extend the proven record/replay spill path to sampled access probes.
+
+Work:
+
+- Cover sampled access windows and their scalar/VCC preservation state.
+- Require deterministic selection, visible publication, and at least one
+  emitted spill patch.
+
+Done criteria:
+
+- Sampled standard mode needs no register numbers and preserves live victim
+  values around a guarded publication.
+
+### S7B: Inline Access Spill Parity - TODO
+
+Goal: cover inline-shadow access and private-epoch VGPR windows.
+
+Work:
+
+- Cover B32 and multi-cell inline access windows.
+- Cover private-epoch coexistence with ephemeral slots.
+
+Done criteria:
+
+- Inline-shadow standard mode needs no register numbers and a guarded race
+  still produces its diagnostic through a spill-backed patch.
+
+### S7C: Barrier And Atomic Spill Parity - TODO
+
+Goal: cover synchronization-specific VGPR temporaries after their native probe
+families are proven.
+
+Work:
+
+- Cover barrier-record, inline barrier-epoch, record/replay atomic, and inline
+  atomic-handoff temporaries.
+
+Done criteria:
+
+- Each applicable family emits a spill-backed patch and retains its positive
+  and ordered-control semantics.
+
+### S7D: Shared-Helper Spill Layout - TODO
+
+Goal: close spill parity with a reachable helper shared by multiple kernels.
+
+Work:
+
+- Compute one compatible private layout across every owner of the A3C helper.
+- Verify rollback when any owner cannot support the common layout.
+
+Done criteria:
+
+- Standard MOI runs need no register numbers, and focused controls observe at
+  least one emitted spill patch per applicable engine and shared owner.
+
+## Native Probe Nodes
+
+### D1A: CDNA4 Basic LDS Decode - TODO
+
+Goal: convert the basic gfx950 B32 LDS read/write forms into ConSan's semantic
+access model without importing RDNA4 raw layouts.
+
+Work:
+
+- Decode address/data/destination registers and the combined 16-bit byte
+  offset for basic single-address forms.
+- Normalize byte ranges and rounded shadow-cell ranges.
+
+Done criteria:
+
+- B32 fixture tests cover reads and writes and do not classify unrelated DS
+  operations as ordinary accesses.
+
+### D1B: CDNA4 Extended LDS Forms - TODO
+
+Goal: add bounded multi-width and two-address coverage after D1A is stable.
+
+Work:
+
+- Decode B64/B96/B128, byte/short, d16, READ2/WRITE2, and ST64 forms selected
+  for initial parity.
+- Apply the ISA-defined offset scaling and alignment rules.
+
+Done criteria:
+
+- Each admitted form has exact register, byte-range, and cell-range fixture
+  expectations.
+
+### D1C: CDNA4 Unsupported DS And Atomic Inventory - TODO
+
+Goal: make the remainder of the DS family explicit instead of silently
+misclassifying it.
+
+Work:
+
+- Inventory transpose, permute, GDS-reserved, and LDS atomic forms.
+- Mark each form admitted elsewhere, intentionally unsupported, or reserved for
+  AT1A.
+
+Done criteria:
+
+- Every DS opcode seen in representative gfx950 objects has a normalized form
+  or a typed exclusion.
+
+### P1A: CDNA4 Scalar Control Primitives - ACTIVE
+
+Goal: supply and independently validate scalar control-flow/state primitives.
+
+Work:
+
+- Implement branch/trap, scalar moves and compares, and EXEC/VCC/SCC
+  preservation as required.
+- Parameterize special operand encodings and architectural register limits.
+- Validate each primitive independently against LLVM when representable.
+
+Done criteria:
+
+- Scalar-control tests contain no unexplained RDNA4 constants on a gfx950 path.
+
+### P1B: CDNA4 Vector And Address Primitives - ACTIVE
+
+Goal: supply the vector moves, compares, and address arithmetic shared by probe
+families.
+
+Work:
+
+- Implement the minimal vector ALU and address-building forms needed by native
+  LDS, scratch, shadow, and report paths.
+- Test operand boundaries, special operands, and rollback on an unsupported
+  encoding.
+
+Done criteria:
+
+- Every admitted primitive round-trips through rocJITsu decode and, where
+  representable, LLVM assembly/disassembly.
+
+### P1C: CDNA4 Report Publication Primitives - TODO
+
+Goal: prove global report-buffer stores and their required completion sequence
+before composing full engines.
+
+Work:
+
+- Emit bounded report address calculation and stores using P1A/P1B state.
+- Validate exact bytes, buffer bounds, and report visibility in a standalone
+  hardware smoke.
+
+Done criteria:
+
+- One guarded GPU test publishes a known report without an LDS probe.
+
+### I1A: gfx950 Workgroup Identity - TODO
+
+Goal: produce stable 1D/2D/3D workgroup identity from descriptor-enabled system
+SGPRs.
+
+Work:
+
+- Use descriptor-enabled workgroup ID SGPRs for 1D/2D/3D identity.
+- Preserve compatible assignments across shared helpers.
+
+Done criteria:
+
+- Focused controls record distinct workgroup keys for distinct workgroups and
+  identical keys for waves in one workgroup.
+
+### I1B: Stable Wave64 Owner Identity - TODO
+
+Goal: define the required standard owner source independently of debug-only
+`HW_ID` and runtime-owned TTMP payloads.
+
+Work:
+
+- Derive owner identity from descriptor-enabled wave-in-workgroup state or an
+  equivalently stable architectural input.
+- Preserve compatible assignments across shared helpers.
+
+Done criteria:
+
+- Two unordered waves in one workgroup receive distinct stable owners, while
+  accesses in different workgroups remain separated by I1A.
+
+### I1C: Optional HW_ID Owner Experiment - TODO
+
+Goal: determine whether `HW_ID` is useful for diagnostics without making it a
+standard correctness dependency.
+
+Work:
+
+- Exercise migration-sensitive and repeated controls where practical.
+- Expose the source only as an explicitly experimental capability if observed
+  behavior and documentation permit it.
+
+Done criteria:
+
+- The result is recorded as experimental or rejected. NP and M0 do not depend
+  on this node.
+
+### W1: CDNA4 Non-Scratch Memory Wait Semantics - ACTIVE
+
+Goal: model CDNA4 memory completion without gfx12 wait encodings.
+
+Work:
+
+- Define waits after original LDS accesses, report-buffer operations, general
+  FLAT operations, and shadow atomics.
+- Require both `VM_CNT=0` and `LGKM_CNT=0` after general FLAT operations, as
+  required by the ISA manual.
+- Leave scratch save/restore waits owned by S1.
+
+Done criteria:
+
+- Focused producer/consumer smokes prove each admitted non-scratch wait
+  sequence.
+
+### B1A: CDNA4 Barrier Decode And Emission - TODO
+
+Goal: decode and re-emit supported gfx950 barriers independently of engine
+semantics.
+
+Work:
+
+- Inventory compiler-emitted barrier forms and operands.
+- Prove exact `S_BARRIER` emission and the required pre-barrier memory wait;
+  the barrier itself does not drain counters.
+
+Done criteria:
+
+- Fixture tests distinguish barrier decode/emission from its separate
+  `S_WAITCNT` precondition.
+
+### B1B: CDNA4 Engine Barrier Semantics - TODO
+
+Goal: compose B1A with record/replay arrival and inline epoch advancement.
+
+Work:
+
+- Add barrier event recording and replay ordering.
+- Add inline epoch advancement without changing the original barrier's
+  participant set.
+
+Done criteria:
+
+- A barrier-ordered two-wave control remains clean in record/replay and inline
+  shadow, while the unordered control reports.
+
+### SC1: SuperCollider Native LDS - TODO
+
+Goal: obtain the first non-destructive native gfx950 sanitizer patch.
+
+Work:
+
+- Duplicate supported DS reads and synthesize readback for supported writes.
+- Preserve guest state around compare and trap/marker reporting.
+- Exercise inline, local-cave, and appended-cave placement where available.
+
+Done criteria:
+
+- Clean and racy marker-buffer controls pass with `REQUIRE_PATCH=1`; the racy
+  case reports without relying on a destructive proof probe.
+
+### RR1A: gfx950 Access Record Emission - TODO
+
+Goal: emit and decode the static and dynamic access-record ABI before relying
+on replay semantics.
+
+Work:
+
+- Emit static and dynamic access records for supported native LDS accesses.
+- Record correct workgroup, owner, range, instruction offset, and event index.
+- Preserve EXEC/VCC/SCC with automatic scalar resources.
+
+Done criteria:
+
+- A guarded auto-buffer run produces visible, field-correct records for one
+  static and one dynamic access.
+
+### RR1B: gfx950 Record/Replay Live Semantics - TODO
+
+Goal: establish record/replay as the semantic reference engine on gfx950.
+
+Work:
+
+- Replay same-workgroup records using the exact cell-range and owner model.
+- Keep barrier-specific ordering in B1B and atomic-specific ordering in AT1A.
+
+Done criteria:
+
+- A two-wave race produces a replay conflict and a non-barrier ordered control
+  remains clean.
+
+### SA1A: gfx950 Static Sampled Publication - TODO
+
+Goal: port deterministic sampled entry publication before runtime selection.
+
+Work:
+
+- Emit compact generation-qualified entries.
+- Port static selection and VCC preservation.
+
+Done criteria:
+
+- Deterministic static sampling selects the expected wave and publishes the
+  expected range and generation.
+
+### SA1B: gfx950 Runtime Selection And Immediate Check - TODO
+
+Goal: add runtime selection and bounded immediate checking to SA1A.
+
+Work:
+
+- Port runtime power-of-two owner selection.
+- Port optional immediate checking and its bounded report path.
+
+Done criteria:
+
+- Deterministic controls select and reject the expected owners, and a selected
+  conflict produces an immediate signal.
+
+### SA1C: gfx950 Sampled Host Oracle - TODO
+
+Goal: retain host scan as the broader sampled oracle and compare it with the
+record/replay reference.
+
+Work:
+
+- Decode generation-qualified entries and ignore stale generations.
+- Compare overlap and owner decisions with RR1B on the same seeds.
+
+Done criteria:
+
+- A known sampled race produces both host-scan and immediate-check signals in
+  focused controls, while stale and non-overlapping controls remain clean.
+
+### IS1A: gfx950 Shadow Atomic Primitive - TODO
+
+Goal: select and prove the atomic primitive used for exact GPU-side shadow
+publication.
+
+Work:
+
+- Select a proven gfx950 atomic primitive for 64-bit shadow exchange.
+
+Done criteria:
+
+- Standalone contention and return-value controls establish the primitive's
+  exact update and completion semantics.
+
+### IS1B: gfx950 Single-Cell Inline Shadow - TODO
+
+Goal: compose owner/epoch state and IS1A into the smallest exact B32 race probe.
+
+Work:
+
+- Publish one normalized 4-byte cell and detect an unordered conflicting owner.
+- Preserve automatic owner/epoch, scratch, scalar, and private-epoch paths.
+
+Done criteria:
+
+- A B32 unordered race reports; read/read and barrier-ordered controls remain
+  clean.
+
+### IS1C: gfx950 Multi-Cell Shadow And Diagnostics - TODO
+
+Goal: extend the proven single-cell path without changing the host ABI.
+
+Work:
+
+- Publish every normalized 4-byte cell for scalar and multi-cell accesses.
+- Emit the existing bounded diagnostic ABI without changing host semantics.
+
+Done criteria:
+
+- B32 and multi-cell unordered races report; read/read and barrier-ordered
+  controls remain clean.
+
+### FL1A: gfx950 Group-Flat Inventory - TODO
+
+Goal: determine which compiler-emitted gfx950 flat forms and provenance classes
+are worth admitting.
+
+Work:
+
+- Audit real gfx950 IREE and hip-moi objects before choosing supported forms.
+- Record raw forms and `strict`/`likely` provenance counts by representative
+  workload.
+
+Done criteria:
+
+- The inventory names a bounded initial form set and selects FL1B, or records
+  that there are no admissible forms and selects FL1X.
+
+### FL1B: gfx950 Group-Flat Emission - TODO
+
+Goal: instrument the bounded FL1A form set without misclassifying global or
+private accesses.
+
+Work:
+
+- Define CDNA4 raw-field extraction and LDS address normalization.
+- Retain `strict` versus `likely` provenance and visible exclusions.
+- Reuse native LDS cell-range semantics rather than creating another shadow
+  layout.
+
+Done criteria:
+
+- A strongly classified flat-LDS race agrees between record/replay and inline
+  shadow; unknown/global/private forms are not instrumented as LDS.
+
+### FL1X: Typed No-Admitted-Forms Result - TODO
+
+Goal: close the group-flat capability honestly when FL1A finds no strongly
+proven form worth instrumenting.
+
+Work:
+
+- Record workload inventory counts and the provenance reason for exclusion.
+- Emit a typed visible capability outcome for encountered candidates.
+
+Done criteria:
+
+- Native LDS coverage remains enabled, while unknown, global, private, and
+  merely speculative flat candidates cannot be mistaken for sanitized LDS.
+
+Only one of FL1B or FL1X is required to reach FLC. Discovery of an admissible
+strongly classified form requires FL1B; FL1X is not an escape from implementing
+an observed required form.
+
+### AT1A: gfx950 Atomic Decode And Record/Replay - TODO
+
+Goal: decode the admitted LDS atomic forms and establish record/replay ordering
+without claiming global-memory race detection.
+
+Work:
+
+- Select supported gfx950 atomic forms and decode their return/order fields.
+- Port record/replay release/acquire records.
+
+Done criteria:
+
+- Record/replay same-address handoff is clean and wrong-address handoff still
+  reports.
+
+### AT1B: gfx950 Inline Atomic Handoff - TODO
+
+Goal: compose the admitted atomic contract with inline shadow.
+
+Work:
+
+- Port or explicitly replace the one-slot inline address-matching handoff.
+
+Done criteria:
+
+- Same-address handoff is clean and wrong-address handoff still reports in
+  record/replay and inline-shadow controls.
+
+## Qualification Nodes
+
+### T1A: Target-Aware Test Registration - TODO
+
+Goal: let one test definition register the appropriate gfx1201 or gfx950
+controls.
+
+Work:
+
+- Replace hard-coded `ARCH gfx1201` and `HAS_GFX1201_GPU` registration around
+  portable tests with target-aware configuration.
+- Keep ISA-specific assembly tests explicitly named and gated.
+
+Done criteria:
+
+- Test discovery on either machine registers portable controls plus only the
+  native ISA-specific controls supported by that GPU.
+
+### T1B: Target-Aware Workload And Tier Selection - TODO
+
+Goal: select equivalent semantic workloads without embedding RDNA4 names in
+the common tier harness.
+
+Work:
+
+- Parameterize tier-one workload selection instead of matching only
+  `rdna4_tileandfusewmma` names.
+- Preserve fail-fast timeouts and per-profile sequencing.
+
+Done criteria:
+
+- Dry-run output on each architecture names a nonempty guarded focused tier and
+  the intended architecture-specific selected workloads.
+
+### T2SC: gfx950 SuperCollider Focused Tier - TODO
+
+Goal: prove focused native SuperCollider behavior before broader workloads.
+
+Required rows:
+
+- SuperCollider clean and racy marker controls.
+
+Done criteria:
+
+- The positive row requires a patch and marker; the clean row forbids a false
+  diagnostic.
+
+### T2RR: gfx950 Record/Replay Focused Tier - TODO
+
+Required rows:
+
+- Race, clean ordering, barrier ordering, atomic handoff, overflow, and dropped
+  or unsupported record controls.
+
+Done criteria:
+
+- Positive rows require records and diagnostics; ordered rows forbid conflict
+  diagnostics.
+
+### T2SA: gfx950 Sampled Focused Tier - TODO
+
+Required rows:
+
+- Publication, deterministic static selection, runtime selection, host
+  conflict, stale generation, and immediate check.
+
+Done criteria:
+
+- Every intended selection and rejection is observable, and the positive race
+  reaches both required reporting paths.
+
+### T2IS: gfx950 Inline-Shadow Focused Tier - TODO
+
+Required rows:
+
+- B32, multi-cell, read/read, barrier, atomic, diagnostic overflow, and
+  private-epoch controls.
+
+Done criteria:
+
+- Positive rows require a diagnostic and ordered/read-only rows forbid one.
+
+### T2R: gfx950 Resource And Spill Focused Tier - TODO
+
+Required rows:
+
+- Dead, descriptor-growth, forced-spill, zero-private, nonzero-private,
+  rollback, and shared-owner outcomes.
+
+Done criteria:
+
+- Every resource path reports its expected typed outcome, and forced-spill
+  rows require an emitted spill patch and preserved guest values.
+
+`T2G` is reached only when T2SC, T2RR, T2SA, T2IS, and T2R all pass.
+
+### T3A: gfx950 Real-Workload Inventory - TODO
+
+Goal: choose bounded, representative compiler output before running profiles.
+
+Work:
+
+- Run hip-moi semantic controls without a ConSan hook.
+- Select gfx950 IREE workloads containing native LDS, multi-cell operations,
+  barriers, and any admitted group-flat forms.
+- Record uninstrumented runtime and instruction inventory for each selection.
+
+Done criteria:
+
+- Each selected workload has a stated semantic purpose and at least one
+  non-vacuity guard suitable for its profile.
+
+### T3SC: SuperCollider Selected Workloads - TODO
+
+Goal: run the T3A selection under guarded SuperCollider.
+
+### T3RR: Record/Replay Selected Workloads - TODO
+
+Goal: run the T3A selection under guarded record/replay.
+
+### T3SA: Sampled Selected Workloads - TODO
+
+Goal: run the T3A selection under guarded sampled MOI.
+
+### T3IS: Inline-Shadow Selected Workloads - TODO
+
+Goal: run the T3A selection under guarded inline shadow.
+
+For each T3 profile node:
+
+- Record candidate, patch, spill, unsupported, record, diagnostic, and timeout
+  evidence.
+- Require the profile-specific patch, record, or diagnostic non-vacuity signal.
+
+Done criteria:
+
+- The profile passes its guarded selected tier; intentional capability
+  exclusions are recorded rather than omitted.
+
+`T3G` is reached only when all four T3 profile nodes pass.
+
+### T4SC: SuperCollider Broad IREE - TODO
+
+Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
+
+### T4RR: Record/Replay Broad IREE - TODO
+
+Goal: run the same inventory under standard record/replay.
+
+### T4SA: Sampled Broad IREE - TODO
+
+Goal: run the same inventory under standard sampled MOI.
+
+### T4IS: Inline-Shadow Broad IREE - TODO
+
+Goal: run the same inventory under standard inline shadow.
+
+For each T4 profile node:
+
+- Run no other IREE CTest sweep against the build directory concurrently.
+- Keep broad compatibility results distinct from focused sanitizer evidence.
+- Preserve reproducible logs for every failure or timeout.
+
+Done criteria:
+
+- The profile completes the agreed inventory without corruption or hidden
+  resource-induced timeout; failures have typed ConSan outcomes.
+
+The T4 nodes are deliberately chained in the DAG to enforce one broad IREE
+sweep at a time. `T4G` is reached after all four complete.
+
+### D2: Capability And Runbook Docs - TODO
+
+Goal: make gfx950 support usable and accurately bounded.
+
+Work:
+
+- Add gfx950 feature rows to `DESIGN.md` and `USAGE.md`.
+- Update `TUTORIAL.md` commands only where architecture affects selection.
+- Record current per-tier results in `LOCAL_TESTING.md` without embedding
+  machine-specific absolute paths.
+- Update `SPILLING.md` with the CDNA4 backend, waits, offset boundary, and live
+  proof while preserving the shared spill contract.
+
+Done criteria:
+
+- A teammate can identify supported gfx950 features, reproduce each tier, and
+  distinguish unsupported coverage from a clean sanitizer result.
+
+### X1: gfx1201 Live Regression Evidence - BLOCKED
+
+Goal: retain the accepted gfx1201 hardware baseline while changing shared
+ConSan policy and emitters.
+
+Work available on this machine:
+
+- Run all architecture-neutral and gfx1201 synthetic/encoding regression tests.
+- Produce the exact focused and broad commands for the gfx1201 workspace.
+
+External completion requirement:
+
+- Run the focused and agreed broad gfx1201 hardware tiers on the gfx1201
+  machine after the shared changes are integrated.
+
+Done criteria:
+
+- Local synthetic regression is green and the other workspace records green
+  focused and broad hardware results at the accepted revision.
+
+## Final Acceptance Checklist
+
+`M0: gfx950 Fully Supported` is reached only when:
+
+- `SP` and `NP` are complete.
+- Focused live controls prove spill preservation and race/order semantics.
+- SuperCollider, record/replay, sampled, and inline-shadow each have a guarded
+  gfx950 selected-workload pass.
+- All four standard profiles complete the agreed broad compatibility tier.
+- No standard command requires register numbers or report-buffer sizing.
+- `X1` records green gfx1201 focused and broad regression tiers from the
+  gfx1201 workspace.
+- The architecture capability and spilling documentation matches the code.

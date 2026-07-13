@@ -2248,6 +2248,20 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        rj_add_hip_test(
+            hip_consan_spill_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/hip_consan_spill_gfx950_test.hip
+        )
+        rj_add_hip_test_case(
+            hip_consan_spill_gfx950_test
+            "ConSanSpillHipTest.Gfx950VgprScratchRoundTrip"
+        )
+        rj_add_hip_test_case(
+            hip_consan_spill_gfx950_test
+            "ConSanSpillHipTest.Gfx950PartialExecVgprScratchRoundTrip"
+        )
+
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
         # generic HIP smoke tests are built for a local RDNA host such as

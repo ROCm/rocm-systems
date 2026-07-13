@@ -62,6 +62,10 @@ inline constexpr uint32_t kMaxAddressFreeScratchDwordOffset = 0x7ffffcu;
 /// Largest per-lane private segment whose last dword starts at an encodable
 /// address-free VSCRATCH offset.
 inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
+/// Largest non-negative, dword-aligned offset in CDNA4 FLAT_SCRATCH's signed
+/// 13-bit byte offset field, and the corresponding per-lane private extent.
+inline constexpr uint32_t kMaxCdna4AddressFreeScratchDwordOffset = 0xffcu;
+inline constexpr uint32_t kMaxCdna4AddressFreeScratchPrivateBytes = 0x1000u;
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
@@ -375,6 +379,8 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 /// @brief Get the VOP2 v_lshlrev_b32 opcode for a target ISA.
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_lshlrev_b32(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 18;
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_GFX1250:
     return 24;
@@ -386,6 +392,9 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 /// @brief Get the VOP2 v_add_nc_u32 opcode for a target ISA.
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_add_nc_u32(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    // CDNA4 names the carry-free E32 form v_add_u32.
+    return 52;
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_GFX1250:
     return 37;
@@ -397,6 +406,8 @@ inline constexpr uint32_t kMaxAddressFreeScratchPrivateBytes = 0x800000u;
 /// @brief Get the VOP2 v_and_b32 opcode for a target ISA.
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_and_b32(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return 19;
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_GFX1250:
     return 27;
@@ -559,7 +570,8 @@ build_v_and_b32_e32_literal(uint16_t vdst, uint32_t literal, uint16_t vsrc1, rj_
 /// @brief Encode RDNA4 `v_readfirstlane_b32 sdst, vsrc`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 127 || vsrc > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 127 ||
+      vsrc > 255)
     return std::nullopt;
   return (0x3Fu << 25) | (static_cast<uint32_t>(sdst) << 17) | (2u << 9) | vector_source_vgpr(vsrc);
 }
@@ -567,8 +579,12 @@ build_v_readfirstlane_b32(uint16_t sdst, uint16_t vsrc, rj_code_arch_t arch) {
 /// @brief Encode RDNA4 `v_mbcnt_lo_u32_b32 vdst, src0, src1`.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_mbcnt_lo_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 || src0 > 511 || src1 > 511)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vdst > 255 ||
+      src0 > 511 || src1 > 511)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return std::array<uint32_t, 2>{0xD28C0000u | static_cast<uint32_t>(vdst),
+                                   (static_cast<uint32_t>(src1) << 9u) | src0};
   return std::array<uint32_t, 2>{0xD71F0000u | static_cast<uint32_t>(vdst),
                                  0x02000000u | (static_cast<uint32_t>(src1) << 9u) | src0};
 }
@@ -576,8 +592,12 @@ build_v_mbcnt_lo_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_ar
 /// @brief Encode RDNA4 `v_mbcnt_hi_u32_b32 vdst, src0, src1`.
 [[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
 build_v_mbcnt_hi_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255 || src0 > 511 || src1 > 511)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vdst > 255 ||
+      src0 > 511 || src1 > 511)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return std::array<uint32_t, 2>{0xD28D0000u | static_cast<uint32_t>(vdst),
+                                   (static_cast<uint32_t>(src1) << 9u) | src0};
   return std::array<uint32_t, 2>{0xD7200000u | static_cast<uint32_t>(vdst),
                                  0x02000000u | (static_cast<uint32_t>(src1) << 9u) | src0};
 }
@@ -585,17 +605,21 @@ build_v_mbcnt_hi_u32_b32(uint16_t vdst, uint16_t src0, uint16_t src1, rj_code_ar
 /// @brief Encode RDNA4 `v_cmp_eq_u32_e32 vcc_lo, src0, vsrc1`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_cmp_eq_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || src0 > 511 || vsrc1 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || src0 > 511 ||
+      vsrc1 > 255)
     return std::nullopt;
-  return 0x7C940000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
+  const uint32_t base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x7D940000u : 0x7C940000u;
+  return base | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
 }
 
 /// @brief Encode RDNA4 `v_cmp_ne_u32_e32 vcc_lo, src0, vsrc1`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || src0 > 511 || vsrc1 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || src0 > 511 ||
+      vsrc1 > 255)
     return std::nullopt;
-  return 0x7C9A0000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
+  const uint32_t base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x7D9A0000u : 0x7C9A0000u;
+  return base | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
 }
 
 /// @brief Encode RDNA4 `v_cmp_gt_u32_e32 vcc_lo, src0, vsrc1`.
@@ -605,37 +629,52 @@ build_v_cmp_ne_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
 /// accepts.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_v_cmp_gt_u32_e32_vcc(uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || src0 > 511 || vsrc1 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || src0 > 511 ||
+      vsrc1 > 255)
     return std::nullopt;
-  return 0x7C980000u | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
+  const uint32_t base = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x7D980000u : 0x7C980000u;
+  return base | (static_cast<uint32_t>(vsrc1) << 9u) | src0;
 }
 
 /// @brief Encode RDNA4 `v_mov_b32` in VOP3 form with a literal source.
-[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_v_mov_b32_e64_literal(uint16_t vdst, uint32_t literal, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vdst > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vdst > 255)
     return std::nullopt;
-  return std::array<uint32_t, 3>{0xD5810000u | static_cast<uint32_t>(vdst), 0x000000FFu, literal};
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    return std::vector<uint32_t>{0x7E0002FFu | (static_cast<uint32_t>(vdst) << 17u), literal};
+  }
+  return std::vector<uint32_t>{0xD5810000u | static_cast<uint32_t>(vdst), 0x000000FFu, literal};
 }
 
 /// @brief Encode RDNA4 `flat_store_b32 v[vaddr:vaddr+1], vsrc`.
-[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_store_b32_vaddr_vsrc(uint16_t vaddr, uint16_t vsrc, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vsrc > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vaddr > 255 ||
+      vsrc > 255)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    return std::vector<uint32_t>{0xDC700000u, static_cast<uint32_t>(vaddr) |
+                                                  (static_cast<uint32_t>(vsrc) << 8u)};
+  }
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
-  return std::array<uint32_t, 3>{0xEC068000u | kRdna4FlatNoSaddr,
-                                 static_cast<uint32_t>(vsrc) << 23u, static_cast<uint32_t>(vaddr)};
+  return std::vector<uint32_t>{0xEC068000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vsrc) << 23u,
+                               static_cast<uint32_t>(vaddr)};
 }
 
 /// @brief Encode RDNA4 `flat_load_b32 vdst, v[vaddr:vaddr+1]`.
-[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_load_b32_vaddr_vdst(uint16_t vaddr, uint16_t vdst, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vdst > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vaddr > 255 ||
+      vdst > 255)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    return std::vector<uint32_t>{0xDC500000u, static_cast<uint32_t>(vaddr) |
+                                                  (static_cast<uint32_t>(vdst) << 24u)};
+  }
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
-  return std::array<uint32_t, 3>{0xEC050000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vdst),
-                                 static_cast<uint32_t>(vaddr)};
+  return std::vector<uint32_t>{0xEC050000u | kRdna4FlatNoSaddr, static_cast<uint32_t>(vdst),
+                               static_cast<uint32_t>(vaddr)};
 }
 
 /// @brief Encode gfx12 `scratch_store_b32 off, vsrc, off offset:byte_offset`.
@@ -668,6 +707,82 @@ build_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code
                                  byte_offset << 8u};
 }
 
+/// @brief Encode CDNA4 `scratch_store_dword off, vsrc, off offset:byte_offset`.
+///
+/// CDNA4's FLAT_SCRATCH form is eight bytes and uses a signed 13-bit byte
+/// offset. Selecting `off` for both address operands leaves only the implicit
+/// per-lane scratch base.
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna4_address_free_scratch_store_b32(uint16_t vsrc, uint32_t byte_offset,
+                                           rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vsrc > 255 ||
+      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+    return std::nullopt;
+  }
+  return std::array<uint32_t, 2>{0xdc704000u | byte_offset,
+                                 (static_cast<uint32_t>(vsrc) << 8u) | 0x007f0000u};
+}
+
+/// @brief Encode CDNA4 `scratch_load_dword vdst, off, off offset:byte_offset`.
+/// @copydetails build_cdna4_address_free_scratch_store_b32
+[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 2>>
+build_cdna4_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset,
+                                          rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4 || vdst > 255 ||
+      byte_offset > kMaxCdna4AddressFreeScratchDwordOffset || byte_offset % sizeof(uint32_t) != 0) {
+    return std::nullopt;
+  }
+  return std::array<uint32_t, 2>{0xdc504000u | byte_offset,
+                                 (static_cast<uint32_t>(vdst) << 24u) | 0x007f0000u};
+}
+
+/// @brief Encode CDNA4 `s_waitcnt vmcnt(0)` for FLAT_SCRATCH completion.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_cdna4_s_wait_vmcnt0(rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return std::nullopt;
+  return 0xbf8c0f70u;
+}
+
+/// @brief Encode the completion wait required after a general FLAT operation.
+///
+/// CDNA4 FLAT operations increment both VM_CNT and LGKM_CNT, so both must be
+/// zero. RDNA4 uses its split load counter for the ConSan forms admitted here.
+[[nodiscard]] inline constexpr std::optional<uint32_t>
+build_s_wait_flat_load0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return 0xbf8c0070u; // s_waitcnt vmcnt(0) lgkmcnt(0)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return pack_sopp(rdna4::kSWaitLoadcntSopp, 0);
+  return std::nullopt;
+}
+
+/// @brief Encode the completion wait required after an LDS operation.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_lds0(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return 0xbf8cc07fu; // s_waitcnt lgkmcnt(0)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return pack_sopp(rdna4::kSWaitDscntSopp, 0);
+  return std::nullopt;
+}
+
+/// @brief Encode `s_trap simm16` for admitted ConSan targets.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_trap(uint16_t simm16,
+                                                                    rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return pack_sopp(cdna4::kSTrapSopp, simm16);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return pack_sopp(rdna4::kSTrapSopp, simm16);
+  return std::nullopt;
+}
+
+/// @brief Encode the no-operand `s_barrier` form.
+[[nodiscard]] inline constexpr std::optional<uint32_t> build_s_barrier(rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+    return pack_sopp(cdna4::kSBarrierSopp, 0);
+  return std::nullopt;
+}
+
 /// @brief Encode gfx12 `s_wait_storecnt 0`.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_storecnt0(rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4)
@@ -687,20 +802,28 @@ build_address_free_scratch_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code
 /// @details Uses the no-SADDR flat form. `return_old_value=true` encodes the
 /// GFX12 atomic-return TH value so the old memory value is written to @p vdst.
 /// @p scope is the two-bit RDNA4 SCOPE field; device scope is 2.
-[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                           bool return_old_value, uint8_t scope,
                                           rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 255 || vsrc > 255 || vdst > 255 || scope > 3)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vaddr > 255 ||
+      vsrc > 255 || vdst > 255 || scope > 3)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    // CDNA4 FLAT atomics require SC0 and return the old value. Callers that do
+    // not need it provide a disposable destination.
+    (void)return_old_value;
+    return std::vector<uint32_t>{0xDD090000u, static_cast<uint32_t>(vaddr) |
+                                                  (static_cast<uint32_t>(vsrc) << 8u) |
+                                                  (static_cast<uint32_t>(vdst) << 24u)};
+  }
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
-  return std::array<uint32_t, 3>{0xEC0D4000u | kRdna4FlatNoSaddr,
-                                 static_cast<uint32_t>(vdst) |
-                                     (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
-                                     (static_cast<uint32_t>(vsrc) << 23u),
-                                 static_cast<uint32_t>(vaddr)};
+  return std::vector<uint32_t>{0xEC0D4000u | kRdna4FlatNoSaddr,
+                               static_cast<uint32_t>(vdst) | (static_cast<uint32_t>(scope) << 18u) |
+                                   (th << 20u) | (static_cast<uint32_t>(vsrc) << 23u),
+                               static_cast<uint32_t>(vaddr)};
 }
 
 /// @brief Encode RDNA4 `flat_atomic_swap_b64 v[vdst:vdst+1], v[vaddr:vaddr+1],
@@ -710,20 +833,26 @@ build_flat_atomic_add_u32_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_
 /// GFX12 atomic-return TH value so the old 64-bit memory value is written to
 /// @p vdst/@p vdst+1. @p scope is the two-bit RDNA4 SCOPE field; device scope
 /// is 2.
-[[nodiscard]] inline constexpr std::optional<std::array<uint32_t, 3>>
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
 build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16_t vdst,
                                            bool return_old_value, uint8_t scope,
                                            rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || vaddr > 254 || vsrc > 254 || vdst > 254 || scope > 3)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || vaddr > 254 ||
+      vsrc > 254 || vdst > 254 || scope > 3)
     return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    (void)return_old_value;
+    return std::vector<uint32_t>{0xDD810000u, static_cast<uint32_t>(vaddr) |
+                                                  (static_cast<uint32_t>(vsrc) << 8u) |
+                                                  (static_cast<uint32_t>(vdst) << 24u)};
+  }
   constexpr uint32_t kRdna4FlatNoSaddr = 0x7C;
   constexpr uint32_t kRdna4AtomicReturnTh = 1;
   const uint32_t th = return_old_value ? kRdna4AtomicReturnTh : 0u;
-  return std::array<uint32_t, 3>{0xEC104000u | kRdna4FlatNoSaddr,
-                                 static_cast<uint32_t>(vdst) |
-                                     (static_cast<uint32_t>(scope) << 18u) | (th << 20u) |
-                                     (static_cast<uint32_t>(vsrc) << 23u),
-                                 static_cast<uint32_t>(vaddr)};
+  return std::vector<uint32_t>{0xEC104000u | kRdna4FlatNoSaddr,
+                               static_cast<uint32_t>(vdst) | (static_cast<uint32_t>(scope) << 18u) |
+                                   (th << 20u) | (static_cast<uint32_t>(vsrc) << 23u),
+                               static_cast<uint32_t>(vaddr)};
 }
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
@@ -748,7 +877,8 @@ build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16
 /// @brief Encode RDNA4 `s_mov_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 126 || ssrc0 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 126 ||
+      ssrc0 > 255)
     return std::nullopt;
   return pack_sop1(1, sdst, ssrc0);
 }
@@ -756,9 +886,10 @@ build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
 /// @brief Encode RDNA4 `s_and_saveexec_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_and_saveexec_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 126 || ssrc0 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 126 ||
+      ssrc0 > 255)
     return std::nullopt;
-  return pack_sop1(0x21, sdst, ssrc0);
+  return pack_sop1(arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x20 : 0x21, sdst, ssrc0);
 }
 
 /// @brief Encode RDNA4 `s_cselect_b32 sdst, ssrc0, ssrc1`.
@@ -767,10 +898,11 @@ build_s_and_saveexec_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
 /// when SCC is set and inline 0 otherwise.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || sdst > 127 || ssrc0 > 255 || ssrc1 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 127 ||
+      ssrc0 > 255 || ssrc1 > 255)
     return std::nullopt;
-  constexpr uint32_t kRdna4Sop2CselectB32 = 0x30;
-  return pack_sop2(kRdna4Sop2CselectB32, sdst, ssrc0, ssrc1);
+  const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCselectB32Sop2 : 0x30;
+  return pack_sop2(op, sdst, ssrc0, ssrc1);
 }
 
 /// @brief Encode RDNA4 `s_cmp_lg_u32 ssrc0, ssrc1`.
@@ -779,7 +911,8 @@ build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_
 /// SCC to that saved Boolean value.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || ssrc0 > 255 || ssrc1 > 255)
+  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || ssrc0 > 255 ||
+      ssrc1 > 255)
     return std::nullopt;
   constexpr uint32_t kRdna4SopcCmpLgU32 = 7;
   return pack_sopc(kRdna4SopcCmpLgU32, ssrc0, ssrc1);
@@ -788,10 +921,10 @@ build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
 /// @brief Encode RDNA4 `s_cbranch_vccz`.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_cbranch_vccz(int16_t offset_dwords,
                                                                             rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     return std::nullopt;
-  constexpr uint32_t kRdna4SoppCbranchVccz = 35;
-  return pack_sopp(kRdna4SoppCbranchVccz, static_cast<uint16_t>(offset_dwords));
+  const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCbranchVcczSopp : 35;
+  return pack_sopp(op, static_cast<uint16_t>(offset_dwords));
 }
 
 /// @brief Encode s_lshl_b32 for the given target ISA.

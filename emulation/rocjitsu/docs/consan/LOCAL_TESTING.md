@@ -1,28 +1,68 @@
 # Local ConSan Testing
 
-This is a short-lived local runbook for the current workspace. Unlike the
-team-facing docs, this file may name local paths and current machine state.
-
-Current local GPU: RDNA4 `gfx1201`.
+This is the local runbook for ConSan development workspaces. It uses paths
+relative to the workspace root so the same commands apply to the gfx1201 and
+gfx950 machines. Architecture-specific results below name the machine on which
+they were obtained.
 
 See [SPILLING.md](SPILLING.md) for the resource-path invariants exercised by
 the focused and live spill tests below.
 
 ## Local Paths
 
-- rocm-systems repo: `/home/benoit/workspace/TheRock/rocm-systems`
-- TheRock ROCm install: `/home/benoit/workspace/TheRock-build/dist/rocm`
-- rocJITsu build: `/home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build`
-- ConSan HSA hook:
-  `/home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so`
-- hip-moi build: `/home/benoit/workspace/hip-moi-build`
-- IREE build: `/home/benoit/workspace/iree-build`
-- rocjitsu-test-corpus: `/home/benoit/workspace/rocjitsu-test-corpus`
+The expected source/build layout is:
+
+```text
+$WORKSPACE_ROOT/
+|-- TheRock/
+|   `-- rocm-systems/
+|-- TheRock-build/                 # out-of-tree build (one alternative)
+|-- TheRock/build/                 # in-tree build (the other alternative)
+|-- hip-moi/
+|-- hip-moi-build/
+|-- iree/
+|-- iree-build/
+`-- rocjitsu-test-corpus/
+```
+
+From the `rocm-systems` checkout, initialize the common paths with:
+
+```sh
+export ROCM_SYSTEMS_DIR="$(git rev-parse --show-toplevel)"
+export WORKSPACE_ROOT="$(cd "$ROCM_SYSTEMS_DIR/../.." && pwd)"
+export ROCJITSU_SOURCE_DIR="$ROCM_SYSTEMS_DIR/emulation/rocjitsu"
+export ROCJITSU_BUILD_DIR="$ROCJITSU_SOURCE_DIR/build"
+if test -d "$WORKSPACE_ROOT/TheRock-build/dist/rocm"; then
+  export THEROCK_BUILD_DIR="$WORKSPACE_ROOT/TheRock-build"
+elif test -d "$WORKSPACE_ROOT/TheRock/build/dist/rocm"; then
+  export THEROCK_BUILD_DIR="$WORKSPACE_ROOT/TheRock/build"
+else
+  echo "No TheRock ROCm build found under $WORKSPACE_ROOT" >&2
+  return 1 2>/dev/null || exit 1
+fi
+export ROCM_DIST_DIR="$THEROCK_BUILD_DIR/dist/rocm"
+export HOST_LLVM_DIR="$HOME/LLVM-21.1.8-Linux-X64"
+export CC="$HOST_LLVM_DIR/bin/clang"
+export CXX="$HOST_LLVM_DIR/bin/clang++"
+export HIP_MOI_SOURCE_DIR="$WORKSPACE_ROOT/hip-moi"
+export HIP_MOI_BUILD_DIR="$WORKSPACE_ROOT/hip-moi-build"
+export IREE_SOURCE_DIR="$WORKSPACE_ROOT/iree"
+export IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build"
+export ROCJITSU_TEST_CORPUS_DIR="$WORKSPACE_ROOT/rocjitsu-test-corpus"
+export RJ_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+```
+
+Override any individual variable after this block if a build directory uses a
+different location. Both the sibling `TheRock-build` layout and TheRock's
+in-tree `TheRock/build` layout are detected. The source repositories `hip-moi`,
+`iree`, and `rocjitsu-test-corpus` are siblings of `TheRock`; the last one is
+optional for the authoritative ConSan tier matrix.
 
 ## Ground Rules
 
-- Use TheRock's ROCm build for runtime tests:
-  `/home/benoit/workspace/TheRock-build/dist/rocm`.
+- Use the workspace's TheRock ROCm build at `$ROCM_DIST_DIR` for runtime tests.
+- Use `$CC` and `$CXX` (Clang 21.1.8 above) for host C/C++ configuration. HIP
+  compilation still uses the compiler supplied by `$ROCM_DIST_DIR`.
 - Limit GPU test parallelism to about `8`.
 - Do not run multiple IREE `ctest` sweeps against the same build directory at
   the same time; several tests share temporary paths.
@@ -32,8 +72,7 @@ the focused and live spill tests below.
 Common environment:
 
 ```sh
-export RJ_ROCM=/home/benoit/workspace/TheRock-build/dist/rocm
-export RJ_HOOK=/home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so
+export RJ_ROCM="$ROCM_DIST_DIR"
 export ROCM_PATH=$RJ_ROCM
 export HIP_PATH=$RJ_ROCM
 export LD_LIBRARY_PATH=$RJ_ROCM/lib
@@ -45,7 +84,7 @@ export HSA_TOOLS_LIB=$RJ_HOOK
 Build:
 
 ```sh
-cmake --build /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+cmake --build "$ROCJITSU_BUILD_DIR" \
   --target rocjitsu_tests rocjitsu_dbi_hooks
 ```
 
@@ -53,7 +92,7 @@ Focused ConSan unit/synthetic tests:
 
 ```sh
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
-/home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build/tests/rocjitsu_tests \
+"$ROCJITSU_BUILD_DIR/tests/rocjitsu_tests" \
   '--gtest_filter=ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
@@ -65,10 +104,27 @@ Known local result:
   access/barrier/atomic planner rollout, including automatic scalar resources,
   shared owners, bounded outcome summaries, and spill accounting.
 
+gfx950 environment and spill baseline:
+
+```sh
+ctest --test-dir "$ROCJITSU_BUILD_DIR" \
+  -R '^ConSanSpillHipTest\.Gfx950.*ScratchRoundTrip$' \
+  --output-on-failure
+```
+
+Known gfx950 result:
+
+- The agent is an AMD Instinct MI355X, target
+  `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-`, wave64, using TheRock HSA runtime
+  1.21 and ROCk/amdgpu 6.14.14.
+- 2/2 standalone CDNA4 spill tests pass. They execute the exact
+  `scratch_store_dword` / `scratch_load_dword` plus `s_waitcnt vmcnt(0)`
+  sequence emitted by the gfx950 backend under full and partial EXEC masks.
+
 Focused gfx1201 spill hardware smoke:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+ctest --test-dir "$ROCJITSU_BUILD_DIR" \
   -R '^ConSanSpillHipTest.Gfx1201VgprScratchRoundTrip$' \
   --output-on-failure
 ```
@@ -82,7 +138,7 @@ Known local result:
 Focused MOI spill vertical and live regression slice:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+ctest --test-dir "$ROCJITSU_BUILD_DIR" \
   -R '^(ConSanSpillHipTest|ConSanMoiHipTest\.)' \
   --parallel 8 --output-on-failure
 ```
@@ -100,7 +156,7 @@ Known local result:
 Automatic inline-shadow resource checks:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+ctest --test-dir "$ROCJITSU_BUILD_DIR" \
   -R '^ConSanInlineShadowTest\.Dbi(ReportsCrossWaveRace|BarrierEpochOrdersCrossWaveAccesses|PrivateEpochBarrierOrdersCrossWaveAccesses)$' \
   --parallel 3 --output-on-failure
 ```
@@ -115,7 +171,7 @@ Known local result:
 Full targeted MOI resource hardware tier:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/TheRock/rocm-systems/emulation/rocjitsu/build \
+ctest --test-dir "$ROCJITSU_BUILD_DIR" \
   -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.' \
   --parallel 8 --output-on-failure
 ```
@@ -138,7 +194,7 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=supercollider \
 RJ_CONSAN_REQUIRE_PATCH=1 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
   --parallel 8 --output-on-failure
 ```
@@ -154,7 +210,7 @@ HSA_TOOLS_LIB=$RJ_HOOK \
 ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=supercollider \
 RJ_CONSAN_CHECK_TRAP_MODE=lds \
-ctest --test-dir /home/benoit/workspace/hip-moi-build \
+ctest --test-dir "$HIP_MOI_BUILD_DIR" \
   --parallel 8 --output-on-failure
 ```
 
@@ -205,7 +261,7 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay \
 RJ_CONSAN_MAX_PATCHES=4 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
   --parallel 8 --output-on-failure
 ```
@@ -225,7 +281,7 @@ RJ_CONSAN_MOI_ENGINE=record_replay \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*large_rdna4_tileandfusewmma.*_rocm_hip$' \
   --parallel 8 --output-on-failure
 ```
@@ -249,7 +305,7 @@ ROCM_PATH=$RJ_ROCM HIP_PATH=$RJ_ROCM LD_LIBRARY_PATH=$RJ_ROCM/lib \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=sampled \
 RJ_CONSAN_MAX_PATCHES=4 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
   --parallel 8 --output-on-failure
 ```
@@ -269,7 +325,7 @@ RJ_CONSAN_MOI_ENGINE=sampled \
 RJ_CONSAN_MAX_PATCHES=4 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*large_rdna4_tileandfusewmma.*_rocm_hip$' \
   --parallel 8 --output-on-failure
 ```
@@ -291,7 +347,7 @@ RJ_CONSAN_MOI_OWNER_SOURCE=hw_id \
 RJ_CONSAN_MAX_PATCHES=1 \
 RJ_CONSAN_REQUIRE_PATCH=1 \
 RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \
-ctest --test-dir /home/benoit/workspace/iree-build \
+ctest --test-dir "$IREE_BUILD_DIR" \
   -R '^iree/tests/e2e/matmul/e2e_matmul_rocm_.*rdna4_tileandfusewmma.*rocm_hip$' \
   --parallel 8 --output-on-failure
 ```
@@ -316,7 +372,7 @@ Known local result:
 Run the independent reference suite without a ConSan hook:
 
 ```sh
-ctest --test-dir /home/benoit/workspace/hip-moi-build \
+ctest --test-dir "$HIP_MOI_BUILD_DIR" \
   --parallel 8 --timeout 120 --output-on-failure
 ```
 
@@ -332,14 +388,14 @@ It requires `ROCJITSU_BUILD_DIR`, `IREE_BUILD_DIR`, `HIP_MOI_BUILD_DIR`, and
 `ROCM_DIST_DIR`; pass `tier0`, `tier1`, `tier2`, or `all`. See `USAGE.md` for
 the exact invocation and the meaning of each tier.
 
-Current architecture evidence:
+Recorded architecture evidence across the development workspaces:
 
-| Target | Live hardware | Tier evidence | Status |
+| Target | Workspace hardware | Tier evidence | Status |
 | --- | --- | --- | --- |
-| gfx942 | unavailable locally | no current native ConSan tier | deferred to A1 |
-| gfx950 | unavailable locally | no current native ConSan tier | deferred to A1 |
-| gfx1201 | yes | tier0 183 unit + 37 live; tier1/tier2 recorded below | active qualification target |
-| gfx1250 | unavailable locally | decoder/encoder sources and synthetic dispatch coverage only | deferred to A1 |
+| gfx942 | no current workspace | no current native ConSan tier | deferred |
+| gfx950 | available in the gfx950 workspace | port and native tier pending | tracked in `PLAN_GFX950.md` |
+| gfx1201 | available in the gfx1201 workspace | tier0 183 unit + 37 live; tier1/tier2 recorded below | accepted baseline |
+| gfx1250 | no current workspace | decoder/encoder sources and synthetic dispatch coverage only | deferred |
 
 The harness uses 30-second focused-GPU, 60-second IREE, and 120-second hip-moi
 per-test limits. A failure or timeout terminates the current profile and all
@@ -361,7 +417,7 @@ resource-induced hangs; they do not imply every loaded object was patchable.
 
 ## rocjitsu-test-corpus
 
-Current local status:
+Recorded gfx1201 workspace status:
 
 - `gfx1201` CTS corpus under SuperCollider: 59/59 passed.
 - IREE corpus: compile-only cases passed, but runtime cases were blocked by
@@ -372,9 +428,9 @@ Current local status:
 
 ## Architecture Matrix
 
-| Architecture | Local live-GPU coverage |
+| Architecture | Live-GPU workspace coverage |
 | --- | --- |
-| `gfx1201` | Yes. Results above are current local coverage. |
-| `gfx942` | Planned target, not validated on this machine. |
-| `gfx950` | Planned target, not validated on this machine. |
-| `gfx1250` | Planned target, not validated on this machine. |
+| `gfx1201` | Available. The recorded results above are the accepted baseline. |
+| `gfx950` | Available. Native ConSan port and qualification are tracked in [PLAN_GFX950.md](PLAN_GFX950.md). |
+| `gfx942` | No current live-GPU workspace. |
+| `gfx1250` | No current live-GPU workspace. |
