@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/amd_ext_aql_packet.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 
@@ -17,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <thread>
 
@@ -69,6 +71,12 @@ public:
     cp_->engine()->schedule_event_now(cp_->doorbell_event());
   }
 
+  void submit(const amdgpu::AmdExtKernelDispatchPacket &pkt) {
+    hsa_kernel_dispatch_packet_t raw{};
+    std::memcpy(&raw, &pkt, sizeof(pkt));
+    submit(raw);
+  }
+
   /// Build and submit a kernel dispatch packet.
   void dispatch(uint64_t kernel_object, uint32_t grid_size_x, uint16_t workgroup_size_x = 64,
                 uint64_t kernarg_addr = 0) {
@@ -81,6 +89,29 @@ public:
     pkt.grid_size_x = grid_size_x;
     pkt.grid_size_y = 1;
     pkt.grid_size_z = 1;
+    pkt.kernel_object = kernel_object;
+    pkt.kernarg_address = reinterpret_cast<void *>(kernarg_addr);
+    submit(pkt);
+  }
+
+  /// Build and submit an AMD extended kernel dispatch packet with cluster shape.
+  void dispatch_clustered(uint64_t kernel_object, uint32_t cluster_count_x, uint8_t cluster_size_x,
+                          uint16_t workgroup_size_x = 64, uint64_t kernarg_addr = 0,
+                          uint32_t group_segment_size = 0) {
+    amdgpu::AmdExtKernelDispatchPacket pkt{};
+    pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    pkt.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    pkt.setup = 1;
+    pkt.workgroup_size_x = workgroup_size_x;
+    pkt.workgroup_size_y = 1;
+    pkt.workgroup_size_z = 1;
+    pkt.cluster_count_x = cluster_count_x;
+    pkt.cluster_count_y = 1;
+    pkt.cluster_count_z = 1;
+    pkt.cluster_size_x = cluster_size_x;
+    pkt.cluster_size_y = 1;
+    pkt.cluster_size_z = 1;
+    pkt.group_segment_size = group_segment_size;
     pkt.kernel_object = kernel_object;
     pkt.kernarg_address = reinterpret_cast<void *>(kernarg_addr);
     submit(pkt);

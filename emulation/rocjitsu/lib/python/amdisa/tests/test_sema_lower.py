@@ -53,6 +53,24 @@ def _cast(inner: SemaNode, target: SemaType) -> SemaNode:
     return SemaNode(SemaNodeKind.CAST, ty=target, cast_target=target, children=(inner,))
 
 
+def _cvt_f32_fp8_assignment() -> SemaNode:
+    return SemaNode(
+        SemaNodeKind.ASSIGN,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name='tmp'),
+            SemaNode(
+                SemaNodeKind.CALL,
+                call_name='cvt_f32_fp8',
+                ty=SemaType.U32,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='cvt_f32_fp8'),
+                    SemaNode(SemaNodeKind.LIT, lit_value='0x40', ty=SemaType.U32),
+                ),
+            ),
+        ),
+    )
+
+
 class TestLowerEmptyBlock:
     def test_empty_block(self):
         block = SemaBlock(
@@ -401,15 +419,16 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
             '::rocjitsu::amdgpu::write_vop3_true16_dst('
-            'vdst, wf, lane, inst_.opsel & 0x8u, src_half);' in result
+            'vdst, wf, lane, inst_.opsel, src_half, true);' in result
         )
 
     def test_true16_cndmask_keeps_selector_scalar(self):
@@ -450,6 +469,7 @@ class TestLowerVectorAdd:
                 0: 'inst_.opsel & 0x1u',
                 1: 'inst_.opsel & 0x2u',
             },
+            true16_vop3_opsel='inst_.opsel',
             vcc_read='src2.read_scalar64(wf)',
         )
 
@@ -457,10 +477,10 @@ class TestLowerVectorAdd:
 
         assert 'src2.read_scalar64(wf)' in result
         assert 'src2.read_lane' not in result
-        assert '((inst_.opsel & 0x1u) != 0 ? (src0.read_lane(wf, lane) >> 16)' in result
-        assert '((inst_.opsel & 0x2u) != 0 ? (src1.read_lane(wf, lane) >> 16)' in result
+        assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in result
+        assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in result
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
 
@@ -486,6 +506,7 @@ class TestLowerVectorAdd:
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
             true16_src_selects={0: 'inst_.opsel & 0x1u'},
+            true16_vop3_opsel='inst_.opsel',
         )
 
         result = lower_sema_block(block, ctx)
@@ -496,7 +517,7 @@ class TestLowerVectorAdd:
             in result
         )
         assert (
-            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel & 0x8u, src_half);'
+            'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, src_half, true);'
             in result
         )
         assert 'std::cos' in result
@@ -651,6 +672,61 @@ class TestLowerControlFlow:
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
         assert 'for (' in result
+
+    @pytest.mark.parametrize('control', ['if', 'for', 'while'])
+    def test_nested_control_flow_preserves_arch_name(self, control):
+        nested_body = _cvt_f32_fp8_assignment()
+        if control == 'if':
+            body = SemaNode(
+                SemaNodeKind.IF,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        elif control == 'for':
+            body = SemaNode(
+                SemaNodeKind.FOR,
+                children=(
+                    SemaNode(
+                        SemaNodeKind.ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='0', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.LT,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    SemaNode(
+                        SemaNodeKind.ADD_ASSIGN,
+                        children=(
+                            SemaNode(SemaNodeKind.ID, id_name='i'),
+                            SemaNode(SemaNodeKind.LIT, lit_value='1', ty=SemaType.U32),
+                        ),
+                    ),
+                    nested_body,
+                ),
+            )
+        else:
+            body = SemaNode(
+                SemaNodeKind.WHILE,
+                children=(
+                    SemaNode(SemaNodeKind.ID, id_name='SCC', ty=SemaType.U1),
+                    nested_body,
+                ),
+            )
+        block = SemaBlock('TEST', ExecModel.SCALAR, body)
+        ctx = LoweringContext(exec_model=ExecModel.SCALAR, arch_name='cdna3')
+
+        result = lower_sema_block(block, ctx)
+
+        assert 'util::fp8_e4m3_fnuz_to_f32' in result
+        assert 'util::fp8_e4m3_to_f32' not in result
 
 
 class TestLowerContextIds:

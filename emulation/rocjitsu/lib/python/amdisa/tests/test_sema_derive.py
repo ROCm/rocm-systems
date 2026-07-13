@@ -117,6 +117,29 @@ class TestDeriveScalarUnary:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_CVT_F32_I32', 'cvt_f32_i32'),
+            ('S_CVT_F32_U32', 'cvt_f32_u32'),
+            ('S_CVT_I32_F32', 'cvt_i32_f32'),
+            ('S_CVT_U32_F32', 'cvt_u32_f32'),
+            ('S_CVT_F16_F32', 'cvt_f16_f32'),
+            ('S_CVT_F32_F16', 'cvt_f32_f16'),
+            ('S_CVT_HI_F32_F16', 'cvt_hi_f32_f16'),
+        ],
+    )
+    def test_scalar_cvt_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
     @pytest.mark.parametrize('name', ['S_CLZ_I32_U32', 'S_CLZ_I32_U64'])
     def test_clz_zero_returns_all_ones(self, name):
         sem = derive_semantics(name, 'ENC_SOP1')
@@ -195,25 +218,29 @@ class TestDeriveScalarBinop:
         assert 'uint32_t result' in cpp
         assert re.search(r'\bint32_t\s+result\b', cpp) is None
 
-    def test_signed_co_uses_signed_overflow(self):
+    def test_signed_co_uses_unsigned_overflow(self):
+        # Signed s_add_co_i32 / s_sub_co_i32 must emulate the hardware's
+        # wrap-around add/sub entirely in unsigned (signed overflow is undefined
+        # behavior and unnecessary).
         sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
 
-        assert 'int32_t' in cpp
-        assert 'int64_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<uint64_t>' not in cpp
+        assert 'uint32_t result = (s0 + s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        # SCC overflow is detected by the unsigned helper (simd_glue.h).
+        assert 'wf.write_scc(signed_add_overflows(s0, s1))' in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
         assert sem.sets_scc == 'overflow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'int32_t' in cpp
-        assert 'int64_t' in cpp
-        assert 'write_scc' in cpp
-        assert 'static_cast<uint64_t>' not in cpp
+        assert 'uint32_t result = (s0 - s1)' in cpp
+        assert re.search(r'\bint32_t\b', cpp) is None
+        assert re.search(r'\bint64_t\b', cpp) is None
+        assert 'wf.write_scc(signed_sub_overflows(s0, s1))' in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
@@ -564,6 +591,12 @@ class TestDeriveScalarMovrel:
 
 
 class TestDeriveScalarSplitBarrier:
+    def test_barrier_wait_derives_current_workgroup_barrier_model(self):
+        sem = derive_semantics('S_BARRIER_WAIT', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'barrier'
+        assert sem.sets_scc is None
+
     def test_get_barrier_state_derives_idle_state_read(self):
         sem = derive_semantics('S_GET_BARRIER_STATE', 'ENC_SOP1')
         assert sem is not None
@@ -574,6 +607,8 @@ class TestDeriveScalarSplitBarrier:
     @pytest.mark.parametrize(
         'name',
         [
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
             'S_BARRIER_INIT',
             'S_BARRIER_JOIN',
             'S_WAKEUP_BARRIER',
@@ -1007,6 +1042,42 @@ class TestDeriveVectorBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SUB in all_kinds
 
+    def test_signed_add_sub_use_unsigned_operands_to_avoid_ub(self):
+        ops = [
+            ('add', SemaNodeKind.ADD, ('0', '1')),
+            ('sub', SemaNodeKind.SUB, ('0', '1')),
+            ('subrev', SemaNodeKind.SUB, ('1', '0')),
+            ('rsub', SemaNodeKind.SUB, ('1', '0')),
+        ]
+        dtypes = [
+            ('i16', SemaType('I', 16), SemaType('U', 16), 'int16_t'),
+            ('i32', SemaType.I32, SemaType.U32, 'int32_t'),
+        ]
+        for dtype, signed_ty, unsigned_ty, cpp_type in dtypes:
+            for op, kind, operand_order in ops:
+                sem = _FakeSem(
+                    f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype
+                )
+                block = derive_sema_block(sem)
+                assert block is not None
+
+                rhs = block.body.children[1]
+                assert block.body.children[0].cast_target == signed_ty
+                assert rhs.kind == kind
+                assert rhs.ty == unsigned_ty
+                assert [c.ty for c in rhs.children] == [unsigned_ty, unsigned_ty]
+                assert [c.children[1].lit_value for c in rhs.children] == list(
+                    operand_order
+                )
+
+                cpp = lower_sema_block(block)
+                assert (
+                    f'static_cast<{cpp_type}>(inst.src0.read_lane(wf, lane))' not in cpp
+                )
+                assert (
+                    f'static_cast<{cpp_type}>(inst.src1.read_lane(wf, lane))' not in cpp
+                )
+
     def test_lshlrev(self):
         sem = _FakeSem('V_LSHLREV_B32', 'vector_binop', 'lshlrev', 'b32')
         block = derive_sema_block(sem)
@@ -1143,6 +1214,27 @@ class TestDeriveVectorTernary:
 
         assert '::rocjitsu::amdgpu::mad_i24_u32' in cpp
         assert 'a * b' not in cpp
+
+    def test_u16_mad_widens_before_multiply(self):
+        sem = _FakeSem('V_MAD_LEGACY_U16', 'vector_ternary', 'mad', 'u16')
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert '::rocjitsu::amdgpu::mad_lo_u16' in cpp
+        assert 'static_cast<uint32_t>(static_cast<uint16_t>(' in cpp
+        assert (
+            'static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>('
+            not in cpp
+        )
+        assert 'static_cast<uint16_t>(inst.src0.read_lane(wf, lane)) *' not in cpp
+        assert 'static_cast<uint16_t>(inst.src1.read_lane(wf, lane))' not in cpp
+        assert 'static_cast<uint16_t>(inst.src2.read_lane(wf, lane))' not in cpp
+        compact_cpp = ''.join(cpp.split())
+        assert (
+            '::rocjitsu::amdgpu::mad_lo_u16('
+            'inst.src0.read_lane(wf,lane),'
+            'inst.src1.read_lane(wf,lane),'
+            'inst.src2.read_lane(wf,lane))' in compact_cpp
+        )
 
     def test_signed_bfe_keeps_braced_one_literal(self):
         sem = _FakeSem('V_BFE_I32', 'vector_ternary', 'bfe_i', 'i32')
@@ -2052,6 +2144,11 @@ class TestDeriveControlFlow:
         sem = _FakeSem('S_ENDPGM', 'endpgm')
         block = derive_sema_block(sem)
         assert block is not None
+
+    def test_trap_is_classified_as_control_flow_terminator(self):
+        sem = derive_semantics('S_TRAP', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'trap'
 
     def test_nop(self):
         sem = _FakeSem('S_NOP', 'nop')

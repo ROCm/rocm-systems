@@ -96,5 +96,3 @@ The `TheRock <https://github.com/ROCm/TheRock>`__ build system publishes nightly
 builds for the ROCm Core SDK and its components. See `Nightly release status
 <https://github.com/ROCm/TheRock#nightly-release-status>`__ for download links and
 support notes.
-
-Some hipFile preview packages also appear on the `ROCm hipFile releases page <https://github.com/ROCm/hipFile/releases>`__. Treat those artifacts as previews unless your release notes state otherwise. Match the ``.deb`` or RPM file names to your distribution and ROCm version before you install them.

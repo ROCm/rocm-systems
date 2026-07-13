@@ -47,6 +47,10 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 
 using detail::fits_in_bounds;
 
+/*
+ * \NPI new GPU: map its MACH value and its gfxNNNN triple to a target id in \
+ * both target_from_machine_flags() and target_from_triple() below.
+ */
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
   uint32_t mach = flags & EF_AMDGPU_MACH;
   if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A)

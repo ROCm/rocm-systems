@@ -12,7 +12,6 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.openmp,
-    pytest.mark.ci_enable,
     pytest.mark.rocm_min_version(
         "6.4"
     ),  # Requires SDK version >= 600, 6.3 ships with 500
@@ -134,7 +133,6 @@ class TestOpenMPCG(RocprofsysTest):
         )
         self.assert_regex(result)
 
-    @pytest.mark.timeout(300)
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
         result = self.run_test(
@@ -144,7 +142,6 @@ class TestOpenMPCG(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=self.DURATION_SAMPLING_PASS_REGEX)
 
-    @pytest.mark.timeout(300)
     @pytest.mark.no_tmp_files
     def test_no_tmp_files(self, ompt_no_tmp_env):
         result = self.run_test(
@@ -201,7 +198,6 @@ class TestOpenMPLU(RocprofsysTest):
             binary_rewrite_fail_regex=self.BINARY_REWRITE_FAIL_REGEX,
         )
 
-    @pytest.mark.timeout(300)
     @pytest.mark.sampling_duration
     def test_sampling_duration(self, ompt_sampling_env):
         result = self.run_test(
@@ -217,7 +213,7 @@ class TestOpenMPLU(RocprofsysTest):
 # ============================================================================
 
 
-@pytest.mark.ci_disable("all")  # TODO: Deprecate once TheRock switches to CTest
+@pytest.mark.build_only
 @pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.class_name("openmp-target")
@@ -296,9 +292,6 @@ class TestOpenMPFortran(RocprofsysTest):
                 marks=[
                     pytest.mark.slow,
                     pytest.mark.serialize,
-                    pytest.mark.ci_disable(
-                        "all"
-                    ),  # TODO: Deprecate once TheRock switches to CTest
                 ],
             ),
         ],

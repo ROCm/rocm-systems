@@ -19,7 +19,7 @@ For guidance on interpreting errors in practice, see
 ========================
 
 The ``hipFileError_t`` struct carries the ``[[nodiscard]]`` attribute when
-compiled with C++ 17 (``__cplusplus >= 201703L``) or C23
+compiled with C++ 17 or newer (``__cplusplus >= 201703L``) or C23 or newer
 (``__STDC_VERSION__ >= 202311L``). The compiler emits a warning if a caller
 discards the return value of any function that returns ``hipFileError_t``.
 

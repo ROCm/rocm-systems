@@ -82,12 +82,46 @@ foreach(gtest_target GTest::gtest GTest::gmock)
         set_property(TARGET ${gtest_target} APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Threads::Threads)
     endif()
+
+    # Mark GoogleTest's headers as system includes so consumers pull them in
+    # via -isystem. clang-tidy suppresses diagnostics from system headers by
+    # default, which keeps GoogleTest's macros and templates from polluting our
+    # test builds with warnings we can't fix. The SYSTEM keyword passed to
+    # FetchContent_Declare only takes effect on CMake >= 3.25, and a system
+    # find_package(GTest) is not guaranteed to mark them either, so set the
+    # property here directly to cover every path.
+    set_target_properties(${gtest_target} PROPERTIES
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+            "$<TARGET_PROPERTY:${gtest_target},INTERFACE_INCLUDE_DIRECTORIES>")
 endforeach()
 
 include(GoogleTest)
 
+# Absolute path to the LeakSanitizer suppression file. Only applied when
+# building with the (non-TSAN) sanitizers.
+set(AIS_LSAN_SUPPRESSIONS_FILE "${HIPFILE_ROOT_PATH}/cmake/lsan-suppressions.supp")
+
 function(ais_gtest_discover_tests target)
-    cmake_language(CALL gtest_discover_tests ${ARGV})
+    set(forwarded_args ${ARGV})
+
+    # When the address sanitizer is on, force every discovered test to load the
+    # LSan suppression file via LSAN_OPTIONS. We splice an ENVIRONMENT entry into
+    # the PROPERTIES list that gtest_discover_tests applies to each test case, so
+    # the suppression travels with the test regardless of how ctest is invoked.
+    if(AIS_USE_SANITIZERS)
+        set(lsan_env "LSAN_OPTIONS=suppressions=${AIS_LSAN_SUPPRESSIONS_FILE}")
+        list(FIND forwarded_args "PROPERTIES" props_idx)
+        if(props_idx EQUAL -1)
+            list(APPEND forwarded_args PROPERTIES ENVIRONMENT "${lsan_env}")
+        else()
+            # Insert ENVIRONMENT right after the PROPERTIES keyword so it joins
+            # the existing property name/value pairs the caller passed.
+            math(EXPR insert_idx "${props_idx} + 1")
+            list(INSERT forwarded_args ${insert_idx} ENVIRONMENT "${lsan_env}")
+        endif()
+    endif()
+
+    cmake_language(CALL gtest_discover_tests ${forwarded_args})
 
     if(AIS_USE_CODE_COVERAGE)
         set(options)

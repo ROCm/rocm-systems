@@ -1087,6 +1087,7 @@ RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
+  if (comm->nNodes <= 1) return 0;
   bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
@@ -1167,7 +1168,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;
@@ -1241,7 +1247,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;
@@ -3350,14 +3361,9 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    if (comm->symmetricSupport) {
-      struct ncclWindow_vidmem* peerWinDevHost = NULL;
-      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
-    } else {
-      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
-      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
-    }
+    struct ncclWindow_vidmem* peerWinDevHost = NULL;
+    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
@@ -3368,23 +3374,21 @@ static ncclResult_t rmaTaskAppend(
       WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    if (comm->symmetricSupport) {
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
-    } else {
-      // hostRmaSupport path: source buffer must be inside a registered window so
-      // the GIN proxy can resolve its MR handle.  Look it up the same way.
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL) {
-        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+
+    // RCCL: Source buffer must be inside a registered window. The winFlags
+    // symmetric hint is enforced only on the sym VMM path (user contract:
+    // offsets symmetric across ranks); IPC and proxy do not require the flag.
+    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+    if (srcWinHost == NULL) {
+      WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+      return ncclInvalidArgument;
     }
+    if (comm->symmetricSupport &&
+        !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+      return ncclInvalidArgument;
+    }
+    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
 
     // Relevant for symmetric window only
     bool isMultiSegment = (comm->symmetricSupport)
@@ -3432,16 +3436,15 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
-#ifdef RCCL_RMA_CU_PATH_ENABLED
   // Check if RMA CE needs initialization
-  if (!comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+  if (!comm->rmaState.rmaCeState.initialized &&
+      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECK(ncclCalloc(&ceTask, 1));
     ceTask->comm = comm;
     ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
-#endif
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);

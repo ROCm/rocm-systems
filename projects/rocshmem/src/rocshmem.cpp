@@ -610,6 +610,21 @@ __host__ void rocshmem_buffer_unregister_all() {
   backend->buffer_unregister_all();
 }
 
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length) {
+  VERIFY_BACKEND();
+  void *registered_addr = nullptr;
+  if (backend->buffer_register_symmetric(addr, length, &registered_addr) !=
+      ROCSHMEM_SUCCESS) {
+    return nullptr;
+  }
+  return registered_addr;
+}
+
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr) {
+  VERIFY_BACKEND();
+  return backend->buffer_unregister_symmetric(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 
@@ -638,6 +653,15 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
 
 [[maybe_unused]] __host__ void rocshmem_finalize() {
   VERIFY_BACKEND();
+
+  /*
+   * Dump backend statistics if ROCSHMEM_DEBUG_LEVEL=...:stats was requested.
+   * Must be called before destroy_remaining_ctxs() so that list_of_ctxs
+   * is still populated for host-stats accumulation.
+   */
+  if (envvar::log_flags.show_stats) {
+    backend->dump_stats();
+  }
 
   /*
    * Destroy all the ctxs that the user
@@ -1391,6 +1415,16 @@ __host__ int rocshmem_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
               ->reduce<T, Op>(team, dest, source, nreduce);
 }
 
+template <typename T, ROCSHMEM_OP Op>
+__host__ int rocshmem_reduce_scatter([[maybe_unused]] rocshmem_ctx_t ctx,
+                                     rocshmem_team_t team, T *dest,
+                                     const T *source, int nreduce) {
+  LOG_API("host::reduce_scatter (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+
+  return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
+              ->reduce_scatter<T, Op>(team, dest, source, nreduce);
+}
+
 template <typename T>
 __host__ void rocshmem_wait_until(T *ivars, int cmp, T val) {
   LOG_API("host::wait_until (ivars=%p, cmp=%d, val=%g)", ivars, cmp, (double)val);
@@ -1470,6 +1504,9 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
       rocshmem_ctx_t ctx, T * dest, const T *source, int nreduce,             \
       int PE_start, int logPE_stride, int PE_size, T *pWrk, long *pSync);     \
   template __host__ int rocshmem_reduce<T, Op>(                               \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
+      int nreduce);                                                            \
+  template __host__ int rocshmem_reduce_scatter<T, Op>(                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
       int nreduce);
 
@@ -1629,6 +1666,11 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nreduce) {                                                          \
     return rocshmem_reduce<T, Op>(ctx, team, dest, source, nreduce);          \
+  }                                                                           \
+  __host__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter(              \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
+      int nreduce) {                                                          \
+    return rocshmem_reduce_scatter<T, Op>(ctx, team, dest, source, nreduce);  \
   }
 
 #define ARITH_REDUCTION_DEF_GEN(T, TNAME)                                     \

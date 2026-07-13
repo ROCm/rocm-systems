@@ -83,13 +83,17 @@ class VirtMemoryTestBasic : public TestBase {
   void MemoryAccountingTest(void);
   void TestVirtAddressAlias(void);
 
+  void TestGpuAccessToHostMemoryAllocation(void);
+
+  void ImportedShareableHandleSetAccessAfterFdClose(void);
+
  private:
   void TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void TestPartialMapping(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void NonContiguousChunks(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                            hsa_amd_memory_pool_t pool);
-
+  void NonContiguousChunks(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
   void GPUAccessToCPUMemoryTest(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                                 hsa_amd_memory_pool_t pool);
   void CPUAccessToGPUMemoryTest(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
@@ -97,8 +101,13 @@ class VirtMemoryTestBasic : public TestBase {
   void GPUAccessToGPUMemoryTest(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                                 hsa_amd_memory_pool_t pool);
   void MemoryAccountingTest(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
+  void TestGpuAccessToHostMemoryAllocation(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
+                                           hsa_amd_memory_pool_t cpu_pool);
+  void ImportedShareableHandleSetAccessAfterFdClose(hsa_agent_t gpu_agent,
+                                                    hsa_amd_memory_pool_t pool);
   void TestVirtAddressAlias(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                             hsa_amd_memory_pool_t pool);
+  void TestVirtAddressAlias(hsa_agent_t agent, hsa_amd_memory_pool_t pool);
 };
 
 struct SharedVirtMem {
@@ -111,9 +120,11 @@ struct SharedVirtMem {
   int sv[2];
 };
 
+enum class PoolType { kDevicePool, kCpuPool };
+
 class VirtMemoryTestInterProcess : public TestBase {
  public:
-  VirtMemoryTestInterProcess();
+  explicit VirtMemoryTestInterProcess(PoolType pool_type);
 
   // @Brief: Destructor for test case of VirtMemoryTest
   virtual ~VirtMemoryTestInterProcess();
@@ -144,8 +155,9 @@ class VirtMemoryTestInterProcess : public TestBase {
   int child_;
   SharedVirtMem* shared_;
   bool parentProcess_;
-  size_t min_gpu_mem_granule; /* Minimum granularity */
-  size_t rec_gpu_mem_granule; /* Recommented granularity */
+  PoolType pool_type_;
+  size_t min_mem_granule; /* Minimum granularity */
+  size_t rec_mem_granule; /* Recommended granularity */
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_VIRTUAL_MEMORY_H_

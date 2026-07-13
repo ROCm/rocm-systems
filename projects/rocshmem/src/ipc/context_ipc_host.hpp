@@ -140,7 +140,11 @@ class IPCHostContext : public Context {
   __host__ int reduce(rocshmem_team_t team, T *dest, const T *source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __host__ int reduce_on_stream(rocshmem_team_t team, T *dest, const T *source, 
+  __host__ int reduce_scatter(rocshmem_team_t team, T *dest, const T *source,
+                              int nreduce);
+
+  template <typename T, ROCSHMEM_OP Op>
+  __host__ int reduce_on_stream(rocshmem_team_t team, T *dest, const T *source,
                                 int nreduce, hipStream_t stream);
 
   template <typename T>
@@ -191,12 +195,15 @@ class IPCHostContext : public Context {
   /* Per-context HIP stream for non-MPI IPC host ops (nullptr on MPI path) */
   hipStream_t ctx_stream_{nullptr};
 
-  /* Helper functions to launch AMO kernel on ctx_stream_ and 
-   * return the old value via ipc_staging_buf_.
+  /* ipc_amo_fadd: fetch=true (default) syncs the stream and returns the old
+   * value via ipc_staging_buf_.  fetch=false enqueues the kernel without
+   * syncing; the caller is responsible for ordering via quiet/fence.
+   * ipc_amo_fcas: always syncs and returns the old value.
    */
-  __host__ uint64_t ipc_amo_fadd(void *dst, uint64_t val, bool is32);
-  __host__ uint64_t ipc_amo_fcas(void *dst, uint64_t cond, uint64_t val,
-                                  bool is32);
+  template <typename T>
+  __host__ T ipc_amo_fadd(T *dst, T val, bool fetch = true);
+  template <typename T>
+  __host__ T ipc_amo_fcas(T *dst, T cond, T val);
 
   /* Fine-grained staging buffer for AMO kernel result readback (non-MPI only) */
   uint64_t *ipc_staging_buf_{nullptr};
