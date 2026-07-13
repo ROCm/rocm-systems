@@ -25,20 +25,18 @@ namespace
 // must handle arbitrary caller types) these can be dispatched explicitly instead
 // of relying on a generic fmt::is_formattable/fmt::streamed fallback.
 template <typename Tp>
-std::string
+[[nodiscard]] std::string
 annotation_arg_type_name()
 {
     using value_type = std::decay_t<Tp>;
     if constexpr(concepts::is_string_type<value_type>::value)
         return "string";
-    else if constexpr(std::is_pointer<value_type>::value)
-        return "pointer";
     else
         return utility::demangle<value_type>();
 }
 
 template <typename Tp>
-std::string
+[[nodiscard]] std::string
 annotation_arg_value_string(Tp&& _val)
 {
     using value_type = std::decay_t<Tp>;
@@ -46,6 +44,8 @@ annotation_arg_value_string(Tp&& _val)
         return std::string{ std::string_view{ std::forward<Tp>(_val) } };
     else if constexpr(std::is_pointer<value_type>::value)
         return fmt::format("{:#x}", reinterpret_cast<std::uintptr_t>(_val));
+    else if constexpr(std::is_integral<value_type>::value)
+        return fmt::format_int{ _val }.str();
     else
         return fmt::format("{}", std::forward<Tp>(_val));
 }
@@ -64,13 +64,13 @@ append_annotation_arg(function_args_t& _args, const rocprofsys_annotation_t& _an
         using type = tracing::annotation_value_type_t<Idx>;
         if constexpr(std::is_pointer<type>::value)
         {
-            auto _value = reinterpret_cast<type>(_annotation.value);
+            const auto _value = reinterpret_cast<type>(_annotation.value);
             _args.push_back({ _arg_number, annotation_arg_type_name<type>(),
                               _annotation.name, annotation_arg_value_string(_value) });
         }
         else
         {
-            auto* _value = reinterpret_cast<type*>(_annotation.value);
+            const auto* _value = reinterpret_cast<type*>(_annotation.value);
             _args.push_back({ _arg_number, annotation_arg_type_name<type>(),
                               _annotation.name, annotation_arg_value_string(*_value) });
         }
@@ -86,7 +86,7 @@ append_annotation_arg(function_args_t& _args, const rocprofsys_annotation_t& _an
 // rocprofsys_push_category_region) into the trace-cache args wire format, so
 // annotations attached to a region survive cache-replay (Perfetto + rocpd)
 // instead of only appearing on the live-instrumentation path.
-function_args_t
+[[nodiscard]] function_args_t
 annotations_to_function_args(const rocprofsys_annotation_t* _annotations, size_t _count)
 {
     function_args_t _args;
@@ -96,8 +96,8 @@ annotations_to_function_args(const rocprofsys_annotation_t* _annotations, size_t
     for(size_t i = 0; i < _count; ++i)
     {
         const auto& _annotation = _annotations[i];
-        if(_annotation.name == nullptr || _annotation.type == ROCPROFSYS_VALUE_NONE ||
-           _annotation.value == nullptr)
+        if(_annotation.name == nullptr || _annotation.type <= ROCPROFSYS_VALUE_NONE ||
+           _annotation.type >= ROCPROFSYS_VALUE_LAST || _annotation.value == nullptr)
             continue;
 
         append_annotation_arg(
