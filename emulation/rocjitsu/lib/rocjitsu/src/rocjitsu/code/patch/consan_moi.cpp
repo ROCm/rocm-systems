@@ -5877,19 +5877,42 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         descriptor, options, arch, result.errors);
     if (!words)
       return;
+    const bool has_kernarg_preload =
+        AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
+    std::optional<std::vector<uint32_t>> preload_words;
+    if (has_kernarg_preload) {
+      const uint64_t prologue_bytes = words->size() * sizeof(uint32_t);
+      if (prologue_bytes > kAmdhsaKernelEntryAlignment) {
+        result.errors.emplace_back(
+            "ConSan MOI owner/epoch prologue exceeds the kernarg-preload entry window");
+        return;
+      }
+      preload_words = build_owner_epoch_prologue_words(
+          prologue_text_offset + kAmdhsaKernelEntryAlignment,
+          kernel.entry_text_offset + kAmdhsaKernelEntryAlignment, *options.moi_owner_vgpr,
+          *options.moi_epoch_vgpr, *owner_input, options.moi_owner_source, options.moi_owner_sgpr,
+          descriptor, options, arch, result.errors);
+      if (!preload_words)
+        return;
+    }
     if (!patcher.redirect_kernel_entry(kernel.descriptor_file_offset, kernel.entry_text_offset,
                                        prologue_text_offset)) {
       result.errors.emplace_back("ConSan MOI owner/epoch prologue could not redirect kernel entry");
       return;
     }
     append_words_bytes(new_text, *words);
+    if (preload_words) {
+      while (new_text.size() < prologue_text_offset + kAmdhsaKernelEntryAlignment)
+        append_word_bytes(new_text, build_s_nop(0, arch));
+      append_words_bytes(new_text, *preload_words);
+    }
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
     info.anchor_offset = kernel.entry_text_offset;
     info.trampoline_offset = prologue_text_offset;
     info.original_size = 0;
-    info.trampoline_size = static_cast<uint32_t>(words->size() * sizeof(uint32_t));
+    info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     patches.push_back(info);
   }
 

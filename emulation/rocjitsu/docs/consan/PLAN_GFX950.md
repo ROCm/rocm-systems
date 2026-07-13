@@ -348,6 +348,14 @@ Full gfx950 support means:
   every row emits an access probe plus owner/epoch prologue and then traps with
   `HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION`. T3RR remains orange while a single
   dumped replacement object is reduced at instruction level.
+- 2026-07-13: `T3RR` is `DONE`; `T3SA` is now `ACTIVE`. The illegal-instruction
+  reduction isolated kernel-entry redirection: kernels requesting AMDHSA
+  kernarg preloading have two hardware entries exactly 256 bytes apart, while
+  ConSan had emitted only the compatibility entry. ConSan now emits equivalent
+  owner/epoch launch stubs at both entries and branches each to its matching
+  original path. The new synthetic dual-entry regression and 209 focused
+  ConSan tests pass. All 10 guarded selected IREE rows pass record/replay in
+  6.01 seconds with both patch and record non-vacuity required.
 
 ## DAG Overview
 
@@ -565,8 +573,8 @@ flowchart LR
   T2G{"T2G: Focused gfx950 Accepted"}:::target
   T3A["T3A: Workload Inventory"]:::done
   T3SC["T3SC: SuperCollider Selected Workloads"]:::done
-  T3RR["T3RR: Record/Replay Selected Workloads"]:::active
-  T3SA["T3SA: Sampled Selected Workloads"]:::todo
+  T3RR["T3RR: Record/Replay Selected Workloads"]:::done
+  T3SA["T3SA: Sampled Selected Workloads"]:::active
   T3IS["T3IS: Inline-Shadow Selected Workloads"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SC["T4SC: SuperCollider Broad IREE"]:::todo
@@ -1826,16 +1834,21 @@ Goal: run the T3A selection under guarded SuperCollider.
 Result: all 10 selected IREE rows pass in 6.07 seconds with
 `RJ_CONSAN_REQUIRE_PATCH=1`, so every semantic pass has emitted instrumentation.
 
-### T3RR: Record/Replay Selected Workloads - ACTIVE
+### T3RR: Record/Replay Selected Workloads - DONE
 
 Goal: run the T3A selection under guarded record/replay.
 
-Current evidence: all 10 rows emit both an appended-cave access probe and a
-kernel-entry owner/epoch prologue, then fail dispatch with an illegal shader
-instruction. This is being reduced from a dumped patched softmax object; the
-node is not accepted until guarded records execute successfully.
+Result: all 10 selected rows pass in 6.01 seconds with
+`RJ_CONSAN_REQUIRE_PATCH=1` and `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`.
 
-### T3SA: Sampled Selected Workloads - TODO
+The initial illegal-instruction failure was caused by redirecting a
+kernarg-preload kernel to only one appended owner/epoch entry. AMDHSA exposes a
+second firmware entry at descriptor entry plus 256 bytes for these kernels.
+ConSan now emits paired equivalent launch stubs at that exact spacing, with
+each stub returning to the corresponding original entry. A synthetic gfx950
+regression locks down the dual-entry layout.
+
+### T3SA: Sampled Selected Workloads - ACTIVE
 
 Goal: run the T3A selection under guarded sampled MOI.
 

@@ -4629,6 +4629,60 @@ TEST(ConSanMoi, Gfx950StableOwnerTransactionEnablesDispatchPtrWithoutWorkgroupIn
             2u);
 }
 
+TEST(ConSanMoi, Gfx950OwnerEpochProloguePreservesKernargPreloadEntryPair) {
+  std::array<uint32_t, 220> text_words{};
+  text_words[0] = 0xD81A0000u;
+  text_words[1] = 0x00000000u; // ds_write_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_kernarg_preload", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+  });
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.scratch_vgpr = 8;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto prologue_patch =
+      std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+        return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
+      });
+  ASSERT_NE(prologue_patch, result.patches.end());
+  ASSERT_GT(prologue_patch->trampoline_size, 256u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  const char *text = patched.text_sections().front()->data();
+  const uint64_t first_entry = prologue_patch->trampoline_offset;
+  const uint64_t preload_entry = first_entry + 256u;
+  const size_t prologue_size = prologue_patch->trampoline_size - 256u;
+  EXPECT_EQ(std::memcmp(text + first_entry, text + preload_entry, prologue_size), 0)
+      << "the compatibility and kernarg-preloaded firmware entries must execute equivalent "
+         "identity prologues";
+
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  const uint64_t descriptor_vaddr = patched.kernel_descriptor_offset("gfx950_kernarg_preload");
+  ASSERT_NE(descriptor_vaddr, 0u);
+  EXPECT_EQ(static_cast<int64_t>(descriptor_vaddr) + descriptor.kernel_code_entry_byte_offset,
+            static_cast<int64_t>(patched.text_sections().front()->vaddr() + first_entry));
+}
+
 TEST(ConSanMoi, Gfx950StableOwnerTransactionPreservesExistingDispatchPtrAbi) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,
