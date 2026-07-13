@@ -581,7 +581,6 @@ bool rcclUseCeAllReduce(struct ncclComm* comm, size_t count,
 
   // Requires single-node symmetric memory support with CTA_POLICY_ZERO (CE mode).
   if (!comm->symmetricSupport) return false;
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) return false;
   if (comm->nNodes != 1) return false;
 
   // count must divide evenly so every rank owns an equal shard.

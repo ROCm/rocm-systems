@@ -229,6 +229,22 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t
   return true;
 }
 
+bool ncclCeScartchAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType) {
+  if (!ncclCeImplemented(coll, red, ty)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (comm->nNodes > 1) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  if (!comm->symmetricSupport) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  return true;
+}
+
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
@@ -861,13 +877,9 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff,
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
-  // Phase 0 (slow path only): Barrier — ensure all peers have finished
-  // consuming their ceARTmpBuf from any previous AllReduce call before we
-  // overwrite it with new scatter data.
-
-  if (!fastPath) {
-    NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, stream), ret, fail);
-  }
+  
+  NCCLCHECKGOTO(ncclMemOpSync(comm, &collArgs, stream), ret, fail);
+  
 
   // Phase 1: CE Scatter.
   // Each rank r sends shard r of its sendbuff to every peer p's
