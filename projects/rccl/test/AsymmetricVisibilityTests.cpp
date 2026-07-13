@@ -50,22 +50,17 @@ constexpr const char* kEnvUid = "RCCL_ASYM_UID"; // hex-encoded ncclUniqueId
 
 constexpr int kNumRanks = 2;
 
-// Coordinator process exit code signalling "not enough GPUs"; the parent
-// translates it to a gtest skip. Kept outside the WorkerStatus range (2-8).
-constexpr int kCoordSkip = 10;
+// Minimum GPUs for the asymmetric topology: rank0 sees 2 devices, rank1 sees
+// a third, disjoint device.
+constexpr int kMinDevices = 3;
 
-// Worker process exit codes; distinct values so the orchestrator failure log
-// identifies which step failed. Non-zero codes start at 2 to avoid colliding
-// with the exit code 1 that gtest itself returns on an assertion failure.
+// Process exit codes shared between workers and coordinator. kCoordSkip is
+// returned by the coordinator when there aren't enough GPUs; the parent maps
+// it to a gtest skip.
 enum WorkerStatus {
   kOk = 0,
-  kSetDeviceFailed = 2,
-  kInitRankFailed = 3,
-  kHipSetupFailed = 4,
-  kAllReduceFailed = 5,
-  kSyncFailed = 6,
-  kWrongResult = 7,
-  kPendingHipError = 8,
+  kWorkerFailed = 1,
+  kCoordSkip = 2,
 };
 
 std::string toHex(const ncclUniqueId& id) {
@@ -81,107 +76,134 @@ std::string toHex(const ncclUniqueId& id) {
 }
 
 bool fromHex(const std::string& hex, ncclUniqueId& id) {
-  if (hex.size() != sizeof(ncclUniqueId) * 2) return false;
+  if (hex.size() != sizeof(ncclUniqueId) * 2) { return false; }
   unsigned char* bytes = reinterpret_cast<unsigned char*>(&id);
   for (size_t i = 0; i < sizeof(ncclUniqueId); ++i) {
     unsigned int v = 0;
-    if (sscanf(hex.c_str() + i * 2, "%02x", &v) != 1) return false;
+    const int parsed = sscanf(hex.c_str() + i * 2, "%02x", &v);
+    if (parsed != 1) { return false; }
     bytes[i] = static_cast<unsigned char>(v);
   }
   return true;
 }
 
+// RAII holder for a worker's AllReduce resources, so every early return
+// cleans up automatically instead of duplicating hipFree/hipStreamDestroy at
+// each exit point. ncclCommDestroy only runs after a confirmed success: on
+// any failure the process exits right away, and the coordinator kills a
+// hung peer outright (see runCoordinator), so there's no peer left to
+// coordinate a graceful comm teardown with.
+struct WorkerResources {
+  hipStream_t stream = nullptr;
+  float* sendbuf = nullptr;
+  float* recvbuf = nullptr;
+  ncclComm_t comm = nullptr;
+  bool success = false;
+
+  WorkerResources() = default;
+  WorkerResources(const WorkerResources&) = delete;
+  WorkerResources& operator=(const WorkerResources&) = delete;
+
+  ~WorkerResources() {
+    if (sendbuf) { (void)hipFree(sendbuf); }
+    if (recvbuf) { (void)hipFree(recvbuf); }
+    if (stream) { (void)hipStreamDestroy(stream); }
+    if (comm && success) { ncclCommDestroy(comm); }
+  }
+};
+
+// File-local check macros. We don't use the shared HIPCHECK/NCCLCHECK from
+// TestChecks.hpp because those return a raw ncclResult_t (whose values would
+// collide with our WorkerStatus exit codes) and log without a rank prefix,
+// which two concurrent workers interleaving on stderr need. On failure these
+// log the failing call, then run onFail (a return with the caller's own code).
+#define ASYM_HIPCHECK(cmd, tag, onFail)                                        \
+  do {                                                                         \
+    err = (cmd);                                                               \
+    if (err != hipSuccess) {                                                   \
+      fprintf(stderr, "%s %s failed: %s\n", tag, #cmd,                         \
+              hipGetErrorString(err));                                         \
+      onFail;                                                                  \
+    }                                                                          \
+  } while (0)
+
+#define ASYM_NCCLCHECK(cmd, tag, onFail)                                       \
+  do {                                                                         \
+    nres = (cmd);                                                              \
+    if (nres != ncclSuccess) {                                                 \
+      fprintf(stderr, "%s %s failed: %s\n", tag, #cmd,                         \
+              ncclGetErrorString(nres));                                       \
+      onFail;                                                                  \
+    }                                                                          \
+  } while (0)
+
 // Body executed inside a re-exec'd worker process. Returns kOk on success.
 int runWorker(int rank, int localDev, const ncclUniqueId& id) {
-  if (hipSetDevice(localDev) != hipSuccess) {
-    fprintf(stderr, "[asym rank%d] hipSetDevice(%d) failed\n", rank, localDev);
-    return kSetDeviceFailed;
-  }
+  char tag[32];
+  snprintf(tag, sizeof(tag), "[asym rank%d]", rank);
+
+  hipError_t err;
+  ASYM_HIPCHECK(hipSetDevice(localDev), tag, return kWorkerFailed);
 
   // Clear any pre-existing HIP error so the check below reflects only what
   // happened during ncclCommInitRank.
   (void)hipGetLastError();
 
-  ncclComm_t comm = nullptr;
-  ncclResult_t nres = ncclCommInitRank(&comm, kNumRanks, id, rank);
-  if (nres != ncclSuccess) {
-    fprintf(stderr, "[asym rank%d] ncclCommInitRank failed: %s\n", rank,
-            ncclGetErrorString(nres));
-    return kInitRankFailed;
-  }
+  WorkerResources res;
+  ncclResult_t nres;
+  ASYM_NCCLCHECK(ncclCommInitRank(&res.comm, kNumRanks, id, rank), tag,
+                 return kWorkerFailed);
 
   // Core of the ROCM-27034 regression: a successful ncclCommInitRank must not
   // leave a pending HIP error behind.
-  hipError_t pendingHipError = hipGetLastError();
-  int rc = kOk;
-  if (pendingHipError != hipSuccess) {
-    fprintf(stderr,
-            "[asym rank%d] ncclCommInitRank left a pending HIP error: %s\n",
-            rank, hipGetErrorString(pendingHipError));
-    rc = kPendingHipError;
+  err = hipGetLastError();
+  if (err != hipSuccess) {
+    fprintf(stderr, "%s ncclCommInitRank left a pending HIP error: %s\n", tag,
+            hipGetErrorString(err));
+    return kWorkerFailed;
   }
 
-  // Also verify the communicator actually works with a small AllReduce. Both
-  // ranks must reach the collective, so a failure recorded above is returned
-  // only after it - bailing out early here would deadlock the peer rank.
-  hipStream_t stream = nullptr;
-  float* sendbuf = nullptr;
-  float* recvbuf = nullptr;
-  if (hipStreamCreate(&stream) != hipSuccess ||
-      hipMalloc(&sendbuf, sizeof(float)) != hipSuccess ||
-      hipMalloc(&recvbuf, sizeof(float)) != hipSuccess) {
-    fprintf(stderr, "[asym rank%d] HIP setup for AllReduce failed\n", rank);
-    ncclCommAbort(comm);
-    return rc ? rc : kHipSetupFailed;
-  }
+  // Also verify the communicator actually works with a small AllReduce.
+  ASYM_HIPCHECK(hipStreamCreate(&res.stream), tag, return kWorkerFailed);
+  ASYM_HIPCHECK(hipMalloc(&res.sendbuf, sizeof(float)), tag,
+                return kWorkerFailed);
+  ASYM_HIPCHECK(hipMalloc(&res.recvbuf, sizeof(float)), tag,
+                return kWorkerFailed);
 
   const float value = static_cast<float>(rank + 1);
-  if (hipMemcpy(sendbuf, &value, sizeof(float), hipMemcpyHostToDevice) !=
-        hipSuccess && !rc)
-    rc = kHipSetupFailed;
+  ASYM_HIPCHECK(hipMemcpy(res.sendbuf, &value, sizeof(float),
+                          hipMemcpyHostToDevice),
+                tag, return kWorkerFailed);
 
-  nres = ncclAllReduce(sendbuf, recvbuf, 1, ncclFloat32, ncclSum, comm, stream);
-  if (nres != ncclSuccess) {
-    fprintf(stderr, "[asym rank%d] ncclAllReduce failed: %s\n", rank,
-            ncclGetErrorString(nres));
-    if (!rc) rc = kAllReduceFailed;
+  ASYM_NCCLCHECK(ncclAllReduce(res.sendbuf, res.recvbuf, 1, ncclFloat32,
+                               ncclSum, res.comm, res.stream),
+                 tag, return kWorkerFailed);
+
+  ASYM_HIPCHECK(hipStreamSynchronize(res.stream), tag, return kWorkerFailed);
+
+  float result = 0.0f;
+  ASYM_HIPCHECK(hipMemcpy(&result, res.recvbuf, sizeof(float),
+                          hipMemcpyDeviceToHost),
+                tag, return kWorkerFailed);
+
+  const float expected = static_cast<float>(kNumRanks) * (kNumRanks + 1) / 2.0f;
+  if (result != expected) {
+    fprintf(stderr, "%s wrong AllReduce result %.1f (expected %.1f)\n", tag,
+            result, expected);
+    return kWorkerFailed;
   }
 
-  if (hipStreamSynchronize(stream) != hipSuccess && !rc) {
-    fprintf(stderr, "[asym rank%d] hipStreamSynchronize failed\n", rank);
-    rc = kSyncFailed;
-  }
-
-  if (!rc) {
-    float result = 0.0f;
-    if (hipMemcpy(&result, recvbuf, sizeof(float), hipMemcpyDeviceToHost) !=
-        hipSuccess) {
-      fprintf(stderr, "[asym rank%d] result copy back to host failed\n", rank);
-      rc = kHipSetupFailed;
-    } else {
-      const float expected =
-        static_cast<float>(kNumRanks) * (kNumRanks + 1) / 2.0f;
-      if (result != expected) {
-        fprintf(stderr,
-                "[asym rank%d] wrong AllReduce result %.1f (expected %.1f)\n",
-                rank, result, expected);
-        rc = kWrongResult;
-      }
-    }
-  }
-
-  (void)hipFree(sendbuf);
-  (void)hipFree(recvbuf);
-  (void)hipStreamDestroy(stream);
-  ncclCommDestroy(comm);
-  return rc;
+  res.success = true;
+  return kOk;
 }
 
 // Spawn one worker: fork, set the asymmetric environment, re-exec the worker.
 pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
                   const std::string& uidHex) {
   pid_t pid = fork();
-  if (pid != 0) return pid; // parent (or fork error, reported by caller)
+  if (pid != 0) {
+    return pid; // parent (or fork error, reported by caller)
+  }
 
   // Child: set the per-rank environment BEFORE HIP initializes, then re-exec
   // a fresh image so the restricted visibility takes effect cleanly.
@@ -208,39 +230,61 @@ pid_t spawnWorker(int rank, const char* visibleDevices, int localDev,
 // initialized in the parent, so touching it here would crash later TestBed
 // children. Returns an exit code the parent maps to skip/pass/fail.
 int runCoordinator() {
+  const char* tag = "[asym]";
+
   int numDevices = 0;
-  if (hipGetDeviceCount(&numDevices) != hipSuccess) return kHipSetupFailed;
-  if (numDevices < 3) return kCoordSkip;
+  hipError_t err;
+  ASYM_HIPCHECK(hipGetDeviceCount(&numDevices), tag, return kWorkerFailed);
+  if (numDevices < kMinDevices) { return kCoordSkip; }
 
   ncclUniqueId id;
-  if (ncclGetUniqueId(&id) != ncclSuccess) return kInitRankFailed;
+  ncclResult_t nres;
+  ASYM_NCCLCHECK(ncclGetUniqueId(&id), tag, return kWorkerFailed);
   const std::string uidHex = toHex(id);
 
   // rank0: HIP_VISIBLE_DEVICES=0,1 -> bind ordinal 1; rank1: =2 -> bind ordinal 0.
   const pid_t child0 = spawnWorker(0, "0,1", 1, uidHex);
   const pid_t child1 = (child0 > 0) ? spawnWorker(1, "2", 0, uidHex) : -1;
   if (child0 <= 0 || child1 <= 0) {
-    if (child0 > 0) { kill(child0, SIGKILL); waitpid(child0, nullptr, 0); }
-    if (child1 > 0) { kill(child1, SIGKILL); waitpid(child1, nullptr, 0); }
-    fprintf(stderr, "[asym] fork failed (child0=%d, child1=%d)\n", child0,
+    if (child0 > 0) {
+      kill(child0, SIGKILL);
+      waitpid(child0, nullptr, 0);
+    }
+    if (child1 > 0) {
+      kill(child1, SIGKILL);
+      waitpid(child1, nullptr, 0);
+    }
+    fprintf(stderr, "%s fork failed (child0=%d, child1=%d)\n", tag, child0,
             child1);
-    return kSetDeviceFailed;
+    return kWorkerFailed;
   }
 
+  // Reap whichever worker exits first. If it failed, kill its peer right
+  // away instead of waiting on it - a rank already blocked in ncclAllReduce
+  // would otherwise hang forever for a partner that already gave up.
+  const pid_t children[kNumRanks] = {child0, child1};
+  bool reaped[kNumRanks] = {false, false};
   int rc = kOk;
-  auto reap = [&rc](pid_t pid, int rank) {
+  for (int done_count = 0; done_count < kNumRanks; ++done_count) {
     int status = 0;
-    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) {
-      fprintf(stderr, "[asym] rank %d terminated abnormally\n", rank);
-      if (!rc) rc = kInitRankFailed;
-    } else if (WEXITSTATUS(status) != kOk) {
-      fprintf(stderr, "[asym] rank %d worker returned %d\n", rank,
-              WEXITSTATUS(status));
-      if (!rc) rc = WEXITSTATUS(status);
+    const pid_t done = waitpid(-1, &status, 0);
+    if (done < 0) {
+      fprintf(stderr, "%s waitpid failed: %s\n", tag, strerror(errno));
+      if (!rc) { rc = kWorkerFailed; }
+      continue;
     }
-  };
-  reap(child0, 0);
-  reap(child1, 1);
+
+    const int rank = (done == child0) ? 0 : 1;
+    reaped[rank] = true;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != kOk) {
+      fprintf(stderr, "%s rank %d failed or terminated abnormally\n", tag,
+              rank);
+      if (!rc) { rc = kWorkerFailed; }
+      // Only signal the peer if it hasn't already been reaped
+      const int peer = 1 - rank;
+      if (!reaped[peer]) { kill(children[peer], SIGKILL); }
+    }
+  }
   return rc;
 }
 
@@ -250,9 +294,10 @@ int runCoordinator() {
 // the rank env var is present). In a normal full-suite run it skips.
 TEST(AsymmetricVisibilityWorker, Run) {
   const char* rankEnv = getenv(kEnvRank);
-  if (rankEnv == nullptr)
+  if (rankEnv == nullptr) {
     GTEST_SKIP() << "worker entry point, driven by "
                     "AsymmetricVisibility.CommInitRankAllReduce";
+  }
 
   const int rank = atoi(rankEnv);
   const char* devEnv = getenv(kEnvLocalDev);
@@ -263,10 +308,10 @@ TEST(AsymmetricVisibilityWorker, Run) {
   ncclUniqueId id;
   ASSERT_TRUE(fromHex(uidEnv, id)) << "malformed ncclUniqueId in environment";
 
-  // Exit with the step-specific WorkerStatus so the orchestrator's WEXITSTATUS
-  // pinpoints the failing step instead of gtest's generic code.
+  // Exit with the WorkerStatus code so the orchestrator's WEXITSTATUS reflects
+  // this worker's own result rather than gtest's generic exit code.
   const int rc = runWorker(rank, atoi(devEnv), id);
-  if (rc != kOk) _exit(rc);
+  if (rc != kOk) { _exit(rc); }
 }
 
 // Orchestrator: reproduces the ROCM-27034 asymmetric topology with two workers,
@@ -275,20 +320,24 @@ TEST(AsymmetricVisibilityWorker, Run) {
 // main gtest process stays HIP-clean for TestBed's per-test forks.
 TEST(AsymmetricVisibility, CommInitRankAllReduce) {
   const char* cumemEnv = getenv("NCCL_CUMEM_ENABLE");
-  if (cumemEnv != nullptr && atoi(cumemEnv) == 0)
+  const int cumemValue = cumemEnv != nullptr ? atoi(cumemEnv) : 1;
+  if (cumemValue == 0) {
     GTEST_SKIP() << "NCCL_CUMEM_ENABLE explicitly disabled; this test requires "
                     "the cuMem path";
+  }
 
   const pid_t coord = fork();
-  if (coord == 0) _exit(runCoordinator());
+  if (coord == 0) { _exit(runCoordinator()); }
   ASSERT_GT(coord, 0) << "fork of coordinator process failed";
 
   int status = 0;
   ASSERT_EQ(waitpid(coord, &status, 0), coord);
   ASSERT_TRUE(WIFEXITED(status)) << "coordinator terminated abnormally";
   const int code = WEXITSTATUS(status);
-  if (code == kCoordSkip)
-    GTEST_SKIP() << "requires at least 3 GPUs for an asymmetric topology";
+  if (code == kCoordSkip) {
+    GTEST_SKIP() << "requires at least " << kMinDevices
+                 << " GPUs for an asymmetric topology";
+  }
   EXPECT_EQ(code, kOk)
     << "asymmetric-visibility workers reported failure (exit code " << code
     << "); see stderr for the failing rank";

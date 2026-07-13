@@ -3124,6 +3124,12 @@
       "enabled": true
     },
     {
+      "name": "Asymmetric Visibility",
+      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
+      "config": "asymmetric_visibility",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - Standard Collectives",
       "description": "Basic collective operation tests",
       "config": "unit_tests_standard",
@@ -3643,12 +3649,6 @@
       "name": "Host API Tests - Default",
       "description": "Host API tests with default memory support",
       "config": "host_api_tests_default",
-      "enabled": true
-    },
-    {
-      "name": "Asymmetric Visibility",
-      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
-      "config": "asymmetric_visibility",
       "enabled": true
     }
   ]
