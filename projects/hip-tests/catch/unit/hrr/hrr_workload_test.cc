@@ -1913,6 +1913,49 @@ TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: cross-GPU peer copy (REQUIRES 2 GPUs)
+//
+// First HRR workload that spans two devices. dev0 is memset to a known value and
+// peer-copied to dev1 via hipMemcpyPeer (real generated handler: translates both
+// dst and src through the alloc map, passes the device ids by value); a D2H from
+// dev1 validates the bytes. Replay must recreate the two allocations on the
+// correct devices (hipSetDevice + alloc map) for the peer copy to land.
+// Skips (no-op) on a single-GPU host; the roundtrip driver guards the same way.
+// Final blob: h[i] == 0x7E7E7E7E.
+// ===========================================================================
+TEST_CASE("Unit_HRR_MemcpyPeer_Direct", "[.][hrr-direct]") {
+  int ndev = 0;
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);  // needs 2 GPUs
+  constexpr int    N   = 256;
+  constexpr size_t SZ  = N * sizeof(int);
+  constexpr int    VAL = 0x7E7E7E7E;
+
+  HIP_CHECK(hipSetDevice(0));
+  int* d0 = nullptr;
+  HIP_CHECK(hipMalloc(&d0, SZ));
+  HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d0), VAL, N));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipSetDevice(1));
+  int* d1 = nullptr;
+  HIP_CHECK(hipMalloc(&d1, SZ));
+
+  // API under test: cross-device peer copy dev0 -> dev1.
+  HIP_CHECK(hipMemcpyPeer(d1, /*dstDev*/ 1, d0, /*srcDev*/ 0, SZ));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  int* h = new int[N]();
+  HIP_CHECK(hipMemcpy(h, d1, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
+
+  HIP_CHECK(hipFree(d1));
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipFree(d0));
+  delete[] h;
+}
+
+// ===========================================================================
 // Workload N: Additional memset variants
 //
 // Exercises hipMemset3D, hipMemset3DAsync, hipMemsetD2D8/16/32 and Async,

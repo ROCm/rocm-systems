@@ -790,6 +790,16 @@ HIP_TEST_CASE(Unit_HRR_ConfigureCallRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ConfigureCall_Direct", cap.path);
 }
 
+HIP_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
+  int ndev = 0;
+  HIP_CHECK(hipGetDeviceCount(&ndev));
+  if (ndev < 2) HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
+  // Exercises hipMemcpyPeer across two GPUs: capture on a multi-GPU host, replay
+  // must recreate both allocations on their devices and validate the D2H bytes.
+  hrr_run_roundtrip("Unit_HRR_MemcpyPeer_Direct", cap.path);
+}
+
 HIP_TEST_CASE(Unit_HRR_MemsetExtraRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetextra"};
   hrr_run_roundtrip("Unit_HRR_MemsetExtra_Direct", cap.path);

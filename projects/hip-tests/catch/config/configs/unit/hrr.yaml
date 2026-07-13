@@ -120,6 +120,9 @@ hrr:
   Unit_HRR_StreamCaptureBeginSptRoundtrip:
     <<: *level_2
     tags: [capture, stream, graph, playback, roundtrip]
+  Unit_HRR_MemcpyPeerRoundtrip:
+    <<: *level_2
+    tags: [capture, memcpy, peer, playback, roundtrip]
   Unit_HRR_ConfigureCallRoundtrip:
     <<: *level_2
     tags: [capture, launch, playback, roundtrip]
@@ -264,6 +267,9 @@ hrr:
   Unit_HRR_StreamCaptureBeginSpt_Direct:
     <<: *level_2
     tags: [direct, stream, graph]
+  Unit_HRR_MemcpyPeer_Direct:
+    <<: *level_2
+    tags: [direct, memcpy, peer]
   Unit_HRR_ConfigureCall_Direct:
     <<: *level_2
     tags: [direct, launch]
