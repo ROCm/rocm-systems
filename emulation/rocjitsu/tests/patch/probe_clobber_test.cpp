@@ -28,6 +28,14 @@ constexpr uint32_t kSWaitcnt0 = 0xbf8c0000;    // s_waitcnt 0
 constexpr uint32_t kSNop0 = 0xbf800000;        // s_nop 0
 constexpr uint32_t kSSetpcS30S31 = 0xbe801d1e; // s_setpc_b64 s[30:31]
 
+// Explicit special-state writes. to_register_ref() currently returns nullopt
+// for these operand forms, so the summary must recognize them via the operand
+// name.
+constexpr uint32_t kSMovExecLo_0 = 0xbefe0080;    // s_mov_b32 exec_lo, 0
+constexpr uint32_t kSMovM0_0 = 0xbefc0080;        // s_mov_b32 m0, 0
+constexpr uint32_t kSMovVccLo_0 = 0xbeea0080;     // s_mov_b32 vcc_lo, 0
+constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 0
+
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA2;
 
 ProbeCallable make_callable(std::vector<uint32_t> body) {
@@ -80,6 +88,58 @@ TEST(ProbeClobber, ReturnLinkIsNotAProbeClobber) {
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 30));
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 31));
+}
+
+// A body that writes EXEC via an explicit operand must set touches_exec, even
+// though to_register_ref() does not map the OPR_SDST_EXEC operand form. This is
+// the decoder-gap regression guard: if the name fallback ever silently breaks,
+// touches_exec goes false and this fails.
+TEST(ProbeClobber, DetectsExplicitExecWrite) {
+  const auto callable = make_callable({kSMovExecLo_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_exec);
+  EXPECT_FALSE(summary->touches_vcc);
+  EXPECT_FALSE(summary->touches_m0);
+  EXPECT_FALSE(summary->touches_flat_scratch);
+}
+
+// A body that writes M0 via an explicit operand must set touches_m0.
+TEST(ProbeClobber, DetectsExplicitM0Write) {
+  const auto callable = make_callable({kSMovM0_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_m0);
+  EXPECT_FALSE(summary->touches_exec);
+  EXPECT_FALSE(summary->touches_vcc);
+  EXPECT_FALSE(summary->touches_flat_scratch);
+}
+
+// A body that writes VCC via an explicit operand must set touches_vcc.
+TEST(ProbeClobber, DetectsExplicitVccWrite) {
+  const auto callable = make_callable({kSMovVccLo_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_vcc);
+  EXPECT_FALSE(summary->touches_exec);
+  EXPECT_FALSE(summary->touches_m0);
+  EXPECT_FALSE(summary->touches_flat_scratch);
+}
+
+// A body that writes FLAT_SCRATCH via an explicit operand must set
+// touches_flat_scratch.
+TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
+  const auto callable = make_callable({kSMovFlatScrLo_0, kSSetpcS30S31});
+  std::string err;
+  const auto summary = build_probe_clobber_summary(callable, &err);
+  ASSERT_TRUE(summary.has_value()) << err;
+  EXPECT_TRUE(summary->touches_flat_scratch);
+  EXPECT_FALSE(summary->touches_exec);
+  EXPECT_FALSE(summary->touches_vcc);
+  EXPECT_FALSE(summary->touches_m0);
 }
 
 } // namespace

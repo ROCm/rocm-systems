@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -116,6 +117,25 @@ bool check_probe_special_state(const ProbeClobberSummary &summary, std::string *
       first = false;
     }
     *error_out = std::move(msg);
+  }
+  return false;
+}
+
+// Check that the probe does not clobber the link pair.
+bool check_probe_link_pair(const ProbeClobberSummary &summary, ProbeCallingConvention cc,
+                           std::string *error_out) {
+  const std::optional<uint16_t> link_base = link_pair_for(cc);
+  if (!link_base)
+    return true; // Unknown convention: plan_probe_call rejects it with a cc-specific error.
+  RegisterSet link_pair;
+  link_pair.expand(RegisterRef{RegClass::SGPR, *link_base, 2});
+  if (!summary.ordinary_clobbers.intersects(link_pair))
+    return true;
+  if (error_out != nullptr) {
+    const uint16_t hi = static_cast<uint16_t>(*link_base + 1);
+    *error_out = "probe body overwrites its own return-link pair s[" + std::to_string(*link_base) +
+                 ":" + std::to_string(hi) +
+                 "] before returning; it would return through a corrupted PC";
   }
   return false;
 }
@@ -484,6 +504,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     cave_cursor += probe.body_words.size() * sizeof(uint32_t);
   }
 
+  // Temporary SGPR-allocation bound. The probe-call return-link pair is fixed
+  // by the calling convention, so the kernel must allocate up to it.
+  const std::optional<uint32_t> kernel_sgpr_count = obj_.min_kernel_sgpr_count(arch_);
+
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());
   // Allocate offsets for each site. Trampoline size is highly dependent on the
@@ -500,6 +524,18 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     if (site.is_probe_call()) {
       const ProbeCallable &probe = resolved.probes[*site.probe_index];
 
+      // The kernel must own the fixed return-link pair.
+      if (const std::optional<uint16_t> link_base = link_pair_for(probe.cc);
+          link_base && kernel_sgpr_count &&
+          !probe_link_pair_fits_in_kernel(*kernel_sgpr_count, *link_base)) {
+        result.errors.push_back(
+            "probe call needs the return-link pair s[" + std::to_string(*link_base) + ":" +
+            std::to_string(*link_base + 1) + "] but the kernel allocates only " +
+            std::to_string(*kernel_sgpr_count) + " SGPRs; rebuild the kernel with at least " +
+            std::to_string(*link_base + 2) + " SGPRs");
+        continue;
+      }
+
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
       // resource selection and the no-spill policy gate.
       auto summary = build_probe_clobber_summary(probe, &err);
@@ -510,6 +546,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       // Check for special machine state that has no save/restore path yet
       if (!check_probe_special_state(*summary, &err)) {
+        result.errors.push_back(std::move(err));
+        continue;
+      }
+
+      // The probe must not overwrite its own return-link pair before returning.
+      if (!check_probe_link_pair(*summary, probe.cc, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }

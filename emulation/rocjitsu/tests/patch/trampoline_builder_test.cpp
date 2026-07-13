@@ -502,7 +502,7 @@ TrampolinePlan make_probe_plan(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2) {
   plan.arch = arch;
   plan.anchor_offset = 0x1000;
   plan.original_size = 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   plan.trampoline_offset = 0x2000;
   plan.return_target = plan.anchor_offset + plan.original_size;
   plan.probe_target_offset = 0x3000;
@@ -610,7 +610,7 @@ TEST(TrampolineBuilderEmit, RejectsNonProbeCallPlan) {
   TrampolinePlan plan;
   plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
   plan.original_size = 4;
-  plan.original_words = {0xDEADBEEFu};
+  plan.original_words.assign(1, 0xDEADBEEFu);
   std::string err;
   EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
   EXPECT_NE(err.find("not a probe call"), std::string::npos);
