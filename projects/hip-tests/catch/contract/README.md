@@ -70,6 +70,7 @@ The first domains are:
 - `driver_array`: driver-style HIP array creation, destruction, and descriptor contracts
 - `managed_memory`: managed allocation, visibility, free, and prefetch contracts
 - `mem_advise`: managed-memory advice and range-attribute contracts
+- `mem_advise_v2`: location-based managed-memory advise and prefetch contracts
 - `pointer_info`: pointer attribute, address-range, and memory-capacity query contracts
 - `pointer_query`: driver-style pointer attribute, pointer-attribute set, and allocation-size query contracts
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts

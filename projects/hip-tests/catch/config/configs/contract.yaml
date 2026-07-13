@@ -972,6 +972,18 @@ contract:
   Contract_MemAdvise_RangeGetAttribute_NullData_IsRejected:
     <<: *level_0
     tags: [mem_advise]
+  Contract_MemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_advise_v2]
+  Contract_MemAdviseV2_SetAndUnsetPreferredLocation_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_advise_v2]
+  Contract_MemAdviseV2_PrefetchAsync_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_advise_v2]
+  Contract_MemAdviseV2_NullPointer_IsRejected:
+    <<: *level_0
+    tags: [mem_advise_v2]
   Contract_PointerInfo_GetAttributes_DeviceAllocation_ReportsDeviceType:
     <<: *level_0
     tags: [pointer_info]
