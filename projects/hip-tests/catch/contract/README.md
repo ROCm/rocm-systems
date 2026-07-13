@@ -53,6 +53,8 @@ The first domains are:
 - `graph_child`: child graph node creation, introspection, and embedded execution contracts
 - `graph_host`: host graph node callback, parameter, and node-type contracts
 - `graph_mem_nodes`: graph memory allocation/free node and graph memory attribute contracts
+- `graph_generic_node`: unified generic graph node add and pre/post-instantiation parameter setter contracts
+- `graph_memcpy3d_node`: struct-based 3D memcpy graph node add, parameter round-trip, and pre/post-instantiation setter contracts
 - `graph_node_find`: graph node lookup in cloned graph contracts
 - `graph_user_objects`: graph user object create, retain, release, and graph lifetime contracts
 - `graph_node_enabled`: executable graph node enable/disable query and behavior contracts
@@ -86,10 +88,12 @@ The first domains are:
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
 - `device_config`: device configuration query, limit, flag, and stream-priority contracts
+- `device_lifecycle`: device flag, shared-memory-config, valid-device selection, and primary-context flag/reset lifecycle contracts
 - `memory_pool_lifecycle`: explicit memory pool lifecycle, release-threshold, trim, and pool-specific async allocation contracts
 - `memory_pool_access`: current-device memory pool access-control contracts
 - `mem_location_pool`: location-based memory pool set/get and access-query contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
+- `profiler`: deprecated profiler start/stop accepted-or-unsupported contracts
 - `driver_entry_point`: driver entry-point symbol resolution contracts
 - `ipc`: capability-gated same-process IPC memory and event handle contracts
 - `module`: HIPRTC-backed module load, function, global, launch, and function-attribute contracts

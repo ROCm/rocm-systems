@@ -723,9 +723,33 @@ contract:
   Contract_GraphMemNodes_GetParams_RoundTripsBytesize:
     <<: *level_0
     tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer:
+    <<: *level_0
+    tags: [graph_mem_nodes]
   Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing:
     <<: *level_0
     tags: [graph_mem_nodes]
+  Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue:
+    <<: *level_0
+    tags: [graph_generic_node]
+  Contract_GraphGenericNode_NodeSetParams_UpdatesValueBeforeInstantiate:
+    <<: *level_0
+    tags: [graph_generic_node]
+  Contract_GraphGenericNode_ExecNodeSetParams_UpdatesValueAfterInstantiate:
+    <<: *level_0
+    tags: [graph_generic_node]
+  Contract_GraphMemcpy3DNode_AddNode_LaunchesCopyThroughGraph:
+    <<: *level_0
+    tags: [graph_memcpy3d_node]
+  Contract_GraphMemcpy3DNode_GetParams_ReflectsAddedNode:
+    <<: *level_0
+    tags: [graph_memcpy3d_node]
+  Contract_GraphMemcpy3DNode_SetParams_RetargetsSourceBeforeInstantiate:
+    <<: *level_0
+    tags: [graph_memcpy3d_node]
+  Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate:
+    <<: *level_0
+    tags: [graph_memcpy3d_node]
   Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct:
     <<: *level_0
     tags: [graph_node_find]
@@ -1227,6 +1251,21 @@ contract:
   Contract_DeviceConfig_GetDeviceFlagsAndStreamPriorityRange_AreConsistent:
     <<: *level_0
     tags: [device_config]
+  Contract_DeviceLifecycle_SetDeviceFlags_AcceptsCurrentFlags:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_SetSharedMemConfig_RoundTripsCurrentConfig:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_SetValidDevices_AcceptsFullDeviceList:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_PrimaryCtxSetFlags_IsAcceptedOrInUse:
+    <<: *level_0
+    tags: [device_lifecycle]
+  Contract_DeviceLifecycle_PrimaryCtxReset_LeavesDeviceUsable:
+    <<: *level_0
+    tags: [device_lifecycle]
   Contract_MemoryPoolLifecycle_CreateDestroy_SucceedsWhenSupported:
     <<: *level_0
     tags: [memory_pool_lifecycle]
@@ -1275,6 +1314,15 @@ contract:
   Contract_Extension_ExtGetLastError_TracksErrorState:
     <<: *level_0
     tags: [extension]
+  Contract_Profiler_Start_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [profiler]
+  Contract_Profiler_Stop_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [profiler]
+  Contract_Profiler_StartStop_PairIsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [profiler]
   Contract_DriverEntryPoint_ResolvesKnownSymbol_IsCallable:
     <<: *level_0
     tags: [driver_entry_point]

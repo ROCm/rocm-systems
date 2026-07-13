@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 486
+- Contract tests: 502
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 366
-- Approximate declared API-name coverage: 74.1%
+- Declared HIP runtime APIs directly exercised by contract tests: 379
+- Approximate declared API-name coverage: 76.7%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -29,6 +29,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `peer_access` | 6 |
 | `peer_copy` | 5 |
 | `device_config` | 6 |
+| `device_lifecycle` | 5 |
 | `stream_event` | 7 |
 | `stream_props` | 7 |
 | `stream_callbacks` | 5 |
@@ -44,6 +45,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `error_api` | 6 |
 | `driver_error` | 6 |
 | `extension` | 6 |
+| `profiler` | 3 |
 | `driver_entry_point` | 5 |
 | `kernel` | 4 |
 | `call_config` | 2 |
@@ -52,6 +54,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph` | 5 |
 | `occupancy` | 3 |
 | `occupancy_ext` | 4 |
+| `occupancy_variable` | 4 |
 | `graph_capture` | 4 |
 | `stream_capture_mode` | 6 |
 | `capture_to_graph` | 3 |
@@ -65,6 +68,8 @@ The percentages below are approximate API-name coverage against declarations par
 | `graph_child` | 3 |
 | `graph_host` | 3 |
 | `graph_mem_nodes` | 4 |
+| `graph_generic_node` | 3 |
+| `graph_memcpy3d_node` | 4 |
 | `graph_node_attributes` | 3 |
 | `graph_node_params` | 7 |
 | `graph_node_setters` | 5 |
@@ -118,12 +123,12 @@ The percentages below are approximate API-name coverage against declarations par
 | Error handling | 5 | 5 | 100.0% |
 | Event | 8 | 8 | 100.0% |
 | Occupancy | 13 | 13 | 100.0% |
-| Graph / capture | 79 | 96 | 82.3% |
+| Graph / capture | 86 | 96 | 89.6% |
 | Stream | 23 | 23 | 100.0% |
-| Runtime / device | 34 | 45 | 75.6% |
+| Runtime / device | 39 | 45 | 86.7% |
 | Kernel launch / function attrs | 15 | 19 | 78.9% |
 | Memory / copy / memset | 119 | 137 | 86.9% |
-| Other runtime APIs | 1 | 56 | 1.8% |
+| Other runtime APIs | 3 | 56 | 5.4% |
 | Module / library loading | 29 | 29 | 100.0% |
 | Texture / surface | 13 | 44 | 29.5% |
 | Context / driver | 16 | 16 | 100.0% |
@@ -298,6 +303,11 @@ hipDeviceGetLimit
 hipDeviceSetLimit
 hipGetDeviceFlags
 hipDeviceGetStreamPriorityRange
+hipSetDeviceFlags
+hipSetValidDevices
+hipDeviceSetSharedMemConfig
+hipDevicePrimaryCtxSetFlags
+hipDevicePrimaryCtxReset
 ```
 
 ### Context / driver
@@ -523,6 +533,11 @@ hipGraphMemcpyNodeSetParamsToSymbol
 hipGraphMemcpyNodeSetParamsFromSymbol
 hipGraphExecMemcpyNodeSetParamsToSymbol
 hipGraphExecMemcpyNodeSetParamsFromSymbol
+hipGraphAddNode
+hipGraphNodeSetParams
+hipGraphExecNodeSetParams
+hipGraphAddMemcpyNode
+hipGraphExecMemcpyNodeSetParams
 ```
 
 ### Occupancy
@@ -564,13 +579,20 @@ hipIpcGetEventHandle
 hipIpcOpenEventHandle
 ```
 
+### Profiler
+
+```text
+hipProfilerStart
+hipProfilerStop
+```
+
 ## Largest remaining gaps
 
 1. Memory surface beyond current basics: advanced VMM operations (multi-device access descriptors, shareable-handle import, and protection-mode matrices), and remaining advanced memory-pool operations (pool export/import handles and multi-device access descriptors). Host allocation/registration and alternate host/device allocation entry points (`hipHostAlloc`, `hipMallocHost`, `hipMemAllocHost`, `hipFreeHost`, `hipExtMallocWithFlags`), directed driver-style 1D and struct-based 2D copies (`hipMemcpyHtoD`, `hipMemcpyDtoH`, `hipMemcpyDtoD`, `hipMemcpyParam2D`, plus async variants), directed async byte/word/dword memset (`hipMemsetD8Async`, `hipMemsetD16Async`, `hipMemsetD32Async`), directed 2D/3D memset (`hipMemset2D`, `hipMemset2DAsync`, `hipMemset3D`, `hipMemset3DAsync`, `hipMemsetD2D8`, `hipMemsetD2D16`, `hipMemsetD2D32`, and D2D async variants), runtime and driver-style pitched allocation with 2D copies, basic array allocation with 2D array copies plus legacy, driver-style, and async array-copy entry points (`hipMemcpyToArray`, `hipMemcpyFromArray`, `hipMemcpyHtoA`, `hipMemcpyAtoH`, `hipMemcpyDtoA`, `hipMemcpyAtoD`, `hipMemcpyHtoAAsync`, `hipMemcpyAtoHAsync`, `hipMemcpy2DArrayToArray`, `hipMemcpy2DToArrayAsync`, `hipMemcpy2DFromArrayAsync`), 3D pitched allocation with runtime and driver-style host-device 3D copies, 3D array allocation with 3D copy-to/from-array, driver-style array create/destroy and descriptor queries (`hipArrayCreate`, `hipArrayDestroy`, `hipArrayGetDescriptor`, `hipArray3DCreate`, `hipArray3DGetDescriptor`), managed allocation with prefetch, managed-memory advice and range attribute queries (set/unset read-mostly, preferred-location, and accessed-by advice via `hipMemAdvise`, plus single-attribute and multi-attribute range queries via `hipMemRangeGetAttribute` and `hipMemRangeGetAttributes`), location-based managed-memory advice and prefetch (`hipMemAdvise_v2` read-mostly and set/unset preferred-location accepted-or-unsupported with a null-range rejection, and `hipMemPrefetchAsync_v2` accepted-or-unsupported), default memory pools with stream-ordered allocation, location-based memory-pool set/get and access queries (`hipMemSetMemPool`, `hipMemGetMemPool`, `hipMemGetAccess` for a device `hipMemLocation`), basic virtual memory management (granularity, address reserve/free, allocation handle create/release, map/unmap, and single-device access), VMM allocation-handle queries on a mapped allocation (retain-by-address, allocation-property round-trip from handle, and dma-buf address-range export: `hipMemRetainAllocationHandle`, `hipMemGetAllocationPropertiesFromHandle`, `hipMemGetHandleForAddressRange`), explicit memory-pool lifecycle (create/destroy, release-threshold, trim, and pool-specific async allocation), current-device memory-pool access control, pointer and memory-capacity queries (`hipPointerGetAttributes`, `hipPointerGetAttribute`, `hipDrvPointerGetAttributes`, `hipPointerSetAttribute`, `hipMemGetAddressRange`, `hipMemGetInfo`, `hipMemPtrGetInfo`), and device-global symbol copies (synchronous and stream-ordered copy-to/from-symbol with byte-offset placement and invalid/out-of-bounds rejection: `hipMemcpyToSymbol`, `hipMemcpyFromSymbol`, `hipMemcpyToSymbolAsync`, `hipMemcpyFromSymbolAsync`) are now covered. Single-device peer copies are now covered too: synchronous and async 1D peer copy plus 3D peer copy (`hipMemcpyPeer`, `hipMemcpyPeerAsync`, `hipMemcpy3DPeer`, `hipMemcpy3DPeerAsync`), exercised via self-device (dst==src) round-trips that behave like ordinary device-to-device copies, plus an invalid-device-ordinal rejection; cross-device peer transfers require multi-GPU hosts and remain uncovered. Remaining symbol-copy gaps are the driver-style/2D memcpy families.
 2. Texture and surface APIs beyond current basics: runtime and driver-style texture object create/destroy with resource, texture, and resource-view descriptor round-trips, image-gated device texture-width queries, surface object create/destroy, and channel-descriptor queries are now covered; texture reference APIs, mipmapped arrays, and bound/linear texture variants remain.
 3. Module, library, and code-loading APIs: module load from file/fat-binary, HIPRTC-backed module load-from-data, load-from-data-with-options (`hipModuleLoadDataEx`, including JIT option handling), unload, function and global lookup, module kernel launch (with `hipFuncGetAttribute`), function-count queries, cooperative module launch, and module occupancy helpers (max potential block size and max active blocks per multiprocessor, including both with-flags variants), and JIT linker lifecycle and invalid-input paths are now covered; the HIPRTC-backed library-loading family is now covered too (library load-from-data, unload, kernel lookup, kernel count, kernel enumeration, global lookup, and the `hipKernel*` accessors for function/library/name), plus the `hipKernel_t` attribute accessors and parameter-info query (`hipKernelGetAttribute`, `hipKernelSetAttribute` accepted-or-unsupported, `hipKernelGetParamInfo` first-parameter layout), and the library load-from-file and managed-symbol accessors (`hipLibraryLoadFromFile` with kernel resolution and missing-file rejection, `hipLibraryGetManaged` unknown-symbol rejection). This brings the module/library-loading API family to full name coverage. Tex-ref queries and multi-device cooperative module launch remain (the latter counted under kernel launch).
-4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Driver-style context configuration and peer access are now covered as well: per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access enable/disable (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`). This brings the driver-style context (`hipCtx*`) API family to full name coverage. PCI bus-id-to-device round-trips, device selection (`hipChooseDevice`), single-device peer-access queries (`hipDeviceCanAccessPeer`), peer-attribute queries (`hipDeviceGetP2PAttribute`), and peer-access enable/disable contracts (`hipDeviceEnablePeerAccess`, `hipDeviceDisablePeerAccess`) are now covered too. Remaining driver-style device-management gaps are the primary-context reset/set-flags helpers.
-5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, stream capture-mode exchange and v2 capture-info queries, capture into a caller-provided graph with mid-capture dependency-set updates (`hipStreamBeginCaptureToGraph`, `hipStreamUpdateCaptureDependencies`), memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, graph node parameter get/set round-trips and event getter contracts, graph node destruction, executable-graph instantiate-with-flags/upload/flag query paths, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; the pre-instantiation node parameter setters are covered too (`hipGraphKernelNodeSetParams`, `hipGraphHostNodeSetParams`, `hipGraphMemcpyNodeSetParams1D`, `hipGraphEventRecordNodeSetEvent`, `hipGraphEventWaitNodeSetEvent`, and kernel-node attribute propagation via `hipGraphKernelNodeCopyAttributes`), verified by set-then-get round-trips and launched observable effects. The device-global symbol-copy graph nodes are now covered as well (`hipGraphAddMemcpyNodeToSymbol`, `hipGraphAddMemcpyNodeFromSymbol`, their graph-node set-params variants `hipGraphMemcpyNodeSetParamsToSymbol`/`hipGraphMemcpyNodeSetParamsFromSymbol`, and the executable-graph set-params variants `hipGraphExecMemcpyNodeSetParamsToSymbol`/`hipGraphExecMemcpyNodeSetParamsFromSymbol`), verified by to/from-symbol round-trips through a device global with node and exec-node re-parameterization. Remaining node attribute variants and debug dot export remain.
+4. Context and driver-style APIs beyond current basics: device-handle, name, compute-capability, total-memory, UUID, and PCI bus-id queries, primary-context retain/get-state/release, current-context/device queries, device cache-config get/set, shared-memory-config query, device-limit get/set, device-flag query, and stream-priority-range query are now covered; driver-style context lifecycle and current-context mutation are now covered too (context create/destroy, set-current, push/pop-current, context synchronize, and API-version query). Driver-style context configuration and peer access are now covered as well: per-context cache-config get/set (`hipCtxGetCacheConfig`, `hipCtxSetCacheConfig`), shared-memory-config get/set (`hipCtxGetSharedMemConfig`, `hipCtxSetSharedMemConfig`), the context flag query (`hipCtxGetFlags`), and context peer access enable/disable (`hipCtxEnablePeerAccess`, `hipCtxDisablePeerAccess`). This brings the driver-style context (`hipCtx*`) API family to full name coverage. PCI bus-id-to-device round-trips, device selection (`hipChooseDevice`), single-device peer-access queries (`hipDeviceCanAccessPeer`), peer-attribute queries (`hipDeviceGetP2PAttribute`), and peer-access enable/disable contracts (`hipDeviceEnablePeerAccess`, `hipDeviceDisablePeerAccess`) are now covered too. The remaining device-management lifecycle entry points are now covered as well: the device flag setter (`hipSetDeviceFlags` accepts the currently-active flags), the deprecated shared-memory bank configuration setter (`hipDeviceSetSharedMemConfig` round-trips the current config), the deprecated valid-device selector (`hipSetValidDevices` accepts the full visible-device list), and the deprecated primary-context flag setter and reset (`hipDevicePrimaryCtxSetFlags` accepted-or-already-in-use, `hipDevicePrimaryCtxReset` leaves the device usable via a post-reset alloc/free round-trip). This brings the driver-style device-management family to full name coverage aside from `hipDeviceReset`, which is intentionally omitted because it tears down all device context and would corrupt sibling tests sharing the process. The deprecated profiler control entry points (`hipProfilerStart`, `hipProfilerStop`) are covered too, as an accepted-or-unsupported pair with a start/stop capability-consistency check.
+5. Advanced graph APIs: node type queries, explicit add/remove dependencies, child graph nodes with sub-graph retrieval, host nodes with param round-trips, node find in clone, stream capture-mode exchange and v2 capture-info queries, capture into a caller-provided graph with mid-capture dependency-set updates (`hipStreamBeginCaptureToGraph`, `hipStreamUpdateCaptureDependencies`), memory alloc/free nodes with param round-trips plus device graph-memory attribute and trim helpers, user objects (create/retain/release and graph retain/release), per-node enable/disable state (set/get), kernel-node attribute set/get round-trips (cooperative and access-policy-window) with invalid-input rejection, graph node parameter get/set round-trips and event getter contracts, graph node destruction, executable-graph instantiate-with-flags/upload/flag query paths, and executable-graph update paths (whole-graph `hipGraphExecUpdate` with topology-change reporting plus per-node exec setters for host, child-graph, event-record, and event-wait nodes) are now covered; the pre-instantiation node parameter setters are covered too (`hipGraphKernelNodeSetParams`, `hipGraphHostNodeSetParams`, `hipGraphMemcpyNodeSetParams1D`, `hipGraphEventRecordNodeSetEvent`, `hipGraphEventWaitNodeSetEvent`, and kernel-node attribute propagation via `hipGraphKernelNodeCopyAttributes`), verified by set-then-get round-trips and launched observable effects. The device-global symbol-copy graph nodes are now covered as well (`hipGraphAddMemcpyNodeToSymbol`, `hipGraphAddMemcpyNodeFromSymbol`, their graph-node set-params variants `hipGraphMemcpyNodeSetParamsToSymbol`/`hipGraphMemcpyNodeSetParamsFromSymbol`, and the executable-graph set-params variants `hipGraphExecMemcpyNodeSetParamsToSymbol`/`hipGraphExecMemcpyNodeSetParamsFromSymbol`), verified by to/from-symbol round-trips through a device global with node and exec-node re-parameterization. The graph memory free node is now covered too (`hipGraphAddMemFreeNode` with an alloc-node dependency and `hipGraphMemFreeNodeGetParams` device-pointer round-trip; the alloc/free-pair launch is intentionally structural-only because launching a graph memory free node aborts with SIGSEGV on some runtime paths). The unified generic node entry points are now covered (`hipGraphAddNode`, `hipGraphNodeSetParams`, `hipGraphExecNodeSetParams`) via a memset node whose value is set pre- and post-instantiation and verified by launched observable effect, as are the struct-based 3D memcpy graph nodes (`hipGraphAddMemcpyNode` with `hipMemcpy3DParms`, `hipGraphMemcpyNodeGetParams`/`hipGraphMemcpyNodeSetParams`, and `hipGraphExecMemcpyNodeSetParams`) via full-extent host-to-device 3D copy round-trips with pre- and post-instantiation source retargeting. This brings the graph node-parameter API family to full name coverage. Remaining graph gaps are the driver-style graph nodes (`hipDrvGraphAddMemcpyNode`, `hipDrvGraphAddMemsetNode`, and their get/set/exec-set params), batch-mem-op and external-semaphore graph nodes, generic instantiate-with-params (`hipGraphInstantiateWithParams`), remaining node attribute variants, and debug dot export.
 6. IPC memory and event handle round-trips (get/open/close for memory, get/open for events) are now covered; peer access and multigpu APIs remain.
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, driver-entry-point lookup, API-name-to-string mapping, per-stream device-id queries, and thread-local extended error state are now covered; external memory/semaphore import/export, extended kernel launch variants, and logging controls remain.
 8. Occupancy APIs: the occupancy API family is now at full name coverage. Beyond the earlier basics — max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`), max-potential-block-size, available-dynamic-shared-memory-per-block, and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) — the non-module with-flags potential-block-size variant (`hipOccupancyMaxPotentialBlockSizeWithFlags`) and the variable-shared-memory potential-block-size helpers (`hipOccupancyMaxPotentialBlockSizeVariableSMem`, `hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags`) are now covered too, exercising the with-flags/plain equivalence and a zero-dynamic-shared-memory functor.

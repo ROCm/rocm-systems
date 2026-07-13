@@ -56,6 +56,20 @@ bool TryAddMemAllocNode(hipGraphNode_t* node, hipGraph_t graph,
   HIP_CHECK(status);
   return true;
 }
+
+// Attempts to add a memory free node for dev_ptr that depends on alloc_node.
+// Returns false if the runtime path does not support graph memory free nodes.
+bool TryAddMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
+                       const hipGraphNode_t* deps, size_t num_deps,
+                       void* dev_ptr) {
+  const hipError_t status =
+      hipGraphAddMemFreeNode(node, graph, deps, num_deps, dev_ptr);
+  if (status == hipErrorNotSupported) {
+    return false;
+  }
+  HIP_CHECK(status);
+  return true;
+}
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
@@ -105,6 +119,41 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GetParams_RoundTripsBytesize) {
   REQUIRE(retrieved.poolProps.allocType == hipMemAllocationTypePinned);
   REQUIRE(retrieved.poolProps.location.type == hipMemLocationTypeDevice);
   REQUIRE(retrieved.poolProps.location.id == CurrentDevice());
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  TryTrimGraphMemory();
+}
+
+HIP_TEST_CASE(Contract_GraphMemNodes_FreeNodeGetParams_RoundTripsPointer) {
+  if (!TryTrimGraphMemory()) {
+    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
+  }
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t alloc_node = nullptr;
+  hipGraphNode_t free_node = nullptr;
+  hipMemAllocNodeParams params = CurrentDeviceAllocParams();
+
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
+    HIP_CHECK(hipGraphDestroy(graph));
+    TryTrimGraphMemory();
+    HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
+  }
+  REQUIRE(params.dptr != nullptr);
+
+  if (!TryAddMemFreeNode(&free_node, graph, &alloc_node, 1, params.dptr)) {
+    HIP_CHECK(hipGraphDestroy(graph));
+    TryTrimGraphMemory();
+    HIP_SKIP_TEST("Graph memory free nodes are not supported by this runtime path.");
+  }
+
+  // The free node reports the device pointer it was created with. The getter
+  // writes the pointer through its void* out-parameter.
+  void* retrieved = nullptr;
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(free_node, &retrieved));
+  REQUIRE(retrieved == params.dptr);
 
   HIP_CHECK(hipGraphDestroy(graph));
   TryTrimGraphMemory();
