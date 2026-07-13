@@ -91,7 +91,7 @@ jobs:
         timeout-minutes: 10
         run: |
           source ${{ env.VENV_DIR }}/bin/activate
-          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm6.3
+          pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/rocm7.2
           pip install pytest
 
       - name: Verify RCCL override
