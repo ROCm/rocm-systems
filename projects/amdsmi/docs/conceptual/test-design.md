@@ -132,14 +132,14 @@ tests/amd_smi_test/
     │   └── sys_info_read{.h,_test.cc}
     ├── cpu/
     │   ├── clock/
-    │   │   └── placeholder_test.cc  # Stub — CPU clock C++ tests added here
+    │   │   └── .gitkeep             # Empty — add CPU clock C++ tests here
     │   └── power/
-    │       └── placeholder_test.cc  # Stub — CPU power C++ tests added here
+    │       └── .gitkeep             # Empty — add CPU power C++ tests here
     ├── nic/
     │   ├── discovery/
-    │   │   └── placeholder_test.cc  # Stub — NIC/switch discovery C++ tests added here
+    │   │   └── .gitkeep             # Empty — add NIC/switch discovery C++ tests here
     │   └── identity/
-    │       └── placeholder_test.cc  # Stub — NIC/switch identity C++ tests added here
+    │       └── .gitkeep             # Empty — add NIC/switch identity C++ tests here
     └── ifoe/
         ├── fabric/
         │   └── fabric_read{.h,_test.cc}   # IFoE fabric link reads
@@ -150,8 +150,8 @@ tests/amd_smi_test/
 ### Component subdirectory depth
 
 Each component groups tests into per-feature subdirectories (`<component>/<feature>/`, like `gpu/`).
-A feature gets its own subdirectory even for a single test. A `placeholder_test.cc` holds a feature
-directory until its first real test lands.
+A feature gets its own subdirectory even for a single test. An empty feature directory is held by a
+`.gitkeep` marker until its first real test lands.
 
 The names below are suggestions that mirror the Python suite's `test_<feature>.py` files. Sharing
 names lets a feature line up across both suites. Adapt them as the APIs warrant.
@@ -181,6 +181,8 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 | :--- | :--- | :--- |
 | `GpuFunctionalReadOnly` | functional | GPU tests that only read device state; no root required |
 | `GpuFunctionalReadWrite` | functional | GPU tests that modify device state; root typically required |
+| `SystemFunctionalReadOnly` | functional | System/topology/serialization tests under `functional/system/` |
+| `IfoeFunctionalReadOnly` | functional | IFoE tests under `functional/ifoe/` |
 | `GpuUnit` | unit | Pure unit tests under `unit/gpu/`; no device required |
 
 The full suite name scheme is `<Component><Type>[<Operation>]`. Use the PascalCase component name

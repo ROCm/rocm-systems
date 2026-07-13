@@ -62,7 +62,6 @@
 #include "functional/ifoe/identity/ifoe_info_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
-#include "functional/system/init_shutdown_refcount.h"
 #include "functional/system/kfd_atfork_read.h"
 #include "functional/system/mutual_exclusion.h"
 #include "functional/system/sys_info_read.h"
@@ -181,7 +180,7 @@ TEST(GpuFunctionalReadWrite, TestPciReadWrite) {
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST(GpuFunctionalReadOnly, TestSysInfoRead) {
+TEST(SystemFunctionalReadOnly, TestSysInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
@@ -232,7 +231,7 @@ TEST(GpuFunctionalReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
   RunGenericTest(&tst);
 }
-TEST(GpuFunctionalReadOnly, TestHWTopologyRead) {
+TEST(SystemFunctionalReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
@@ -265,7 +264,7 @@ TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
   RunGenericTest(&tst);
 }
 
-TEST(GpuFunctionalReadOnly, TestMutualExclusion) {
+TEST(SystemFunctionalReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -314,22 +313,22 @@ TEST(GpuFunctionalReadWrite, TestMemoryReadWrite) {
   RunGenericTest(&tst);
 }
 
-TEST(GpuFunctionalReadOnly, TestKfdAtforkRead) {
+TEST(SystemFunctionalReadOnly, TestKfdAtforkRead) {
   TestKfdAtforkRead tst;
   RunGenericTest(&tst);
 }
 
-TEST(GpuFunctionalReadOnly, TestFabricRead) {
+TEST(IfoeFunctionalReadOnly, TestFabricRead) {
   TestFabricRead tst;
   RunGenericTest(&tst);
 }
 
-TEST(GpuFunctionalReadOnly, TestIfoeInfoRead) {
+TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
 
-TEST(GpuFunctionalReadOnly, TestCrossProcessSerialization) {
+TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
