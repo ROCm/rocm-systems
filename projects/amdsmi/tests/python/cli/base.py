@@ -92,9 +92,8 @@ class TestCliBase(unittest.TestCase):
     def _build_baseline(cls):
         baseline = {}
 
-        # Record starting values; running here (once per class) rather than in
-        # __init__ (once per test method) reduces setup overhead from O(N) to
-        # O(1) — N being the number of test methods in this class.
+        # Record starting values once per CLI suite rather than once per test
+        # method, reducing baseline setup overhead from O(N) to O(1).
         cmds = [
             ("metric", "amd-smi metric --json"),
             ("static", "amd-smi static --json"),

@@ -20,14 +20,12 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """BDF string parsing and formatting unit tests."""
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import amdsmi
 
 # BDF strings that must parse to their [domain, bus, device, function] components.
-VALID_BDFS: dict[str, list[int]] = {
+VALID_BDFS = {
     "00:00.0": [0, 0, 0, 0],
     "01:01.1": [0, 1, 1, 1],
     "FF:1F.7": [0, 255, 31, 7],
@@ -40,7 +38,7 @@ VALID_BDFS: dict[str, list[int]] = {
 }
 
 # Malformed inputs that _parse_bdf must reject (return None).
-INVALID_BDFS: dict[str | None, None] = {
+INVALID_BDFS = {
     None: None,
     "": None,
     "00:00:0": None,

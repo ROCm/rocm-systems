@@ -20,8 +20,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """APU metrics helper unit tests (hardware-free)."""
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import amdsmi

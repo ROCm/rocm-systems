@@ -20,17 +20,9 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """Core shared infrastructure for the AMD SMI Python test suite.
 
-Owns three responsibilities:
-  * amdsmi module discovery -- resolves the install via
-    AMDSMI_PATH -> ROCM_HOME -> ROCM_PATH -> /opt/rocm, inserts it on
-    sys.path, and guards against a shadowing site-packages copy
-    (see ROCM-1552 / PR #6359).
-  * the ``Common`` helper base -- enum tables, ``Test_API_*`` drivers,
-    ``check_ret`` and friends, held as ``self.common`` by the API tests
-    (intentionally NOT a unittest.TestCase).
-  * the unittest runner machinery -- ``run_test_dir``,
-    ``GTestSummaryRunner``, verbosity/-k/-l parsing and the help/legend
-    printers used by the three top-level runners.
+This module owns amdsmi discovery and shadowing protection, the ``Common`` helper
+base used by API tests, and the unittest runner machinery shared by the three
+top-level runners. ``Common`` intentionally is not a ``unittest.TestCase``.
 
 Imported by every functional/unit leaf test and by all three runners
 (integration_test.py, cli_unit_test.py, unit_tests.py).
@@ -577,15 +569,19 @@ def _filter_suite_exclude(suite, pattern):
     return filtered
 
 
-def run_test_dir(subdir, title, top_level_dir):
+def run_test_dir(subdir, title, top_level_dir, requires_root=True):
     """Discover and run every test under *top_level_dir*/*subdir*, then exit.
 
     Single implementation of the runner boilerplate shared by the three entry
     scripts (integration_test.py / cli_unit_test.py / unit_tests.py): it handles
-    ``-h``/``--help``, ``-k``/``--keyword`` filtering, ``-l``/``--list``, the
-    root-privilege check, the legend/title preamble, output buffering
-    (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
-    always calls ``sys.exit()`` (0 on success, 1 on failure).
+    ``-h``/``--help``, ``-k``/``--keyword`` filtering, ``-x``/``--exclude``
+    filtering, ``-l``/``--list``, the legend/title preamble, output buffering
+    (``-b``/``--buffer``) and the GTest-style summary runner. Never returns and
+    always calls ``sys.exit()`` with status 0 on success or 1 on failure.
+
+    *requires_root* gates the elevated-privilege check: the functional and CLI
+    suites drive live hardware and abort early without root, while the
+    hardware-free unit suite passes ``requires_root=False`` so it runs anywhere.
     """
     argv = sys.argv
 
@@ -617,8 +613,8 @@ def run_test_dir(subdir, title, top_level_dir):
         print_test_ids(suite)
         sys.exit(0)
 
-    # Detect if ran without sudo or root privileges
-    if os.geteuid() != 0:
+    # Functional and CLI suites need root for live-hardware access; unit tests are hardware-free.
+    if requires_root and os.geteuid() != 0:
         print(
             "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
             file=sys.stderr,

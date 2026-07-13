@@ -12,9 +12,10 @@ message("--------Share Install Prefix: " ${SHARE_INSTALL_PREFIX})
 # (e.g. .../tests/python_unittest/unit_tests.py -v) keep working unchanged.
 install(
     DIRECTORY ./
-    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest/
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest
     COMPONENT ${TESTS_COMPONENT}
     USE_SOURCE_PERMISSIONS
     FILES_MATCHING
     PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE
 )

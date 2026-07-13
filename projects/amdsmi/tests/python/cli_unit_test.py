@@ -35,6 +35,7 @@ Options:
     -q / --quiet      Quiet output
     -b / --buffer     Buffer stdout/stderr during tests
     -k "pattern"      Only run tests matching the substring
+    -x / --exclude "pattern"  Skip tests matching the substring
     --list / -l       List all available tests without running them
 """
 
@@ -48,4 +49,5 @@ sys.path.insert(0, _here)
 
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
-common.run_test_dir("cli", "AMD SMI CLI Tests", _here)
+if __name__ == "__main__":
+    common.run_test_dir("cli", "AMD SMI CLI Tests", _here)

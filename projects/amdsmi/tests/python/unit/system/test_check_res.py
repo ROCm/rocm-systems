@@ -20,8 +20,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """Status-code to exception mapping unit tests for _check_res."""
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import amdsmi

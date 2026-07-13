@@ -48,6 +48,12 @@ meaningful timing data.
 
 ## C++ test structure
 
+```{note}
+The C++ layout in this section is the target design for the companion C++ test refactor.
+Until that change lands, the source tree retains its existing flat functional-test layout and
+suite names.
+```
+
 ### Directory layout
 
 > **Notation.** In the tree below, `<name>{.h,_test.cc}` is shorthand for the pair
@@ -220,7 +226,8 @@ The cper suite shows both styles:
 3. Add an `install(DIRECTORY …)` line for the new fixture folder in `CMakeLists.txt`.
 
 Fixtures should be static, sanitized blobs so the tests stay deterministic and **run on any
-machine regardless of GPU** (see `mock_cper/README.md` for provenance).
+machine regardless of GPU**. The current tree stores provenance in
+`functional/mock_values/README.md`; the companion refactor moves it to `mock_cper/README.md`.
 
 ### CMake integration
 
@@ -359,7 +366,9 @@ tests/python/
 │   │   ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
 │   │   └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)
 │   └── system/
-│       └── test_bdf.py                # BDF string parsing and formatting
+│       ├── test_bdf.py                 # BDF string parsing and formatting
+│       ├── test_check_res.py           # Status-code to exception mapping
+│       └── test_infrastructure.py      # Test-layout and runner invariants
 │
 ├── functional/                        # Requires live hardware
 │   ├── __init__.py
@@ -389,11 +398,7 @@ tests/python/
 │   │   ├── test_thermal.py            # socket_temperature, prochot_status
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── nic/
-│   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
-│   │   └── test_identity.py           # NIC and switch BDF and device ID reads
-│   ├── ifoe/
-│   │   ├── test_discovery.py          # IFoE endpoint enumeration
-│   │   └── test_identity.py           # IFoE endpoint BDF and device ID reads
+│   │   └── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
 │   └── system/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
@@ -428,6 +433,9 @@ tests/python/
 ├── CMakeLists.txt                    # Installs this tree into the python_unittest/ path
 └── README.md                         # Prerequisites + pointer to this design doc
 ```
+
+The tree lists implemented coverage only. Add a test module when it contains runnable tests,
+rather than committing empty component scaffolding.
 
 ### Naming conventions
 
@@ -517,22 +525,16 @@ one way — **CLI tests are Python-only**, and the **read-only/read-write split 
 `python_unittest/` install path. The source directory was consolidated into `tests/python/`,
 but the install location is unchanged, so existing invocations keep working:
 
-```cmake
-install(
-    DIRECTORY ./
-    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest/
-    COMPONENT ${TESTS_COMPONENT}
-    USE_SOURCE_PERMISSIONS
-    FILES_MATCHING
-    PATTERN "*.py"
-)
-```
+The install rule copies only Python source files and excludes `__pycache__` directories.
 
 The top-level `CMakeLists.txt` wires this in with `add_subdirectory("tests/python")`.
 
 ## Migration reference
 
 ### C++ file mapping
+
+This table shows the target layout for the companion C++ refactor. Until it lands, the files
+remain at their old paths under `functional/`.
 
 > **Note.** `<name>{.h,_test.cc}` in the *New path* column denotes the pair `<name>.h` + `<name>_test.cc`
 > (see [Directory layout](#directory-layout)).
@@ -603,3 +605,6 @@ shown in parentheses.
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |
 | `runcmd.py` | `common/runcmd.py` |
+
+The common-helper migration also corrects CPU I/O bandwidth coverage to pass public link IDs
+(`P0`–`P4` and `G0`–`G7`) instead of wrapper constant names.
