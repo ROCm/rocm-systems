@@ -1281,6 +1281,24 @@ RJ_INTERPOSER_EXPORT void *mmap(void *addr, size_t length, int prot, int flags, 
     }
   }
 
+  if (InterposerContext::ctx.is_drm(fd)) {
+    // Synthetic DRM fds in daemon mode do not have local mmap state; route them
+    // through the remote KFD driver so dma-buf imports get a real host mapping.
+    if (auto *remote =
+            InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd())) {
+      void *ret = remote->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
+    if (auto *drv = InterposerContext::ctx.driver()) {
+      void *ret = drv->mmap(addr, length, prot, flags, offset);
+      if (ret != MAP_FAILED)
+        rocjitsu::KfdProcess::notify_host_mappings_changed();
+      return ret;
+    }
+  }
+
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
     int memfd_out = -1;
     off_t memfd_offset = 0;

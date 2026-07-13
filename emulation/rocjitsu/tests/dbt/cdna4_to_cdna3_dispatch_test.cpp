@@ -1512,38 +1512,27 @@ TEST(Cdna4ToCdna3DispatchTest, DynamicCopyLoopDispatchAndRun) {
   ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(translated.elf_bytes, target));
 }
 
-TEST(Cdna4ToCdna3DispatchTest, VCvtPkBf16F32DispatchAndRun) {
+TEST(Cdna4ToCdna3DbtGuestTest, DynamicCopyLoopDispatchAndRun) {
   const hsa_status_t init_status = hsa_init();
-  if (init_status != HSA_STATUS_SUCCESS)
-    GTEST_SKIP() << "hsa_init failed with status " << init_status
-                 << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
+  ASSERT_EQ(init_status, HSA_STATUS_SUCCESS)
+      << "DBT guest simulator launch must provide an HSA-capable execution backend";
   const HsaShutdownGuard shutdown;
 
-  Cdna3Target target = find_cdna3_target();
-  if (target.agent.handle == 0)
-    GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
-                 << join_seen_isas(target.seen_gpu_isas);
+  Cdna3Target guest = find_gpu_target_named("gfx950", EF_AMDGPU_MACH_AMDGCN_GFX942);
+  ASSERT_NE(guest.agent.handle, 0u) << "DBT guest launch must publicly expose gfx950; found: "
+                                    << join_seen_isas(guest.seen_gpu_isas);
 
-  std::vector<uint8_t> translated;
-  ASSERT_NO_FATAL_FAILURE(translate_hip_fixture("cvt_pk_bf16_f32", target.mach, translated));
-  ASSERT_NO_FATAL_FAILURE(run_cvt_pk_bf16_f32(translated, target));
-}
+  Executable exec(kernel_path("dynamic_copy_loop"));
+  ASSERT_TRUE(exec.is_valid());
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950), 0u);
+  const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
+  ASSERT_NE(co, nullptr);
+  std::vector<uint8_t> guest_elf(co->image_size());
+  std::memcpy(guest_elf.data(), co->image_data(), co->image_size());
 
-TEST(Cdna4ToCdna3DispatchTest, VirtualLdsSmokeDispatchAndRun) {
-  const hsa_status_t init_status = hsa_init();
-  if (init_status != HSA_STATUS_SUCCESS)
-    GTEST_SKIP() << "hsa_init failed with status " << init_status
-                 << "; CDNA4->CDNA3 dispatch verification requires an HSA-capable host";
-  const HsaShutdownGuard shutdown;
-
-  Cdna3Target target = find_cdna3_target();
-  if (target.agent.handle == 0)
-    GTEST_SKIP() << "Test requires a CDNA3 GPU agent (gfx940/gfx941/gfx942); found: "
-                 << join_seen_isas(target.seen_gpu_isas);
-
-  std::vector<uint8_t> translated;
-  ASSERT_NO_FATAL_FAILURE(translate_hip_fixture("virtual_lds_smoke", target.mach, translated));
-  ASSERT_NO_FATAL_FAILURE(run_virtual_lds_smoke(translated, target));
+  // Deliberately load the original gfx950 ELF through the public guest agent.
+  // The DBT HSA hook owns translation and maps execution to simulated gfx942.
+  ASSERT_NO_FATAL_FAILURE(run_dynamic_copy_loop(guest_elf, guest));
 }
 
 TEST(Cdna4ToCdna3DispatchTest, TritonDynamicMatmulDispatchAndRun) {

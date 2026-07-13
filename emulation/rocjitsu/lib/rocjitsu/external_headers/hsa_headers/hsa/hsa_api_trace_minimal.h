@@ -107,7 +107,7 @@ struct AmdExtTable {
   hsa_amd_queue_intercept_register_fn_t hsa_amd_queue_intercept_register_fn;
   void *hsa_amd_queue_set_priority_fn;
   hsa_amd_memory_async_copy_rect_fn_t hsa_amd_memory_async_copy_rect_fn;
-  hsa_amd_runtime_queue_create_register_fn_t hsa_amd_runtime_queue_create_register_fn;
+  void *hsa_amd_runtime_queue_create_register_fn;
   hsa_amd_memory_lock_to_pool_fn_t hsa_amd_memory_lock_to_pool_fn;
   void *hsa_amd_register_deallocation_callback_fn;
   void *hsa_amd_deregister_deallocation_callback_fn;

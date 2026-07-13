@@ -28,7 +28,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
-#include <cstddef>
+#include <array>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -53,10 +53,38 @@ constexpr uint32_t kMaxSgprGranulatedField = 15;
 constexpr uint16_t kScalarOperandTtmpBase = 108;
 constexpr uint16_t kTtmpRdna4GridYz = 7;
 constexpr uint16_t kTtmpRdna4GridX = 9;
+constexpr uint8_t kSoppWaitLoadcnt = 64;
+constexpr uint8_t kSoppWaitKmcnt = 71;
+constexpr uint8_t kSmemEncoding = 0x3d;
+constexpr uint8_t kSmemSoffsetNone = 0x7c;
+
+[[nodiscard]] constexpr uint16_t build_hwreg(uint8_t reg_id, uint8_t offset, uint8_t size) {
+  return static_cast<uint16_t>((reg_id & 0x3Fu) | ((offset & 0x1Fu) << 6) |
+                               (((size - 1u) & 0x1Fu) << 11));
+}
+
+[[nodiscard]] constexpr uint32_t build_sopk(uint8_t op, uint16_t simm16, uint8_t sdst = 0) {
+  return 0xB0000000u | (simm16 & 0xFFFFu) | ((sdst & 0x7Fu) << 16) | ((op & 0x1Fu) << 23);
+}
 
 // -----------------------------------------------------------------------------
 // ISA-family helpers.
 // -----------------------------------------------------------------------------
+
+[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+[[nodiscard]] bool is_rdna_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+[[nodiscard]] bool is_gfx1250_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
 
 [[nodiscard]] bool arch_supports_wave_size(rj_code_arch_t arch, uint32_t wf) {
   switch (arch) {
@@ -109,6 +137,33 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna4::Isa::WF_SIZE;
   default:
     return 64;
+  }
+}
+
+[[nodiscard]] uint32_t arch_max_sgprs(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::Isa::MAX_SGPRS_PER_WF;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::Isa::MAX_SGPRS_PER_WF;
+  default:
+    return 0;
   }
 }
 
@@ -218,9 +273,34 @@ kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t s
   return std::nullopt;
 }
 
+[[nodiscard]] uint64_t executable_code_range_size(uint64_t text_vaddr, uint64_t text_size,
+                                                  const Elf64_Ehdr &ehdr, const Elf64_Shdr *shdr) {
+  constexpr uint64_t max_u64 = std::numeric_limits<uint64_t>::max();
+  if (text_vaddr > max_u64 - text_size)
+    return 0;
+
+  uint64_t code_end = text_vaddr + text_size;
+
+  // DBT places expansion bodies in .rj_translations and addresses them as a
+  // .text-relative continuation. Include executable sections at or after .text
+  // so a redirected kernel descriptor entry can still be parsed.
+  for (int i = 0; i < ehdr.e_shnum; ++i) {
+    constexpr uint64_t executable_load_flags = SHF_ALLOC | SHF_EXECINSTR;
+    if ((shdr[i].sh_flags & executable_load_flags) != executable_load_flags)
+      continue;
+    if (shdr[i].sh_addr < text_vaddr)
+      continue;
+    if (shdr[i].sh_addr > max_u64 - shdr[i].sh_size)
+      continue;
+    code_end = std::max(code_end, shdr[i].sh_addr + shdr[i].sh_size);
+  }
+
+  return code_end - text_vaddr;
+}
+
 using KernelDescriptorVisitor =
-    std::function<void(uint64_t descriptor_file_offset, std::string kernel_name,
-                       uint64_t entry_text_offset, const KD &desc)>;
+    std::function<void(uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+                       std::string_view symbol_name, const KD &desc)>;
 
 void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset,
                               uint64_t text_size, const KernelDescriptorVisitor &callback) {
@@ -286,7 +366,9 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
         continue;
 
       const uint64_t entry_text_offset = entry_vaddr - *text_vaddr;
-      callback(file_off, std::move(*kernel_name), entry_text_offset, desc);
+      const char *name = strtab + symtab[j].st_name;
+      const size_t name_len = strnlen(name, strtab_size - symtab[j].st_name);
+      callback(file_off, entry_text_offset, std::string_view(name, name_len), *desc);
     }
   }
 }
@@ -368,33 +450,6 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
   return AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_OFFSET);
 }
 
-[[nodiscard]] std::optional<uint32_t> kernarg_bytes_to_preserve(const KD &desc) {
-  const uint32_t preload_length = kernarg_preload_length(desc);
-  if (preload_length == 0)
-    return desc.kernarg_size;
-
-  const uint32_t preload_offset = kernarg_preload_offset(desc);
-  if (preload_offset > std::numeric_limits<uint32_t>::max() - preload_length)
-    return std::nullopt;
-  const uint32_t preload_end_dwords = preload_offset + preload_length;
-  if (preload_end_dwords > std::numeric_limits<uint32_t>::max() / sizeof(uint32_t))
-    return std::nullopt;
-  const uint32_t preload_end_bytes = preload_end_dwords * static_cast<uint32_t>(sizeof(uint32_t));
-  if (preload_end_bytes > std::numeric_limits<uint32_t>::max() - 7u)
-    return std::nullopt;
-
-  // The descriptor preload range is dword-granular, but the kernarg block is an
-  // ABI byte array and often carries 64-bit pointers. Virtual LDS redirects the
-  // packet to a rocjitsu-owned copy before appending its runtime state. If the
-  // last preloaded dword is the low half of a pointer, copying exactly the
-  // dword range would zero the pointer's high half in the redirected kernarg.
-  // Preserve through the next 8-byte boundary so a tail 64-bit kernarg value
-  // remains intact while still keeping the copied range derived from descriptor
-  // preload facts rather than msgpack metadata.
-  const uint32_t aligned_preload_bytes = (preload_end_bytes + 7u) & ~uint32_t{7u};
-  return std::max(desc.kernarg_size, aligned_preload_bytes);
-}
-
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension) {
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
@@ -439,8 +494,6 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
          arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
-[[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) { return arch_is_rdna(arch); }
-
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size) {
   // This is the AMDHSA kernel-descriptor encoding granularity for
@@ -460,7 +513,9 @@ void visit_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offs
     return 4;
   if (arch_is_cdna(arch))
     return 8;
-  if (arch_is_rdna(arch))
+  if (is_gfx1250_arch(arch))
+    return 16;
+  if (is_rdna_arch(arch))
     return wavefront_size == 32 ? 8 : 4;
   return 1;
 }
@@ -706,8 +761,15 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
-    append_rdna4_workgroup_grid_prologue(words, src, host_arch);
+  if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    append_rdna4_kernarg_preload_prologue(words, src);
+  if ((is_cdna_arch(guest_arch) &&
+       (host_arch == ROCJITSU_CODE_ARCH_RDNA4 || host_arch == ROCJITSU_CODE_ARCH_GFX1250)) ||
+      (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4))
+    append_rdna4_workgroup_grid_prologue(words, src, host_arch, rdna4_grid_x_sgpr,
+                                         rdna4_grid_yz_sgpr);
+  if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    append_rdna4_vgpr_msb_entry_reset(words);
 
   return words;
 }
@@ -762,39 +824,14 @@ void append_descriptor_resource_error(KdTranslation &result, std::string message
 
 [[nodiscard]] KdTranslation
 translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
-                         uint64_t descriptor_file_offset, std::string kernel_name,
-                         uint64_t entry_text_offset, const KD &src,
+                         uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+                         std::string_view symbol_name, const KD &src,
                          const KernelDescriptorTranslationOptions &options) {
   KdTranslation result;
   result.descriptor_file_offset = descriptor_file_offset;
   result.kernel_name = std::move(kernel_name);
   result.entry_text_offset = entry_text_offset;
-  result.target_entry_text_offset = entry_text_offset;
-  result.target_body_entry_text_offset = entry_text_offset;
-  result.has_kernarg_preload = kernarg_preload_length(src) != 0;
-  result.kernarg_preload_entry_text_offset =
-      result.has_kernarg_preload ? entry_text_offset + kKernargPreloadSkipBytes : entry_text_offset;
-  const auto preserved_kernarg_bytes = kernarg_bytes_to_preserve(src);
-  result.kernarg_size = preserved_kernarg_bytes.value_or(src.kernarg_size);
-  result.target_kernarg_size = src.kernarg_size;
-  result.source_user_sgpr_count = static_cast<uint8_t>(user_sgpr_count(src));
-  result.target_user_sgpr_count = result.source_user_sgpr_count;
-  result.source_has_kernarg_segment_ptr = has_kernarg_segment_ptr(src);
-  result.has_kernarg_segment_ptr = result.source_has_kernarg_segment_ptr;
-  if (auto kernarg_sgpr = kernarg_segment_ptr_sgpr(src))
-    result.kernarg_segment_ptr_sgpr = *kernarg_sgpr;
-  // DBT does not consume the dispatch-packet pointer itself. The virtual-LDS
-  // SGPR allocator still needs to know when CP initializes this ABI pair so it
-  // does not permanently place the backing-buffer base over live source state.
-  result.has_dispatch_ptr = has_dispatch_ptr(src);
-  if (auto dispatch_sgpr = dispatch_ptr_sgpr(src))
-    result.dispatch_ptr_sgpr = *dispatch_sgpr;
-  result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0);
-  result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1);
-  result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2);
-  result.lds_overflow_workgroup_id_sgpr_x = result.workgroup_id_sgpr_x;
-  result.lds_overflow_workgroup_id_sgpr_y = result.workgroup_id_sgpr_y;
-  result.lds_overflow_workgroup_id_sgpr_z = result.workgroup_id_sgpr_z;
+  result.symbol_name = std::string(symbol_name);
 
   // The source descriptor encodes the guest launch wave size. The target
   // descriptor must request a wave size the host can actually launch. We do not
@@ -836,13 +873,6 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
-    // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
-    // that allocation into the ordinary VGPR prefix and the AccVGPR window.
-    // Without this split, gfx950 kernels that reserve a full accumulator bank
-    // look like they require 512 ordinary VGPRs and are incorrectly rejected.
-    // It also prevents liveness from forcing scratch above the accumulator
-    // window when ordinary dead registers can be reused safely.
-    result.guest_vgpr_count = result.accvgpr_base;
     result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
   }
 
@@ -899,27 +929,18 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.target_vgpr_count = required_vgprs;
   result.target_vgpr_allocation_count = required_vgpr_allocation;
   const uint32_t max_host_vgprs = arch_max_vgprs(host_arch);
-  if (max_host_vgprs != 0 && required_vgprs > max_host_vgprs) {
-    append_descriptor_resource_error(
-        result,
-        "required ordinary VGPR count exceeds target limit; spill tiers are not implemented for "
-        "this descriptor",
-        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
-  }
-  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
-    if (max_host_vgprs != 0 && result.target_agpr_count > max_host_vgprs) {
-      append_descriptor_resource_error(
-          result,
-          "required AccVGPR count exceeds target limit; spill tiers are not implemented for this "
-          "descriptor",
-          required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
-    }
-  } else if (max_host_vgprs != 0 && required_vgpr_allocation > max_host_vgprs) {
-    append_descriptor_resource_error(
-        result,
-        "required VGPR allocation exceeds target limit; spill tiers are not implemented for this "
-        "descriptor",
-        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
+  if (max_host_vgprs != 0 && required_vgpr_allocation > max_host_vgprs) {
+    std::string message = "required VGPR allocation " + std::to_string(required_vgpr_allocation) +
+                          " exceeds target limit " + std::to_string(max_host_vgprs) +
+                          " for kernel " + result.symbol_name +
+                          "; guest_vgpr_count=" + std::to_string(result.guest_vgpr_count) +
+                          ", target_vgpr_count=" + std::to_string(result.target_vgpr_count);
+    if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+      message += "; gfx1250 high-bank virtualization above the RDNA4 launch limit is not "
+                 "implemented for this descriptor";
+    else
+      message += "; spill tiers are not implemented for this descriptor";
+    append_descriptor_error(result, std::move(message));
   }
 
   const uint32_t target_vgpr_granulated =
@@ -982,90 +1003,45 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
                        "GRANULATED_WAVEFRONT_SGPR_COUNT");
 
   // LDS/private sizes are copied from the source descriptor and extended by
-  // explicit lowering addends. In normal mode the translated descriptor still
-  // uses hardware LDS and must fit the host limit. In virtualized mode the
-  // descriptor advertises zero fixed LDS so the launch can fit on gfx942; all
-  // LDS accesses in the kernel body must then be lowered to a backing buffer
-  // supplied by the dispatch path.
-  result.target_private_size =
-      src.private_segment_fixed_size + options.private_segment_fixed_size_addend;
-  const uint32_t requested_lds_size =
-      src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
-  if (options.virtualize_lds) {
-    result.target_lds_size = 0;
-    result.lds_overflow_size = requested_lds_size;
-    result.needs_lds_overflow_buf = true;
-    if (!preserved_kernarg_bytes) {
-      append_descriptor_error(
-          result,
-          "virtual LDS cannot preserve kernarg preload bytes because the preload range overflows");
-    }
-    const KernargExtensionPayloadLayout virtual_lds_state{
-        .size = kVirtualLdsRuntimeStateBytes,
-        .alignment = alignof(uint64_t),
-    };
-    const auto wrapper_layout =
-        make_kernarg_extension_layout(result.kernarg_size, std::span{&virtual_lds_state, 1});
-    if (!wrapper_layout) {
-      append_descriptor_error(result, "virtual LDS kernarg wrapper size exceeds descriptor range");
-    } else {
-      result.kernarg_wrapper_original_pointer_offset =
-          wrapper_layout->original_kernarg_pointer_offset;
-      result.lds_overflow_kernarg_pointer_offset = wrapper_layout->payload_offsets[0];
-      result.target_kernarg_size = wrapper_layout->wrapper_size;
-    }
-
-    if (!result.source_has_kernarg_segment_ptr) {
-      if (result.source_user_sgpr_count > 14) {
-        append_descriptor_error(
-            result,
-            "virtual LDS cannot enable ENABLE_SGPR_KERNARG_SEGMENT_PTR because USER_SGPR_COUNT "
-            "would exceed the 16 SGPR hardware initialization limit");
-      } else {
-        const uint16_t inserted_slot = kernarg_segment_ptr_slot(src);
-        result.has_kernarg_segment_ptr = true;
-        result.kernarg_segment_ptr_sgpr = inserted_slot;
-        result.target_user_sgpr_count = result.source_user_sgpr_count + 2u;
-        const uint32_t source_initial_sgprs = source_initial_sgpr_count(src);
-        if (source_initial_sgprs > inserted_slot) {
-          const uint32_t repair_count = source_initial_sgprs - inserted_slot;
-          if (repair_count > std::numeric_limits<uint16_t>::max()) {
-            append_descriptor_error(result,
-                                    "virtual LDS user SGPR repair range exceeds encoder range");
-          } else {
-            result.user_sgpr_repair_start = inserted_slot;
-            result.user_sgpr_repair_count = static_cast<uint16_t>(repair_count);
-          }
-        }
-        if (result.workgroup_id_sgpr_x >= 0)
-          result.lds_overflow_workgroup_id_sgpr_x =
-              static_cast<int16_t>(result.workgroup_id_sgpr_x + 2);
-        if (result.workgroup_id_sgpr_y >= 0)
-          result.lds_overflow_workgroup_id_sgpr_y =
-              static_cast<int16_t>(result.workgroup_id_sgpr_y + 2);
-        if (result.workgroup_id_sgpr_z >= 0)
-          result.lds_overflow_workgroup_id_sgpr_z =
-              static_cast<int16_t>(result.workgroup_id_sgpr_z + 2);
-      }
-    } else if (result.kernarg_segment_ptr_sgpr + 2 > result.source_user_sgpr_count) {
-      append_descriptor_error(
-          result,
-          "virtual LDS requires USER_SGPR_COUNT to cover the kernarg segment pointer SGPR pair");
-    }
-
-  } else {
-    result.target_lds_size = requested_lds_size;
-    const uint32_t max_host_lds_bytes = arch_lds_bytes(host_arch);
-    if (!options.allow_oversized_lds && max_host_lds_bytes != 0 &&
-        result.target_lds_size > max_host_lds_bytes) {
-      append_descriptor_error(
-          result, "target LDS size exceeds host per-workgroup limit; LDS virtualization is not "
-                  "enabled (target_lds_size=" +
-                      std::to_string(result.target_lds_size) +
-                      ", max_lds=" + std::to_string(max_host_lds_bytes) + ")");
-    }
+  // explicit lowering addends. The addend ranges are exposed to semantic
+  // lowerings as spill zones.
+  result.target_private_size = src.private_segment_fixed_size;
+  if (options.private_segment_fixed_size_addend != 0) {
+    result.private_spill_zone_base = (src.private_segment_fixed_size + 3u) & ~3u;
+    result.private_spill_zone_bytes = options.private_segment_fixed_size_addend;
+    result.target_private_size =
+        result.private_spill_zone_base + options.private_segment_fixed_size_addend;
+  }
+  result.target_lds_size = src.group_segment_fixed_size + options.group_segment_fixed_size_addend;
+  if (options.group_segment_fixed_size_addend != 0) {
+    result.lds_spill_zone_base = src.group_segment_fixed_size;
+    result.lds_spill_zone_bytes = options.group_segment_fixed_size_addend;
   }
 
+  // The fixed user-SGPR prefix is preserved. Workgroup-id SGPRs are derived
+  // separately from the enable bits because they are allocated immediately after
+  // this prefix and are not included in USER_SGPR_COUNT.
+  result.target_user_sgpr_count = user_sgpr_count(src);
+
+  if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+      kernarg_preload_length(src) != 0) {
+    const UserSgprLayout layout = user_sgpr_layout(src);
+    if (!layout.kernarg_segment_ptr_sgpr) {
+      append_descriptor_error(
+          result, "gfx1250 kernarg preload DBT requires ENABLE_SGPR_KERNARG_SEGMENT_PTR");
+    } else if (layout.fixed_count + kernarg_preload_length(src) > user_sgpr_count(src)) {
+      append_descriptor_error(result, "gfx1250 kernarg preload exceeds declared user SGPR count");
+    }
+  }
+  result.clears_kernarg_preload = is_gfx1250_arch(guest_arch) &&
+                                  host_arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+                                  can_materialize_rdna4_kernarg_preload(src);
+
+  // Descriptor ABI fixes that require instructions, not bitfield changes, are
+  // emitted as prologue words. CodeObjectPatcher decides where to place them and
+  // redirects the kernel descriptor entry point if this vector is non-empty.
+  result.prologue_words = build_kernel_entry_prologue(
+      src, guest_arch, host_arch, result.rdna4_grid_x_sgpr, result.rdna4_grid_yz_sgpr);
   return result;
 }
 
@@ -1126,13 +1102,13 @@ std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
   std::vector<KdTranslation> translations;
 
   visit_kernel_descriptors(image, text_offset, text_size,
-                           [&](uint64_t descriptor_file_offset, std::string kernel_name,
-                               uint64_t entry_text_offset, const KD &src) {
+                           [&](uint64_t descriptor_file_offset, uint64_t entry_text_offset,
+                               std::string_view symbol_name, const KD &src) {
                              KD desc{};
                              std::memcpy(&desc, &src, sizeof(desc));
                              translations.push_back(translate_one_descriptor(
-                                 guest_arch_, host_arch_, descriptor_file_offset,
-                                 std::move(kernel_name), entry_text_offset, desc, options));
+                                 guest_arch_, host_arch_, descriptor_file_offset, entry_text_offset,
+                                 symbol_name, desc, options_for_entry(options, entry_text_offset)));
                            });
 
   return translations;
@@ -1146,8 +1122,8 @@ std::optional<KdTranslation> KernelDescriptorTranslator::translate_descriptor(
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset, {},
-                                  entry_text_offset, desc, options);
+  return translate_one_descriptor(guest_arch_, host_arch_, descriptor_file_offset,
+                                  entry_text_offset, symbol_name, desc, options);
 }
 
 } // namespace rocjitsu
