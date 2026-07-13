@@ -70,7 +70,7 @@ consan_moi_encode_descriptor_register_count(uint32_t required_count, uint32_t ma
                                             uint32_t granularity);
 
 inline constexpr uint32_t kConSanMoiReportMagic = 0x494f4d43u; // "CMOI" as little-endian bytes.
-inline constexpr uint32_t kConSanMoiReportAbiVersion = 1;
+inline constexpr uint32_t kConSanMoiReportAbiVersion = 2;
 inline constexpr uint64_t kConSanMoiRecordReplayDefaultReportBufferBytes = 64u * 1024u;
 inline constexpr uint64_t kConSanMoiSampledDefaultReportBufferBytes = 64u * 1024u;
 inline constexpr uint64_t kConSanMoiInlineShadowDefaultReportBufferBytes = 256u * 1024u;
@@ -92,7 +92,9 @@ struct alignas(8) ConSanMoiReportHeader {
   uint32_t magic = kConSanMoiReportMagic;
   uint32_t abi_version = kConSanMoiReportAbiVersion;
   uint32_t header_size = 0;
-  uint32_t flags = 0;
+  /// Number of consecutive sampled slots owned by each workgroup partition.
+  /// Zero means the legacy unpartitioned layout.
+  uint32_t sampled_slots_per_partition = 0;
   uint64_t generation = 0;
   uint64_t dispatch_id = 0;
   uint32_t access_record_capacity = 0;
@@ -106,8 +108,44 @@ struct alignas(8) ConSanMoiReportHeader {
   uint32_t exact_shadow_entry_capacity = 0;
   uint32_t sampled_watchpoint_capacity = 0;
   uint32_t event_counter = 0;
-  uint32_t reserved = 0;
+  /// Number of active-lane overflow events observed when an instrumented
+  /// access had a workgroup coordinate outside the configured bounded
+  /// partition extents. A nonzero value means some accesses were skipped.
+  uint32_t partition_overflow_count = 0;
 };
+
+struct ConSanMoiWorkgroupPartitionLayout {
+  uint32_t partition_count = 0;
+  uint32_t slots_per_partition = 0;
+};
+
+[[nodiscard]] constexpr std::optional<ConSanMoiWorkgroupPartitionLayout>
+consan_moi_workgroup_partition_layout(uint32_t capacity, uint32_t extent_x, uint32_t extent_y,
+                                      uint32_t extent_z) {
+  if (extent_x == 0 || extent_y == 0 || extent_z == 0)
+    return std::nullopt;
+  // CDNA4's V_MAD_U32_U24 implementation is used by the injected mapping.
+  constexpr uint64_t kMaxPartitionCount = 0x00ffffffu;
+  if (extent_x > kMaxPartitionCount / extent_y)
+    return std::nullopt;
+  const uint64_t xy = static_cast<uint64_t>(extent_x) * extent_y;
+  if (xy > kMaxPartitionCount / extent_z)
+    return std::nullopt;
+  const uint64_t count = xy * extent_z;
+  return ConSanMoiWorkgroupPartitionLayout{static_cast<uint32_t>(count),
+                                           capacity / static_cast<uint32_t>(count)};
+}
+
+[[nodiscard]] constexpr std::optional<uint32_t>
+consan_moi_workgroup_partition_index(uint32_t x, uint32_t y, uint32_t z, uint32_t extent_x,
+                                     uint32_t extent_y, uint32_t extent_z) {
+  if (x >= extent_x || y >= extent_y || z >= extent_z)
+    return std::nullopt;
+  const auto layout = consan_moi_workgroup_partition_layout(0, extent_x, extent_y, extent_z);
+  if (!layout)
+    return std::nullopt;
+  return x + extent_x * (y + extent_y * z);
+}
 
 struct alignas(8) ConSanMoiAccessRecord {
   uint64_t generation = 0;
@@ -267,11 +305,15 @@ struct ConSanMoiAtomicSyncResult {
 
 using ConSanMoiRecordReplayAtomicEvent = ConSanMoiAtomicRecord;
 
+/// Constructs the complete host-visible report ABI header. Caller-owned
+/// sampled buffers with bounded workgroup partitioning must pass the exact
+/// slots-per-partition value returned by consan_moi_workgroup_partition_layout;
+/// otherwise host replay cannot distinguish entries from different partitions.
 [[nodiscard]] constexpr ConSanMoiReportHeader make_consan_moi_report_header(
     uint64_t generation, uint64_t dispatch_id, uint32_t access_record_capacity,
     uint32_t diagnostic_capacity, uint32_t exact_shadow_entry_capacity,
     uint32_t sampled_watchpoint_capacity, uint32_t barrier_record_capacity = 0,
-    uint32_t atomic_record_capacity = 0) {
+    uint32_t atomic_record_capacity = 0, uint32_t sampled_slots_per_partition = 0) {
   ConSanMoiReportHeader header;
   header.header_size = sizeof(ConSanMoiReportHeader);
   header.generation = generation;
@@ -282,6 +324,7 @@ using ConSanMoiRecordReplayAtomicEvent = ConSanMoiAtomicRecord;
   header.diagnostic_capacity = diagnostic_capacity;
   header.exact_shadow_entry_capacity = exact_shadow_entry_capacity;
   header.sampled_watchpoint_capacity = sampled_watchpoint_capacity;
+  header.sampled_slots_per_partition = sampled_slots_per_partition;
   return header;
 }
 

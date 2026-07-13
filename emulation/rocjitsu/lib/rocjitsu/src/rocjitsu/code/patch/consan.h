@@ -176,6 +176,11 @@ struct ConSanOptions {
   /// CDNA4 kernel-entry identity prologue.
   std::optional<uint16_t> moi_identity_sgpr;
   std::optional<uint64_t> report_buffer_address;
+  /// Address of a versioned ConSanMoiReportHeader followed by its payload.
+  /// For caller-owned sampled buffers with more than one workgroup partition,
+  /// the caller must initialize header.sampled_slots_per_partition to
+  /// sampled_capacity / (extent_x * extent_y * extent_z). Hook users confirm
+  /// that initialization with RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION.
   std::optional<uint64_t> moi_report_buffer_address;
   uint64_t moi_report_buffer_size = 0;
   /// Generation stored in direct sampled entries. Auto report buffers set
@@ -189,6 +194,11 @@ struct ConSanOptions {
   /// stride is a power of two and selects owner & (stride - 1) == offset.
   uint32_t moi_runtime_sample_stride = 1;
   uint32_t moi_runtime_sample_offset = 0;
+  /// Bounded workgroup-coordinate extents used to partition shared sampled
+  /// watchpoint storage without aliasing distinct workgroups.
+  uint32_t moi_workgroup_extent_x = 1;
+  uint32_t moi_workgroup_extent_y = 1;
+  uint32_t moi_workgroup_extent_z = 1;
   uint32_t report_marker = 1;
 };
 

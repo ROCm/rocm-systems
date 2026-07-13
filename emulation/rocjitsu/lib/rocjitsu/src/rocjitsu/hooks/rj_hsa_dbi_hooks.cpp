@@ -108,6 +108,9 @@ struct HookConfig {
   uint32_t moi_sample_offset = 0;
   uint32_t moi_runtime_sample_stride = 1;
   uint32_t moi_runtime_sample_offset = 0;
+  uint32_t moi_workgroup_extent_x = 1;
+  uint32_t moi_workgroup_extent_y = 1;
+  uint32_t moi_workgroup_extent_z = 1;
   uint32_t report_marker = 1;
   int log_level = kLogDisabled;
   std::string dump_dir;
@@ -820,6 +823,18 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                  config.moi_runtime_sample_stride);
     return std::nullopt;
   }
+  if (!parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_EXTENT_X", 1, &config.moi_workgroup_extent_x) ||
+      !parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y", 1, &config.moi_workgroup_extent_y) ||
+      !parse_u32_env("RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z", 1, &config.moi_workgroup_extent_z)) {
+    return std::nullopt;
+  }
+  if (!rocjitsu::consan_moi_workgroup_partition_layout(0, config.moi_workgroup_extent_x,
+                                                       config.moi_workgroup_extent_y,
+                                                       config.moi_workgroup_extent_z)) {
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid RJ_CONSAN_MOI_WORKGROUP_EXTENT_X/Y/Z; "
+                         "expected positive extents with product <= 16777215\n");
+    return std::nullopt;
+  }
   if (!refresh_report_config_from_env(&config))
     return std::nullopt;
   uint32_t delay_var_ssrc = 106;
@@ -921,6 +936,36 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
   }
   if (!parse_u64_env("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", 0, &config->moi_report_buffer_size))
     return false;
+  if (config->moi_report_buffer_address &&
+      config->moi_engine == rocjitsu::ConSanMoiEngine::Sampled) {
+    const rocjitsu::ConSanMoiReportBufferLayout layout =
+        rocjitsu::consan_moi_direct_sampled_report_buffer_layout_for_bytes(
+            config->moi_report_buffer_size);
+    const auto partition_layout = rocjitsu::consan_moi_workgroup_partition_layout(
+        layout.sampled_watchpoint_capacity, config->moi_workgroup_extent_x,
+        config->moi_workgroup_extent_y, config->moi_workgroup_extent_z);
+    if (partition_layout && partition_layout->partition_count > 1) {
+      uint32_t declared_slots = 0;
+      if (!env_has_value("RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION")) {
+        std::fprintf(
+            stderr,
+            "[rocjitsu-dbi-hooks] caller-owned multi-partition sampled buffer requires "
+            "RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION=%u and matching ABI-v2 header field\n",
+            partition_layout->slots_per_partition);
+        return false;
+      }
+      if (!parse_u32_env("RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION", 0, &declared_slots))
+        return false;
+      if (declared_slots != partition_layout->slots_per_partition) {
+        std::fprintf(stderr,
+                     "[rocjitsu-dbi-hooks] invalid "
+                     "RJ_CONSAN_MOI_REPORT_SLOTS_PER_PARTITION='%u'; expected %u from report "
+                     "capacity and workgroup extents\n",
+                     declared_slots, partition_layout->slots_per_partition);
+        return false;
+      }
+    }
+  }
   config->moi_auto_report_buffer_size_explicit =
       env_has_value("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE");
   if (config->moi_auto_report_buffer_size_explicit) {
@@ -1206,8 +1251,10 @@ public:
 
   [[nodiscard]] bool allocate(CoreApiTable *core, hsa_agent_t agent, uint64_t reader,
                               uint64_t requested_size, bool direct_sampled, bool inline_shadow,
-                              bool track_barriers, bool track_atomics, uint64_t *address,
-                              uint64_t *registered_size, uint64_t *registered_generation) {
+                              bool track_barriers, bool track_atomics, uint32_t workgroup_extent_x,
+                              uint32_t workgroup_extent_y, uint32_t workgroup_extent_z,
+                              uint64_t *address, uint64_t *registered_size,
+                              uint64_t *registered_generation) {
     if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
         core->hsa_region_get_info_fn == nullptr || core->hsa_memory_allocate_fn == nullptr ||
         core->hsa_memory_free_fn == nullptr) {
@@ -1292,12 +1339,25 @@ public:
     }
 
     const uint64_t generation = next_generation_.fetch_add(1, std::memory_order_relaxed) + 1u;
+    uint32_t sampled_slots_per_partition = 0;
+    if (direct_sampled) {
+      const auto partition_layout = rocjitsu::consan_moi_workgroup_partition_layout(
+          layout.sampled_watchpoint_capacity, workgroup_extent_x, workgroup_extent_y,
+          workgroup_extent_z);
+      if (!partition_layout || partition_layout->slots_per_partition == 0) {
+        log_message(kLogInfo,
+                    "ConSan MOI auto report buffer has no sampled slot per workgroup partition");
+        (void)core->hsa_memory_free_fn(ptr);
+        return false;
+      }
+      sampled_slots_per_partition = partition_layout->slots_per_partition;
+    }
     auto *header = static_cast<rocjitsu::ConSanMoiReportHeader *>(ptr);
     *header = rocjitsu::make_consan_moi_report_header(
         generation, /*dispatch_id=*/reader, layout.access_record_capacity,
         layout.diagnostic_capacity, layout.exact_shadow_entry_capacity,
         layout.sampled_watchpoint_capacity, layout.barrier_record_capacity,
-        layout.atomic_record_capacity);
+        layout.atomic_record_capacity, sampled_slots_per_partition);
 
     {
       std::lock_guard lock(mutex_);
@@ -1352,6 +1412,7 @@ public:
     uint64_t replay_diagnostic_count = 0;
     uint64_t sampled_conflict_count = 0;
     uint64_t sampled_immediate_conflict_count = 0;
+    uint64_t partition_overflow_count = 0;
     uint64_t identity_workgroup_count = 0;
     uint64_t identity_multi_owner_workgroup_count = 0;
   };
@@ -1376,6 +1437,7 @@ public:
       total.replay_diagnostic_count += entry_summary.replay_diagnostic_count;
       total.sampled_conflict_count += entry_summary.sampled_conflict_count;
       total.sampled_immediate_conflict_count += entry_summary.sampled_immediate_conflict_count;
+      total.partition_overflow_count += entry_summary.partition_overflow_count;
       total.identity_workgroup_count += entry_summary.identity_workgroup_count;
       total.identity_multi_owner_workgroup_count +=
           entry_summary.identity_multi_owner_workgroup_count;
@@ -1551,6 +1613,12 @@ private:
       const SampledEntry &current = visible_sampled[i];
       for (size_t prior_index = 0; prior_index < i; ++prior_index) {
         const SampledEntry &prior = visible_sampled[prior_index];
+        const uint32_t slots_per_partition =
+            header->sampled_slots_per_partition != 0
+                ? header->sampled_slots_per_partition
+                : std::max(header->sampled_watchpoint_capacity, 1u);
+        if (current.index / slots_per_partition != prior.index / slots_per_partition)
+          continue;
         if (!rocjitsu::consan_moi_sampled_watchpoints_conflict(current.entry, prior.entry))
           continue;
         if (sampled_conflicts != std::numeric_limits<uint32_t>::max())
@@ -1572,6 +1640,7 @@ private:
     summary.sampled_conflict_count = sampled_conflicts;
     summary.sampled_immediate_conflict_count =
         header->sampled_watchpoint_capacity != 0 ? header->event_counter : 0;
+    summary.partition_overflow_count = header->partition_overflow_count;
     log_message(kLogInfo,
                 "ConSan MOI auto report reader=%llu addr=0x%llx bytes=%zu generation=%llu "
                 "event_counter=%u access_records=%u visible_records=%u dropped_records=%u "
@@ -1582,7 +1651,7 @@ private:
                 "diagnostic_capacity=%u "
                 "exact_shadow_capacity=%u visible_exact_shadow=%zu "
                 "sampled_watchpoints=%u visible_sampled=%zu sampled_conflicts=%u "
-                "sampled_immediate_conflicts=%u "
+                "sampled_immediate_conflicts=%u partition_overflow=%u "
                 "fine_grained=%s",
                 static_cast<unsigned long long>(entry.reader),
                 static_cast<unsigned long long>(reinterpret_cast<uint64_t>(entry.ptr)), entry.size,
@@ -1596,7 +1665,7 @@ private:
                 visible_exact_shadow.size(), header->sampled_watchpoint_capacity,
                 visible_sampled.size(), sampled_conflicts,
                 static_cast<uint32_t>(summary.sampled_immediate_conflict_count),
-                entry.fine_grained ? "true" : "false");
+                header->partition_overflow_count, entry.fine_grained ? "true" : "false");
 
     const auto *records = reinterpret_cast<const rocjitsu::ConSanMoiAccessRecord *>(
         static_cast<const uint8_t *>(report_ptr) + sizeof(rocjitsu::ConSanMoiReportHeader));
@@ -2082,17 +2151,19 @@ public:
     const uint64_t moi_dropped_record_count = moi_report_summary.dropped_access_record_count +
                                               moi_report_summary.dropped_barrier_record_count +
                                               moi_report_summary.dropped_atomic_record_count +
-                                              moi_report_summary.dropped_diagnostic_record_count;
+                                              moi_report_summary.dropped_diagnostic_record_count +
+                                              moi_report_summary.partition_overflow_count;
     if (moi_dropped_record_count != 0) {
       std::fprintf(
           stderr,
           "[rocjitsu-dbi-hooks] ConSan MOI report overflow: dropped access=%llu "
-          "barrier=%llu atomic=%llu diagnostic=%llu across %llu auto report "
+          "barrier=%llu atomic=%llu diagnostic=%llu partition=%llu across %llu auto report "
           "buffer(s)\n",
           static_cast<unsigned long long>(moi_report_summary.dropped_access_record_count),
           static_cast<unsigned long long>(moi_report_summary.dropped_barrier_record_count),
           static_cast<unsigned long long>(moi_report_summary.dropped_atomic_record_count),
           static_cast<unsigned long long>(moi_report_summary.dropped_diagnostic_record_count),
+          static_cast<unsigned long long>(moi_report_summary.partition_overflow_count),
           static_cast<unsigned long long>(moi_report_summary.buffer_count));
       std::fflush(stderr);
       if (moi_forbid_overflow)
@@ -2525,6 +2596,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     patch_options.moi_sample_offset = config->moi_sample_offset;
     patch_options.moi_runtime_sample_stride = config->moi_runtime_sample_stride;
     patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
+    patch_options.moi_workgroup_extent_x = config->moi_workgroup_extent_x;
+    patch_options.moi_workgroup_extent_y = config->moi_workgroup_extent_y;
+    patch_options.moi_workgroup_extent_z = config->moi_workgroup_extent_z;
     patch_options.report_marker = config->report_marker;
     if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
         !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
@@ -2548,7 +2622,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           AutoMoiReportBufferRegistry::instance().allocate(
               layer().core_table(), agent, code_object_reader.handle,
               config->moi_auto_report_buffer_size, direct_sampled, inline_shadow,
-              config->moi_track_barriers, config->moi_track_atomics, &auto_report_address,
+              config->moi_track_barriers, config->moi_track_atomics, config->moi_workgroup_extent_x,
+              config->moi_workgroup_extent_y, config->moi_workgroup_extent_z, &auto_report_address,
               &auto_report_size, &auto_report_generation)) {
         patch_options.moi_report_buffer_address = auto_report_address;
         patch_options.moi_report_buffer_size = auto_report_size;
