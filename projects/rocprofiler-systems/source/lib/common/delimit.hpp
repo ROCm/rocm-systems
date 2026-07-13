@@ -67,12 +67,13 @@ delimit(const std::string& line, std::string_view delimiters)
     size_t     _delimp = 0;  // position of the delimiter in the string
     if(reserve(_result, 0))
     {
+        // tally every character in the line that is one of the delimiters
         size_t _nmax = 0;
         for(char itr : line)
         {
-            for(size_t j = 0; j < delimiters.size(); ++j)
+            if(delimiters.find(itr) != std::string_view::npos)
             {
-                if(itr == delimiters[j]) ++_nmax;
+                ++_nmax;
             }
         }
         reserve(_result, _nmax);
