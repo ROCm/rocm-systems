@@ -2875,10 +2875,12 @@ TEST(ConSan, Gfx950SuperColliderRewritesPaddedStoreWithNativeReadback) {
   EXPECT_EQ(words[3], 0xD86C000Cu);
   EXPECT_EQ(words[4], 0x03000000u);
   EXPECT_EQ(words[5], *build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[6], *build_s_mov_b64(0, kRdna4VccLo, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(words[7],
             *build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(1), 3, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(words[8], *build_s_cbranch_vccz(1, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(words[9], *build_s_trap(0, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_EQ(words[10], *build_s_mov_b64(kRdna4VccLo, 0, ROCJITSU_CODE_ARCH_CDNA4));
 }
 
 TEST(ConSan, Gfx950SuperColliderUsesAppendedCaveWithoutPadding) {
@@ -9634,6 +9636,44 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanGrowDescriptorForB64ScratchHeadroom) {
   const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   EXPECT_EQ(granulated, 4u);
+}
+
+TEST(ConSan, ProbeLdsCheckTrapModeGrowsDescriptorForB64StoreReadbackHeadroom) {
+  const std::array<uint32_t, 4> text_words = {
+      0xD89A0000u,
+      0x00000109u, // ds_write_b64 v9, v[1:2]
+      build_v_mov_b32_e32(69, vector_source_vgpr(69), ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const uint32_t seventy_two_vgprs_granulated = 8;
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "lds_probe", seventy_two_vgprs_granulated, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.delay_nops = 1;
+
+  const auto result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
+  EXPECT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
+  ASSERT_TRUE(result.patches.front().scratch_vgpr);
+  EXPECT_EQ(*result.patches.front().scratch_vgpr, 70u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.kernels().size(), 1u);
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                                              kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+  EXPECT_EQ(granulated, 9u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModePrefersDescriptorCoveredCandidate) {

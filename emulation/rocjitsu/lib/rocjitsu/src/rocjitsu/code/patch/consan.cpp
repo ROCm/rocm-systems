@@ -311,6 +311,17 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
   return descriptor_vgpr_allocation_count(*desc, arch);
 }
 
+[[nodiscard]] std::optional<uint16_t>
+descriptor_sgpr_allocation_count(std::span<const uint8_t> image, uint64_t descriptor_file_offset) {
+  if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
+    return std::nullopt;
+  const auto *desc = reinterpret_cast<const KD *>(image.data() + descriptor_file_offset);
+  const uint32_t granulated = AMDHSA_BITS_GET(
+      desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+  return static_cast<uint16_t>(
+      std::min<uint32_t>((granulated + 1u) * 8u, REGISTER_SET_ALLOCATABLE_SGPRS));
+}
+
 [[nodiscard]] bool grow_descriptor_vgpr_allocation(KD &desc, uint16_t required_count,
                                                    rj_code_arch_t arch) {
   if (required_count > REGISTER_SET_MAX_VGPRS)
@@ -1890,8 +1901,10 @@ build_ds_load_word0_from_vds_word0(uint32_t word0, uint32_t width_bits, rj_code_
 }
 
 [[nodiscard]] bool needs_scratch_headroom_at_descriptor_edge(const ConSanLdsSite &site) {
-  return site.mnemonic == "ds_load_b64" || site.mnemonic == "ds_load_2addr_b64" ||
-         site.mnemonic == "ds_load_2addr_stride64_b64";
+  // SuperCollider always emits a duplicate load, including when the original
+  // site is a store. A B64 readback must not end exactly at the descriptor's
+  // allocated VGPR edge.
+  return site.width_bits == 64;
 }
 
 [[nodiscard]] std::optional<uint16_t>
@@ -1956,14 +1969,24 @@ choose_scratch_vgpr(const ConSanLdsSite &site, const ConSanOptions &options,
 
 [[nodiscard]] std::optional<uint16_t>
 choose_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
-                     std::optional<uint16_t> min_preferred_sgpr) {
+                     std::optional<uint16_t> min_preferred_sgpr,
+                     std::optional<uint16_t> max_auto_sgpr, rj_code_arch_t arch) {
   if (inst == nullptr || liveness == nullptr)
     return std::nullopt;
+  const uint16_t required_sgprs = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
+  auto find = [&](uint16_t search_start) {
+    const auto candidate = required_sgprs == 2u ? liveness->find_free_sgpr_pair(inst, search_start)
+                                                : liveness->find_free_sgpr(inst, search_start);
+    if (!candidate ||
+        (max_auto_sgpr && static_cast<uint32_t>(*candidate) + required_sgprs > *max_auto_sgpr))
+      return std::optional<uint16_t>{};
+    return candidate;
+  };
   if (min_preferred_sgpr) {
-    if (auto high_sgpr = liveness->find_free_sgpr(inst, *min_preferred_sgpr))
+    if (auto high_sgpr = find(*min_preferred_sgpr))
       return high_sgpr;
   }
-  return liveness->find_free_sgpr(inst);
+  return find(0);
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanResult &result) {
@@ -2764,9 +2787,15 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   }
   auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kWave64VccLo = 106;
-  const uint32_t save_vcc = build_s_mov_b32(vcc_save_sgpr, kWave64VccLo, arch);
-  const uint32_t restore_vcc = build_s_mov_b32(kWave64VccLo, vcc_save_sgpr, arch);
-  if (!wait_dscnt || !skip_action) {
+  const auto save_vcc =
+      arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? build_s_mov_b64(vcc_save_sgpr, kWave64VccLo, arch)
+          : std::optional<uint32_t>{build_s_mov_b32(vcc_save_sgpr, kWave64VccLo, arch)};
+  const auto restore_vcc =
+      arch == ROCJITSU_CODE_ARCH_CDNA4
+          ? build_s_mov_b64(kWave64VccLo, vcc_save_sgpr, arch)
+          : std::optional<uint32_t>{build_s_mov_b32(kWave64VccLo, vcc_save_sgpr, arch)};
+  if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;
   }
@@ -2799,7 +2828,7 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
   words.push_back(duplicate_load[0]);
   words.push_back(duplicate_load[1]);
   words.push_back(*wait_dscnt);
-  words.push_back(save_vcc);
+  words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto chunk_cmp_ne = build_v_cmp_ne_u32_e32_word(static_cast<uint16_t>(*compare_vgpr + i),
                                                     static_cast<uint16_t>(scratch_vgpr + i), arch);
@@ -2811,7 +2840,7 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     words.push_back(*skip_action);
     words.insert(words.end(), mismatch_action->begin(), mismatch_action->end());
   }
-  words.push_back(restore_vcc);
+  words.push_back(*restore_vcc);
   return words;
 }
 
@@ -2900,6 +2929,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       continue;
     const auto max_auto_scratch_vgpr =
         descriptor_vgpr_allocation_count(original_bytes, kernel.descriptor_file_offset, arch);
+    const auto max_auto_vcc_save_sgpr =
+        descriptor_sgpr_allocation_count(original_bytes, kernel.descriptor_file_offset);
     std::optional<uint16_t> min_auto_scratch_vgpr;
     std::optional<uint16_t> min_preferred_vcc_save_sgpr;
     const KernelMaxRegisterRefs max_refs =
@@ -2948,7 +2979,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       std::optional<uint16_t> descriptor_growth;
       if (max_auto_scratch_vgpr && *required_allocation > *max_auto_scratch_vgpr)
         descriptor_growth = *required_allocation;
-      auto vcc_save = choose_vcc_save_sgpr(site_inst, liveness.get(), min_preferred_vcc_save_sgpr);
+      auto vcc_save = choose_vcc_save_sgpr(site_inst, liveness.get(), min_preferred_vcc_save_sgpr,
+                                           max_auto_vcc_save_sgpr, arch);
       if (!vcc_save)
         continue;
       ++scratchable_candidate_count;
