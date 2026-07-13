@@ -1989,12 +1989,18 @@ Done criteria:
 Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
 
 Current result: 244/259 tests pass in the first parallel sweep. Test 1810, an
-unaligned coalesced-DMA f32 matmul, also fails when rerun alone with
-SuperCollider and passes alone without instrumentation. Its B64 store
-readback selects `v70:v71` at a 72-VGPR descriptor edge; focused diagnosis is
-checking the missing descriptor-growth headroom for generated store readback.
-The remaining 14 failures require isolated baseline and instrumented reruns
-before they can be attributed to ConSan rather than sweep pressure.
+unaligned coalesced-DMA f32 matmul, also failed when rerun alone with
+SuperCollider and passed alone without instrumentation. The root cause was a
+gfx950 wave64 state-preservation bug: the probe comparison wrote both halves
+of VCC but restored only `VCC_LO`. CDNA4 now selects a dead descriptor-covered
+SGPR pair and saves/restores VCC with `s_mov_b64`; 222 focused tests and the
+isolated guarded matmul pass. Generated B64 store readback also now receives
+the same descriptor-edge headroom as a native B64 load.
+The remaining 14 failures all pass together in an isolated uninstrumented
+baseline (13 data-tiled/MXFP4 matmuls plus one TOSA stream matmul), confirming
+that the first broad failures were not intrinsic workload failures. Their
+isolated instrumented reruns still fail, so they are now being classified as
+expected SuperCollider mismatch traps versus a second instrumentation defect.
 
 ### T4RR: Record/Replay Broad IREE - TODO
 
