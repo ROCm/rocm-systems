@@ -164,6 +164,8 @@ set(TEST_host_wait_until_some_vector 145)
 set(TEST_host_wait_until_all_status 146)
 set(TEST_host_wait_until_any_status 147)
 set(TEST_host_wait_until_some_status 148)
+set(TEST_teamreducescatter 149)
+set(TEST_broadcast_wave 150)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1057,11 +1059,17 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME fcollect RANKS 3 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME fcollect RANKS 5 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
+        add_rocshmem_functional_test(NAME teamreducescatter RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 
     # Team split 2D test - requires exactly 4 PEs
     begin_test_group(CATEGORY "COLLECTIVE;TEAM" TIER comprehensive BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME teamsplit2d RANKS 4 WORKGROUPS 1 THREADS 1)
+    end_test_group()
+
+    # AIROCSHMEM-409: wave tests not supported on RO
+    begin_test_group(CATEGORY "COLLECTIVE;WAVE" TIER full BACKENDS "ipc;gda" GPUS "all")
+        add_rocshmem_functional_test(NAME broadcast_wave RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
 endfunction()
 
@@ -1099,7 +1107,8 @@ function(add_stream_tests)
     begin_test_group(CATEGORY "COLLECTIVE;STREAM" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME quiet_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME sync_all_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
-        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
+        add_rocshmem_functional_test(NAME reduce_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576 
+            ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024;ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024")
         add_rocshmem_functional_test(NAME alltoallmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME broadcastmem_on_stream RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
     end_test_group()

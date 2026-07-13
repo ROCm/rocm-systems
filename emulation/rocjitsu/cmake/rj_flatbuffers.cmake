@@ -33,8 +33,7 @@ add_custom_target(flatbuffers_schemas DEPENDS ${GENERATED_HEADERS})
 # JSON configs without locating the schema file at runtime.
 file(READ "${PROJECT_SOURCE_DIR}/schemas/simulation_config.fbs" _schema_content)
 file(
-    WRITE
-    "${GENERATED_DIR}/embedded_schema.h"
+    WRITE "${GENERATED_DIR}/embedded_schema.h"
     "// Auto-generated from simulation_config.fbs — do not edit.\n"
     "#pragma once\n"
     "namespace rocjitsu {\n"
