@@ -69,7 +69,7 @@ tier1_regex() {
       printf '%s' '^(iree/tests/e2e/matmul/e2e_matmul_rocm_.*rdna4_tileandfusewmma.*rocm_hip|iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan(_configured)?\.mlir)$'
       ;;
     gfx950)
-      printf '%s' '^(iree/tests/e2e/matmul/e2e_(batch_)?matmul_cdna4_.*tileandfusemfma.*_rocm_hip|iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan(_configured)?\.mlir)$'
+      printf '%s' '^(iree/tests/e2e/matmul/e2e_(batch_)?matmul_cdna4_.*tileandfusemfma.*_rocm_hip|iree/tests/e2e/linalg/check_rocm_hip_softmax\.mlir|iree/tests/e2e/linalg_ext_ops/check_rocm_hip_scan_configured\.mlir)$'
       ;;
   esac
 }

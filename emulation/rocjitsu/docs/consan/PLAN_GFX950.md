@@ -308,7 +308,7 @@ Full gfx950 support means:
   gfx1201/gfx950 from the workspace ROCm agent enumerator, accepts an explicit
   architecture override, and fails dry runs whose CTest selection is empty.
   gfx950 dry-run selection names 38 focused rocJITsu live controls, all 44
-  independent hip-moi controls, and 11 CDNA4 IREE tile-and-fuse/scan/softmax
+  independent hip-moi controls, and 10 CDNA4 IREE tile-and-fuse/scan/softmax
   workloads for each profile. The existing RDNA4 selector remains the gfx1201
   branch rather than leaking into gfx950 runs.
 - 2026-07-13: `T2SC` is `DONE`; `T2RR` is now `ACTIVE`. The target-aware
@@ -334,6 +334,14 @@ Full gfx950 support means:
   zero/nonzero-private layouts, forced spills for every engine and
   synchronization path, partial EXEC, dynamic-stack rollback, and multi-owner
   shared-helper commit/rollback. Every live row preserves guest values.
+- 2026-07-13: `T3A` is `DONE`; `T3SC` is now `ACTIVE`. The uninstrumented
+  baseline passes all 44 hip-moi controls and all 10 selected IREE workloads.
+  Inventory-only runs emit no patches and find admitted native LDS in every
+  selection: softmax has 4 sites, configured scan has 5 plus two barriers, and
+  the eight CDNA4 tile-and-fuse MFMA rows have 20 to 660 sites. The f16 row
+  includes B64 and two-address multi-cell forms. Unconfigured scan was removed
+  because it had zero admitted sites; no selected IREE object contains Group
+  FLAT, whose admitted form remains covered by the dedicated live control.
 
 ## DAG Overview
 
@@ -549,8 +557,8 @@ flowchart LR
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::done
   T2R["T2R: Resource And Spill Tier"]:::done
   T2G{"T2G: Focused gfx950 Accepted"}:::target
-  T3A["T3A: Workload Inventory"]:::active
-  T3SC["T3SC: SuperCollider Selected Workloads"]:::todo
+  T3A["T3A: Workload Inventory"]:::done
+  T3SC["T3SC: SuperCollider Selected Workloads"]:::active
   T3RR["T3RR: Record/Replay Selected Workloads"]:::todo
   T3SA["T3SA: Sampled Selected Workloads"]:::todo
   T3IS["T3IS: Inline-Shadow Selected Workloads"]:::todo
@@ -1680,10 +1688,12 @@ Result:
   enumerator, with `CONSAN_GPU_ARCH` available for explicit cross-machine
   selection and `CONSAN_DRY_RUN=1` for non-mutating discovery.
 - Empty dry-run selections are failures. On gfx950, tier 0 selects 38 live
-  rocJITsu controls; tier 1 selects all 44 hip-moi controls and 11 CDNA4 IREE
+  rocJITsu controls; tier 1 selects all 44 hip-moi controls and 10 CDNA4 IREE
   tile-and-fuse MFMA, scan, and softmax tests per profile.
 - gfx1201 retains its established RDNA4 tile-and-fuse WMMA selector; gfx950
-  uses CDNA4 MFMA names and cannot silently run an empty RDNA-only regex.
+  uses CDNA4 MFMA names and cannot silently run an empty RDNA-only regex. The
+  guarded gfx950 selection has 10 rows after excluding an unconfigured scan
+  variant with zero admitted LDS sites.
 
 ### T2SC: gfx950 SuperCollider Focused Tier - DONE
 
@@ -1771,7 +1781,7 @@ patch and verifies all guest values after dispatch.
 
 `T2G` is reached only when T2SC, T2RR, T2SA, T2IS, and T2R all pass.
 
-### T3A: gfx950 Real-Workload Inventory - ACTIVE
+### T3A: gfx950 Real-Workload Inventory - DONE
 
 Goal: choose bounded, representative compiler output before running profiles.
 
@@ -1787,7 +1797,23 @@ Done criteria:
 - Each selected workload has a stated semantic purpose and at least one
   non-vacuity guard suitable for its profile.
 
-### T3SC: SuperCollider Selected Workloads - TODO
+Result:
+
+- All 44 independent hip-moi semantic controls pass without a ConSan hook.
+- All 10 selected IREE tests pass uninstrumented. They comprise softmax,
+  configured cross-subgroup scan, and eight scalar/batch CDNA4 tile-and-fuse
+  MFMA type variants. Individual runtime is 0.25--5.65 seconds; the complete
+  parallel baseline takes 6.08 seconds.
+- Inventory-only runs use a deliberately nonmatching kernel filter and confirm
+  zero emitted patches. Softmax has 4 admitted LDS sites; configured scan has
+  5 admitted sites and two barrier-bearing kernels; the MFMA rows have 53,
+  260, 37, 36, 20, 660, 592, and 252 admitted sites. The representative f16
+  object includes B64 and two-address multi-cell accesses.
+- No selected IREE application object has Group FLAT. That is a visible
+  workload fact, not a silent omission; the admitted `SRC_SHARED_BASE` form is
+  retained in the dedicated T2 live Group-FLAT control.
+
+### T3SC: SuperCollider Selected Workloads - ACTIVE
 
 Goal: run the T3A selection under guarded SuperCollider.
 
