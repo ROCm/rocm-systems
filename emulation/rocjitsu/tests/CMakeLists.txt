@@ -2285,6 +2285,33 @@ if(RJ_ENABLE_HIP_TESTS)
                 "RJ_CONSAN_MAX_PATCHES=1"
                 "RJ_CONSAN_REQUIRE_PATCH=1"
         )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.SingleLdsStoreRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "event_counter=64 access_records=1 visible_records=1 dropped_records=0"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.SingleLdsStoreCompletes"
+            NAME "ConSanMoiGfx950Test.DynamicLdsStoreRecordFields"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.DynamicLdsStoreRecordFields"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "index=0 event_index=0 kind=2 wave=0 epoch=0 inst=0x[0-9a-f]+ lds_offset=0 lds_bytes=4 cells=\\[0,1\\) lane_mask=0xffffffffffffffff"
+        )
 
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the

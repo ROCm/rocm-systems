@@ -111,11 +111,33 @@ Full gfx950 support means:
   B32 LDS read/write operands and widths while excluding `ds_add_u32` from
   ordinary access candidates; the admitted write composes with the live
   record path's architecture-neutral range lowering.
+- 2026-07-13: `RR1A` is `DONE`. Guarded auto-buffer CTests now require the
+  static summary (`1` visible record) and a dynamic per-lane record with
+  field-level evidence (`event_index=0`, write kind, owner/epoch zero, four
+  LDS bytes, cell `[0,1)`, and full wave64 lane mask); the dynamic run publishes
+  64 visible records with automatic EXEC/VCC/SCC preservation.
 
 ## DAG Overview
 
 The DAG is split into panels for readability. Repeated nodes refer to the same
 work item. `A --> B` means `A` is a hard prerequisite of `B`.
+
+### Color legend
+
+```mermaid
+flowchart LR
+  DONE["DONE: completed and verified"]:::done
+  ACTIVE["ACTIVE: work in progress"]:::active
+  TODO["TODO: not started"]:::todo
+  BLOCKED["BLOCKED: requires unavailable external evidence"]:::blocked
+  TARGET{"TARGET: acceptance gate"}:::target
+
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
+  classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef blocked fill:#e06666,stroke:#660000,stroke-width:2px,color:#000;
+  classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
+```
 
 ### Foundation and architecture model
 
@@ -221,7 +243,7 @@ flowchart LR
   B1A["B1A: Barrier Decode And Emission"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
   SC1["SC1: SuperCollider Native LDS"]:::todo
-  RR1A["RR1A: Access Record Emission"]:::active
+  RR1A["RR1A: Access Record Emission"]:::done
   RR1B["RR1B: Record/Replay Live Semantics"]:::todo
   SA1A["SA1A: Static Sampled Publication"]:::todo
   SA1B["SA1B: Runtime Selection And Check"]:::todo
@@ -286,6 +308,7 @@ flowchart LR
   FLC --> NP
   AT1B --> NP
 
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
@@ -350,6 +373,7 @@ flowchart LR
   D2 --> M0
   X1 --> M0
 
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
@@ -956,7 +980,7 @@ Done criteria:
 - Clean and racy marker-buffer controls pass with `REQUIRE_PATCH=1`; the racy
   case reports without relying on a destructive proof probe.
 
-### RR1A: gfx950 Access Record Emission - ACTIVE
+### RR1A: gfx950 Access Record Emission - DONE
 
 Goal: emit and decode the static and dynamic access-record ABI before relying
 on replay semantics.
@@ -966,6 +990,16 @@ Work:
 - Emit static and dynamic access records for supported native LDS accesses.
 - Record correct workgroup, owner, range, instruction offset, and event index.
 - Preserve EXEC/VCC/SCC with automatic scalar resources.
+
+Result:
+
+- The static guarded test requires exactly one visible, non-dropped record.
+- The dynamic guarded test enables per-lane appends, requires records, and
+  matches the first decoded record's event, kind, owner, epoch, instruction,
+  LDS range/cell, and full wave64 lane mask. Its teardown reports 64 visible
+  records and no drops.
+- Both paths use automatically planned scalar save state and preserve the guest
+  kernel result.
 
 Done criteria:
 
