@@ -477,6 +477,10 @@ Full gfx950 support means:
   conflicts in both engines. `T3IW` is split into completed entry work
   (`T3IWA`) and parallel sampled/inline partition work (`T3IWS`/`T3IWE`);
   `T3IWL` is the final live acceptance gate.
+- 2026-07-13: `T3IR` is `DONE`. The isolated MXFP4 #1853 reproducer passes
+  under both record/replay and sampled, then both guarded selected tiers pass
+  10/10 with patches and nonempty records. This includes the three previously
+  excluded high-SGPR batch matmuls and a clean parallel scan rerun.
 
 ## DAG Overview
 
@@ -698,7 +702,7 @@ flowchart LR
   T3SA["T3SA: Sampled Selected Workloads"]:::done
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
-  T3IR["T3IR: Accumulator-Safe Scalar State"]:::active
+  T3IR["T3IR: Accumulator-Safe Scalar State"]:::done
   T3IWA["T3IWA: Complete Entry Workgroup ABI"]:::done
   T3IWS["T3IWS: Sampled Workgroup Partitions"]:::active
   T3IWE["T3IWE: Inline Workgroup Partitions"]:::active
@@ -2060,7 +2064,7 @@ load the snapshotted state. Exact-boundary, overlap, multiple-owner, invalid
 descriptor, shared-layout, and paired-entry regressions pass; the complete
 focused filter is 231/231.
 
-### T3IR: Accumulator-Safe Scalar State - ACTIVE
+### T3IR: Accumulator-Safe Scalar State - DONE
 
 Goal: preserve all wave-uniform identity state without crossing the VGPR
 accumulator window in record/replay and sampled access-record paths.
@@ -2087,15 +2091,16 @@ Done criteria:
   touching accumulator VGPRs or requiring automatic private backing, and the
   isolated MXFP4 row passes.
 
-Current result: all scalar consumers and both entry variants have direct
-instruction-sequence coverage in the 249/249 focused filter. On the isolated
+Result: all scalar consumers and both entry variants have direct
+instruction-sequence coverage in the focused filter. On the isolated
 MXFP4 #1853 reproducer, keeping scalar state inside the guest's 32-SGPR
 allocation first produced numerical corruption, and choosing the earliest
 access site produced an unsafe private spill. Scalar state now grows above
 the original allocation (`s32:s36` on this row), and record/replay plus sampled
 rank a later dead scratch window ahead of spill-required sites. Both automatic
-engines pass #1853 with patch and record emission and no private bytes. The
-guarded selected tiers remain before this node can become `DONE`.
+engines pass #1853 with patch and record emission and no private bytes. Fresh
+guarded selected record/replay and sampled runs both pass 10/10, including all
+three high-SGPR batch matmuls and the previously collateral scan row.
 
 ### T3IW: Complete Workgroup-ID ABI - ACTIVE
 
