@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/vop1.h"
@@ -105,6 +106,9 @@ static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
 static_assert(!HasMonolithicWaitcnt<gfx1250::Isa>);
 static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_CDNA3).supports_wgp_mode);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).supports_wgp_mode);
+static_assert(!isa_properties(ROCJITSU_CODE_ARCH_GFX1250).supports_wgp_mode);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
@@ -1665,6 +1669,7 @@ struct Rdna1DppTraits {
   using Vop1VopDpp8MachineInst = rdna1::Vop1VopDpp8MachineInst;
   using VMovB32Vop1 = rdna1::VMovB32Vop1;
   using VCmpEqU32Vopc = rdna1::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = rdna1::VCmpxEqU32Vopc;
 };
 
 struct Rdna2DppTraits {
@@ -1676,12 +1681,14 @@ struct Rdna2DppTraits {
   using Vop1VopDpp8MachineInst = rdna2::Vop1VopDpp8MachineInst;
   using VMovB32Vop1 = rdna2::VMovB32Vop1;
   using VCmpEqU32Vopc = rdna2::VCmpEqU32Vopc;
+  using VCmpxEqU32Vopc = rdna2::VCmpxEqU32Vopc;
 };
 
 struct Rdna4DppTraits {
   static constexpr const char *name = "rdna4";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
   using MachineInst = rdna4::MachineInst;
+  using VopcMachineInst = rdna4::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna4::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna4::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna4::VopcVopDpp16MachineInst;
@@ -1694,6 +1701,7 @@ struct Rdna3DppTraits {
   static constexpr const char *name = "rdna3";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3;
   using MachineInst = rdna3::MachineInst;
+  using VopcMachineInst = rdna3::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna3::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna3::VopcVopDpp16MachineInst;
@@ -1706,6 +1714,7 @@ struct Rdna3_5DppTraits {
   static constexpr const char *name = "rdna3_5";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3_5;
   using MachineInst = rdna3_5::MachineInst;
+  using VopcMachineInst = rdna3_5::VopcMachineInst;
   using Vop1VopDpp16MachineInst = rdna3_5::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = rdna3_5::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = rdna3_5::VopcVopDpp16MachineInst;
@@ -1718,6 +1727,7 @@ struct Gfx1250DppTraits {
   static constexpr const char *name = "gfx1250";
   static constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_GFX1250;
   using MachineInst = gfx1250::MachineInst;
+  using VopcMachineInst = gfx1250::VopcMachineInst;
   using Vop1VopDpp16MachineInst = gfx1250::Vop1VopDpp16MachineInst;
   using Vop1VopDpp8MachineInst = gfx1250::Vop1VopDpp8MachineInst;
   using VopcVopDpp16MachineInst = gfx1250::VopcVopDpp16MachineInst;
@@ -2350,9 +2360,9 @@ template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
 
-  constexpr uint64_t kOldExec = 0x00000000FFFF005AULL;
+  constexpr uint64_t kOldExec = 0xA5A55A5AFFFF005AULL;
   constexpr uint64_t kOldVcc = 0x00000000000000A5ULL;
-  wf->set_exec(kOldExec);
+  wf->set_exec_raw(kOldExec);
   wf->set_vcc(kOldVcc);
 
   constexpr uint32_t kSrc0 = 4;
@@ -2383,6 +2393,49 @@ template <typename Traits> void wave32_generated_vcmpx_dpp_write_mask_preserves_
 
   EXPECT_EQ(wf->vcc(), kOldVcc);
   EXPECT_EQ(wf->exec(), 0x00000000FFEF005AULL);
+  EXPECT_EQ(wf->exec_raw(), 0xA5A55A5AFFEF005AULL);
+}
+
+template <typename Traits> void wave32_generated_vcmpx_preserves_exec_hi() {
+  SCOPED_TRACE(Traits::name);
+  amdgpu::GpuMemory mem(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_mem");
+  amdgpu::L2Cache l2(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = Traits::arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 32;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(Traits::name) + "_vcmpx_wave32_exec_hi_cu",
+                                            cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec_raw(0xA5A55A5AFFFFFFFFULL);
+
+  constexpr uint32_t kSrc0 = 4;
+  constexpr uint32_t kSrc1 = 8;
+  uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+    cu->write_vgpr(vbase + kSrc0, lane, lane);
+    cu->write_vgpr(vbase + kSrc1, lane, (lane & 4u) == 0 ? lane : lane + 1);
+  }
+
+  constexpr uint32_t kVgprSrcEncodingBase = 256;
+  typename Traits::VopcMachineInst raw{};
+  raw.src0 = kVgprSrcEncodingBase + kSrc0;
+  raw.vsrc1 = kSrc1;
+
+  typename Traits::VCmpxEqU32Vopc inst(
+      reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+  inst.execute_impl(*wf);
+
+  EXPECT_EQ(wf->exec(), 0x0F0F0F0FULL);
+  EXPECT_EQ(wf->exec_raw(), 0xA5A55A5A0F0F0F0FULL);
 }
 
 template <typename Traits> void unsupported_rdna_vopc_dpp_throws() {
@@ -2506,6 +2559,15 @@ TEST(DppPermuteTest, RdnaGeneratedVcmpxDppWave32WriteMaskPreservesExec) {
 
 TEST(DppPermuteTest, Gfx1250GeneratedVcmpxDppWave32WriteMaskPreservesExec) {
   wave32_generated_vcmpx_dpp_write_mask_preserves_exec<Gfx1250DppTraits>();
+}
+
+TEST(ExecMaskTest, RdnaGeneratedVcmpxWave32PreservesExecHi) {
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna1DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna2DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna3DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna3_5DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Rdna4DppTraits>();
+  wave32_generated_vcmpx_preserves_exec_hi<Gfx1250DppTraits>();
 }
 
 TEST(DppPermuteTest, Rdna1VopcDppThrowsUnsupported) {
