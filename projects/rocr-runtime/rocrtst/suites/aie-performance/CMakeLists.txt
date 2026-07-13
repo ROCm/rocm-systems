@@ -186,20 +186,53 @@ target_link_libraries(vector-scalar-add-xrt-elf PRIVATE
 add_dependencies(vector-scalar-add-xrt-elf aie_full_elf)
 
 # ---------------------------------------------------------------------------
-# HSA PDI/insts benchmark
+# HSA hsaco packaging (inject an arch section into a generated ELF template)
+# ---------------------------------------------------------------------------
+if(NPU_TARGET STREQUAL "npu2")
+  set(NPU_TARGET_ARCH "aie2p")
+else()
+  set(NPU_TARGET_ARCH "aie2")
+endif()
+
+set(AIE_HSACO_PY "${CMAKE_CURRENT_SOURCE_DIR}/../aie/aie_hsaco.py")
+set(HSACO_TEMPLATE "${KERNEL_BUILD_DIR}/empty_hsaco_template.o")
+set(TEST_HSACO "${KERNEL_BUILD_DIR}/vector_scalar_add.hsaco")
+
+add_custom_command(
+  OUTPUT "${HSACO_TEMPLATE}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${KERNEL_BUILD_DIR}"
+  COMMAND "${CMAKE_C_COMPILER}" -c -o "${HSACO_TEMPLATE}" -xc /dev/null
+  COMMENT "Generating empty hsaco ELF template"
+  VERBATIM
+)
+
+# KERNARG_SIZE=32 (2 ptr + 2 size = 4*8), NUM_COLS=1.
+add_custom_command(
+  OUTPUT "${TEST_HSACO}"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${HSACO_TEMPLATE}" "${TEST_HSACO}"
+  COMMAND "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
+          --hsaco "${TEST_HSACO}" --arch "${NPU_TARGET_ARCH}"
+          --kernel "vector_scalar_add:${INSTS_BIN}:${DESIGN_PDI}:32:1"
+  DEPENDS "${INSTS_BIN}" "${DESIGN_PDI}" "${AIE_HSACO_PY}" "${HSACO_TEMPLATE}"
+  COMMENT "Packaging AIE kernel into hsaco"
+  VERBATIM
+)
+add_custom_target(aie_hsaco DEPENDS "${TEST_HSACO}")
+
+# ---------------------------------------------------------------------------
+# HSA hsaco dispatch benchmark
 # ---------------------------------------------------------------------------
 
 add_executable(vector-scalar-add-hsa vector_scalar_add_hsa.cpp)
 target_compile_features(vector-scalar-add-hsa PRIVATE cxx_std_20)
 target_compile_definitions(vector-scalar-add-hsa PRIVATE
-  DEFAULT_PDI_PATH=${DESIGN_PDI}
-  DEFAULT_INSTS_PATH=${INSTS_BIN}
+  DEFAULT_HSACO_PATH=${TEST_HSACO}
 )
 target_link_libraries(vector-scalar-add-hsa PRIVATE
   benchmark::benchmark_main
   hsa-runtime64::hsa-runtime64
 )
-add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
+add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts aie_hsaco)
 
 # ---------------------------------------------------------------------------
 # HSA vmem alloc/release microbenchmark
