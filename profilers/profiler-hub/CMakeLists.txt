@@ -21,6 +21,14 @@ option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
 option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+# Opt-in POC for Perfetto trace_processor embedding.
+# Requires PERFETTO_SOURCE_DIR (Perfetto repo root) and
+# PERFETTO_BUILD_DIR (GN out/ dir containing libtrace_processor.a).
+option(
+    PROFILER_HUB_ENABLE_TPX
+    "Build Perfetto trace_processor POC executable"
+    OFF
+)
 
 if(PROFILER_HUB_BUILD_TESTS)
     enable_testing()
@@ -522,4 +530,8 @@ endif()
 
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+if(PROFILER_HUB_ENABLE_TPX)
+    add_subdirectory(poc)
 endif()
