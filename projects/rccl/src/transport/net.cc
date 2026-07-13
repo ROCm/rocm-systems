@@ -1291,9 +1291,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
+      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1311,10 +1311,8 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+      } else
+#endif
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
           pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1328,10 +1326,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
       } else // FALL-THROUGH to nv_peermem GDR path
-#endif
       {
         NCCLCHECK(proxyState->ncclNet->regMr(resources->netSendComm, resources->buffers[p], resources->buffSizes[p],
-                                             NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
+                                             type,
                                              &resources->mhandles[p]));
       }
 
@@ -1530,9 +1527,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     resources->buffers[p] = NCCL_NET_MAP_GET_POINTER(map, cpu, buffs[p]);
     if (resources->buffers[p]) {
+      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
       /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && ncclCuMemEnable()) {
         int bank = NCCL_NET_MAP_OFFSET_BANK(map, buffs[p]);
         if (bank == NCCL_NET_MAP_DEVMEM && map->mems[NCCL_NET_MAP_DEVMEM].dmaBufFd >= 0) {
@@ -1550,10 +1547,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
                                                      &resources->mhandles[p]));
           (void)close(dmabuf_fd);
         }
-      } else // FALL-THROUGH to nv_peermem GDR path
-#else
-      /* DMA-BUF support */
-      int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
+      } else
+#endif
       if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport &&
           pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
@@ -1567,10 +1562,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
         TRACE(NCCL_INIT | NCCL_NET, "hsa_amd_portable_export_dmabuf buffer %p size %d handle %x offset %ld",
               (const void*)resources->buffers[p], resources->buffSizes[p], dmabuf_fd, offset);
       } else // FALL-THROUGH to nv_peermem GDR path
-#endif
       {
         NCCLCHECK(proxyState->ncclNet->regMr(resources->netRecvComm, resources->buffers[p], resources->buffSizes[p],
-                                             NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST,
+                                             type,
                                              &resources->mhandles[p]));
       }
 
@@ -2396,9 +2390,8 @@ static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, s
     (void)close(dmabuf_fd);
     needReg = false;
   }
-peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+#endif
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     int dmabuf_fd;
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
@@ -2410,7 +2403,6 @@ peermem:
     needReg = false;
   }
 peermem:
-#endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
     if (numSegments > 1) {
@@ -2468,9 +2460,8 @@ static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, s
     (void)close(dmabuf_fd);
     needReg = false;
   }
-peermem:
-#else
-  if (resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
+#endif
+  if (needReg && resources->useDmaBuf && pfn_hsa_amd_portable_export_dmabuf) {
     int dmabuf_fd;
     uint64_t offset;
     HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)info->buffer, info->size, &dmabuf_fd, &offset), ret,
@@ -2482,7 +2473,6 @@ peermem:
     needReg = false;
   }
 peermem:
-#endif
   if (needReg) {
     // Non-dmabuf regMr does not support multiple physical segments
     if (numSegments > 1) {
