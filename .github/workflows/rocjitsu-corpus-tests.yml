@@ -24,8 +24,8 @@ on:
         required: true
       corpus_ref:
         description: "Branch, tag, or SHA to check out from the corpus repository"
-        # Last updated on 2026/07/10.
-        default: "f1c6c03d76819e230541cd873dff1a882d946d44"
+        # Last updated on 2026/07/13.
+        default: "parallelize-fpsan-tests"
         required: true
 
 concurrency:
@@ -102,8 +102,8 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'lua1235/rocjitsu-test-corpus' }}
-          # Last updated on 2026/07/10.
-          ref: f1c6c03d76819e230541cd873dff1a882d946d44
+          # Last updated on 2026/07/13.
+          ref: ${{ github.event.inputs.corpus_ref || 'parallelize-fpsan-tests' }}
           path: rocjitsu-test-corpus
 
       - name: Set up Python
@@ -231,7 +231,9 @@ jobs:
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 1200; then
+              --timeout 1200 \
+              --ctest-jobs 16 \
+              --ctest-timeout 200; then
               corpus_status=1
             fi
             echo "::endgroup::"
