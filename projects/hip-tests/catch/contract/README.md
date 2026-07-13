@@ -56,6 +56,8 @@ The first domains are:
 - `graph_generic_node`: unified generic graph node add and pre/post-instantiation parameter setter contracts
 - `graph_memcpy3d_node`: struct-based 3D memcpy graph node add, parameter round-trip, and pre/post-instantiation setter contracts
 - `driver_graph_node`: AMD-gated driver-style context-bound 3D memcpy and memset graph node add, parameter round-trip, and executable setter contracts
+- `graph_instantiate_params`: params-struct graph instantiation result and upload-stream launch contracts
+- `graph_debug`: graph dot-export file-output contracts
 - `graph_node_find`: graph node lookup in cloned graph contracts
 - `graph_user_objects`: graph user object create, retain, release, and graph lifetime contracts
 - `graph_node_enabled`: executable graph node enable/disable query and behavior contracts
@@ -94,6 +96,7 @@ The first domains are:
 - `memory_pool_access`: current-device memory pool access-control contracts
 - `mem_location_pool`: location-based memory pool set/get and access-query contracts
 - `extension`: proc-address resolution and AMD extension API contracts (`hipGetProcAddress`, `hipApiName`, `hipGetStreamDeviceId`, `hipExtGetLastError`)
+- `logging`: AMD-gated extended logging enable/disable and parameter-configuration contracts
 - `profiler`: deprecated profiler start/stop accepted-or-unsupported contracts
 - `driver_entry_point`: driver entry-point symbol resolution contracts
 - `ipc`: capability-gated same-process IPC memory and event handle contracts

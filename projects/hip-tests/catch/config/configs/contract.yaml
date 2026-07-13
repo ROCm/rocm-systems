@@ -765,6 +765,18 @@ contract:
   Contract_DriverGraphNode_ExecMemsetNodeSetParams_UpdatesValueAfterInstantiate:
     <<: *level_0
     tags: [driver_graph_node]
+  Contract_GraphInstantiateParams_ReportsSuccessAndLaunches:
+    <<: *level_0
+    tags: [graph_instantiate_params]
+  Contract_GraphInstantiateParams_UploadStream_LaunchesUploadedGraph:
+    <<: *level_0
+    tags: [graph_instantiate_params]
+  Contract_GraphDebug_DotPrint_WritesNonEmptyFile:
+    <<: *level_0
+    tags: [graph_debug]
+  Contract_GraphDebug_DotPrint_VerboseFlagIsAccepted:
+    <<: *level_0
+    tags: [graph_debug]
   Contract_GraphNodeFind_ClonedNode_IsFoundAndDistinct:
     <<: *level_0
     tags: [graph_node_find]
@@ -1329,6 +1341,12 @@ contract:
   Contract_Extension_ExtGetLastError_TracksErrorState:
     <<: *level_0
     tags: [extension]
+  Contract_Logging_EnableThenDisable_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [logging]
+  Contract_Logging_SetLoggingParams_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [logging]
   Contract_Profiler_Start_IsAcceptedOrUnsupported:
     <<: *level_0
     tags: [profiler]
