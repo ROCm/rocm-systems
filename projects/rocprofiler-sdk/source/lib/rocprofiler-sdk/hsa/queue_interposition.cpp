@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/common/container/pool.hpp"
 #include "lib/common/container/pool_object.hpp"
+#include "lib/common/container/static_vector.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -55,6 +56,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <pthread.h>
 
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <thread>
@@ -68,6 +70,8 @@ namespace queue_interposition
 {
 namespace
 {
+auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
+
 // NOTE:
 //  - "installed" is for checking whether HSA functions have been passed
 //  - "active" is for controlling whether wrappers are intercepting or passing through
@@ -78,13 +82,19 @@ auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
 
 bool
+has_active_queue_interposition_consumers()
+{
+    return s_active_queue_interposition_consumers.load(std::memory_order_relaxed) > 0;
+}
+
+bool
 should_bypass_inline_intercept()
 {
     return (!s_intercept_installed.load(std::memory_order_acquire) ||
             !s_intercept_active.load(std::memory_order_acquire) ||
             registration::get_fini_status() != 0 ||
             // TODO: debug and enable queue interposition for attachment
-            registration::supports_attachment());
+            registration::supports_attachment() || !has_active_queue_interposition_consumers());
 }
 
 auto*&
@@ -222,7 +232,8 @@ publish_submitted_packets(QueueState* state, uint64_t submit_pos)
         << ") regressed below last_published_submit_pos (" << tls.last_published_submit_pos << ")";
 
     __atomic_store_n(state->real_wdid, submit_pos, __ATOMIC_RELEASE);
-    (*tls.ring_doorbell)(state->doorbell_signal, static_cast<hsa_signal_value_t>(submit_pos - 1));
+    const auto doorbell_idx = static_cast<hsa_signal_value_t>(submit_pos - 1);
+    (*tls.ring_doorbell)(state->doorbell_signal, doorbell_idx);
     tls.last_published_submit_pos = submit_pos;
 }
 
@@ -842,27 +853,47 @@ process_doorbell_impl(const queue_state_ptr_t& state,
         return;
     }
 
-    static thread_local auto snapshot_storage = std::vector<char>{};
-    const uint64_t           max_bytes        = (wptr_end - scan_pos) * state_ptr->pkt_size;
-    if(snapshot_storage.size() < max_bytes) snapshot_storage.resize(max_bytes);
-    char* const source_snapshot = snapshot_storage.data();
+    constexpr size_t kSnapshotMaxPkts = 16;
+    const uint64_t   max_pkts         = wptr_end - scan_pos;
+    const auto       pkt_size         = state_ptr->pkt_size;
+
+    using snapshot_pkt_t = std::array<char, 64>;
+    common::container::static_vector<snapshot_pkt_t, kSnapshotMaxPkts> snapshot;
+    std::vector<char>                                                  overflow_snapshot;
+    char*                                                              source_snapshot = nullptr;
+
+    if(max_pkts > kSnapshotMaxPkts)
+    {
+        overflow_snapshot.resize(max_pkts * pkt_size);
+        source_snapshot = overflow_snapshot.data();
+    }
 
     uint64_t drained = 0;
     for(uint64_t pos = scan_pos; pos < wptr_end; ++pos)
     {
         const auto  ring_slot = pos & state_ptr->ring_mask;
-        char* const slot_base =
-            static_cast<char*>(state_ptr->ring_buf) + (ring_slot * state_ptr->pkt_size);
-        auto* const hdr_ptr = reinterpret_cast<volatile uint16_t*>(slot_base);
+        char* const slot_base = static_cast<char*>(state_ptr->ring_buf) + (ring_slot * pkt_size);
+        auto* const hdr_ptr   = reinterpret_cast<volatile uint16_t*>(slot_base);
 
         if((__atomic_load_n(hdr_ptr, __ATOMIC_ACQUIRE) & 0xFFu) ==
            static_cast<unsigned>(HSA_PACKET_TYPE_INVALID))
             break;
 
-        ::memcpy(source_snapshot + (drained * state_ptr->pkt_size), slot_base, state_ptr->pkt_size);
+        char* dst = nullptr;
+        if(source_snapshot)
+        {
+            dst = source_snapshot + (drained * pkt_size);
+        }
+        else
+        {
+            dst = snapshot.emplace_back().data();
+        }
+        ::memcpy(dst, slot_base, pkt_size);
         __atomic_store_n(hdr_ptr, static_cast<uint16_t>(HSA_PACKET_TYPE_INVALID), __ATOMIC_RELEASE);
         ++drained;
     }
+
+    if(!source_snapshot) source_snapshot = reinterpret_cast<char*>(snapshot.data());
 
     if(drained == 0)
     {
@@ -1113,6 +1144,56 @@ bool
 supports_queue_interposition()
 {
     return s_intercept_installed.load(std::memory_order_acquire);
+}
+
+namespace
+{
+void
+resync_queue_shadow_state(QueueState* state)
+{
+    if(!state || !state->real_wdid) return;
+
+    const uint64_t wdid = __atomic_load_n(state->real_wdid, __ATOMIC_ACQUIRE);
+    state->virtual_wptr.store(wdid, std::memory_order_release);
+    state->next_scan_pos   = wdid;
+    state->next_submit_pos = wdid;
+}
+
+void
+resync_all_queue_shadow_states()
+{
+    get_queue_registry().rlock([](const auto& registry) {
+        for(const auto& entry : registry)
+            resync_queue_shadow_state(entry.second.get());
+    });
+}
+}  // namespace
+
+void
+notify_queue_interposition_consumer_context_started(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+
+    const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
+    if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
+        resync_all_queue_shadow_states();
+
+    s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_release);
+}
+
+void
+notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
+{
+    if(!context_needs_queue_interposition_tracing(ctx)) return;
+    auto cur = s_active_queue_interposition_consumers.load(std::memory_order_relaxed);
+    while(cur > 0)
+    {
+        if(s_active_queue_interposition_consumers.compare_exchange_weak(
+               cur, cur - 1, std::memory_order_release, std::memory_order_relaxed))
+        {
+            return;
+        }
+    }
 }
 
 void

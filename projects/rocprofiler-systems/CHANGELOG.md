@@ -4,6 +4,18 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.8.0 for ROCm 7.15.0 (unreleased)
+
+### Changed
+
+- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
+
+### Removed
+
+- Removed the `-p` / `--pid` option from `rocprof-sys-instrument` for attaching to
+  an already running process. Use the `rocprof-sys-attach` executable instead, which
+  attaches to and profiles running processes via the rocprofiler-sdk rocattach API.
+
 ## ROCm Systems Profiler 1.7.0 for ROCm 7.14.0
 
 ### Added
@@ -76,13 +88,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   v1.17.0 (bundled fmt v12).
 - Supported environment variables for rank detection: removed MPI_RANK and
   MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
-- Replaced `--parse-all-modules` in `rocprof-sys-instrument` with
-  `--exclude-internal-lib-paths`. The module-iteration behavior of
-  `--parse-all-modules` is now the default (the tool always iterates objects and
-  modules to extract functions). The remaining behavior is now covered by
-  `--exclude-internal-lib-paths`, which excludes every on-disk path matching an
-  internal library's filename.
-- `ROCPROFSYS_BUILD_TESTING` no longer implies `ROCPROFSYS_BUILD_EXAMPLES`.
 
 ### Resolved issues
 

@@ -589,11 +589,12 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   if (!image_contains_range(image_.size(), translation.descriptor_file_offset, sizeof(KD)))
     return false;
 
-  auto *desc = reinterpret_cast<KD *>(image_.data() + translation.descriptor_file_offset);
+  KD desc;
+  std::memcpy(&desc, image_.data() + translation.descriptor_file_offset, sizeof(desc));
 
-  AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   translation.target_vgpr_granulated);
-  AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   translation.target_sgpr_granulated);
 
   if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
@@ -602,34 +603,34 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
     // lowering needs ordinary VGPR scratch above the source AccVGPR window, so
     // the patcher must write the recomputed base alongside the VGPR allocation.
     const uint32_t encoded_accum_offset = (translation.target_accvgpr_base / 4) - 1;
-    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                     encoded_accum_offset);
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
     if (target_clears_rsrc1_mode_bits(target_arch)) {
-      AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
-      AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
+      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
+      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 0);
     }
     const uint32_t wgp_mode = target_uses_wgp_mode(target_arch) ? 1u : 0u;
-    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, wgp_mode);
-    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
-    AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_WGP_MODE, wgp_mode);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_MEM_ORDERED, 1);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
   }
 
   if (target_supports_wave32(target_arch)) {
     const uint32_t wave32 = translation.target_wave_size == 32 ? 1u : 0u;
-    AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     wave32);
   } else {
-    AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     0);
   }
 
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
-    desc->compute_pgm_rsrc3 = 0;
+    desc.compute_pgm_rsrc3 = 0;
     if (const uint32_t inst_pref = target_default_inst_pref_size(target_arch); inst_pref != 0) {
-      AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
+      AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
                       inst_pref);
     }
   } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
@@ -640,18 +641,19 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
     assert(translation.target_accvgpr_base >= 4 &&
            "ACCUM_OFFSET base must encode at least 4 VGPRs");
     assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
-    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                     (translation.target_accvgpr_base / 4 - 1));
   }
 
-  desc->private_segment_fixed_size = translation.target_private_size;
-  desc->group_segment_fixed_size = translation.target_lds_size;
-  AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+  desc.private_segment_fixed_size = translation.target_private_size;
+  desc.group_segment_fixed_size = translation.target_lds_size;
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                   translation.target_user_sgpr_count);
   const uint32_t enable_private_segment = translation.target_private_size != 0 ? 1u : 0u;
-  AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                   enable_private_segment);
 
+  std::memcpy(image_.data() + translation.descriptor_file_offset, &desc, sizeof(desc));
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
                              translation.target_entry_text_offset))
     return false;
@@ -664,14 +666,16 @@ bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
   if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
     return false;
 
-  auto *desc = reinterpret_cast<KD *>(image_.data() + descriptor_file_offset);
+  KD desc;
+  std::memcpy(&desc, image_.data() + descriptor_file_offset, sizeof(desc));
   const int64_t delta =
       static_cast<int64_t>(new_entry_text_offset) - static_cast<int64_t>(old_entry_text_offset);
-  const int64_t redirected = static_cast<int64_t>(desc->kernel_code_entry_byte_offset) + delta;
+  const int64_t redirected = static_cast<int64_t>(desc.kernel_code_entry_byte_offset) + delta;
   // The descriptor field is signed because the entry point may be before or
   // after the descriptor in virtual address order. Preserve that signed value
   // when applying the text-relative delta.
-  desc->kernel_code_entry_byte_offset = redirected;
+  desc.kernel_code_entry_byte_offset = redirected;
+  std::memcpy(image_.data() + descriptor_file_offset, &desc, sizeof(desc));
   return true;
 }
 

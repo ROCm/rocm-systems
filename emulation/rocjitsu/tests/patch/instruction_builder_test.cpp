@@ -121,5 +121,21 @@ TEST(InstructionBuilder, BuildSEndpgm) {
   EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
 }
 
+TEST(InstructionBuilder, BuildSMovB32UsesRdna1AndRdna2Opcodes) {
+  constexpr uint16_t kDst = 4;
+  constexpr uint16_t kSrc = 8;
+
+  const uint32_t rdna1_word = build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA1);
+  const uint32_t rdna2_word = build_s_mov_b32(kDst, kSrc, ROCJITSU_CODE_ARCH_RDNA2);
+
+  // RDNA1/2 assign s_mov_b32 opcode 3 rather than the opcode 0 used by CDNA
+  // and newer RDNA targets. This is an intentional correctness fix over the
+  // old architecture-agnostic builder and must not be treated as NFC.
+  EXPECT_EQ((rdna1_word >> 8) & 0xFFu, rdna1::kSMovB32Sop1);
+  EXPECT_EQ((rdna2_word >> 8) & 0xFFu, rdna2::kSMovB32Sop1);
+  EXPECT_EQ(rdna1::kSMovB32Sop1, 3u);
+  EXPECT_EQ(rdna2::kSMovB32Sop1, 3u);
+}
+
 } // namespace
 } // namespace rocjitsu
