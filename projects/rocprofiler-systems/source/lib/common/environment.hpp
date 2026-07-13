@@ -93,7 +93,7 @@ to_bool(std::string_view value, bool fallback = false)
 
     constexpr auto false_values = std::array{
         std::string_view{ "off" }, std::string_view{ "false" }, std::string_view{ "no" },
-        std::string_view{ "n" },   std::string_view{ "f" },     std::string_view{ "0" },
+        std::string_view{ "n" },   std::string_view{ "f" },
     };
     return !std::any_of(false_values.begin(), false_values.end(),
                         [&lower](std::string_view val) { return lower == val; });
