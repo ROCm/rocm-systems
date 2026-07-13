@@ -10,7 +10,6 @@
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/gpu_metrics.hpp"
-#include "core/output/output_summary.hpp"
 #include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/counter_track.hpp"
 #include "core/perfetto/emitter.hpp"
@@ -454,7 +453,7 @@ emit_grouped_event(bool group_by_queue, QueueCategory queue_cat,
 perfetto_processor_t::perfetto_processor_t(
     const std::shared_ptr<metadata_registry>& metadata,
     const std::shared_ptr<agent_manager>& agent_mngr, int pid, [[maybe_unused]] int ppid,
-    [[maybe_unused]] output_summary& summary, rocprofsys::track_registry& tracks)
+    rocprofsys::track_registry& tracks)
 : processor_t<perfetto_processor_t>()
 , m_metadata(*metadata)
 , m_process_id(pid)
@@ -462,7 +461,6 @@ perfetto_processor_t::perfetto_processor_t(
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
 , m_tracks(tracks)
-, m_output_summary(summary)
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {

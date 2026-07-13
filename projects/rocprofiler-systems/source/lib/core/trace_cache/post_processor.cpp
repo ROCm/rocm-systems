@@ -95,7 +95,7 @@ configure_processors(
     {
         storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _config->_metadata_registry, _config->_agent_manager, _config->_pid,
-            _config->_ppid, _summary, _tracks->get());
+            _config->_ppid, _tracks->get());
         _coordinator->add_handler(*storage.perfetto_processor);
     }
 
