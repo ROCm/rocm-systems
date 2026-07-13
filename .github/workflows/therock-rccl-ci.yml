@@ -64,6 +64,7 @@ jobs:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
       event_name: ${{ github.event_name }}
+      package_version: ADHOCBUILD
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON

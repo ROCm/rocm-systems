@@ -12,7 +12,7 @@ on:
         default: ''
       package_version:
         type: string
-        default: 'ADHOCBUILD'
+        required: true
       cmake_options:
         type: string
 
