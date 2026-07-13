@@ -13,8 +13,6 @@ on:
       amdgpu_families:
         type: string
         default: "gfx94X-dcgpu"
-      artifact_group:
-        type: string
       test_runs_on:
         type: string
         default: "linux-gfx942-1gpu-core42-ossci-rocm"
@@ -25,6 +23,10 @@ on:
         type: string
         default: "false"
         description: "Set to 'true' to run MI455 tests for gfx125X builds"
+      enable_rccl:
+        type: boolean
+        default: false
+        description: "When true, builds with RCCL enabled and runs RCCL-specific test jobs instead of the standard test job."
 
 permissions:
   contents: read
@@ -102,7 +104,7 @@ jobs:
             ${{ inputs.cmake_options }}
           BUILD_DIR: build
         run: |
-          python3 TheRock/build_tools/github_actions/build_configure.py
+          python TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-artifacts and therock-dist
         run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
@@ -141,7 +143,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+          python TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
@@ -153,7 +155,7 @@ jobs:
     needs: [therock-build-linux]
     # Skip tests if test_runs_on is empty (build-only mode) or gfx950-dcgpu (capacity)
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ !inputs.enable_rccl && inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
@@ -174,3 +176,32 @@ jobs:
       amdgpu_families: "gfx125X-dcgpu"
       test_runs_on: "linux-mi455-gpu-rocm"
       platform: "linux"
+
+  # ── RCCL test jobs (only active when enable_rccl: true) ──────────────────────
+  therock-test-linux-rccl-multi-node:
+    name: "Test RCCL multi-node"
+    # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    if: false
+    permissions:
+      contents: read
+      id-token: write
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-packages-multi-node.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.amdgpu_families }}
+      test_runs_on: ruby-linux-slurm-scale-runner
+      artifact_run_id: ${{ github.run_id }}
+
+  therock-test-linux-rccl-single-node:
+    name: "Test RCCL single-node"
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    if: ${{ inputs.enable_rccl && inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.amdgpu_families }}
+      test_runs_on: linux-gfx942-8gpu-ossci-rocm
+      artifact_run_id: ${{ github.run_id }}
+

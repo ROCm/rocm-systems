@@ -177,7 +177,6 @@ jobs:
     with:
       enable_rccl: true
       amdgpu_families: ${{ matrix.amdgpu_family }}
-      artifact_group: ${{ matrix.amdgpu_family }}
       package_version: ${{ needs.setup.outputs.package_version }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
