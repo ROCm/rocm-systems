@@ -212,6 +212,12 @@ Full gfx950 support means:
   current-generation entries from distinct owners, and reports exactly one
   overlap conflict with zero immediate conflicts. This isolates the host
   oracle and directly agrees with record/replay on the same native kernel.
+- 2026-07-13: `S7A` is `DONE`. A forced-spill sampled probe saves and restores
+  five live VGPRs through 20 bytes of dispatch-private storage while runtime
+  owner selection exercises VCC preservation. The guarded gfx950 test requires
+  one emitted spill patch and one visible sampled entry, verifies AQL private
+  growth from zero to 20 bytes, and proves eight independently live values are
+  unchanged in all 64 lanes.
 
 ## DAG Overview
 
@@ -288,7 +294,7 @@ flowchart LR
   B1B["B1B: Engine Barrier Semantics"]:::todo
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
   R1C["R1C: Owners And Transaction Tests"]:::done
-  S7A["S7A: Sampled Spill Parity"]:::todo
+  S7A["S7A: Sampled Spill Parity"]:::done
   S7B["S7B: Inline Access Spill Parity"]:::todo
   S7C["S7C: Barrier And Atomic Spill Parity"]:::todo
   S7D["S7D: Shared-Helper Spill Layout"]:::todo
@@ -797,7 +803,7 @@ Done criteria:
 - The test proves patch execution, record publication, value preservation, and
   dispatch-private growth in one run.
 
-### S7A: Sampled Spill Parity - TODO
+### S7A: Sampled Spill Parity - DONE
 
 Goal: extend the proven record/replay spill path to sampled access probes.
 
@@ -811,6 +817,15 @@ Done criteria:
 
 - Sampled standard mode needs no register numbers and preserves live victim
   values around a guarded publication.
+
+Result:
+
+- `ConSanMoiGfx950Test.ForcedSpillSampled` uses automatic register selection,
+  forces the five-VGPR sampled window through the CDNA4 spill backend, and
+  requires a visible generation-one watchpoint plus a logged 0-to-20-byte
+  dispatch-private grow operation. Its kernel keeps eight unrelated values
+  live across the patched access and validates every value in all 64 lanes;
+  runtime stride selection also covers the sampled path's VCC save/restore.
 
 ### S7B: Inline Access Spill Parity - TODO
 

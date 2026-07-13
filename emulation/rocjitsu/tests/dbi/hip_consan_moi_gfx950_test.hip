@@ -58,6 +58,32 @@ __global__ __launch_bounds__(64) void gfx950_moi_forced_spill(uint32_t *out) {
   out[base + 3u] = victim3;
 }
 
+__global__ __launch_bounds__(64) void gfx950_moi_forced_sampled_spill(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  uint32_t values[8] = {
+      0x11500000u ^ tid, 0x22500000u ^ tid, 0x33500000u ^ tid, 0x44500000u ^ tid,
+      0x55500000u ^ tid, 0x66500000u ^ tid, 0x77500000u ^ tid, 0x88500000u ^ tid,
+  };
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  asm volatile("ds_write_b32 %0, %1\n\t"
+               ".rept 128\n\t"
+               "s_nop 0\n\t"
+               ".endr\n\t"
+               :
+               : "v"(address), "v"(values[0])
+               : "memory");
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  const uint32_t base = tid * 8u;
+  for (uint32_t i = 0; i < 8u; ++i)
+    out[base + i] = values[i];
+}
+
 __global__ __launch_bounds__(64) void gfx950_standalone_report_publication(uint32_t *out) {
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
   uint32_t *slot = out + tid;
@@ -209,6 +235,29 @@ TEST(ConSanMoiGfx950Test, ForcedSpillPreservesLiveVgprs) {
     EXPECT_EQ(out[base + 1u], 0x20500000u ^ (tid * 3u)) << "tid=" << tid;
     EXPECT_EQ(out[base + 2u], 0x30500000u ^ (tid * 5u)) << "tid=" << tid;
     EXPECT_EQ(out[base + 3u], 0x40500000u ^ (tid * 7u)) << "tid=" << tid;
+  }
+}
+
+TEST(ConSanMoiGfx950Test, ForcedSampledSpillPreservesEightLiveVgprs) {
+  constexpr uint32_t kThreads = 64;
+  constexpr uint32_t kValuesPerThread = 8;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kThreads * kValuesPerThread * sizeof(uint32_t)));
+  gfx950_moi_forced_sampled_spill<<<1, kThreads>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kThreads * kValuesPerThread);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  constexpr uint32_t seeds[kValuesPerThread] = {
+      0x11500000u, 0x22500000u, 0x33500000u, 0x44500000u,
+      0x55500000u, 0x66500000u, 0x77500000u, 0x88500000u,
+  };
+  for (uint32_t tid = 0; tid < kThreads; ++tid) {
+    for (uint32_t i = 0; i < kValuesPerThread; ++i)
+      EXPECT_EQ(out[tid * kValuesPerThread + i], seeds[i] ^ tid) << "tid=" << tid << " i=" << i;
   }
 }
 
