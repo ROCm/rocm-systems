@@ -1620,9 +1620,8 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
   }
   auto* aie_agent = static_cast<AMD::AieAgent*>(core_agent);
 
-  // Arch-vs-agent validation: the section name must match one the agent accepts.
-  const auto& arches = aie_agent->supported_arch_names();
-  if (std::find(arches.begin(), arches.end(), aie_code->GetArchSectionName()) == arches.end()) {
+  // Arch-vs-agent validation: the section name must match the one the agent accepts.
+  if (aie_code->GetArchSectionName() != aie_agent->arch_name()) {
     logger_ << "LoaderError: code object arch does not match agent\n";
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   }
