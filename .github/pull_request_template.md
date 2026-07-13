@@ -6,10 +6,23 @@
 
 <!-- Explain the changes along with any relevant GitHub links. -->
 
-## JIRA ID
+## Ticket ID
 
-<!-- If applicable, mention the JIRA ID resolved by this PR (Example: Resolves SWDEV-12345). -->
-<!-- Do not post any JIRA links here. -->
+<!--
+Include a JIRA ID or GitHub Issue ID. The separator may be : or - (or omitted),
+and the value can be a JIRA key, a number (with or without #), or a GitHub Issue
+link.
+Do not include a link to internal JIRAs.
+
+Accepted examples:
+- JIRA ID : TESTAUTO-6039
+- JIRA ID - #330
+- JIRA ID #330
+- ISSUE ID : TESTUTO-3334
+- ISSUE ID #3334
+- ISSUE ID - TESTAUTO-3433
+- ISSUE ID : https://github.com/<org_name>/<repo_name>/issues/1234
+-->
 
 ## Test Plan
 
