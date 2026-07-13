@@ -112,6 +112,7 @@ class LoweringContext:
     operand_map: OperandMap | None = None
     indent: int = 1
     declared: set[str] = field(default_factory=set)
+    vector_preamble: list[str] = field(default_factory=list)
     is_lhs: bool = False
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
@@ -119,6 +120,7 @@ class LoweringContext:
     true16_dst_select: str | None = None
     true16_src_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
+    true16_vop3_opsel: str | None = None
     true16_dst_reg: str | None = None
     true16_src_raw: str | None = None
     fp8_byte_select: str | None = None
@@ -201,6 +203,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         writes_vcc = _writes_vcc(block.body)
         wrapped = []
         wrapped.append('  uint64_t exec = wf.exec();')
+        wrapped.extend(ctx.vector_preamble)
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
@@ -883,6 +886,11 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
                 )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
         if tag != 'D' and idx in ctx.true16_src_selects:
+            if ctx.true16_vop3_opsel is not None:
+                return (
+                    f'::rocjitsu::amdgpu::read_vop3_true16_src('
+                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, {idx})'
+                )
             select = ctx.true16_src_selects[idx]
             return f'(({select}) != 0 ? ({value} >> 16) : {value})'
         return value
@@ -895,6 +903,11 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         return value
     value = f'inst.src{idx}.read_lane(wf, lane)'
     if tag != 'D' and idx in ctx.true16_src_selects:
+        if ctx.true16_vop3_opsel is not None:
+            return (
+                f'::rocjitsu::amdgpu::read_vop3_true16_src('
+                f'inst.src{idx}, wf, lane, {ctx.true16_vop3_opsel}, {idx})'
+            )
         select = ctx.true16_src_selects[idx]
         return f'(({select}) != 0 ? ({value} >> 16) : {value})'
     return value
@@ -1023,15 +1036,12 @@ def _lower_dst_write(
                 dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
                 read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
                 write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
-            elif ctx.true16_dst_select in {
-                'inst_.opsel & 0x8u',
-                'amdgpu::vop3_opsel(inst_) & 0x8u',
-            }:
+            elif ctx.true16_vop3_opsel is not None:
                 return [
                     f'{ind}{{',
                     f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
                     f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
-                    f'{name}, wf, lane, {ctx.true16_dst_select}, src_half);',
+                    f'{name}, wf, lane, {ctx.true16_vop3_opsel}, src_half, true);',
                     f'{ind}}}',
                 ]
             else:
