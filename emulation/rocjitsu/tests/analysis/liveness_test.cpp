@@ -321,20 +321,6 @@ TEST(RegisterSetAnalysis, GeneratedCdna4OperandsMapTrackedRegisterRefs) {
   EXPECT_FALSE(imm32.to_register_ref().has_value());
 }
 
-TEST(RegisterSetAnalysis, Cdna4WritelaneDestinationIsUseAndDef) {
-  constexpr std::array<uint32_t, 2> kWritelaneV141S4Lane2 = {0xd28a008du, 0x00010404u};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
-
-  std::unique_ptr<Instruction> inst(decoder->decode(kWritelaneV141S4Lane2.data()));
-  ASSERT_NE(inst, nullptr);
-  EXPECT_EQ(inst->mnemonic(), "v_writelane_b32");
-
-  InstDefUse du(*inst);
-  EXPECT_TRUE(du.defs.contains({RegClass::VGPR, 141, 1}));
-  EXPECT_TRUE(du.uses.contains({RegClass::VGPR, 141, 1}));
-  EXPECT_TRUE(du.uses.contains({RegClass::SGPR, 4, 1}));
-}
-
 TEST(CfgAnalysis, LoopBackEdgeLinksPredecessor) {
   auto blocks = build_test_blocks({TestOpcode::Nop, TestOpcode::BranchBackToStart});
 
@@ -714,18 +700,28 @@ TEST(LivenessAnalysis, MinFreeVgprForcesScratchAllocationAboveFloor) {
   EXPECT_EQ(liveness.find_free_run(&use, 1, 7), 7);
 }
 
-TEST(LivenessAnalysis, FindFreeRunHonorsBaseAlignment) {
+TEST(LivenessAnalysis, ReservedScratchSgprsAreNotAllocated) {
   auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
-  auto scope = block_scope(blocks);
-
-  LivenessAnalysisOptions options;
-  options.min_free_vgpr = 93;
-
-  LivenessAnalysis liveness(KernelBlockScope(scope), options);
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  liveness.reserve_scratch_registers({RegClass::SGPR, 5, 3});
 
   const Instruction &use = *blocks[0]->instructions().begin();
-  EXPECT_EQ(liveness.find_free_run(&use, 4, 0, 2), 94);
-  EXPECT_EQ(liveness.find_free_run(&use, 4, 94, 4), 96);
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 4), 8);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 4), 8);
+}
+
+TEST(LivenessAnalysis, TargetSpecificSgprLimitExposesRdna4ScratchWindow) {
+  auto blocks = build_test_blocks({TestOpcode::UseSgpr4, TestOpcode::End});
+  LivenessAnalysis liveness = analyze_scope(blocks);
+  liveness.reserve_scratch_registers(
+      {RegClass::SGPR, 0, static_cast<uint8_t>(REGISTER_SET_ALLOCATABLE_SGPRS)});
+
+  const Instruction &use = *blocks[0]->instructions().begin();
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 0), std::nullopt);
+
+  liveness.set_allocatable_sgpr_limit(106);
+  EXPECT_EQ(liveness.find_free_sgpr(&use, 0), 102);
+  EXPECT_EQ(liveness.find_free_sgpr_pair(&use, 0), 102);
 }
 
 TEST(LivenessAnalysis, ReadWriteSameRegisterIsLiveBeforeInstruction) {

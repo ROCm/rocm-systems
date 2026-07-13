@@ -28,7 +28,6 @@ enum class DiagnosticKind {
   ExpandMissing,
   ExpandFailed,
   ResourceLimit,
-  KernelSkipped,
 };
 
 /// @brief One user/developer-facing DBT diagnostic.

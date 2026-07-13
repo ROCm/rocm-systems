@@ -44,8 +44,6 @@ rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel_as(vector_add vector_add_gfx1250 gfx1250)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
-rj_add_device_kernel(virtual_lds_smoke gfx950)
-rj_add_device_kernel(cvt_pk_bf16_f32 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
@@ -84,13 +82,6 @@ rj_add_triton_asm_fixture(triton_cdna3_matmul_dynamic_32x32x64 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_matmul_buffer_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_no_async_1024 gfx942)
 rj_add_triton_asm_fixture(triton_cdna3_flash_attention_buffer_async_1024 gfx942)
-
-# HipKittens-generated assembly fixtures.  The upstream sources build as Python
-# extension modules and pull in the full HipKittens/PyTorch/pybind stack, so the
-# checked-in .s files preserve the generated gfx950 code object in a readable,
-# reassemblable form for DBT tests.
-rj_add_triton_asm_fixture(hipkittens_bf16fp32_256_256_64_32_with16x32 gfx950)
-rj_add_triton_asm_fixture(hipkittens_bf16fp32_256_256_64_32_with32x16 gfx950)
 
 # Second build of vector_add for gfx90a, used by the DBI hardware-gated
 # smoke test (tests/dbi/hsa_dbi_smoke_test.cpp). Outputs vector_add_gfx90a.o
@@ -135,8 +126,6 @@ add_custom_target(
         kernel_vector_add_gfx1250
         kernel_vector_add_gfx90a
         kernel_dynamic_copy_loop
-        kernel_virtual_lds_smoke
-        kernel_cvt_pk_bf16_f32
         kernel_multikernel_indirect_branch
         kernel_multikernel_indirect_branch_part0
         kernel_multikernel_indirect_branch_part1
@@ -148,8 +137,6 @@ add_custom_target(
         kernel_triton_cdna3_matmul_buffer_async_1024
         kernel_triton_cdna3_flash_attention_no_async_1024
         kernel_triton_cdna3_flash_attention_buffer_async_1024
-        kernel_hipkittens_bf16fp32_256_256_64_32_with16x32
-        kernel_hipkittens_bf16fp32_256_256_64_32_with32x16
 )
 
 # Export variables to the parent scope so the test executable can use them.

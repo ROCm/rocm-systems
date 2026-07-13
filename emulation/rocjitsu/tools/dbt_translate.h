@@ -75,7 +75,6 @@ struct TranslateOptions {
   bool collect_diagnostics = false;
   std::optional<uint16_t> debug_min_free_vgpr;
   bool debug_continue_after_failure = false;
-  bool skip_failed_kernels = false;
   DisassemblyMode disassembly = DisassemblyMode::None;
 };
 
