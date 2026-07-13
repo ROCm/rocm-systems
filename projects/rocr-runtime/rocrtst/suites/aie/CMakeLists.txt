@@ -64,6 +64,13 @@ else()
   message(STATUS "NPU target: ${NPU_TARGET}")
 endif()
 
+# Map the NPU target to the hsaco arch section name.
+if(NPU_TARGET STREQUAL "npu2")
+  set(NPU_TARGET_ARCH "aie2p")
+else()
+  set(NPU_TARGET_ARCH "aie2")
+endif()
+
 # ---------------------------------------------------------------------------
 # Kernel artifact build pipeline
 # ---------------------------------------------------------------------------
@@ -106,6 +113,47 @@ add_custom_target(dispatch_kernel_artifacts
 )
 
 # ---------------------------------------------------------------------------
+# hsaco packaging: inject an arch section into a base ELF template.
+# ---------------------------------------------------------------------------
+# The base template only needs to be a valid ELF64 the loader's reader accepts;
+# the arch section carries all AIE payloads. Generate a minimal object with the
+# project compiler so nothing binary is checked in.
+set(HSACO_TEMPLATE ${KERNEL_BUILD_DIR}/empty_hsaco_template.o)
+add_custom_command(
+  OUTPUT "${HSACO_TEMPLATE}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${KERNEL_BUILD_DIR}"
+  COMMAND "${CMAKE_C_COMPILER}" -c -o "${HSACO_TEMPLATE}" -xc /dev/null
+  COMMENT "Generating empty hsaco ELF template"
+  VERBATIM
+)
+
+set(AIE_HSACO_PY ${CMAKE_CURRENT_SOURCE_DIR}/aie_hsaco.py)
+set(TEST_HSACO ${KERNEL_BUILD_DIR}/vector_scalar_add.hsaco)
+set(TEST_HSACO2 ${KERNEL_BUILD_DIR}/vector_scalar_add2.hsaco)
+set(TEST_HSACO_NOPDI ${KERNEL_BUILD_DIR}/vector_scalar_add_nopdi.hsaco)
+
+# KERNARG_SIZE=32 (2 ptr + 2 size = 4*8), NUM_COLS=1.
+add_custom_command(
+  OUTPUT "${TEST_HSACO}" "${TEST_HSACO2}" "${TEST_HSACO_NOPDI}"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${HSACO_TEMPLATE}" "${TEST_HSACO}"
+  COMMAND "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
+          --hsaco "${TEST_HSACO}" --arch "${NPU_TARGET_ARCH}"
+          --kernel "vector_scalar_add:${INSTS_BIN}:${DESIGN_PDI}:32:1"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${TEST_HSACO}" "${TEST_HSACO2}"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${HSACO_TEMPLATE}" "${TEST_HSACO_NOPDI}"
+  COMMAND "${Python3_EXECUTABLE}" "${AIE_HSACO_PY}"
+          --hsaco "${TEST_HSACO_NOPDI}" --arch "${NPU_TARGET_ARCH}"
+          --kernel "vector_scalar_add:${INSTS_BIN}:32:1"
+  DEPENDS "${INSTS_BIN}" "${DESIGN_PDI}" "${AIE_HSACO_PY}" "${HSACO_TEMPLATE}"
+  COMMENT "Packaging AIE kernels into hsaco files"
+  VERBATIM
+)
+
+add_custom_target(dispatch_hsaco
+  DEPENDS "${TEST_HSACO}" "${TEST_HSACO2}" "${TEST_HSACO_NOPDI}"
+)
+
+# ---------------------------------------------------------------------------
 # dispatch test executable
 # ---------------------------------------------------------------------------
 add_executable(dispatch dispatch.cc)
@@ -127,12 +175,15 @@ target_compile_definitions(dispatch
   PRIVATE
     DEFAULT_PDI_PATH=${DESIGN_PDI}
     DEFAULT_INSTS_PATH=${INSTS_BIN}
+    DEFAULT_HSACO_PATH=${TEST_HSACO}
+    DEFAULT_HSACO2_PATH=${TEST_HSACO2}
+    DEFAULT_HSACO_NOPDI_PATH=${TEST_HSACO_NOPDI}
 )
 target_link_libraries(dispatch
   PRIVATE
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(dispatch dispatch_kernel_artifacts)
+add_dependencies(dispatch dispatch_kernel_artifacts dispatch_hsaco)
 
 gtest_discover_tests(dispatch)
