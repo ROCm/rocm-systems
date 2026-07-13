@@ -18,6 +18,19 @@
 
 namespace {
 
+__device__ __forceinline__ void gfx950_padded_strong_group_flat_store(uint32_t value) {
+  asm volatile("s_mov_b64 s[14:15], src_shared_base\n\t"
+               "v_mov_b32 v0, s14\n\t"
+               "v_mov_b32 v1, s15\n\t"
+               "flat_store_dword v[0:1], %0\n\t"
+               ".rept 128\n\t"
+               "s_nop 0\n\t"
+               ".endr\n\t"
+               :
+               : "v"(value)
+               : "s14", "s15", "v0", "v1", "memory");
+}
+
 __global__ __launch_bounds__(64) void gfx950_moi_single_lds_store(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -175,6 +188,16 @@ __global__ __launch_bounds__(128) void gfx950_moi_two_wave_race(uint32_t *out) {
   }
   if (tid == 0u)
     out[0] = 0x95060001u;
+}
+
+__global__ __launch_bounds__(128) void gfx950_moi_two_wave_group_flat_race(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  asm volatile("" : : "v"(&lds[0]));
+  if (tid == 0u || tid == 64u)
+    gfx950_padded_strong_group_flat_store(0x95070000u | tid);
+  if (tid == 0u)
+    out[0] = 0x95070001u;
 }
 
 __global__ __launch_bounds__(128) void gfx950_moi_two_wave_read_read(uint32_t *out) {
@@ -648,6 +671,19 @@ TEST(ConSanMoiGfx950Test, TwoWaveRaceCompletes) {
   HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(device_out));
   EXPECT_EQ(out, 0x95060001u);
+}
+
+TEST(ConSanMoiGfx950Test, TwoWaveGroupFlatRaceCompletes) {
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, sizeof(uint32_t)));
+  gfx950_moi_two_wave_group_flat_race<<<1, 128>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out, 0x95070001u);
 }
 
 TEST(ConSanMoiGfx950Test, TwoWaveReadReadCompletes) {

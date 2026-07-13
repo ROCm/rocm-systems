@@ -5940,7 +5940,7 @@ TEST(ConSanMoi, Gfx950ClassifiesExplicitSharedBaseFlatLoadAsGroup) {
   EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
 }
 
-std::vector<uint8_t> make_gfx950_padded_group_flat_code_object() {
+std::vector<uint8_t> make_gfx950_padded_group_flat_code_object(uint32_t raw_segment = 0u) {
   const auto load =
       build_flat_load_b32_vaddr_vdst(/*vaddr=*/0, /*vdst=*/2, ROCJITSU_CODE_ARCH_CDNA4);
   if (!load)
@@ -5952,6 +5952,7 @@ std::vector<uint8_t> make_gfx950_padded_group_flat_code_object() {
       (*load)[0],
       (*load)[1],
   };
+  text_words[3] = (text_words[3] & ~(3u << 14u)) | ((raw_segment & 3u) << 14u);
   text_words.resize(180, build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
   text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
   return make_rdna4_lds_code_object(text_words, "gfx950_flat_group_emission",
@@ -6011,6 +6012,27 @@ TEST(ConSanMoi, Gfx950InlineShadowEmitsStronglyClassifiedGroupFlatAccess) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
   EXPECT_GE(result.patches.front().original_size, 2u * sizeof(uint32_t));
   EXPECT_EQ(result.patches.front().original_size % sizeof(uint32_t), 0u);
+}
+
+TEST(ConSanMoi, Gfx950GroupFlatEmissionExcludesTypedPrivateAndGlobalSegments) {
+  for (const uint32_t raw_segment : {1u, 2u}) {
+    const std::vector<uint8_t> bytes = make_gfx950_padded_group_flat_code_object(raw_segment);
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::Moi;
+    options.scratch_vgpr = 8;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.kernels.size(), 1u);
+    // SEG=1 and SEG=2 decode as their typed scratch/global instruction
+    // families, not as generic FLAT candidates.
+    EXPECT_TRUE(result.kernels.front().flat_sites.empty());
+    EXPECT_TRUE(result.moi_candidates.empty());
+    EXPECT_FALSE(result.modified);
+  }
 }
 
 TEST(ConSanMoi, Gfx950AtomicRecordPatchEmitsReleaseAndAcquireRecords) {

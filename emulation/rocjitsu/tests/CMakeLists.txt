@@ -2411,6 +2411,29 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveGroupFlatRaceCompletes"
+            NAME "ConSanMoiGfx950Test.RecordReplayReportsTwoWaveGroupFlatRace"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_group_flat_race"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.RecordReplayReportsTwoWaveGroupFlatRace"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*diagnostics=1.*conflict=true"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.SameWaveProgramOrderCompletes"
             NAME "ConSanMoiGfx950Test.RecordReplayKeepsSameWaveProgramOrderClean"
             TIMEOUT 30
@@ -2557,6 +2580,28 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         set_tests_properties(
             "ConSanMoiGfx950Test.InlineShadowReportsTwoWaveRace"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveGroupFlatRaceCompletes"
+            NAME "ConSanMoiGfx950Test.InlineShadowReportsTwoWaveGroupFlatRace"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_group_flat_race"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlineShadowReportsTwoWaveGroupFlatRace"
             PROPERTIES
                 PASS_REGULAR_EXPRESSION
                     "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"

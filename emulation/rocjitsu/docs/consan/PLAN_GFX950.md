@@ -290,6 +290,12 @@ Full gfx950 support means:
   dword/dwordx2/dwordx4 loads and stores. Unknown forms remain inventory-only;
   the synthetic Group fixture emits both probe families over the same low
   address VGPR and shared exact-shadow cell semantics.
+- 2026-07-13: `FL1B` is `DONE`; `FL1X` is `NOT SELECTED`. A live padded
+  `flat_store_dword` derived from `SRC_SHARED_BASE` races between two gfx950
+  waves. Record/replay and inline shadow each report exactly one conflict for
+  the same four-byte LDS cell. Unknown pointers and typed private/global
+  segments do not emit LDS probes. All 219 focused CPU/synthetic tests and all
+  81 registered `Gfx950` CTests pass with the workspace TheRock runtime.
 
 ## DAG Overview
 
@@ -303,12 +309,14 @@ flowchart LR
   DONE["DONE: completed and verified"]:::done
   ACTIVE["ACTIVE: work in progress"]:::active
   TODO["TODO: not started"]:::todo
+  NOT_SELECTED["NOT SELECTED: mutually exclusive path not taken"]:::notselected
   BLOCKED["BLOCKED: requires unavailable external evidence"]:::blocked
   TARGET{"TARGET: acceptance gate"}:::target
 
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef notselected fill:#cfe2f3,stroke:#134f5c,stroke-width:2px,color:#000;
   classDef blocked fill:#e06666,stroke:#660000,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
 ```
@@ -426,8 +434,8 @@ flowchart LR
   IS1B["IS1B: Single-Cell Inline Shadow"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
   FL1A["FL1A: Group-Flat Inventory"]:::done
-  FL1B["FL1B: Group-Flat Emission"]:::active
-  FL1X["FL1X: Typed No-Forms Result"]:::todo
+  FL1B["FL1B: Group-Flat Emission"]:::done
+  FL1X["FL1X: Typed No-Forms Result"]:::notselected
   FLC{"FLC: Group-Flat Capability Closed"}:::target
   AT1A["AT1A: Atomic Decode And Records"]:::done
   AT1B["AT1B: Inline Atomic Handoff"]:::done
@@ -485,6 +493,7 @@ flowchart LR
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
   classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
+  classDef notselected fill:#cfe2f3,stroke:#134f5c,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
 ```
 
@@ -1498,7 +1507,7 @@ Result:
   retained `SRC_SHARED_BASE` fixture produces a strict Group B32 load, selecting
   a bounded zero-offset B32/B64/B128 load/store set for FL1B.
 
-### FL1B: gfx950 Group-Flat Emission - ACTIVE
+### FL1B: gfx950 Group-Flat Emission - DONE
 
 Goal: instrument the bounded FL1A form set without misclassifying global or
 private accesses.
@@ -1510,21 +1519,27 @@ Work:
 - Reuse native LDS cell-range semantics rather than creating another shadow
   layout.
 
-Progress:
+Result:
 
 - Synthetic record/replay and inline-shadow emission is complete for the
   bounded CDNA4 dword/dwordx2/dwordx4 form set. The CDNA4 gate additionally
   requires raw generic segment 0 and immediate offset 0; strict provenance
   still excludes unknown/global/private pointers before emission.
-- Live record/replay versus inline-shadow agreement remains to close this node,
-  so its Mermaid box stays `active`/orange.
+- A live two-wave `flat_store_dword` fixture explicitly constructs its pointer
+  from `SRC_SHARED_BASE`. Record/replay processes two accesses and reports one
+  conflict; inline shadow reports one diagnostic and one visible exact-shadow
+  cell for the same four-byte range.
+- Unknown generic pointers remain inventory-only. CDNA4 `SEG=1` private and
+  `SEG=2` global forms decode into their typed families and never enter the LDS
+  candidate set. The node is green after 219 focused CPU/synthetic tests and
+  all 81 registered `Gfx950` CTests pass.
 
 Done criteria:
 
 - A strongly classified flat-LDS race agrees between record/replay and inline
   shadow; unknown/global/private forms are not instrumented as LDS.
 
-### FL1X: Typed No-Admitted-Forms Result - TODO
+### FL1X: Typed No-Admitted-Forms Result - NOT SELECTED
 
 Goal: close the group-flat capability honestly when FL1A finds no strongly
 proven form worth instrumenting.
@@ -1538,6 +1553,11 @@ Done criteria:
 
 - Native LDS coverage remains enabled, while unknown, global, private, and
   merely speculative flat candidates cannot be mistaken for sanitized LDS.
+
+Result: not selected because FL1A found a strongly classified Group form and
+FL1B implemented and validated it. Its Mermaid box is light blue rather than
+gray to distinguish an intentionally untaken mutually exclusive branch from
+unfinished work.
 
 Only one of FL1B or FL1X is required to reach FLC. Discovery of an admissible
 strongly classified form requires FL1B; FL1X is not an escape from implementing
