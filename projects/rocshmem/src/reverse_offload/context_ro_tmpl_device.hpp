@@ -329,7 +329,7 @@ __device__ int ROContext::reduce_scatter_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
+__device__ void ROContext::broadcast_wg(rocshmem_team_t team, T *dest,
                                      const T *source, int nelems, int pe_root) {
   if (!is_thread_zero_in_block()) {
     __syncthreads();
@@ -345,6 +345,16 @@ __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
                       GetROType<T>::Type);
 
   __syncthreads();
+}
+
+template <typename T>
+__device__ int ROContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                        [[maybe_unused]] T *dest, 
+                                        [[maybe_unused]] const T* source, 
+                                        [[maybe_unused]] int nelement, 
+                                        [[maybe_unused]] int PE_root) {
+  LOGD_WARN("Broadcast Wave API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
 }
 
 template <typename T>

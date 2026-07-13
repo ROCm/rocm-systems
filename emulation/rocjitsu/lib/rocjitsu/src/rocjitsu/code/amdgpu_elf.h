@@ -64,6 +64,11 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x49;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
 
+/*
+ * \NPI new GPU: add its EF_AMDGPU_MACH_AMDGCN_* constant above (value from the \
+ * LLVM AMDGPU backend), then handle it in elf_mach_for_arch, arch_for_elf_mach, \
+ * and elf_mach_name below.
+ */
 inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
