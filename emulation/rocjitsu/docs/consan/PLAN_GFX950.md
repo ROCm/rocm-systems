@@ -311,6 +311,10 @@ Full gfx950 support means:
   independent hip-moi controls, and 11 CDNA4 IREE tile-and-fuse/scan/softmax
   workloads for each profile. The existing RDNA4 selector remains the gfx1201
   branch rather than leaking into gfx950 runs.
+- 2026-07-13: `T2SC` is `DONE`; `T2RR` is now `ACTIVE`. The target-aware
+  portable gfx950 LDS binary passes both guarded SuperCollider rows: the clean
+  marker stays zero and the racy marker is published, with patch emission
+  required in both runs.
 
 ## DAG Overview
 
@@ -520,8 +524,8 @@ flowchart LR
   NP{"NP: Native Probe Parity"}:::target
   T1A["T1A: Target-Aware Test Registration"]:::done
   T1B["T1B: Workload And Tier Selection"]:::done
-  T2SC["T2SC: SuperCollider Focused Tier"]:::active
-  T2RR["T2RR: Record/Replay Focused Tier"]:::todo
+  T2SC["T2SC: SuperCollider Focused Tier"]:::done
+  T2RR["T2RR: Record/Replay Focused Tier"]:::active
   T2SA["T2SA: Sampled Focused Tier"]:::todo
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::todo
   T2R["T2R: Resource And Spill Tier"]:::todo
@@ -1662,7 +1666,7 @@ Result:
 - gfx1201 retains its established RDNA4 tile-and-fuse WMMA selector; gfx950
   uses CDNA4 MFMA names and cannot silently run an empty RDNA-only regex.
 
-### T2SC: gfx950 SuperCollider Focused Tier - ACTIVE
+### T2SC: gfx950 SuperCollider Focused Tier - DONE
 
 Goal: prove focused native SuperCollider behavior before broader workloads.
 
@@ -1675,7 +1679,11 @@ Done criteria:
 - The positive row requires a patch and marker; the clean row forbids a false
   diagnostic.
 
-### T2RR: gfx950 Record/Replay Focused Tier - TODO
+Result: both target-aware gfx950 CTest rows pass. Instrumentation is mandatory;
+the clean row retains a zero report marker and the racy row publishes the
+expected marker.
+
+### T2RR: gfx950 Record/Replay Focused Tier - ACTIVE
 
 Required rows:
 
