@@ -267,6 +267,13 @@ Full gfx950 support means:
   barrier controls remain clean; wrong-address atomic controls report exactly
   one conflict. All 200 ConSan CPU tests and all 101 gfx950 CTests pass using
   the workspace TheRock runtime.
+- 2026-07-13: `S7D` is `DONE`, reaching the `SP` spill acceptance gate. The
+  reachable CDNA4 helper has two kernel owners with different descriptor and
+  private baselines; record/replay, sampled, and inline probes respectively
+  commit one compatible 44-, 52-, and 60-byte layout to both owners while
+  leaving an unrelated kernel unchanged. Marking only one owner dynamic-stack
+  rejects the shared spill transaction without emitting a modified ELF. All
+  203 ConSan CPU tests and all 104 gfx950 CTests pass.
 
 ## DAG Overview
 
@@ -346,7 +353,7 @@ flowchart LR
   S7A["S7A: Sampled Spill Parity"]:::done
   S7B["S7B: Inline Access Spill Parity"]:::done
   S7C["S7C: Barrier And Atomic Spill Parity"]:::done
-  S7D["S7D: Shared-Helper Spill Layout"]:::active
+  S7D["S7D: Shared-Helper Spill Layout"]:::done
   SP{"SP: gfx950 Spill Accepted"}:::target
 
   F0 --> S1
@@ -927,7 +934,7 @@ Result:
   barrier or atomic events; ordered controls stay clean, while changing only
   the acquire address produces one diagnostic in each atomic engine.
 
-### S7D: Shared-Helper Spill Layout - ACTIVE
+### S7D: Shared-Helper Spill Layout - DONE
 
 Goal: close spill parity with a reachable helper shared by multiple kernels.
 
@@ -940,6 +947,15 @@ Done criteria:
 
 - Standard MOI runs need no register numbers, and focused controls observe at
   least one emitted spill patch per applicable engine and shared owner.
+
+Result:
+
+- Record/replay, sampled, and inline-shadow automatically spill three, five,
+  and seven VGPRs for the same reachable CDNA4 helper. Each patch names both
+  owners and grows both descriptors to the common 44-, 52-, or 60-byte layout;
+  the unrelated descriptor remains at zero.
+- A per-owner dynamic-stack marker proves atomic rollback: if either reachable
+  owner cannot accept the common private layout, no patched ELF is emitted.
 
 ## Native Probe Nodes
 
