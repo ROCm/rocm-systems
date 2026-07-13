@@ -36,23 +36,24 @@ inline constexpr uint16_t kAnyTranslationOpcode = 0xFFFFu;
 class Instruction;
 class LivenessAnalysis;
 
-/// @brief Per-kernel register resource state shared by semantic lowerings.
+/// @brief Architecture-neutral resource accounting shared by semantic lowerings.
 ///
-/// @details TranslationContext is created once per kernel from the current
-/// target kernel descriptor translation, then passed through every semantic
-/// EXPAND rule for that kernel. The `num_*` fields describe the descriptor
-/// state the lowering started from. The `required_*` fields are feedback from
-/// lowerings that allocated scratch registers beyond those descriptor counts.
+/// @details This state is created once per kernel from the current target kernel
+/// descriptor translation, then passed through every semantic EXPAND rule for
+/// that kernel. The `num_*` fields describe the descriptor state the lowering
+/// started from. The `required_*` fields are feedback from lowerings that
+/// allocated scratch registers beyond those descriptor counts. Feature-specific
+/// lowering state belongs in a separate context component.
 ///
 /// Descriptor translation happens before instruction translation, but semantic
 /// lowerings only know their actual scratch choices after liveness has been
 /// computed. Each kernel is lowered once while recording the highest SGPR/VGPR
-/// count required by those lowerings here; BinaryTranslator then recomputes the
+/// and private-memory requirements here; BinaryTranslator then recomputes the
 /// affected descriptor translations with those larger minimums before patching
 /// descriptors into the output image. A second instruction pass is only needed
 /// if a future lowering depends on descriptor-derived register numbers that can
 /// change during that recomputation.
-struct TranslationContext {
+struct KernelResourceRequirements {
   /// @brief Initial target ordinary VGPR count from descriptor translation.
   uint32_t num_vgprs = 0;
 
@@ -95,62 +96,26 @@ struct TranslationContext {
   /// guest body is allowed to clobber the dispatch/kernarg pointer SGPRs.
   uint32_t semantic_spill_persistent_end = 0;
 
-  /// @brief True when this kernel's LDS accesses target a global-memory backing buffer.
-  ///
-  /// @details Descriptor translation sets hardware LDS to zero in this mode, so
-  /// any real LDS read/write instruction in the source body must be rewritten.
-  /// Cross-lane DS instructions that do not access LDS storage, such as
-  /// bpermute, may still use the DS unit directly.
-  bool virtualize_lds = false;
+  /// @brief Construct an empty context component for tests or call sites without
+  /// descriptor feedback.
+  KernelResourceRequirements() = default;
 
-  /// @brief 64-bit SGPR-pair base address for the virtual LDS backing buffer.
-  ///
-  /// @details CDNA3 flat/global addressing uses this SGPR pair plus the source
-  /// DS address VGPR and folded DS immediate offset. The runtime/prologue path
-  /// is responsible for loading this pair before the rewritten body executes.
-  uint16_t virtual_lds_base_sgpr = 0;
-
-  /// @brief True when the virtual-LDS base SGPR pair is borrowed per DS use.
-  ///
-  /// @details Some kernels already allocate and touch every ordinary SGPR pair.
-  /// For those kernels, DBT preserves the selected pair around each lowered LDS
-  /// memory operation instead of permanently clobbering it in the entry
-  /// prologue.
-  bool virtual_lds_base_sgpr_spill_per_use = false;
-
-  /// @brief True when the runtime backing pointer was spilled at entry.
-  bool virtual_lds_base_pointer_spilled = false;
-
-  /// @brief Private scratch offset of the spilled virtual-LDS backing pointer.
-  uint32_t virtual_lds_base_pointer_spill_offset = 0;
-
-  /// @brief Target kernarg segment pointer SGPR pair used by entry-only wrapper loads.
-  uint16_t virtual_lds_kernarg_segment_ptr_sgpr = 0;
-
-  /// @brief Kernarg-wrapper byte offset of the runtime virtual-LDS state.
-  uint32_t virtual_lds_kernarg_pointer_offset = 0;
-
-  /// @brief Construct an empty context for tests or call sites without descriptor feedback.
-  TranslationContext() = default;
-
-  /// @brief Construct a context for kernels that only need VGPR/SGPR descriptor state.
-  ///
+  /// @brief Construct resource accounting for kernels that only need VGPR/SGPR
+  /// descriptor state.
   /// @param vgprs Initial target ordinary VGPR count.
   /// @param sgprs Initial target SGPR count.
-  TranslationContext(uint32_t vgprs, uint32_t sgprs)
-      : num_vgprs(vgprs), num_sgprs(sgprs), required_vgpr_count(0), required_sgpr_count(0) {}
+  KernelResourceRequirements(uint32_t vgprs, uint32_t sgprs) : num_vgprs(vgprs), num_sgprs(sgprs) {}
 
-  /// @brief Construct a full context from target kernel descriptor translation.
-  ///
+  /// @brief Construct full resource accounting from target descriptor translation.
   /// @param vgprs Initial target ordinary VGPR count.
   /// @param agprs Initial target AccVGPR count.
   /// @param accum_base Initial target AccVGPR base.
   /// @param sgprs Initial target SGPR count.
   /// @param private_bytes Initial per-lane private segment size.
-  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
-                     uint32_t private_bytes = 0)
+  KernelResourceRequirements(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
+                             uint32_t private_bytes = 0)
       : num_vgprs(vgprs), num_agprs(agprs), accum_offset(accum_base), num_sgprs(sgprs),
-        required_vgpr_count(0), required_sgpr_count(0), private_segment_fixed_size(private_bytes),
+        private_segment_fixed_size(private_bytes),
         required_private_segment_fixed_size(private_bytes),
         semantic_spill_persistent_end(private_bytes) {}
 
@@ -210,10 +175,63 @@ struct TranslationContext {
     constexpr uint32_t kSpillAlignment = 16;
     const uint32_t base =
         (semantic_spill_persistent_end + kSpillAlignment - 1u) & ~(kSpillAlignment - 1u);
-    const uint32_t required = base + dwords * 4u;
-    require_private_segment_bytes(required);
+    require_private_segment_bytes(base + dwords * 4u);
     return base;
   }
+};
+
+/// @brief State owned by the virtual-LDS feature while lowering one kernel.
+struct VirtualLdsTranslationState {
+  /// @brief True when this kernel's LDS accesses target a global-memory backing buffer.
+  ///
+  /// @details Descriptor translation sets hardware LDS to zero in this mode, so
+  /// any real LDS read/write instruction in the source body must be rewritten.
+  /// Cross-lane DS instructions that do not access LDS storage, such as
+  /// bpermute, may still use the DS unit directly.
+  bool virtualize_lds = false;
+
+  /// @brief 64-bit SGPR-pair base address for the virtual-LDS backing buffer.
+  ///
+  /// @details CDNA3 flat/global addressing uses this SGPR pair plus the source
+  /// DS address VGPR and folded DS immediate offset. The runtime/prologue path
+  /// is responsible for loading this pair before the rewritten body executes.
+  uint16_t virtual_lds_base_sgpr = 0;
+
+  /// @brief True when the virtual-LDS base SGPR pair is borrowed per DS use.
+  ///
+  /// @details Some kernels already allocate and touch every ordinary SGPR pair.
+  /// For those kernels, DBT preserves the selected pair around each lowered LDS
+  /// memory operation instead of permanently clobbering it in the entry
+  /// prologue.
+  bool virtual_lds_base_sgpr_spill_per_use = false;
+
+  /// @brief True when the runtime backing pointer was spilled at entry.
+  bool virtual_lds_base_pointer_spilled = false;
+
+  /// @brief Private scratch offset of the spilled virtual-LDS backing pointer.
+  uint32_t virtual_lds_base_pointer_spill_offset = 0;
+
+  /// @brief Target kernarg segment pointer SGPR pair used by entry-only wrapper loads.
+  uint16_t virtual_lds_kernarg_segment_ptr_sgpr = 0;
+
+  /// @brief Kernarg-wrapper byte offset of the runtime virtual-LDS state.
+  uint32_t virtual_lds_kernarg_pointer_offset = 0;
+};
+
+/// @brief Per-kernel state passed through semantic translation rules.
+///
+/// @details Inheritance preserves the compact field access used by existing
+/// rules while making the ownership split explicit. Generic DBT/DBI resource
+/// helpers can consume KernelResourceRequirements without depending on virtual
+/// LDS, and pair-specific lowerings can consume VirtualLdsTranslationState.
+struct TranslationContext : KernelResourceRequirements, VirtualLdsTranslationState {
+  TranslationContext() = default;
+
+  TranslationContext(uint32_t vgprs, uint32_t sgprs) : KernelResourceRequirements(vgprs, sgprs) {}
+
+  TranslationContext(uint32_t vgprs, uint32_t agprs, uint32_t accum_base, uint32_t sgprs,
+                     uint32_t private_bytes = 0)
+      : KernelResourceRequirements(vgprs, agprs, accum_base, sgprs, private_bytes) {}
 };
 
 /// @brief Status returned by a semantic EXPAND rule lookup or expansion.

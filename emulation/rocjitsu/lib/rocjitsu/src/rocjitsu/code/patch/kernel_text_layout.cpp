@@ -4,7 +4,6 @@
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 
 #include "rocjitsu/code/basic_block.h"
-#include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -48,9 +47,11 @@ constexpr uint64_t kLongDirectBranchSourceDistanceThresholdBytes = 32 * 1024;
 
 [[nodiscard]] TextRelocationResult
 relocation_error(uint64_t source_offset, std::string message,
-                 TextLayoutFailureCategory failure = TextLayoutFailureCategory::InvalidLayout) {
+                 TextLayoutFailureCategory failure = TextLayoutFailureCategory::InvalidLayout,
+                 TextLayoutFailureReason reason = TextLayoutFailureReason::None) {
   return {.ok = false,
           .failure = failure,
+          .reason = reason,
           .source_offset = source_offset,
           .message = std::move(message)};
 }
@@ -128,7 +129,7 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
   return (target_residue + alignment - current_residue) % alignment;
 }
 
-[[nodiscard]] uint64_t kernel_entry_stub_bytes(const KdTranslation &translation) {
+[[nodiscard]] uint64_t kernel_entry_stub_bytes(const KernelEntryLayoutPlan &translation) {
   return translation.prologue_words.size() * sizeof(uint32_t) + sizeof(uint32_t);
 }
 
@@ -138,9 +139,9 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
   std::memcpy(dst.data() + offset, words.data(), words.size() * sizeof(uint32_t));
 }
 
-[[nodiscard]] bool write_launch_stub(std::vector<uint8_t> &text, const KdTranslation &translation,
-                                     uint64_t stub_offset, uint64_t target_offset,
-                                     rj_code_arch_t arch) {
+[[nodiscard]] bool write_launch_stub(std::vector<uint8_t> &text,
+                                     const KernelEntryLayoutPlan &translation, uint64_t stub_offset,
+                                     uint64_t target_offset, rj_code_arch_t arch) {
   uint64_t cursor = stub_offset;
   write_words_at(text, cursor, translation.prologue_words);
   cursor += translation.prologue_words.size() * sizeof(uint32_t);
@@ -175,7 +176,7 @@ void write_words_at(std::vector<uint8_t> &dst, uint64_t offset, std::span<const 
   return placement.target_start;
 }
 
-bool kernarg_preload_launch_window_fits(const KdTranslation &translation) {
+bool kernarg_preload_launch_window_fits(const KernelEntryLayoutPlan &translation) {
   return !translation.has_kernarg_preload ||
          kernel_entry_stub_bytes(translation) <= kKernargPreloadSkipBytes;
 }
@@ -206,9 +207,9 @@ void rebase_kernel_text_layout(KernelTextLayout &layout, uint64_t delta) {
 }
 
 KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
-                                                  const KdTranslation &translation,
+                                                  const SkippedKernelLayoutPlan &plan,
                                                   rj_code_arch_t arch) {
-  const uint64_t source_entry = translation.entry_text_offset;
+  const uint64_t source_entry = plan.source_entry;
   const uint64_t padding = padding_for_residue(text.size(), source_entry % 256, 256);
   append_nop_padding(text, padding, arch);
   const uint64_t target_entry = text.size();
@@ -222,7 +223,7 @@ KernelTextAppendResult append_skipped_kernel_stub(std::vector<uint8_t> &text,
   const uint32_t endpgm = build_s_endpgm(arch);
   append_words(text, std::span<const uint32_t>(&trap, 1));
   append_words(text, std::span<const uint32_t>(&endpgm, 1));
-  if (translation.has_kernarg_preload) {
+  if (plan.has_kernarg_preload) {
     append_nop_padding(text, kKernargPreloadSkipBytes - 2 * sizeof(uint32_t), arch);
     append_words(text, std::span<const uint32_t>(&trap, 1));
     append_words(text, std::span<const uint32_t>(&endpgm, 1));
@@ -235,11 +236,6 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
                                                     KernelTextLayout &layout,
                                                     std::span<const uint8_t> kernel_text,
                                                     rj_code_arch_t arch) {
-  if (layout.translation == nullptr) {
-    return kernel_text_append_error(layout.source_entry,
-                                    "kernel text layout is missing descriptor translation");
-  }
-
   auto body_entry = target_for_source_offset(layout, layout.source_entry);
   if (!body_entry) {
     return kernel_text_append_error(
@@ -248,15 +244,15 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   layout.target_body_entry = *body_entry;
 
   std::optional<uint64_t> preload_body_entry;
-  if (layout.translation->has_kernarg_preload) {
-    const uint64_t source_preload_entry = layout.translation->kernarg_preload_entry_text_offset;
+  if (layout.entry_plan.has_kernarg_preload) {
+    const uint64_t source_preload_entry = layout.entry_plan.kernarg_preload_entry_text_offset;
     preload_body_entry = target_for_source_offset(layout, source_preload_entry);
     if (!preload_body_entry) {
       return kernel_text_append_error(
           source_preload_entry,
           "kernarg preload firmware entry offset is not present in the relocated body");
     }
-    if (!kernarg_preload_launch_window_fits(*layout.translation)) {
+    if (!kernarg_preload_launch_window_fits(layout.entry_plan)) {
       return kernel_text_append_error(
           layout.source_entry,
           "kernel descriptor prologue does not fit in the 256-byte kernarg preload compatibility "
@@ -265,9 +261,9 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
     }
   }
 
-  const bool has_descriptor_prologue = !layout.translation->prologue_words.empty();
+  const bool has_descriptor_prologue = !layout.entry_plan.prologue_words.empty();
   uint64_t target_delta = 0;
-  if (layout.translation->has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload) {
     // Kernarg-preload kernels have two hardware-visible entries separated by
     // exactly 256 bytes. Reserve that launch window before appending the body;
     // the stubs are written after the body offsets have been rebased.
@@ -275,8 +271,8 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
         padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
     append_nop_padding(translated_text, launch_padding, arch);
     layout.target_entry = translated_text.size();
-    const uint64_t launch_end = layout.target_entry + kKernargPreloadSkipBytes +
-                                kernel_entry_stub_bytes(*layout.translation);
+    const uint64_t launch_end =
+        layout.target_entry + kKernargPreloadSkipBytes + kernel_entry_stub_bytes(layout.entry_plan);
     append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
     target_delta = translated_text.size();
   } else if (has_descriptor_prologue) {
@@ -290,7 +286,7 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
         padding_for_residue(translated_text.size(), layout.source_entry % 256, 256);
     append_nop_padding(translated_text, launch_padding, arch);
     layout.target_entry = translated_text.size();
-    const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(*layout.translation);
+    const uint64_t launch_end = layout.target_entry + kernel_entry_stub_bytes(layout.entry_plan);
     append_nop_padding(translated_text, launch_end - translated_text.size(), arch);
     const uint64_t body_padding = padding_for_residue(
         translated_text.size() + layout.target_body_entry, layout.source_entry % 256, 256);
@@ -306,24 +302,24 @@ KernelTextAppendResult append_relocated_kernel_text(std::vector<uint8_t> &transl
   rebase_kernel_text_layout(layout, target_delta);
   translated_text.insert(translated_text.end(), kernel_text.begin(), kernel_text.end());
 
-  if (layout.translation->has_kernarg_preload) {
+  if (layout.entry_plan.has_kernarg_preload) {
     assert(preload_body_entry && "preload body entry was checked before rebase");
-    if (!write_launch_stub(translated_text, *layout.translation, layout.target_entry,
+    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
                            layout.target_body_entry, arch)) {
       return kernel_text_append_error(layout.source_entry,
                                       "kernarg preload launch branch cannot encode target body",
                                       TextLayoutFailureCategory::ResourceLimit);
     }
-    if (!write_launch_stub(translated_text, *layout.translation,
+    if (!write_launch_stub(translated_text, layout.entry_plan,
                            layout.target_entry + kKernargPreloadSkipBytes,
                            *preload_body_entry + target_delta, arch)) {
       return kernel_text_append_error(
-          layout.translation->kernarg_preload_entry_text_offset,
+          layout.entry_plan.kernarg_preload_entry_text_offset,
           "kernarg preload firmware launch branch cannot encode target body",
           TextLayoutFailureCategory::ResourceLimit);
     }
   } else if (has_descriptor_prologue) {
-    if (!write_launch_stub(translated_text, *layout.translation, layout.target_entry,
+    if (!write_launch_stub(translated_text, layout.entry_plan, layout.target_entry,
                            layout.target_body_entry, arch)) {
       return kernel_text_append_error(
           layout.source_entry, "kernel descriptor prologue branch range exceeds s_branch simm16",
@@ -663,7 +659,7 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
           return relocation_error(
               fixup.source_inst_offset,
               direct_branch_range_error(fixup.target_inst_offset, *target_target, new_delta),
-              TextLayoutFailureCategory::ResourceLimit);
+              TextLayoutFailureCategory::ResourceLimit, TextLayoutFailureReason::BranchOutOfRange);
         }
         words = std::move(island_words);
       } else {
