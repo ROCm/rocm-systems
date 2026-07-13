@@ -1728,8 +1728,9 @@ ncclResult_t ncclDevrCommCreateInternal(
     reqs->ginCounterCount = ginCounterTotal;
     NCCLCHECK(ncclGinDevCommSetup(comm, reqs, outDevComm));
 #ifdef ENABLE_ROCSHMEM_GIN
-    if (ginSignalTotal > 0 && win != nullptr) {
-      NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset,
+    if (ginSignalTotal > 0 && devr->winSortedCount > 0) {
+      struct ncclDevrWindow* win0 = devr->winSorted[0].win;
+      NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win0->userPtr, ginAnvilNetSignalsOffset,
                                                           nGinContextsTotal, ginSignalTotal),
                     ret, fail);
     }
