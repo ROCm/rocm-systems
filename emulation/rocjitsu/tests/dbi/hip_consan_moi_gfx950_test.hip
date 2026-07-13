@@ -244,6 +244,46 @@ __global__ __launch_bounds__(128) void gfx950_moi_barrier_ordered_two_wave(uint3
     out[0] = 0x95090001u;
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_forced_barrier_spill(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  uint32_t values[8] = {
+      0x13500000u ^ tid, 0x24500000u ^ tid, 0x35500000u ^ tid, 0x46500000u ^ tid,
+      0x57500000u ^ tid, 0x68500000u ^ tid, 0x79500000u ^ tid, 0x8a500000u ^ tid,
+  };
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  if (tid == 0u) {
+    asm volatile("s_nop 0\n\t"
+                 "ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(values[0])
+                 : "memory");
+  }
+  __syncthreads();
+  if (tid == 64u) {
+    asm volatile("s_nop 0\n\t"
+                 "ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(values[1])
+                 : "memory");
+  }
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  const uint32_t base = tid * 8u;
+  for (uint32_t i = 0; i < 8u; ++i)
+    out[base + i] = values[i];
+}
+
 __global__ __launch_bounds__(64) void gfx950_moi_same_wave_program_order(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -352,6 +392,78 @@ __global__ __launch_bounds__(128) void gfx950_moi_atomic_handoff(uint32_t *out,
   }
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_forced_atomic_spill(uint32_t *out,
+                                                                      uint32_t *release_counter,
+                                                                      uint32_t *acquire_counter,
+                                                                      uint32_t *flag) {
+  __shared__ uint32_t lds[1];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  uint32_t values[8] = {
+      0x14500000u ^ tid, 0x25500000u ^ tid, 0x36500000u ^ tid, 0x47500000u ^ tid,
+      0x58500000u ^ tid, 0x69500000u ^ tid, 0x7a500000u ^ tid, 0x8b500000u ^ tid,
+  };
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  if (tid == 0u) {
+    const uint32_t one = 1u;
+    asm volatile("s_nop 0\n\t"
+                 "ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(values[0])
+                 : "memory");
+    asm volatile("flat_atomic_add %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 :
+                 : "v"(release_counter), "v"(one)
+                 : "memory");
+    *flag = 1u;
+  }
+  if (tid == 64u) {
+    volatile uint32_t *volatile_flag = flag;
+    while (*volatile_flag == 0u) {
+    }
+    const uint32_t one = 1u;
+    uint32_t old = 0u;
+    asm volatile("flat_atomic_add %0, %1, %2 sc0\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 "s_waitcnt vmcnt(0)\n\t"
+                 : "=&v"(old)
+                 : "v"(acquire_counter), "v"(one)
+                 : "memory");
+    asm volatile("s_nop 0\n\t"
+                 "ds_read_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 : "=&v"(old)
+                 : "v"(address)
+                 : "memory");
+  }
+  asm volatile(""
+               : "+v"(values[0]), "+v"(values[1]), "+v"(values[2]), "+v"(values[3]),
+                 "+v"(values[4]), "+v"(values[5]), "+v"(values[6]), "+v"(values[7]));
+  const uint32_t base = tid * 8u;
+  for (uint32_t i = 0; i < 8u; ++i)
+    out[base + i] = values[i];
+}
+
+void expect_spill_values(const std::vector<uint32_t> &out, const uint32_t (&seeds)[8]) {
+  for (uint32_t tid = 0; tid < 128u; ++tid) {
+    for (uint32_t i = 0; i < 8u; ++i)
+      EXPECT_EQ(out[tid * 8u + i], seeds[i] ^ tid) << "tid=" << tid << " i=" << i;
+  }
+}
+
 void run_atomic_handoff(bool same_address) {
   uint32_t *device_out = nullptr;
   uint32_t *release_counter = nullptr;
@@ -378,6 +490,38 @@ void run_atomic_handoff(bool same_address) {
   HIP_ASSERT(hipFree(device_out));
   EXPECT_EQ(out[0], 0x95090001u);
   EXPECT_EQ(out[1], same_address ? 1u : 0u);
+}
+
+void run_forced_atomic_spill(bool same_address) {
+  constexpr uint32_t kWords = 128u * 8u;
+  uint32_t *device_out = nullptr;
+  uint32_t *release_counter = nullptr;
+  uint32_t *acquire_counter = nullptr;
+  uint32_t *flag = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kWords * sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&release_counter, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&acquire_counter, sizeof(uint32_t)));
+  HIP_ASSERT(hipMalloc(&flag, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kWords * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(release_counter, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(acquire_counter, 0, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(flag, 0, sizeof(uint32_t)));
+  uint32_t *selected_acquire_counter = same_address ? release_counter : acquire_counter;
+  gfx950_moi_forced_atomic_spill<<<1, 128>>>(device_out, release_counter, selected_acquire_counter,
+                                             flag);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kWords);
+  HIP_ASSERT(hipMemcpy(out.data(), device_out, kWords * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(flag));
+  HIP_ASSERT(hipFree(acquire_counter));
+  HIP_ASSERT(hipFree(release_counter));
+  HIP_ASSERT(hipFree(device_out));
+  constexpr uint32_t seeds[8] = {
+      0x14500000u, 0x25500000u, 0x36500000u, 0x47500000u,
+      0x58500000u, 0x69500000u, 0x7a500000u, 0x8b500000u,
+  };
+  expect_spill_values(out, seeds);
 }
 
 TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
@@ -536,6 +680,24 @@ TEST(ConSanMoiGfx950Test, BarrierOrderedTwoWaveCompletes) {
   HIP_ASSERT(hipFree(device_out));
 }
 
+TEST(ConSanMoiGfx950Test, ForcedBarrierSpillPreservesEightLiveVgprs) {
+  constexpr uint32_t kWords = 128u * 8u;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kWords * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kWords * sizeof(uint32_t)));
+  gfx950_moi_forced_barrier_spill<<<1, 128>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kWords);
+  HIP_ASSERT(hipMemcpy(out.data(), device_out, kWords * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  constexpr uint32_t seeds[8] = {
+      0x13500000u, 0x24500000u, 0x35500000u, 0x46500000u,
+      0x57500000u, 0x68500000u, 0x79500000u, 0x8a500000u,
+  };
+  expect_spill_values(out, seeds);
+}
+
 TEST(ConSanMoiGfx950Test, SameWaveProgramOrderCompletes) {
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
@@ -568,6 +730,14 @@ TEST(ConSanMoiGfx950Test, AtomicHandoffSameAddressCompletes) {
 
 TEST(ConSanMoiGfx950Test, AtomicHandoffWrongAddressCompletes) {
   run_atomic_handoff(/*same_address=*/false);
+}
+
+TEST(ConSanMoiGfx950Test, ForcedAtomicSpillSameAddressPreservesEightLiveVgprs) {
+  run_forced_atomic_spill(/*same_address=*/true);
+}
+
+TEST(ConSanMoiGfx950Test, ForcedAtomicSpillWrongAddressPreservesEightLiveVgprs) {
+  run_forced_atomic_spill(/*same_address=*/false);
 }
 
 } // namespace

@@ -2833,6 +2833,81 @@ TEST(ConSanMoi, Gfx950BarrierFixtureSeparatesWaitAndBarrierInventory) {
   EXPECT_EQ(kernel.barrier_sites.front().text_offset, sizeof(uint32_t));
 }
 
+TEST(ConSanMoi, Gfx950BarrierRecordForcedSpillUsesPlannedPrivateWindow) {
+  const auto barrier_sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier_sequence);
+  const std::array<uint32_t, 3> text_words = {
+      (*barrier_sequence)[0],
+      (*barrier_sequence)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_barrier_forced_spill", kRdna4Wave64AllVgprsGranulated,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_barriers = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
+  options.max_patches = 1;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
+    return item.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
+  });
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->spilled_vgpr_count, 6u);
+  EXPECT_EQ(patch->required_private_segment_size, 24u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+}
+
+TEST(ConSanMoi, Gfx950InlineBarrierForcedSpillKeepsPrivateEpochWindowDisjoint) {
+  const auto barrier_sequence = build_cdna4_s_barrier_with_memory_wait(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(barrier_sequence);
+  const std::array<uint32_t, 6> text_words = {
+      build_v_mov_b32_e32(/*vdst=*/10, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4),
+      0xD81A0000u,
+      0x00000000u, // ds_store_b32
+      (*barrier_sequence)[0],
+      (*barrier_sequence)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_inline_barrier_forced_spill", /*vgpr_granulated=*/1,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_barriers = true;
+  options.force_private_epoch = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  const auto barrier = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
+  });
+  ASSERT_NE(access, result.patches.end());
+  ASSERT_NE(barrier, result.patches.end());
+  EXPECT_EQ(access->spilled_vgpr_count, 7u);
+  EXPECT_EQ(barrier->spilled_vgpr_count, 1u);
+  EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(barrier->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(access->required_private_segment_size, 44u);
+  EXPECT_EQ(barrier->required_private_segment_size, 44u);
+}
+
 TEST(ConSanMoi, Gfx950ExtendedLdsFormsNormalizeRegistersAndScaledRanges) {
   struct Expected {
     const char *mnemonic;
@@ -5924,6 +5999,64 @@ TEST(ConSanMoi, Gfx950InlineAtomicOrderingEmitsReleaseAndAcquirePatches) {
                                     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
                                   }),
             0u);
+}
+
+TEST(ConSanMoi, Gfx950AtomicRecordForcedSpillUsesPlannedPrivateWindows) {
+  const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_track_atomics = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 0, 2);
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
+                                  }),
+            2u);
+  for (const ConSanPatchInfo &patch : result.patches)
+    if (patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord) {
+      EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+      EXPECT_GT(patch.required_private_segment_size, 0u);
+    }
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+}
+
+TEST(ConSanMoi, Gfx950InlineAtomicForcedSpillUsesPlannedPrivateWindows) {
+  const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
+  ASSERT_FALSE(bytes.empty());
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.moi_track_atomics = true;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+  options.max_patches = 2;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
+                                  }),
+            2u);
+  for (const ConSanPatchInfo &patch : result.patches)
+    if (patch.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering) {
+      EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+      EXPECT_GT(patch.required_private_segment_size, 0u);
+    }
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
 }
 
 TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {

@@ -2868,6 +2868,154 @@ if(RJ_ENABLE_HIP_TESTS)
                 PASS_REGULAR_EXPRESSION
                     "ConSan dispatch-private grow kernel_object=0x[0-9a-f]+ private_bytes=0->44"
         )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedBarrierSpillPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillBarrierRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_barrier_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=3"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillBarrierRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*processed_barriers=2.*diagnostics=0.*conflict=false"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedBarrierSpillPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineBarrierPrivateEpoch"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_TEST_FORCE_PRIVATE_EPOCH=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_barrier_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=3"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineBarrierPrivateEpoch"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedAtomicSpillSameAddressPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillAtomicRecordReplaySameAddress"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_atomic_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillAtomicRecordReplaySameAddress"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*processed_atomics=2.*diagnostics=0.*conflict=false"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedAtomicSpillWrongAddressPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillAtomicRecordReplayWrongAddress"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_atomic_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillAtomicRecordReplayWrongAddress"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto replay reader=[0-9]+.*processed_access=2.*processed_atomics=2.*diagnostics=1.*conflict=true"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedAtomicSpillSameAddressPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineAtomicSameAddress"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_atomic_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineAtomicSameAddress"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.ForcedAtomicSpillWrongAddressPreservesEightLiveVgprs"
+            NAME "ConSanMoiGfx950Test.ForcedSpillInlineAtomicWrongAddress"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=1"
+                "RJ_CONSAN_TEST_FORCE_VGPR_SPILL=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_forced_atomic_spill"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=4"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.ForcedSpillInlineAtomicWrongAddress"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=1 visible_diagnostics=1.*visible_exact_shadow=1"
+        )
 
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the

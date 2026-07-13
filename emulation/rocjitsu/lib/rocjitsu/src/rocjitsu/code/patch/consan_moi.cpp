@@ -6472,6 +6472,11 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     append_barrier_epoch_candidates(kernel, candidates);
   for (const ConSanFunctionInfo &function : result.functions)
     append_barrier_epoch_candidates(function, candidates);
+  if (!options.test_kernel_name_filter.empty()) {
+    std::erase_if(candidates, [&](const BarrierRecordCandidate &candidate) {
+      return candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos;
+    });
+  }
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
@@ -6993,6 +6998,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     append_atomic_record_candidates(kernel, candidates);
   for (const ConSanFunctionInfo &function : result.functions)
     append_atomic_record_candidates(function, candidates);
+  if (!options.test_kernel_name_filter.empty()) {
+    std::erase_if(candidates, [&](const AtomicRecordCandidate &candidate) {
+      return candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos;
+    });
+  }
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
@@ -7337,6 +7347,11 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     append_atomic_record_candidates(kernel, candidates);
   for (const ConSanFunctionInfo &function : result.functions)
     append_atomic_record_candidates(function, candidates);
+  if (!options.test_kernel_name_filter.empty()) {
+    std::erase_if(candidates, [&](const AtomicRecordCandidate &candidate) {
+      return candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos;
+    });
+  }
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });

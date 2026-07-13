@@ -259,6 +259,14 @@ Full gfx950 support means:
   the acquire address produces exactly one inline diagnostic. The gfx950
   atomic capability is now native emission; all 196 ConSan CPU tests and all
   91 gfx950 CTests pass.
+- 2026-07-13: `S7C` is `DONE`. Dedicated barrier and atomic workloads keep
+  eight unrelated values live in every lane while forced-spill probes execute.
+  Record barriers spill six VGPRs, inline private-epoch barriers spill one
+  synchronization temporary alongside seven access temporaries, and both
+  atomic engines spill three VGPRs per release/acquire site. Same-address and
+  barrier controls remain clean; wrong-address atomic controls report exactly
+  one conflict. All 200 ConSan CPU tests and all 101 gfx950 CTests pass using
+  the workspace TheRock runtime.
 
 ## DAG Overview
 
@@ -337,7 +345,7 @@ flowchart LR
   R1C["R1C: Owners And Transaction Tests"]:::done
   S7A["S7A: Sampled Spill Parity"]:::done
   S7B["S7B: Inline Access Spill Parity"]:::done
-  S7C["S7C: Barrier And Atomic Spill Parity"]:::todo
+  S7C["S7C: Barrier And Atomic Spill Parity"]:::done
   S7D["S7D: Shared-Helper Spill Layout"]:::todo
   SP{"SP: gfx950 Spill Accepted"}:::target
 
@@ -894,7 +902,7 @@ Result:
   and non-overlapping access/prologue spill slots share a bounded 44-byte
   layout. The live-value oracle and race diagnostic both remain intact.
 
-### S7C: Barrier And Atomic Spill Parity - TODO
+### S7C: Barrier And Atomic Spill Parity - DONE
 
 Goal: cover synchronization-specific VGPR temporaries after their native probe
 families are proven.
@@ -908,6 +916,16 @@ Done criteria:
 
 - Each applicable family emits a spill-backed patch and retains its positive
   and ordered-control semantics.
+
+Result:
+
+- Synthetic gfx950 plans require six spilled VGPRs and 24 bytes for a barrier
+  record, one spilled barrier temporary in the 44-byte inline private-epoch
+  transaction, and three spilled VGPRs per record or inline atomic patch.
+- Live 128-thread workloads validate eight independent values per lane after
+  every synchronization family. Record/replay consumes two accesses plus two
+  barrier or atomic events; ordered controls stay clean, while changing only
+  the acquire address produces one diagnostic in each atomic engine.
 
 ### S7D: Shared-Helper Spill Layout - TODO
 
