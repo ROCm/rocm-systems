@@ -148,8 +148,8 @@ struct ConSanOptions {
   /// Internal marker set when the persistent set also snapshots CDNA4
   /// workgroup identity at kernel entry.
   bool automatic_moi_identity_vgprs = false;
-  /// Internal marker set when inline shadow derives owner at each probe and
-  /// keeps epoch in per-lane private memory.
+  /// Internal marker set when inline shadow keeps entry-snapshotted owner and
+  /// epoch state in per-lane private memory.
   bool automatic_moi_private_epoch = false;
   /// Internal marker set after ConSan assigns the scalar EXEC-save window.
   bool automatic_moi_exec_save_sgprs = false;
@@ -463,6 +463,7 @@ struct ConSanPatchInfo {
   uint32_t original_size = 0;
   uint32_t trampoline_size = 0;
   std::optional<uint16_t> scratch_vgpr;
+  std::optional<uint32_t> persistent_owner_private_offset;
   std::optional<uint32_t> persistent_epoch_private_offset;
   uint16_t spilled_vgpr_count = 0;
   uint32_t required_private_segment_size = 0;

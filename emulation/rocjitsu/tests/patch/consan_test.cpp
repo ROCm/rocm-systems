@@ -1383,15 +1383,22 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {
   });
   ASSERT_NE(access, result.patches.end());
   ASSERT_EQ(access->scratch_vgpr, 1);
+  EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(access->persistent_owner_private_offset, 4u);
+
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+  });
+  ASSERT_NE(prologue, result.patches.end());
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  std::vector<uint32_t> words(access->trampoline_size / sizeof(uint32_t));
-  std::memcpy(words.data(), patched.text_sections().front()->data() + access->trampoline_offset,
-              access->trampoline_size);
+  std::vector<uint32_t> words(prologue->trampoline_size / sizeof(uint32_t));
+  std::memcpy(words.data(), patched.text_sections().front()->data() + prologue->trampoline_offset,
+              prologue->trampoline_size);
   const auto owner = build_v_lshrrev_b32_e32(
-      /*vdst=*/5, scalar_positive_inline_u32(5), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/1, scalar_positive_inline_u32(5), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner);
   EXPECT_TRUE(contains_subsequence(words, std::span<const uint32_t>(&*owner, 1)));
 }
@@ -2398,7 +2405,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   }
 }
 
-TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
+TEST(ConSanMoi, SharedPrivateOwnerInitializesEachDescriptorWaveSize) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_wave32 = true;
   fixture.second_wave32 = false;
@@ -2428,12 +2435,60 @@ TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_TRUE(result.errors.empty());
-  EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("incompatible owner wave sizes") != std::string::npos;
-  }));
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+                                  }),
+            2u);
+}
+
+TEST(ConSanMoi, Gfx950SharedOwnerUsesPrivateStateWhenAnyAccumWindowOverlaps) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 3;
+  fixture.second_vgpr_granulated = 3;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  AmdGpuCodeObject code_object(bytes.data(), bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
+    if (kernel.name != "shared_owner_0" && kernel.name != "shared_owner_1")
+      continue;
+    KD descriptor{};
+    std::memcpy(&descriptor, bytes.data() + kernel.descriptor_file_offset, sizeof(descriptor));
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    kernel.name == "shared_owner_0" ? 5u : 4u);
+    std::memcpy(bytes.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
+  }
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.moi_private_epoch_automatic);
+  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
+  const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+  });
+  ASSERT_NE(access, result.patches.end());
+  EXPECT_EQ(access->owner_descriptor_file_offsets.size(), 2u);
+  EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(access->persistent_owner_private_offset, 4u);
+  EXPECT_EQ(std::ranges::count_if(result.patches,
+                                  [](const ConSanPatchInfo &patch) {
+                                    return patch.kind ==
+                                           ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+                                  }),
+            2u);
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
@@ -4683,6 +4738,110 @@ TEST(ConSanMoi, Gfx950OwnerEpochProloguePreservesKernargPreloadEntryPair) {
   ASSERT_NE(descriptor_vaddr, 0u);
   EXPECT_EQ(static_cast<int64_t>(descriptor_vaddr) + descriptor.kernel_code_entry_byte_offset,
             static_cast<int64_t>(patched.text_sections().front()->vaddr() + first_entry));
+}
+
+TEST(ConSanMoi, Gfx950AccumOffsetBoundarySelectsPrivateOwnerConservatively) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  struct Case {
+    uint32_t encoded_accum_offset;
+    bool expect_private;
+  };
+  // Explicit scratch v12:v18 makes the persistent identity start at v19.
+  // ACCUM base v24 is the exact non-overlap boundary; v20 overlaps it.
+  for (const Case test_case : std::array{Case{0u, false}, Case{5u, false}, Case{4u, true}}) {
+    std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+        text_words, "gfx950_accum_boundary", /*vgpr_granulated=*/3, /*wave32=*/false,
+        /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    mutate_first_kernel_descriptor(bytes, [&](KD &descriptor) {
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                      test_case.encoded_accum_offset);
+    });
+    ConSanOptions options;
+    options.flavor = ConSanFlavor::Moi;
+    options.moi_engine = ConSanMoiEngine::InlineShadow;
+    options.scratch_vgpr = 12;
+    options.moi_report_buffer_address = 0x123456780000ull;
+    options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+    const ConSanResult result = try_patch_consan(bytes, options);
+
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+    EXPECT_EQ(result.moi_private_epoch_automatic, test_case.expect_private);
+    EXPECT_EQ(result.moi_persistent_vgprs_automatic, !test_case.expect_private);
+    const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+      return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
+    });
+    ASSERT_NE(access, result.patches.end());
+    if (test_case.expect_private) {
+      EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
+      EXPECT_EQ(access->persistent_owner_private_offset, 4u);
+    }
+  }
+}
+
+TEST(ConSanMoi, Gfx950PrivateOwnerProloguePreservesKernargPreloadEntryPair) {
+  std::array<uint32_t, 220> text_words{};
+  text_words[0] = 0xD81A0000u;
+  text_words[1] = 0x00000000u; // ds_write_b32 v0, v0
+  for (size_t i = 2; i + 1 < text_words.size(); ++i)
+    text_words[i] = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  text_words.back() = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_private_kernarg_preload", /*vgpr_granulated=*/3, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  mutate_first_kernel_descriptor(bytes, [](KD &descriptor) {
+    AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
+    AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 4u);
+  });
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_engine = ConSanMoiEngine::InlineShadow;
+  options.scratch_vgpr = 12;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
+  });
+  ASSERT_NE(prologue, result.patches.end());
+  EXPECT_EQ(prologue->persistent_epoch_private_offset, 0u);
+  EXPECT_EQ(prologue->persistent_owner_private_offset, 4u);
+  EXPECT_EQ(prologue->spilled_vgpr_count, 2u);
+  ASSERT_GT(prologue->trampoline_size, 256u);
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const char *text = patched.text_sections().front()->data();
+  const size_t prologue_size = prologue->trampoline_size - 256u;
+  EXPECT_EQ(std::memcmp(text + prologue->trampoline_offset,
+                        text + prologue->trampoline_offset + 256u, prologue_size),
+            0);
+  ASSERT_TRUE(result.resolved_moi_identity_sgpr);
+  std::vector<uint32_t> prologue_words(prologue_size / sizeof(uint32_t));
+  std::memcpy(prologue_words.data(), text + prologue->trampoline_offset, prologue_size);
+  const auto unpack_z = build_v_lshrrev_b32_e32(
+      /*vdst=*/12, scalar_positive_inline_u32(20), /*packed_workitem_id=*/0,
+      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto flatten_yz = build_v_mad_u32_u24(
+      /*vdst=*/12, static_cast<uint16_t>(*result.resolved_moi_identity_sgpr + 1u),
+      /*z=*/12, /*y=*/13, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto flatten_x = build_v_mad_u32_u24(
+      /*vdst=*/12, *result.resolved_moi_identity_sgpr, /*yz=*/12, /*x=*/13,
+      ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(unpack_z);
+  ASSERT_TRUE(flatten_yz);
+  ASSERT_TRUE(flatten_x);
+  EXPECT_TRUE(contains_subsequence(prologue_words, std::span<const uint32_t>(&*unpack_z, 1)));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *flatten_yz));
+  EXPECT_TRUE(contains_subsequence(prologue_words, *flatten_x));
 }
 
 TEST(ConSanMoi, Gfx950StableOwnerTransactionPreservesExistingDispatchPtrAbi) {

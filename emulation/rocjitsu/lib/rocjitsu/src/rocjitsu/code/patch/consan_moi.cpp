@@ -2616,8 +2616,12 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-        if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset)
+        if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+          // An inaccessible descriptor cannot prove that five new persistent
+          // VGPRs stay below ACCUM_OFFSET. Prefer private state conservatively.
+          crosses_cdna4_accum_offset = true;
           continue;
+        }
         KD descriptor{};
         std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
         const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
@@ -2634,47 +2638,21 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     options.automatic_moi_private_epoch = true;
     result.moi_private_epoch_automatic = true;
     result.warnings.emplace_back(
-        "ConSan MOI automatically selected derived-owner/private-epoch CDNA4 state");
+        "ConSan MOI automatically selected private owner/epoch CDNA4 state");
     return true;
   }
   const uint32_t persistent_count = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u;
-  if (options.force_private_epoch && arch == ROCJITSU_CODE_ARCH_CDNA4 &&
-      options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
-    constexpr uint32_t kPersistentIdentityCount = 4u;
-    if (persistent_base + kPersistentIdentityCount > kMaxVgprs) {
-      result.errors.emplace_back(
-          "ConSan MOI CDNA4 private epoch cannot place persistent owner/workgroup identity");
-      return false;
-    }
-    options.moi_owner_vgpr = static_cast<uint16_t>(persistent_base);
-    for (uint32_t dimension = 0; dimension < 3; ++dimension) {
-      options.moi_workgroup_vgprs[dimension] =
-          static_cast<uint16_t>(persistent_base + 1u + dimension);
-      result.resolved_moi_workgroup_vgprs[dimension] = options.moi_workgroup_vgprs[dimension];
-    }
-    options.moi_init_owner_epoch = true;
-    options.automatic_moi_identity_vgprs = true;
-    options.automatic_moi_persistent_vgprs = true;
-    options.automatic_moi_private_epoch = true;
-    result.resolved_moi_owner_vgpr = options.moi_owner_vgpr;
-    result.moi_persistent_vgprs_automatic = true;
-    result.moi_private_epoch_automatic = true;
-    result.warnings.emplace_back(
-        "ConSan MOI automatically assigned persistent CDNA4 identity with private epoch");
-    return true;
-  }
   if (options.force_private_epoch || persistent_base + persistent_count > kMaxVgprs) {
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+    if (!options.force_private_epoch && arch == ROCJITSU_CODE_ARCH_CDNA4 &&
         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
       result.errors.emplace_back(
-          "ConSan MOI CDNA4 stable owner requires two persistent VGPRs at kernel entry");
+          "ConSan MOI CDNA4 stable owner has no supported persistent representation");
       return false;
     }
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
     result.moi_private_epoch_automatic = true;
-    result.warnings.emplace_back(
-        "ConSan MOI automatically selected derived-owner/private-epoch persistent state");
+    result.warnings.emplace_back("ConSan MOI automatically selected private owner/epoch state");
     return true;
   }
 
@@ -2758,38 +2736,9 @@ void note_spill_descriptor_requirements(MoiDescriptorPrivateRequirements &requir
 
 struct MoiPrivateEpochLayout {
   uint32_t epoch_offset = 0;
+  uint32_t owner_offset = 0;
   uint32_t ephemeral_base = 0;
 };
-
-[[nodiscard]] std::optional<MoiOwnerInput>
-common_moi_private_owner_input(std::span<const uint8_t> image,
-                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-                               std::vector<std::string> &warnings) {
-  std::optional<MoiOwnerInput> common_input;
-  for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
-    std::vector<std::string> errors;
-    const auto input = moi_descriptor_owner_input(image, descriptor_offset, arch, errors);
-    if (!input) {
-      warnings.insert(warnings.end(), errors.begin(), errors.end());
-      return std::nullopt;
-    }
-    if (common_input && !same_owner_input(*common_input, *input)) {
-      if (common_input->kind == MoiOwnerInputKind::WorkitemId &&
-          input->kind == MoiOwnerInputKind::WorkitemId &&
-          common_input->shift_right != input->shift_right) {
-        warnings.emplace_back("ConSan MOI shared private owner has incompatible owner wave sizes");
-      } else {
-        warnings.emplace_back(
-            "ConSan MOI shared private owner has incompatible descriptor ABI inputs");
-      }
-      return std::nullopt;
-    }
-    common_input = input;
-  }
-  if (!common_input)
-    warnings.emplace_back("ConSan MOI private owner requires an owning kernel descriptor");
-  return common_input;
-}
 
 [[nodiscard]] bool same_workgroup_source(const ConSanMoiWorkgroupSource &lhs,
                                          const ConSanMoiWorkgroupSource &rhs) {
@@ -2863,12 +2812,16 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
   }
   const uint64_t epoch_offset =
       util::align_up(resources.original_private_segment_size, SpillManager::kDbiZoneAlignment);
-  const uint64_t ephemeral_base = epoch_offset + SpillManager::kSlotBytes;
+  const uint64_t owner_offset = epoch_offset + SpillManager::kSlotBytes;
+  const uint64_t ephemeral_base =
+      util::align_up(owner_offset + SpillManager::kSlotBytes,
+                     static_cast<uint64_t>(SpillManager::kDbiZoneAlignment));
   if (ephemeral_base > kMaxAddressFreeScratchPrivateBytes) {
     warnings.emplace_back("ConSan MOI private epoch exceeds address-free scratch capacity");
     return std::nullopt;
   }
   return MoiPrivateEpochLayout{.epoch_offset = static_cast<uint32_t>(epoch_offset),
+                               .owner_offset = static_cast<uint32_t>(owner_offset),
                                .ephemeral_base = static_cast<uint32_t>(ephemeral_base)};
 }
 
@@ -3488,11 +3441,14 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   return true;
 }
 
-[[nodiscard]] bool
-append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptions &options,
-                                 uint16_t low_vgpr, uint16_t tmp_vgpr, rj_code_arch_t arch,
-                                 std::optional<MoiOwnerInput> private_owner_input,
-                                 std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_moi_private_load_b32(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch);
+
+[[nodiscard]] bool append_inline_shadow_owner_field(std::vector<uint32_t> &words,
+                                                    const ConSanOptions &options, uint16_t low_vgpr,
+                                                    uint16_t tmp_vgpr, rj_code_arch_t arch,
+                                                    std::optional<uint32_t> private_owner_offset,
+                                                    std::vector<std::string> &errors) {
   if (options.moi_owner_vgpr) {
     return append_add_shifted_vgpr_field(words, low_vgpr, *options.moi_owner_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
@@ -3503,36 +3459,19 @@ append_inline_shadow_owner_field(std::vector<uint32_t> &words, const ConSanOptio
     return false;
   }
 
-  switch (options.moi_owner_source) {
-  case ConSanMoiOwnerSource::WorkitemId: {
-    if (!private_owner_input) {
-      errors.emplace_back("ConSan MOI private owner has no descriptor-compatible stable encoding");
-      return false;
-    }
-    if (!append_moi_owner_input(words, tmp_vgpr, *private_owner_input, arch, errors)) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not derive stable owner");
-      return false;
-    }
-    break;
+  if (!private_owner_offset) {
+    errors.emplace_back("ConSan MOI inline-shadow probe has no private owner offset");
+    return false;
   }
-  case ConSanMoiOwnerSource::HwId: {
-    if (!options.moi_owner_sgpr) {
-      errors.emplace_back("ConSan MOI private owner hw_id source requires "
-                          "RJ_CONSAN_MOI_OWNER_SGPR");
-      return false;
-    }
-    const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, /*offset=*/0, kGfx12HwIdOwnerBits);
-    const auto get_hw_id =
-        hwreg ? build_s_getreg_b32(*options.moi_owner_sgpr, *hwreg, arch) : std::nullopt;
-    if (!get_hw_id) {
-      errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from HW_ID1");
-      return false;
-    }
-    words.push_back(*get_hw_id);
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_owner_sgpr, arch));
-    break;
+  const auto load = build_moi_private_load_b32(tmp_vgpr, *private_owner_offset, arch);
+  const auto wait = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
+                                                     : build_s_wait_loadcnt0(arch);
+  if (!load || !wait) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not load private owner state");
+    return false;
   }
-  }
+  words.insert(words.end(), load->begin(), load->end());
+  words.push_back(*wait);
 
   return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                        consan_moi_exact_shadow::owner_shift,
@@ -3847,7 +3786,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_shadow_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanOptions &options, rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout,
-    std::optional<uint32_t> private_epoch_offset, std::optional<MoiOwnerInput> private_owner_input,
+    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires RJ_CONSAN_TMP_VGPR");
@@ -3971,7 +3910,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
       // metadata after diagnosing an earlier cell.
       words.insert(words.end(), mov_low->begin(), mov_low->end());
       if (!append_inline_shadow_owner_field(words, options, low_vgpr, tmp_vgpr, arch,
-                                            private_owner_input, errors)) {
+                                            private_owner_offset, errors)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode owner field");
         return std::nullopt;
       }
@@ -4049,7 +3988,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     ResolvedMoiScratchPlan resources;
     std::optional<VgprSpillSequence> spill;
     std::optional<uint32_t> private_epoch_offset;
-    std::optional<MoiOwnerInput> private_owner_input;
+    std::optional<uint32_t> private_owner_offset;
     uint32_t required_private_bytes = 0;
   };
   std::vector<PlannedInlineShadowPatch> planned_patches;
@@ -4067,17 +4006,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       continue;
 
     std::optional<MoiPrivateEpochLayout> private_layout;
-    std::optional<MoiOwnerInput> private_owner_input;
     if (options.automatic_moi_private_epoch) {
       private_layout = build_moi_private_epoch_layout(result, *resources, result.warnings);
       if (!private_layout)
         continue;
-      if (options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr) {
-        private_owner_input =
-            common_moi_private_owner_input(bytes, *resources, arch, result.warnings);
-        if (!private_owner_input)
-          continue;
-      }
     }
 
     std::optional<VgprSpillSequence> spill;
@@ -4095,7 +4027,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     auto words = build_inline_shadow_words(
         bytes, candidate, candidate_options, arch, layout,
         private_layout ? std::optional<uint32_t>(private_layout->epoch_offset) : std::nullopt,
-        private_owner_input, candidate_errors);
+        private_layout ? std::optional<uint32_t>(private_layout->owner_offset) : std::nullopt,
+        candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),
                              candidate_errors.end());
@@ -4135,7 +4068,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.spill = spill;
     if (private_layout)
       planned.private_epoch_offset = private_layout->epoch_offset;
-    planned.private_owner_input = private_owner_input;
+    if (private_layout)
+      planned.private_owner_offset = private_layout->owner_offset;
     planned.required_private_bytes = required_private_bytes;
     planned_patches.push_back(std::move(planned));
     if (planned_patches.size() == options.max_patches)
@@ -4190,7 +4124,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
                                              planned_patch.private_epoch_offset,
-                                             planned_patch.private_owner_input, result.errors);
+                                             planned_patch.private_owner_offset, result.errors);
       if (!words)
         return;
 
@@ -4201,6 +4135,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       info.anchor_offset = candidate.text_offset;
       info.scratch_vgpr = planned_patch.resources.base;
       info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
+      info.persistent_owner_private_offset = planned_patch.private_owner_offset;
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.required_private_segment_size = planned_patch.required_private_bytes;
       if (planned_patch.spill)
@@ -4299,7 +4234,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     candidate_options.scratch_vgpr = planned_patch.resources.base;
     auto words = build_inline_shadow_words(bytes, candidate, candidate_options, arch, layout,
                                            planned_patch.private_epoch_offset,
-                                           planned_patch.private_owner_input, result.errors);
+                                           planned_patch.private_owner_offset, result.errors);
     if (!words) {
       result.elf_bytes.clear();
       return;
@@ -4335,6 +4270,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     info.trampoline_size = 0;
     info.scratch_vgpr = planned_patch.resources.base;
     info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
+    info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+    info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
+    info.required_private_segment_size = planned_patch.required_private_bytes;
     result.patches.push_back(info);
   }
 
@@ -5502,22 +5440,41 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   return words;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>>
-build_private_epoch_prologue_words(uint64_t prologue_text_offset,
-                                   uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
-                                   uint32_t epoch_offset, const VgprSpillSequence &spill,
-                                   rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] std::optional<std::vector<uint32_t>> build_private_epoch_prologue_words(
+    uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
+    uint32_t epoch_offset, uint32_t owner_offset, const MoiOwnerInput &owner_input,
+    ConSanMoiOwnerSource owner_source, std::optional<uint16_t> owner_sgpr,
+    const VgprSpillSequence &spill, rj_code_arch_t arch, std::vector<std::string> &errors) {
   const auto epoch_store = build_moi_private_store_b32(scratch_vgpr, epoch_offset, arch);
+  const auto owner_store = build_moi_private_store_b32(scratch_vgpr, owner_offset, arch);
   const auto wait_store = arch == ROCJITSU_CODE_ARCH_CDNA4 ? build_cdna4_s_wait_vmcnt0(arch)
                                                            : build_s_wait_storecnt0(arch);
-  if (!epoch_store || !wait_store) {
-    errors.emplace_back("ConSan MOI private-epoch prologue could not encode epoch initialization");
+  if (!epoch_store || !owner_store || !wait_store) {
+    errors.emplace_back("ConSan MOI private-state prologue could not encode initialization");
     return std::nullopt;
   }
 
   std::vector<uint32_t> words;
-  words.reserve(spill.save_words.size() + spill.restore_words.size() + 5u);
+  words.reserve(spill.save_words.size() + spill.restore_words.size() + 10u);
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
+  if (owner_source == ConSanMoiOwnerSource::WorkitemId) {
+    if (!append_moi_owner_input(words, scratch_vgpr, owner_input, arch, errors))
+      return std::nullopt;
+  } else {
+    if (!owner_sgpr) {
+      errors.emplace_back("ConSan MOI private owner hw_id source has no temporary SGPR");
+      return std::nullopt;
+    }
+    const auto hwreg = build_hwreg_imm(kGfx12HwRegHwId1, /*offset=*/0, kGfx12HwIdOwnerBits);
+    const auto get_hw_id = hwreg ? build_s_getreg_b32(*owner_sgpr, *hwreg, arch) : std::nullopt;
+    if (!get_hw_id) {
+      errors.emplace_back("ConSan MOI private-state prologue could not encode HW_ID1");
+      return std::nullopt;
+    }
+    words.push_back(*get_hw_id);
+    words.push_back(build_v_mov_b32_e32(scratch_vgpr, *owner_sgpr, arch));
+  }
+  words.insert(words.end(), owner_store->begin(), owner_store->end());
   words.push_back(build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), arch));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
   words.push_back(*wait_store);
@@ -5537,30 +5494,86 @@ build_private_epoch_prologue_words(uint64_t prologue_text_offset,
 [[nodiscard]] std::optional<std::vector<uint32_t>>
 build_cdna4_private_epoch_identity_prologue_words(
     uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t scratch_vgpr,
-    uint32_t epoch_offset, const VgprSpillSequence &spill, const KD &descriptor,
-    const ConSanOptions &options, std::vector<std::string> &errors) {
-  ConSanOptions identity_options = options;
-  identity_options.moi_epoch_vgpr = scratch_vgpr;
-  auto identity = build_cdna4_identity_prologue_words(
-      /*prologue_text_offset=*/0, original_entry_text_offset, descriptor, identity_options, errors);
+    uint32_t epoch_offset, uint32_t owner_offset, const VgprSpillSequence &spill,
+    const KD &descriptor, const ConSanOptions &options, std::vector<std::string> &errors) {
+  if (!options.moi_identity_sgpr || spill.vgpr_count < 2u) {
+    errors.emplace_back("ConSan MOI CDNA4 private identity has incomplete temporary state");
+    return std::nullopt;
+  }
+  const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
+  const uint16_t size_x_sgpr = *options.moi_identity_sgpr;
+  const uint16_t size_y_sgpr = static_cast<uint16_t>(size_x_sgpr + 1u);
+  const uint16_t dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
+  const uint32_t insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
+  const uint32_t original_abi_count =
+      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
+  if (moi_descriptor_user_sgpr_count(descriptor) < dispatch_sgpr ||
+      original_abi_count + insertion_width > kMaxCdna4Sgprs) {
+    errors.emplace_back("ConSan MOI CDNA4 private identity ABI transaction exceeds SGPR bounds");
+    return std::nullopt;
+  }
+  const auto load_group_xy =
+      build_s_load_dword(size_x_sgpr, dispatch_sgpr, /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wait_group_xy = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto owner_store = build_cdna4_address_free_scratch_store_b32(scratch_vgpr, owner_offset,
+                                                                      ROCJITSU_CODE_ARCH_CDNA4);
   const auto epoch_store = build_cdna4_address_free_scratch_store_b32(scratch_vgpr, epoch_offset,
                                                                       ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait_store = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
-  if (!identity || identity->empty() || !epoch_store || !wait_store) {
+  if (!load_group_xy || !wait_group_xy || !owner_store || !epoch_store || !wait_store) {
     errors.emplace_back(
-        "ConSan MOI CDNA4 private-epoch identity prologue could not encode initialization");
+        "ConSan MOI CDNA4 private identity prologue could not encode initialization");
     return std::nullopt;
   }
-  identity->pop_back(); // Recompute the return branch after adding spill/private state.
 
   std::vector<uint32_t> words;
-  words.reserve(spill.save_words.size() + identity->size() + epoch_store->size() +
-                spill.restore_words.size() + 2u);
+  words.reserve(spill.save_words.size() + spill.restore_words.size() + 40u);
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
-  words.insert(words.end(), identity->begin(), identity->end());
+  words.insert(words.end(), load_group_xy->begin(), load_group_xy->end());
+  words.push_back(*wait_group_xy);
+  constexpr uint16_t kInline16 = kScalarPositiveInlineBase + 16u;
+  words.push_back(build_s_lshr_b32(size_y_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(build_s_lshl_b32(size_x_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+  words.push_back(build_s_lshr_b32(size_x_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
+
+  const auto z = build_v_lshrrev_b32_e32(scratch_vgpr, scalar_positive_inline_u32(20), kWorkitemIdX,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto y = build_v_lshrrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(10), kWorkitemIdX,
+                                         ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mask_y =
+      build_v_and_b32_e32_literal(tmp_vgpr, 0x3ffu, tmp_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto yz = build_v_mad_u32_u24(scratch_vgpr, size_y_sgpr, scratch_vgpr, tmp_vgpr,
+                                      ROCJITSU_CODE_ARCH_CDNA4);
+  const auto x =
+      build_v_and_b32_e32_literal(tmp_vgpr, 0x3ffu, kWorkitemIdX, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto flat = build_v_mad_u32_u24(scratch_vgpr, size_x_sgpr, scratch_vgpr, tmp_vgpr,
+                                        ROCJITSU_CODE_ARCH_CDNA4);
+  const auto wave = build_v_lshrrev_b32_e32(scratch_vgpr, scalar_positive_inline_u32(6),
+                                            scratch_vgpr, ROCJITSU_CODE_ARCH_CDNA4);
+  if (!z || !y || !mask_y || !yz || !x || !flat || !wave) {
+    errors.emplace_back("ConSan MOI CDNA4 private identity could not flatten packed workitem ID");
+    return std::nullopt;
+  }
+  words.push_back(*z);
+  words.push_back(*y);
+  words.insert(words.end(), mask_y->begin(), mask_y->end());
+  words.insert(words.end(), yz->begin(), yz->end());
+  words.insert(words.end(), x->begin(), x->end());
+  words.insert(words.end(), flat->begin(), flat->end());
+  words.push_back(*wave);
+  words.insert(words.end(), owner_store->begin(), owner_store->end());
+  words.push_back(
+      build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
   words.push_back(*wait_store);
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
+  if (insertion_width != 0) {
+    for (uint32_t destination = dispatch_sgpr; destination < original_abi_count; ++destination) {
+      words.push_back(build_s_mov_b32(static_cast<uint16_t>(destination),
+                                      static_cast<uint16_t>(destination + insertion_width),
+                                      ROCJITSU_CODE_ARCH_CDNA4));
+    }
+  }
   const uint64_t branch_pc =
       prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
   const auto branch = compute_sopp_branch_simm16(branch_pc, original_entry_text_offset);
@@ -5653,6 +5666,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     MoiPrivateEpochLayout layout;
     VgprSpillSequence spill;
     KD descriptor{};
+    MoiOwnerInput owner_input;
     uint32_t required_private_bytes = 0;
   };
   std::vector<PlannedPrivateEpochPrologue> planned;
@@ -5677,15 +5691,24 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       continue;
     }
 
-    if (!access_patch->persistent_epoch_private_offset)
+    if (!access_patch->persistent_epoch_private_offset ||
+        !access_patch->persistent_owner_private_offset)
       continue;
     MoiPrivateEpochLayout layout{.epoch_offset = *access_patch->persistent_epoch_private_offset,
-                                 .ephemeral_base = *access_patch->persistent_epoch_private_offset +
-                                                   SpillManager::kSlotBytes};
+                                 .owner_offset = *access_patch->persistent_owner_private_offset,
+                                 .ephemeral_base =
+                                     util::align_up(*access_patch->persistent_owner_private_offset +
+                                                        SpillManager::kSlotBytes,
+                                                    SpillManager::kDbiZoneAlignment)};
 
     SpillManager manager(layout.ephemeral_base, kMaxAddressFreeScratchPrivateBytes);
+    const uint16_t temporary_count =
+        arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId
+            ? 2u
+            : 1u;
     auto spill =
-        build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr, /*vgpr_count=*/1, arch);
+        build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr, temporary_count, arch);
     if (!spill) {
       result.warnings.emplace_back(
           "ConSan MOI private-epoch prologue could not preserve its temporary VGPR");
@@ -5701,22 +5724,32 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     KD descriptor{};
     std::memcpy(&descriptor, active_bytes.data() + active_kernel->descriptor_file_offset,
                 sizeof(descriptor));
+    std::vector<std::string> owner_errors;
+    const auto owner_input = moi_descriptor_owner_input(
+        active_bytes, active_kernel->descriptor_file_offset, arch, owner_errors);
+    if (!owner_input) {
+      result.warnings.insert(result.warnings.end(), owner_errors.begin(), owner_errors.end());
+      continue;
+    }
     planned.push_back({&kernel, active_kernel->descriptor_file_offset,
                        active_kernel->entry_text_offset, *access_patch->scratch_vgpr, layout,
-                       *spill, descriptor, required_private_bytes});
+                       *spill, descriptor, *owner_input, required_private_bytes});
   }
 
   if (planned.empty()) {
     result.warnings.emplace_back("ConSan MOI private-epoch prologue found no patchable kernels");
     return;
   }
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
-    uint32_t required_vgpr_count = static_cast<uint32_t>(*options.moi_owner_vgpr) + 1u;
-    for (const auto workgroup_vgpr : options.moi_workgroup_vgprs)
-      required_vgpr_count = std::max<uint32_t>(required_vgpr_count, *workgroup_vgpr + 1u);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+    if (!options.moi_identity_sgpr) {
+      result.errors.emplace_back("ConSan MOI CDNA4 private owner has no identity SGPR window");
+      return;
+    }
     for (const PlannedPrivateEpochPrologue &item : planned) {
       ConSanKernelInfo active = *item.kernel;
       active.descriptor_file_offset = item.active_descriptor_file_offset;
+      const uint32_t required_vgpr_count = static_cast<uint32_t>(item.scratch_vgpr) + 2u;
       const uint32_t required_sgpr_count =
           std::max<uint32_t>(*options.moi_identity_sgpr + 2u,
                              moi_descriptor_abi_sgpr_count(item.descriptor, arch) +
@@ -5738,14 +5771,17 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     append_nop_padding_to_alignment(new_text, kAmdhsaKernelEntryAlignment, arch);
     const uint64_t prologue_text_offset = static_cast<uint64_t>(new_text.size());
     std::optional<std::vector<uint32_t>> words;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
       words = build_cdna4_private_epoch_identity_prologue_words(
           prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
-          item.layout.epoch_offset, item.spill, item.descriptor, options, result.errors);
+          item.layout.epoch_offset, item.layout.owner_offset, item.spill, item.descriptor, options,
+          result.errors);
     } else {
       words = build_private_epoch_prologue_words(
           prologue_text_offset, item.active_entry_text_offset, item.scratch_vgpr,
-          item.layout.epoch_offset, item.spill, arch, result.errors);
+          item.layout.epoch_offset, item.layout.owner_offset, item.owner_input,
+          options.moi_owner_source, options.moi_owner_sgpr, item.spill, arch, result.errors);
     }
     if (!words)
       return;
@@ -5758,16 +5794,19 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             "ConSan MOI private-epoch prologue exceeds the kernarg-preload entry window");
         return;
       }
-      if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
         preload_words = build_cdna4_private_epoch_identity_prologue_words(
             prologue_text_offset + kAmdhsaKernelEntryAlignment,
             item.active_entry_text_offset + kAmdhsaKernelEntryAlignment, item.scratch_vgpr,
-            item.layout.epoch_offset, item.spill, item.descriptor, options, result.errors);
+            item.layout.epoch_offset, item.layout.owner_offset, item.spill, item.descriptor,
+            options, result.errors);
       } else {
         preload_words = build_private_epoch_prologue_words(
             prologue_text_offset + kAmdhsaKernelEntryAlignment,
             item.active_entry_text_offset + kAmdhsaKernelEntryAlignment, item.scratch_vgpr,
-            item.layout.epoch_offset, item.spill, arch, result.errors);
+            item.layout.epoch_offset, item.layout.owner_offset, item.owner_input,
+            options.moi_owner_source, options.moi_owner_sgpr, item.spill, arch, result.errors);
       }
       if (!preload_words)
         return;
@@ -5791,8 +5830,9 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     info.trampoline_offset = prologue_text_offset;
     info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.scratch_vgpr = item.scratch_vgpr;
+    info.persistent_owner_private_offset = item.layout.owner_offset;
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
-    info.spilled_vgpr_count = 1;
+    info.spilled_vgpr_count = item.spill.vgpr_count;
     info.required_private_segment_size = item.required_private_bytes;
     patches.push_back(info);
   }
@@ -6378,7 +6418,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
         continue;
       }
       const uint32_t ephemeral_base =
-          *access_patch->persistent_epoch_private_offset + SpillManager::kSlotBytes;
+          util::align_up(*access_patch->persistent_owner_private_offset + SpillManager::kSlotBytes,
+                         SpillManager::kDbiZoneAlignment);
       SpillManager manager(ephemeral_base, kMaxAddressFreeScratchPrivateBytes);
       auto spill = build_vgpr_spill_sequence(manager, *access_patch->scratch_vgpr,
                                              /*vgpr_count=*/1, arch);
@@ -6490,6 +6531,22 @@ void try_apply_inline_shadow_barrier_epoch_patch(const ConSanOptions &options, r
     info.original_size = site.size;
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.scratch_vgpr = planned.scratch_vgpr;
+    if (planned.scratch_vgpr) {
+      const ConSanKernelInfo *kernel =
+          planned.candidate.kernel_descriptor_file_offset
+              ? kernel_for_descriptor(result, *planned.candidate.kernel_descriptor_file_offset)
+              : nullptr;
+      if (kernel != nullptr) {
+        const auto access_patch =
+            std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
+              return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
+                      patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
+                     patch.persistent_owner_private_offset && kernel_owns_patch(*kernel, patch);
+            });
+        if (access_patch != result.patches.end())
+          info.persistent_owner_private_offset = access_patch->persistent_owner_private_offset;
+      }
+    }
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
     info.required_private_segment_size = planned.required_private_bytes;
     if (planned.spill)
@@ -7783,7 +7840,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     }
     if (patch_count(ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue) != 0) {
       result.warnings.emplace_back(
-          "ConSan MOI initialized private epoch state with a kernel-entry prologue");
+          "ConSan MOI initialized private owner/epoch state with a kernel-entry prologue");
     }
     if (const uint32_t barrier_patches = patch_count(ConSanPatchKind::TrampolineMoiBarrierRecord);
         barrier_patches != 0) {
