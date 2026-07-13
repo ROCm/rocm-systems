@@ -131,13 +131,15 @@ protected:
     std::string tmpl = base + "/rocjitsu-test-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
     tmp_dir_ = tmpl;
-    sock_path_ = tmp_dir_ + "/rocjitsu/daemon.sock";
+    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    sock_path_ = runtime_dir_ + "/daemon.sock";
 
     daemon_pid_ = fork();
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config(), nullptr);
       _exit(127);
     }
@@ -167,7 +169,12 @@ protected:
   }
 
   ProcessResult run_hip_test(const char *binary, const char *gtest_filter) {
-    std::string cmd = "XDG_RUNTIME_DIR=";
+    // CTest sets ROCJITSU_RUNTIME_DIR for isolation and the RPC layer prefers it
+    // over XDG_RUNTIME_DIR. Override both here so the daemon and all client
+    // subprocesses agree on the same socket and config-path directory.
+    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " LD_PRELOAD=";
     cmd += preload_lib();
@@ -195,7 +202,9 @@ protected:
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "XDG_RUNTIME_DIR=";
+    std::string cmd = "ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " ";
     cmd += daemon_bin();
@@ -251,6 +260,7 @@ protected:
 
   pid_t daemon_pid_ = -1;
   std::string tmp_dir_;
+  std::string runtime_dir_;
   std::string sock_path_;
 };
 
@@ -305,13 +315,15 @@ protected:
     std::string tmpl = base + "/rocjitsu-rccl-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl.data()), nullptr) << "mkdtemp failed: " << strerror(errno);
     tmp_dir_ = tmpl;
-    sock_path_ = tmp_dir_ + "/rocjitsu/daemon.sock";
+    runtime_dir_ = tmp_dir_ + "/rocjitsu";
+    sock_path_ = runtime_dir_ + "/daemon.sock";
 
     daemon_pid_ = fork();
     ASSERT_GE(daemon_pid_, 0) << "fork failed: " << strerror(errno);
 
     if (daemon_pid_ == 0) {
       setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
+      setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
       execl(daemon_bin(), daemon_bin(), "--daemon", "--config", daemon_config_2gpu(), nullptr);
       _exit(127);
     }
@@ -343,7 +355,9 @@ protected:
 
   ProcessResult run_rccl_rank(int rank, int world_size, const std::string &shared_dir,
                               const char *gtest_filter) {
-    std::string cmd = "timeout 150 env XDG_RUNTIME_DIR=";
+    std::string cmd = "timeout 150 env ROCJITSU_RUNTIME_DIR=";
+    cmd += runtime_dir_;
+    cmd += " XDG_RUNTIME_DIR=";
     cmd += tmp_dir_;
     cmd += " HIP_VISIBLE_DEVICES=";
     cmd += std::to_string(rank);
@@ -403,6 +417,7 @@ protected:
 
   pid_t daemon_pid_ = -1;
   std::string tmp_dir_;
+  std::string runtime_dir_;
   std::string sock_path_;
 };
 

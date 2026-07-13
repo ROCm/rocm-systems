@@ -20,6 +20,29 @@ static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtReadWrite) ==
                   static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite),
               "Mem Access Flag Read Write mismatch with ROCclr!");
 
+static_assert(static_cast<uint32_t>(hipMemLocationTypeDevice) ==
+                  static_cast<uint32_t>(amd::Device::VmmLocationType::kDevice),
+              "Mem Location Type Device mismatch with ROCclr!");
+static_assert(static_cast<uint32_t>(hipMemLocationTypeHost) ==
+                  static_cast<uint32_t>(amd::Device::VmmLocationType::kHost),
+              "Mem Location Type Host mismatch with ROCclr!");
+static_assert(static_cast<uint32_t>(hipMemLocationTypeHostNuma) ==
+                  static_cast<uint32_t>(amd::Device::VmmLocationType::kHostNuma),
+              "Mem Location Type HostNuma mismatch with ROCclr!");
+static_assert(static_cast<uint32_t>(hipMemLocationTypeHostNumaCurrent) ==
+                  static_cast<uint32_t>(amd::Device::VmmLocationType::kHostNumaCurrent),
+              "Mem Location Type HostNumaCurrent mismatch with ROCclr!");
+
+int VmmOwnerDeviceIndex(const hipMemAllocationProp& prop) {
+  // For host-backed allocations location.id is not a device index (it is a NUMA
+  // node id for HostNuma, ignored otherwise). The VA-level map/unmap operations
+  // are anchored on the current device in that case.
+  if (prop.location.type == hipMemLocationTypeDevice) {
+    return prop.location.id;
+  }
+  return static_cast<int>(hip::getCurrentDevice()->deviceId());
+}
+
 hipError_t hipMemAddressFree(void* devPtr, size_t size) {
   HIP_INIT_API(hipMemAddressFree, devPtr, size);
   hipError_t status = hipSuccess;
@@ -76,12 +99,23 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   if (handle == nullptr || size == 0 || flags != 0 || prop == nullptr ||
       (prop->type != hipMemAllocationTypePinned && prop->type != hipMemAllocationTypeUncached) ||
       (prop->location.type != hipMemLocationTypeDevice &&
-          prop->location.type != hipMemLocationTypeHost)) {
+          prop->location.type != hipMemLocationTypeHost &&
+          prop->location.type != hipMemLocationTypeHostNuma &&
+          prop->location.type != hipMemLocationTypeHostNumaCurrent)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (prop->location.id < 0 || prop->location.id >= g_devices.size()) {
-    HIP_RETURN(hipErrorInvalidDevice);
+  // location.id is interpreted per location type: a device index for Device, a
+  // NUMA node id for HostNuma, and ignored for Host / HostNumaCurrent.
+  if (prop->location.type == hipMemLocationTypeDevice) {
+    if (prop->location.id < 0 || prop->location.id >= g_devices.size()) {
+      HIP_RETURN(hipErrorInvalidDevice);
+    }
+  } else if (prop->location.type == hipMemLocationTypeHostNuma) {
+    uint32_t numNumaNodes = hip::getCurrentDevice()->devices()[0]->numHostNumaNodes();
+    if (prop->location.id < 0 || static_cast<uint32_t>(prop->location.id) >= numNumaNodes) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
 
   if (prop->requestedHandleTypes != hipMemHandleTypeNone &&
@@ -91,12 +125,26 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   // When ROCCLR_MEM_PHYMEM is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
-  unsigned int ihipFlags = ROCCLR_MEM_PHYMEM;
+  cl_svm_mem_flags ihipFlags = ROCCLR_MEM_PHYMEM;
   if (prop->type == hipMemAllocationTypeUncached) {
     ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
+  const bool isHostNuma = (prop->location.type == hipMemLocationTypeHostNuma ||
+                           prop->location.type == hipMemLocationTypeHostNumaCurrent);
+  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost) || isHostNuma;
+  // NUMA node selector handed to ROCclr: explicit node for HostNuma; -1 (default/
+  // resolve-current) for HostNumaCurrent and non-NUMA allocations.
+  const int numaNode =
+      (prop->location.type == hipMemLocationTypeHostNuma) ? prop->location.id : -1;
+  if (isHostNuma) {
+    // Pack the host-NUMA marker + node into the upper bits so roc::Memory::create
+    // routes to the CPU-pool allocator. Stored node value is (node + 1); 0 means
+    // "resolve current node" (HostNumaCurrent, numaNode == -1).
+    ihipFlags |= ROCCLR_MEM_HOST_NUMA;
+    ihipFlags |= (static_cast<cl_svm_mem_flags>(numaNode + 1) << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT) &
+                 ROCCLR_MEM_HOST_NUMA_NODE_MASK;
+  }
   hip::Device* dev = hip::getCurrentDevice();
   amd::Context* curDevContext = dev->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
@@ -133,9 +181,13 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // Add this to amd::Memory object, so this ptr is accesible for other hipmemory operations.
   size_t offset = 0;  // this is ignored
   amd::Memory* phys_mem_obj = getMemoryObject(dev, ptr, offset);
-  // saves the current device id so that it can be accessed later
-  phys_mem_obj->getUserData().deviceId = prop->location.id;
+  // saves the current device id so that it can be accessed later. For host-NUMA
+  // allocations location.id is a NUMA node id (not a device index), so record the
+  // current device for the device-indexed bookkeeping and keep the node separately.
+  phys_mem_obj->getUserData().deviceId =
+      (prop->location.type == hipMemLocationTypeDevice) ? prop->location.id : dev->deviceId();
   phys_mem_obj->getUserData().locationType = prop->location.type;
+  phys_mem_obj->getUserData().numaNode = numaNode;
   phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
@@ -208,14 +260,18 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
   if (granularity == nullptr || prop == nullptr || (prop->type != hipMemAllocationTypePinned &&
       prop->type != hipMemAllocationTypeUncached) ||
       (prop->location.type != hipMemLocationTypeDevice &&
-       prop->location.type != hipMemLocationTypeHost) ||
-      prop->location.id >= g_devices.size() ||
+       prop->location.type != hipMemLocationTypeHost &&
+       prop->location.type != hipMemLocationTypeHostNuma &&
+       prop->location.type != hipMemLocationTypeHostNumaCurrent) ||
+      (prop->location.type == hipMemLocationTypeDevice &&
+       prop->location.id >= g_devices.size()) ||
       (option != hipMemAllocationGranularityMinimum &&
        option != hipMemAllocationGranularityRecommended)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
+  // All host location types (Host / HostNuma / HostNumaCurrent) use host_context.
+  bool useHostDevice = (prop->location.type != hipMemLocationTypeDevice);
   amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
   const auto& dev_info = amdContext->devices()[0]->info();
@@ -293,8 +349,10 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   // perform: the device-id index guard and size-vs-granularity alignment.
 
   // Owner device id must index g_devices[] safely before any backend call.
-  size_t owner_dev_id = ga->GetProperties().location.id;
-  if (owner_dev_id >= g_devices.size()) {
+  // For host-backed allocations location.id is not a device index, so resolve via
+  // VmmOwnerDeviceIndex (anchors on the current device).
+  int owner_dev_id = VmmOwnerDeviceIndex(ga->GetProperties());
+  if (owner_dev_id < 0 || static_cast<size_t>(owner_dev_id) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   amd::Device* dev = g_devices[owner_dev_id]->devices()[0];
@@ -423,15 +481,34 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
 
   for (size_t desc_idx = 0; desc_idx < count; ++desc_idx) {
     hipMemLocationType accessLocationType = desc[desc_idx].location.type;
-    if (accessLocationType != hipMemLocationTypeDevice && accessLocationType != hipMemLocationTypeHost) {
+    if (accessLocationType != hipMemLocationTypeDevice &&
+        accessLocationType != hipMemLocationTypeHost &&
+        accessLocationType != hipMemLocationTypeHostNuma &&
+        accessLocationType != hipMemLocationTypeHostNumaCurrent) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    if (desc[desc_idx].location.id >= g_devices.size()) {
-      HIP_RETURN(hipErrorInvalidValue)
+    // location.id is a device index for Device access and a NUMA node id for
+    // HostNuma (ignored for Host / HostNumaCurrent). Validate accordingly and pick
+    // a device to dispatch through (the CPU agent is resolved inside SetMemAccess).
+    int numaNode = -1;
+    amd::Device* accessDev = nullptr;
+    if (accessLocationType == hipMemLocationTypeDevice) {
+      if (desc[desc_idx].location.id < 0 || desc[desc_idx].location.id >= g_devices.size()) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      accessDev = g_devices[desc[desc_idx].location.id]->devices()[0];
+    } else {
+      accessDev = hip::getCurrentDevice()->devices()[0];
+      if (accessLocationType == hipMemLocationTypeHostNuma) {
+        if (desc[desc_idx].location.id < 0 ||
+            static_cast<uint32_t>(desc[desc_idx].location.id) >= accessDev->numHostNumaNodes()) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        numaNode = desc[desc_idx].location.id;
+      }
     }
 
-    auto& dev = g_devices[desc[desc_idx].location.id];
     amd::Device::VmmAccess access_flags = static_cast<amd::Device::VmmAccess>(desc[desc_idx].flags);
     if (access_flags != amd::Device::VmmAccess::kNone &&
         access_flags != amd::Device::VmmAccess::kReadOnly &&
@@ -439,8 +516,9 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    if (!dev->devices()[0]->SetMemAccess(ptr, size, access_flags,
-                                         static_cast<amd::Device::VmmLocationType>(accessLocationType))) {
+    if (!accessDev->SetMemAccess(ptr, size, access_flags,
+                                 static_cast<amd::Device::VmmLocationType>(accessLocationType),
+                                 numaNode)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }
@@ -484,13 +562,13 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
         LogPrintfError("hipMemUnmap: sub_obj at %p has null ga", it->getSvmPtr());
         HIP_RETURN(hipErrorInvalidValue);
       }
-      size_t owner_id = ga->GetProperties().location.id;
-      if (owner_id >= g_devices.size()) {
-        LogPrintfError("hipMemUnmap: sub_obj at %p has out-of-range owner id %zu",
+      int owner_id = VmmOwnerDeviceIndex(ga->GetProperties());
+      if (owner_id < 0 || static_cast<size_t>(owner_id) >= g_devices.size()) {
+        LogPrintfError("hipMemUnmap: sub_obj at %p has out-of-range owner id %d",
                        it->getSvmPtr(), owner_id);
         HIP_RETURN(hipErrorInvalidValue);
       }
-      sync_device_ids.insert(static_cast<int>(owner_id));
+      sync_device_ids.insert(owner_id);
 
       // Probe each device's access at THIS sub-buffer's VA. The previous
       // implementation only probed `ptr`, which missed any device whose
@@ -527,7 +605,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
 
     // Each sub-buffer is unmapped by the device that owns its physical backing.
-    amd::Device* sub_dev = g_devices[ga->GetProperties().location.id]->devices()[0];
+    amd::Device* sub_dev = g_devices[VmmOwnerDeviceIndex(ga->GetProperties())]->devices()[0];
     cl_int cl_err = sub_dev->virtualUnmap(sub_va, sub_size);
     if (cl_err != CL_SUCCESS) {
       LogPrintfError("hipMemUnmap: virtualUnmap failed for va: %p", sub_va);

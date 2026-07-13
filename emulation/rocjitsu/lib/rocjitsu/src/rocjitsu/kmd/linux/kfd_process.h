@@ -6,7 +6,7 @@
 ///
 /// @details Each process that opens /dev/kfd gets a KfdProcess instance holding
 /// its allocations, queues, events, doorbells, and memory policies. The
-/// SimulatedDriver owns a process table mapping fds to KfdProcess instances,
+/// SimulatedKfd owns a process table mapping fds to KfdProcess instances,
 /// and delegates per-process ioctl operations through here.
 
 #ifndef ROCJITSU_KMD_LINUX_KFD_PROCESS_H_
@@ -30,7 +30,7 @@ namespace rocjitsu {
 ///
 /// @details Mirrors the kernel's kfd_process + kfd_process_device for a
 /// single-GPU simulator. Each daemon client connection or local-mode session
-/// gets one KfdProcess. The SimulatedDriver maintains a process table and
+/// gets one KfdProcess. The SimulatedKfd maintains a process table and
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
