@@ -10641,5 +10641,91 @@ TEST(ConSan, FailClosedRejectsUnsupportedLdsKernel) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
+TEST(ConSan, InvalidCdna4InstructionFailsOpenWithTypedPreflightSkip) {
+  const std::array<uint32_t, 2> text_words = {
+      0xD3AD0000u, // unsupported standalone CDNA4 VOP3P op 45
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "invalid_vop3p", /*vgpr_granulated=*/0,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.decode_error_count, 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_FALSE(result.modified);
+  ASSERT_GE(result.warnings.size(), 2u);
+  EXPECT_NE(result.warnings[0].find("kernel 'invalid_vop3p'"), std::string::npos);
+  EXPECT_NE(result.warnings[0].find("text offset 0"), std::string::npos);
+  EXPECT_NE(result.warnings[0].find("Invalid instruction opcode"), std::string::npos);
+  EXPECT_NE(result.warnings[1].find("decode errors: 1"), std::string::npos);
+}
+
+TEST(ConSan, InvalidCdna4InstructionFailsClosedWithTypedPreflightReject) {
+  const std::array<uint32_t, 2> text_words = {
+      0xD3AD0000u, // unsupported standalone CDNA4 VOP3P op 45
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "invalid_vop3p", /*vgpr_granulated=*/0,
+      /*wave32=*/false, /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fail_closed = true;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  EXPECT_EQ(kernel.stats.decode_error_count, 1u);
+  EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Reject);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("decode errors: 1"), std::string::npos);
+  EXPECT_FALSE(result.modified);
+}
+
+TEST(ConSan, InvalidCdna4KernelDoesNotContainValidCandidatePatching) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  constexpr uint64_t kTextFileOffset = 0x100;
+  const std::array<uint32_t, 2> invalid_kernel = {
+      0xD3AD0000u, // unsupported standalone CDNA4 VOP3P op 45
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::array<uint32_t, 2> valid_kernel = {
+      0xD81A0000u,
+      0x00000000u, // ds_store_b32 v0, v0
+  };
+  std::memcpy(bytes.data() + kTextFileOffset, invalid_kernel.data(), sizeof(invalid_kernel));
+  std::memcpy(bytes.data() + kTextFileOffset + sizeof(invalid_kernel), valid_kernel.data(),
+              sizeof(valid_kernel));
+
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.probe_lds_check_trap = true;
+  options.scratch_vgpr = 8;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  const auto invalid = std::ranges::find(result.kernels, "shared_owner_0", &ConSanKernelInfo::name);
+  const auto valid = std::ranges::find(result.kernels, "shared_owner_1", &ConSanKernelInfo::name);
+  ASSERT_NE(invalid, result.kernels.end());
+  ASSERT_NE(valid, result.kernels.end());
+  EXPECT_EQ(invalid->stats.decode_error_count, 1u);
+  EXPECT_EQ(invalid->preflight_action, ConSanPreflightAction::Skip);
+  EXPECT_EQ(valid->preflight_action, ConSanPreflightAction::Candidate);
+  EXPECT_TRUE(result.modified);
+  ASSERT_EQ(result.patches.size(), 1u);
+  EXPECT_EQ(result.patches.front().anchor_offset, sizeof(invalid_kernel));
+}
+
 } // namespace
 } // namespace rocjitsu

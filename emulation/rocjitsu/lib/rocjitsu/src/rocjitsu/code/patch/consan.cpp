@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/bit.h"
+#include "util/except.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -1324,8 +1325,18 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     std::memcpy(words.data(), text.data() + offset,
                 std::min(words.size() * sizeof(uint32_t), remaining));
 
-    std::unique_ptr<Instruction> inst(
-        decoder.decode(words.data(), kernel.entry_text_offset + static_cast<uint64_t>(offset)));
+    std::unique_ptr<Instruction> inst;
+    try {
+      inst.reset(
+          decoder.decode(words.data(), kernel.entry_text_offset + static_cast<uint64_t>(offset)));
+    } catch (const util::InvalidInst &error) {
+      ++kernel.stats.decode_error_count;
+      warnings.emplace_back(
+          "ConSan stopped decoding kernel '" + kernel.name + "' at text offset " +
+          std::to_string(kernel.entry_text_offset + static_cast<uint64_t>(offset)) + ": " +
+          error.what());
+      break;
+    }
     if (!inst) {
       ++kernel.stats.decode_error_count;
       warnings.emplace_back("ConSan stopped decoding kernel '" + kernel.name +
@@ -1572,6 +1583,19 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
   return false;
 }
 
+[[nodiscard]] std::vector<BasicBlock::CodeRange>
+preflight_candidate_code_ranges(const ConSanResult &result) {
+  std::vector<BasicBlock::CodeRange> ranges;
+  ranges.reserve(result.kernels.size());
+  for (const ConSanKernelInfo &kernel : result.kernels) {
+    if (kernel.preflight_action != ConSanPreflightAction::Candidate || !kernel.has_text_range ||
+        kernel.code_size == 0)
+      continue;
+    ranges.push_back({.start_offset = kernel.entry_text_offset, .size = kernel.code_size});
+  }
+  return ranges;
+}
+
 [[nodiscard]] std::vector<LocalNopCave>
 find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanResult &result,
                          rj_code_arch_t arch) {
@@ -1614,8 +1638,9 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanResult
   return caves;
 }
 
-[[nodiscard]] std::optional<InPlaceNopSite> find_existing_nop_site(const AmdGpuCodeObject &obj,
-                                                                   rj_code_arch_t arch) {
+[[nodiscard]] std::optional<InPlaceNopSite>
+find_existing_nop_site(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+                       std::span<const BasicBlock::CodeRange> code_ranges) {
   if (obj.text_sections().size() != 1)
     return std::nullopt;
 
@@ -1624,7 +1649,7 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanResult
     return std::nullopt;
 
   const Section *text = obj.text_sections().front();
-  auto blocks = BasicBlock::build(obj, *decoder, arch);
+  auto blocks = BasicBlock::build(obj, *decoder, arch, {}, code_ranges);
   for (const auto &block : blocks) {
     uint64_t offset = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
@@ -1641,7 +1666,8 @@ find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanResult
 }
 
 [[nodiscard]] std::optional<InPlaceInstructionSite>
-find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_arch_t arch) {
+find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+                                         std::span<const BasicBlock::CodeRange> code_ranges) {
   if (obj.text_sections().size() != 1)
     return std::nullopt;
 
@@ -1650,7 +1676,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     return std::nullopt;
 
   const Section *text = obj.text_sections().front();
-  auto blocks = BasicBlock::build(obj, *decoder, arch);
+  auto blocks = BasicBlock::build(obj, *decoder, arch, {}, code_ranges);
   for (const auto &block : blocks) {
     uint64_t offset = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
@@ -1683,9 +1709,10 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   return true;
 }
 
-[[nodiscard]] std::optional<uint64_t> find_first_relocatable_anchor(const AmdGpuCodeObject &obj,
-                                                                    rj_code_arch_t arch,
-                                                                    std::string *error_out) {
+[[nodiscard]] std::optional<uint64_t>
+find_first_relocatable_anchor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+                              std::string *error_out,
+                              std::span<const BasicBlock::CodeRange> code_ranges) {
   if (obj.text_sections().empty()) {
     *error_out = "code object has no .text section";
     return std::nullopt;
@@ -1704,7 +1731,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
   const Section *text = obj.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
-  auto blocks = BasicBlock::build(obj, *decoder, arch);
+  auto blocks = BasicBlock::build(obj, *decoder, arch, {}, code_ranges);
   std::optional<uint64_t> fallback_anchor;
   for (const auto &block : blocks) {
     uint64_t offset = block->start_offset();
@@ -2013,7 +2040,7 @@ choose_vcc_save_sgpr(const Instruction *inst, const LivenessAnalysis *liveness,
   std::vector<uint64_t> offsets;
   offsets.reserve(result.kernels.size());
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    if (kernel.has_text_range)
+    if (kernel.preflight_action == ConSanPreflightAction::Candidate && kernel.has_text_range)
       offsets.push_back(kernel.entry_text_offset);
   }
   std::ranges::sort(offsets);
@@ -2262,8 +2289,10 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
 
+  const std::vector<BasicBlock::CodeRange> code_ranges = preflight_candidate_code_ranges(result);
+
   if (!force_trampoline) {
-    if (auto nop_site = find_existing_nop_site(code_object, arch)) {
+    if (auto nop_site = find_existing_nop_site(code_object, arch, code_ranges)) {
       const uint32_t replacement_nop = build_s_nop(1, arch);
       if (!rewrite_word_in_place(code_object, nop_site->file_offset, replacement_nop, result))
         return;
@@ -2280,7 +2309,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   }
 
   std::string error;
-  auto anchor = find_first_relocatable_anchor(code_object, arch, &error);
+  auto anchor = find_first_relocatable_anchor(code_object, arch, &error, code_ranges);
   if (!anchor) {
     result.errors.push_back("ConSan proof NOP patch skipped: " + error);
     return;
@@ -2359,7 +2388,8 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
 
 void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                   ConSanResult &result) {
-  auto site = find_preferred_in_place_instruction_site(code_object, arch);
+  const std::vector<BasicBlock::CodeRange> code_ranges = preflight_candidate_code_ranges(result);
+  auto site = find_preferred_in_place_instruction_site(code_object, arch, code_ranges);
   if (!site) {
     result.errors.emplace_back(
         "ConSan proof endpgm patch found no preferred 4-byte vector ALU site");
@@ -2900,7 +2930,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
     const std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
-    blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders);
+    const std::vector<BasicBlock::CodeRange> code_ranges = preflight_candidate_code_ranges(result);
+    blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
     block_ptrs = block_ptrs_for(blocks);
     if (!block_ptrs.empty())
       liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(block_ptrs));
