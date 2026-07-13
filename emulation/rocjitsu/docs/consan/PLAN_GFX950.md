@@ -395,6 +395,11 @@ Full gfx950 support means:
   both hardware entries, keeps persistent and ephemeral private slots
   disjoint, and never rederives owner from mutable `v0` at a probe. The focused
   ConSan/resource/placement filter passes 225/225.
+- 2026-07-13: all 14 residual SuperCollider family rows still fail when run
+  one process at a time. Seven produce the expected mismatch trap, while seven
+  produce wrong numerical results instead. One logged MXFP4 row selects
+  scratch `v132` in a 136-VGPR MFMA kernel, exposing a second accumulator alias
+  hazard. `T4SV` is `ACTIVE`; these seven are not accepted as diagnostics.
 
 ## DAG Overview
 
@@ -620,6 +625,7 @@ flowchart LR
   T3IA["T3IA: Private-State Atomic Ordering"]:::todo
   T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
+  T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::active
   T4SC["T4SC: SuperCollider Broad IREE"]:::active
   T4RR["T4RR: Record/Replay Broad IREE"]:::active
   T4SA["T4SA: Sampled Broad IREE"]:::todo
@@ -656,7 +662,7 @@ flowchart LR
   T3RR --> T3G
   T3SA --> T3G
   T3IS --> T3IO --> T3IR --> T3IA --> T3IL --> T3G
-  T3SC --> T4SC
+  T3SC --> T4SV --> T4SC
   T3RR --> T4RR
   T3SA --> T4SA
   T3IL --> T4IS
@@ -2026,6 +2032,24 @@ Done criteria:
 
 `T3G` is reached only when all four T3 profile nodes pass.
 
+### T4SV: SuperCollider Accumulator-Safe Scratch - ACTIVE
+
+Goal: keep redundant-read scratch out of the CDNA4 accumulator alias window.
+
+Work:
+
+- Bound automatic and explicit SuperCollider scratch runs below the owning
+  descriptor's decoded nonzero `ACCUM_OFFSET`.
+- Prefer another liveness-dead run below the boundary; fail with a typed skip
+  when no safe run exists.
+- Cover exact-boundary, overlap, B64 store readback, and malformed descriptor
+  cases synthetically, then rerun an isolated MXFP4 row.
+
+Trigger: after the wave64 VCC fix, an isolated MXFP4 run patched a B64 store
+with `v132` in a 136-VGPR MFMA kernel and silently produced zero results. This
+is not a typed SuperCollider mismatch and must be fixed before accepting the
+remaining family outcomes.
+
 ### T4SC: SuperCollider Broad IREE - ACTIVE
 
 Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
@@ -2046,8 +2070,10 @@ expected SuperCollider mismatch traps versus a second instrumentation defect.
 An isolated logged `dt_f32` run is confirmed typed: one B64 store check patch
 at text `0x8f8` branches to a local cave at `0x2140`, then the first dispatch
 terminates with the documented default `s_trap 0` mismatch exception. The
-other data-tiled/MXFP4 family members remain to be individually typed because
-parallel GPU exceptions can contaminate neighboring subprocess results.
+serial individual runs classify seven family rows as mismatch traps and seven
+as silent numerical corruption. A logged corrupt MXFP4 row uses SuperCollider
+scratch `v132` in a 136-VGPR MFMA kernel, so `T4SV` now blocks acceptance until
+scratch allocation respects the accumulator alias boundary.
 
 ### T4RR: Record/Replay Broad IREE - ACTIVE
 
