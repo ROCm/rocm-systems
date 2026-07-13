@@ -47,7 +47,7 @@ typedef enum {
  */
 typedef enum {
   /**
-   * AIE KMQ packet for aie2 (XDNA) and aie2p (XDNA2).
+   * AIE KMQ packet.
    */
   HSA_AMD_AIE_PACKET_OPCODE_KMQ = 0,
 } hsa_amd_aie_packet_opcode_t;

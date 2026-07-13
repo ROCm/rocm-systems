@@ -307,7 +307,7 @@ private:
 // AieKernelSymbol.                                                           //
 //===----------------------------------------------------------------------===//
 
-/// @brief Kernel symbol for AIE/NPU code objects.
+/// @brief Kernel symbol for AIE code objects.
 ///
 /// The kernel_object handle exposed via HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT
 /// is a pointer to a host-owned AieKernelDescriptor (see amd_aie_section.h).
@@ -330,7 +330,7 @@ class AieKernelSymbol final : public SymbolImpl {
         kernarg_size(_kernarg_size),
         num_cols(_num_cols) {}
 
-  bool GetInfo(hsa_symbol_info32_t symbol_info, void* value);
+  bool GetInfo(hsa_symbol_info32_t symbol_info, void* value) override;
 
   /// @brief Gets the size of the kernel argument buffer.
   uint32_t GetKernargSize() const { return kernarg_size; }
@@ -465,7 +465,7 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   AieLoadedCodeObjectImpl& operator=(const AieLoadedCodeObjectImpl&);
 
   const void* elf_data;
-  const size_t elf_size;
+  size_t elf_size;
 
  public:
   AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
@@ -694,9 +694,9 @@ public:
   size_t id() { return id_; }
 
  private:
-  /// @brief Loads an AIE/NPU code object.
+  /// @brief Loads an AIE code object.
   ///
-  /// @param agent The AIE agent to load the code object for.
+  /// @param agent AIE agent to load the code object for.
   /// @param data Pointer to the code object data.
   /// @param size Size of the code object data.
   /// @param uri URI of the code object for debugging.

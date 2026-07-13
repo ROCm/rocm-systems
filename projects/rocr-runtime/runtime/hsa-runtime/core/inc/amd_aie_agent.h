@@ -101,7 +101,7 @@ public:
  /// @brief Getter for the AIE node properties.
  const HsaNodeProperties& properties() const { return node_props_; }
 
- /// @brief Architecture name accepted in hsaco section names, e.g. "aie2".
+ /// @brief Architecture name accepted in AIE hsaco section names.
  std::string_view arch_name() const { return arch_name_; }
 
 private:
