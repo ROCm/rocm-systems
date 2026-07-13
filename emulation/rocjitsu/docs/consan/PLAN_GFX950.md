@@ -185,6 +185,12 @@ Full gfx950 support means:
   reserved for `AT1A`, permute/swizzle, transpose, unsupported access forms,
   and other DS operations. A reserved GDS encoding is explicitly prevented
   from entering the LDS probe path.
+- 2026-07-13: `RR1B` is `DONE`. A live 128-thread gfx950 kernel records
+  same-cell writes from logical owners zero and one and requires replay to
+  emit exactly one conflict diagnostic with no overflow. Its non-barrier
+  control performs two same-cell writes in one wave and requires two processed
+  records with zero diagnostics, proving same-owner program order remains
+  clean. Both guarded CTests require two patches and visible records.
 
 ## DAG Overview
 
@@ -313,7 +319,7 @@ flowchart LR
   B1B["B1B: Engine Barrier Semantics"]:::todo
   SC1["SC1: SuperCollider Native LDS"]:::todo
   RR1A["RR1A: Access Record Emission"]:::done
-  RR1B["RR1B: Record/Replay Live Semantics"]:::todo
+  RR1B["RR1B: Record/Replay Live Semantics"]:::done
   SA1A["SA1A: Static Sampled Publication"]:::todo
   SA1B["SA1B: Runtime Selection And Check"]:::todo
   SA1C["SA1C: Sampled Host Oracle"]:::todo
@@ -1134,7 +1140,7 @@ Done criteria:
 - A guarded auto-buffer run produces visible, field-correct records for one
   static and one dynamic access.
 
-### RR1B: gfx950 Record/Replay Live Semantics - TODO
+### RR1B: gfx950 Record/Replay Live Semantics - DONE
 
 Goal: establish record/replay as the semantic reference engine on gfx950.
 
@@ -1142,6 +1148,14 @@ Work:
 
 - Replay same-workgroup records using the exact cell-range and owner model.
 - Keep barrier-specific ordering in B1B and atomic-specific ordering in AT1A.
+
+Result:
+
+- A two-wave wave64 fixture produces two same-workgroup/same-cell records from
+  distinct stable owners and one replay conflict diagnostic.
+- A two-access same-wave fixture proves the owner model preserves non-barrier
+  program order without a false conflict; both controls forbid dropped
+  records through the hook teardown checks.
 
 Done criteria:
 
