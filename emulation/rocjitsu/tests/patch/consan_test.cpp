@@ -5863,6 +5863,83 @@ TEST(ConSanMoi, Gfx950InventoriesFlatAtomicScOrderingFields) {
   EXPECT_TRUE(*acquire.returns_old_value);
 }
 
+TEST(ConSanMoi, Gfx950InventoriesFlatLoadStoreRawFieldsWithoutAdmittingUnknownPointers) {
+  const auto load =
+      build_flat_load_b32_vaddr_vdst(/*vaddr=*/2, /*vdst=*/4, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto store =
+      build_flat_store_b32_vaddr_vsrc(/*vaddr=*/2, /*vsrc=*/5, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(load && store);
+  const std::array<uint32_t, 5> text_words = {
+      (*load)[0], (*load)[1], (*store)[0], (*store)[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_flat_unknown", /*vgpr_granulated=*/0, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  ASSERT_EQ(kernel.flat_sites.size(), 2u);
+  EXPECT_EQ(kernel.stats.flat_unknown_hint_count, 2u);
+  EXPECT_TRUE(result.moi_candidates.empty());
+  for (const ConSanFlatSite &site : kernel.flat_sites) {
+    EXPECT_EQ(site.size, 2u * sizeof(uint32_t));
+    EXPECT_EQ(site.raw_vaddr, 2u);
+    EXPECT_EQ(site.raw_ioffset, 0);
+    EXPECT_EQ(site.raw_segment, 0u);
+    EXPECT_EQ(site.raw_scope, 0u);
+    EXPECT_TRUE(site.raw_op.has_value());
+    EXPECT_TRUE(site.raw_saddr.has_value());
+    EXPECT_TRUE(site.raw_th.has_value());
+  }
+  EXPECT_EQ(kernel.flat_sites[0].raw_vdst, 4u);
+  EXPECT_EQ(kernel.flat_sites[1].raw_vsrc, 5u);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("unknown=2") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950ClassifiesExplicitSharedBaseFlatLoadAsGroup) {
+  const auto load =
+      build_flat_load_b32_vaddr_vdst(/*vaddr=*/0, /*vdst=*/2, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(load);
+  const std::array<uint32_t, 6> text_words = {
+      0xBE8001EBu, // s_mov_b64 s[0:1], src_shared_base
+      build_v_mov_b32_e32(/*vdst=*/0, /*scalar s0=*/0, ROCJITSU_CODE_ARCH_CDNA4),
+      build_v_mov_b32_e32(/*vdst=*/1, /*scalar s1=*/1, ROCJITSU_CODE_ARCH_CDNA4),
+      (*load)[0],
+      (*load)[1],
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
+      text_words, "gfx950_flat_group", /*vgpr_granulated=*/0, /*wave32=*/false,
+      /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(decoder);
+  std::unique_ptr<Instruction> base_move(decoder->decode(text_words.data()));
+  ASSERT_TRUE(base_move);
+  ASSERT_NE(base_move->src_operand(0), nullptr);
+  EXPECT_EQ(base_move->src_operand(0)->name(), "SRC_SHARED_BASE");
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.kernels.size(), 1u);
+  const ConSanKernelInfo &kernel = result.kernels.front();
+  ASSERT_EQ(kernel.flat_sites.size(), 1u);
+  EXPECT_EQ(kernel.flat_sites.front().address_space_hint, ConSanFlatAddressSpaceHint::Group);
+  EXPECT_EQ(kernel.stats.flat_group_hint_count, 1u);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
+}
+
 TEST(ConSanMoi, Gfx950AtomicRecordPatchEmitsReleaseAndAcquireRecords) {
   const std::vector<uint8_t> bytes = make_gfx950_flat_atomic_release_acquire_code_object();
   ASSERT_FALSE(bytes.empty());

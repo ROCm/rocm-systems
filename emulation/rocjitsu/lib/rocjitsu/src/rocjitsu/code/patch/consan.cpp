@@ -579,9 +579,9 @@ special_pointer_base_space(const Operand *operand) {
   if (operand == nullptr)
     return std::nullopt;
   const std::string name = operand->name();
-  if (name == "src_shared_base")
+  if (ascii_iequals(name, "src_shared_base"))
     return ConSanFlatAddressSpaceHint::Group;
-  if (name == "src_private_base")
+  if (ascii_iequals(name, "src_private_base"))
     return ConSanFlatAddressSpaceHint::Private;
   return std::nullopt;
 }
@@ -1144,7 +1144,6 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
   site.address_space_hint = flat_address_space_hint(inst, tracker);
-  count_flat_address_space_hint(kernel.stats, site.address_space_hint);
   if (site.kind == ConSanLdsAccessKind::Read) {
     site.dst_vgpr = vgpr_index(inst.dst_operand(0));
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
@@ -1155,10 +1154,28 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     site.addr_vgpr = vgpr_index(inst.src_operand(0));
     site.data_vgpr = vgpr_index(inst.src_operand(1));
   }
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
-      instruction_bytes.size() >= sizeof(rdna4::VflatMachineInst)) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+      instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
+    cdna4::FlatMachineInst raw{};
+    std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    site.raw_op = static_cast<uint32_t>(raw.op);
+    site.raw_saddr = static_cast<uint32_t>(raw.saddr);
+    site.raw_vaddr = static_cast<uint32_t>(raw.addr);
+    site.raw_vsrc = static_cast<uint32_t>(raw.data);
+    site.raw_vdst = static_cast<uint32_t>(raw.vdst);
+    site.raw_ioffset = static_cast<int32_t>(raw.offset);
+    site.raw_segment = static_cast<uint32_t>(raw.seg);
+    site.raw_scope = 0u;
+    site.raw_th = static_cast<uint32_t>(raw.sc0) | (static_cast<uint32_t>(raw.sc1) << 1u);
+    if (raw.seg == 1)
+      site.address_space_hint = ConSanFlatAddressSpaceHint::Private;
+    else if (raw.seg == 2)
+      site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
+  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+             instruction_bytes.size() >= sizeof(rdna4::VflatMachineInst)) {
     rdna4::VflatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
+    site.raw_op = static_cast<uint32_t>(raw.op);
     site.raw_saddr = static_cast<uint32_t>(raw.saddr);
     site.raw_vaddr = static_cast<uint32_t>(raw.vaddr);
     site.raw_vsrc = static_cast<uint32_t>(raw.vsrc);
@@ -1167,6 +1184,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
     site.raw_scope = static_cast<uint32_t>(raw.scope);
     site.raw_th = static_cast<uint32_t>(raw.th);
   }
+  count_flat_address_space_hint(kernel.stats, site.address_space_hint);
   site.mnemonic = std::string(mnemonic);
   kernel.flat_sites.push_back(std::move(site));
 }

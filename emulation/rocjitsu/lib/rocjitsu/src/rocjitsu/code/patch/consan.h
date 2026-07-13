@@ -308,11 +308,13 @@ struct ConSanFlatSite {
   std::optional<uint16_t> dst_vgpr;
   std::optional<uint16_t> addr_vgpr;
   std::optional<uint16_t> data_vgpr;
+  std::optional<uint32_t> raw_op;
   std::optional<uint32_t> raw_saddr;
   std::optional<uint32_t> raw_vaddr;
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdst;
   std::optional<int32_t> raw_ioffset;
+  std::optional<uint32_t> raw_segment;
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
   ConSanFlatAddressSpaceHint address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
@@ -355,9 +357,9 @@ struct ConSanAtomicSite {
   std::optional<uint32_t> raw_rsrc;
   std::optional<uint32_t> raw_soffset;
   std::optional<int32_t> raw_ioffset;
+  std::optional<uint32_t> raw_segment;
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
-  std::optional<uint32_t> raw_segment;
   std::optional<bool> returns_old_value;
   std::string mnemonic;
 };
@@ -415,6 +417,7 @@ struct ConSanMoiCandidate {
   std::optional<uint32_t> raw_vsrc;
   std::optional<uint32_t> raw_vdst;
   std::optional<int32_t> raw_ioffset;
+  std::optional<uint32_t> raw_segment;
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
   std::string mnemonic;

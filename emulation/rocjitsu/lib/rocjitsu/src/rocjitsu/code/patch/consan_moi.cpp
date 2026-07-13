@@ -857,11 +857,13 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.addr_vgpr = site.addr_vgpr;
   candidate.data_vgpr = site.data_vgpr;
   candidate.kernel_descriptor_file_offset = descriptor_file_offset;
+  candidate.raw_op = site.raw_op;
   candidate.raw_saddr = site.raw_saddr;
   candidate.raw_vaddr = site.raw_vaddr;
   candidate.raw_vsrc = site.raw_vsrc;
   candidate.raw_vdst = site.raw_vdst;
   candidate.raw_ioffset = site.raw_ioffset;
+  candidate.raw_segment = site.raw_segment;
   candidate.raw_scope = site.raw_scope;
   candidate.raw_th = site.raw_th;
   candidate.mnemonic = site.mnemonic;

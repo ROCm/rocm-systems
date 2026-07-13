@@ -274,6 +274,16 @@ Full gfx950 support means:
   leaving an unrelated kernel unchanged. Marking only one owner dynamic-stack
   rejects the shared spill transaction without emitting a modified ELF. All
   203 ConSan CPU tests and all 104 gfx950 CTests pass.
+- 2026-07-13: `FL1A` is `DONE` and selects `FL1B`. CDNA4 eight-byte FLAT
+  load/store fields are now inventoried, including opcode, address/data/dest,
+  scalar address, unsigned FLAT offset, segment, and SC bits. Representative
+  IREE scan and matmul objects use native DS (5 to 44 admitted sites per code
+  object) and no application FLAT accesses. A hip-moi MFMA handoff object has
+  1,602 kernel/helper FLAT sites: 371 dword, 292 dwordx2, 151 dwordx4, and 70
+  ubyte loads; 237 dword, 217 dwordx2, 258 dwordx4, and 4 byte stores; all are
+  unknown at their local decode scope. An explicit CDNA4 `SRC_SHARED_BASE`
+  construction is strongly classified Group, so the bounded zero-offset
+  B32/B64/B128 forms must proceed through `FL1B`, not `FL1X`.
 
 ## DAG Overview
 
@@ -409,8 +419,8 @@ flowchart LR
   IS1A["IS1A: Shadow Atomic Primitive"]:::done
   IS1B["IS1B: Single-Cell Inline Shadow"]:::done
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::done
-  FL1A["FL1A: Group-Flat Inventory"]:::todo
-  FL1B["FL1B: Group-Flat Emission"]:::todo
+  FL1A["FL1A: Group-Flat Inventory"]:::done
+  FL1B["FL1B: Group-Flat Emission"]:::active
   FL1X["FL1X: Typed No-Forms Result"]:::todo
   FLC{"FLC: Group-Flat Capability Closed"}:::target
   AT1A["AT1A: Atomic Decode And Records"]:::done
@@ -1455,7 +1465,7 @@ Result:
   requires packed low/high metadata to be materialized four times, preventing
   the stale-temporary defect found during this node from recurring.
 
-### FL1A: gfx950 Group-Flat Inventory - TODO
+### FL1A: gfx950 Group-Flat Inventory - DONE
 
 Goal: determine which compiler-emitted gfx950 flat forms and provenance classes
 are worth admitting.
@@ -1471,7 +1481,18 @@ Done criteria:
 - The inventory names a bounded initial form set and selects FL1B, or records
   that there are no admissible forms and selects FL1X.
 
-### FL1B: gfx950 Group-Flat Emission - TODO
+Result:
+
+- Real IREE gfx950 scan and matmul objects use native DS for their shared-memory
+  accesses; the inspected objects contain no application FLAT sites. The
+  representative hip-moi MFMA object contains B8/B32/B64/B128 FLAT loads and
+  stores, but all 1,602 sites are unknown when decoded within their local
+  kernel/helper scope.
+- CDNA4 raw fields and uppercase special-base spelling are now covered. A
+  retained `SRC_SHARED_BASE` fixture produces a strict Group B32 load, selecting
+  a bounded zero-offset B32/B64/B128 load/store set for FL1B.
+
+### FL1B: gfx950 Group-Flat Emission - ACTIVE
 
 Goal: instrument the bounded FL1A form set without misclassifying global or
 private accesses.
