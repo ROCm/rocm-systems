@@ -152,7 +152,7 @@ TEST(ConSanCapabilities, DistinguishesGfx950InventoryFromNativeEmission) {
   EXPECT_EQ(gfx950.workgroup_identity, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.stable_wave_owner, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.supercollider, ConSanNativeSupport::InventoryOnly);
-  EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::InventoryOnly);
+  EXPECT_EQ(gfx950.sampled, ConSanNativeSupport::NativeEmission);
   EXPECT_EQ(gfx950.inline_shadow, ConSanNativeSupport::InventoryOnly);
   EXPECT_EQ(gfx950.hw_id_owner, ConSanNativeSupport::Unavailable);
 
@@ -2903,7 +2903,7 @@ TEST(ConSanMoi, Gfx950UnsupportedDsInventoryHasTypedDispositionPerSite) {
   EXPECT_TRUE(*result.kernels.front().lds_sites[7].raw_gds);
 }
 
-TEST(ConSanMoi, Gfx950InventoryOnlySampledCapabilityHasTypedSkip) {
+TEST(ConSanMoi, Gfx950StaticSampledCapabilityEmitsNativePatch) {
   const std::array<uint32_t, 3> text_words = {
       0xD81A0000u,
       0x00000000u, // ds_write_b32 v0, v0
@@ -2921,12 +2921,15 @@ TEST(ConSanMoi, Gfx950InventoryOnlySampledCapabilityHasTypedSkip) {
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.errors.empty());
-  EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("context=moi-sampled-access") != std::string::npos &&
-           warning.find("feature=sampled") != std::string::npos &&
-           warning.find("support=inventory-only") != std::string::npos;
+  ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
+           patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   }));
 }
 

@@ -197,6 +197,11 @@ Full gfx950 support means:
   precondition before `s_barrier`; an inventory fixture counts one wait and one
   barrier at separate offsets, preventing the false assumption that the
   barrier drains memory counters.
+- 2026-07-13: `SA1A` is `DONE`. The sampled capability now enables the static
+  CDNA4 emission path. A synthetic gfx950 transaction emits both the sampled
+  access patch and identity prologue. The live two-site control statically
+  selects site one, whose only active lane is owner one, and requires the
+  decoded generation-one write entry for exact cell range `[1,2)`.
 
 ## DAG Overview
 
@@ -326,7 +331,7 @@ flowchart LR
   SC1["SC1: SuperCollider Native LDS"]:::todo
   RR1A["RR1A: Access Record Emission"]:::done
   RR1B["RR1B: Record/Replay Live Semantics"]:::done
-  SA1A["SA1A: Static Sampled Publication"]:::todo
+  SA1A["SA1A: Static Sampled Publication"]:::done
   SA1B["SA1B: Runtime Selection And Check"]:::todo
   SA1C["SA1C: Sampled Host Oracle"]:::todo
   IS1A["IS1A: Shadow Atomic Primitive"]:::todo
@@ -1176,7 +1181,7 @@ Done criteria:
 - A two-wave race produces a replay conflict and a non-barrier ordered control
   remains clean.
 
-### SA1A: gfx950 Static Sampled Publication - TODO
+### SA1A: gfx950 Static Sampled Publication - DONE
 
 Goal: port deterministic sampled entry publication before runtime selection.
 
@@ -1184,6 +1189,13 @@ Work:
 
 - Emit compact generation-qualified entries.
 - Port static selection and VCC preservation.
+
+Result:
+
+- CDNA4 reuses the target-dispatched LDS wait, VCC-neutral vector field
+  construction, general-FLAT publication, and stable owner/epoch prologue.
+- A guarded two-site live test selects only the second site and observes
+  `kind=write`, `owner=1`, `epoch=0`, `generation=1`, and cells `[1,2)`.
 
 Done criteria:
 
