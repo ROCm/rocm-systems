@@ -322,6 +322,89 @@ def run(*args, **kwargs):
     return subprocess.run(*args, **kwargs)
 
 
+def summarize_skipped_tests(binary_dir):
+    """Print a concise "test -> skip reason" section from CTest's Test.xml.
+
+    Avoids having to query CDash for skip reasons: the reason is taken from the
+    "Completion Status" measurement (populated via the <CTestDetails> tag emitted
+    by the pytest harness), falling back to the "SKIPPED (<reason>)" line in the
+    captured test output.
+    """
+    import base64
+    import zlib
+    import xml.etree.ElementTree as ET
+
+    xml_files = sorted(glob.glob(os.path.join(binary_dir, "Testing", "*", "Test.xml")))
+    if not xml_files:
+        return
+
+    def decoded_value(value_el):
+        """Return the text of a <Value>, decoding CTest's base64/gzip output.
+
+        CTest stores the captured stdout in a <Measurement><Value> that is
+        base64-encoded and (usually) gzip-compressed; plain NamedMeasurement
+        values have no encoding attributes and are returned as-is.
+        """
+        text = value_el.text or ""
+        if value_el.get("encoding") != "base64":
+            return text
+        try:
+            raw = base64.b64decode(text)
+        except (ValueError, TypeError):
+            return ""
+        if value_el.get("compression"):
+            for wbits in (zlib.MAX_WBITS | 16, zlib.MAX_WBITS, -zlib.MAX_WBITS):
+                try:
+                    raw = zlib.decompress(raw, wbits)
+                    break
+                except zlib.error:
+                    continue
+            else:
+                return ""
+        return raw.decode("utf-8", errors="replace")
+
+    # Prefer pytest's "short test summary info" line, which carries the full
+    # reason ("SKIPPED [1] file:line: reason"), over the verbose progress line
+    # ("foo SKIPPED (reason)") which pytest truncates with "..." to fit the
+    # terminal width.
+    skip_res = (
+        re.compile(r"SKIPPED \[\d+\][^:]*:\d+:\s*(.+)"),
+        re.compile(r"SKIPPED \(([^)]*)\)"),
+    )
+    reasons = {}  # test name -> reason (last occurrence wins)
+    for xml_file in xml_files:
+        try:
+            root = ET.parse(xml_file).getroot()
+        except ET.ParseError:
+            continue
+        for test in root.iter("Test"):
+            if test.get("Status") != "notrun":
+                continue
+            name = test.findtext("Name") or "<unknown>"
+            reason = ""
+            for nm in test.iter("NamedMeasurement"):
+                if nm.get("name") == "Completion Status":
+                    reason = (nm.findtext("Value") or "").strip()
+                    break
+            if not reason or reason.startswith("SKIP_RETURN_CODE"):
+                output = "".join(decoded_value(v) for v in test.iter("Value"))
+                for skip_re in skip_res:
+                    match = skip_re.search(output)
+                    if match:
+                        reason = match.group(1).strip()
+                        break
+            reasons[name] = reason or "(no reason captured)"
+
+    if not reasons:
+        return
+
+    log_group_start(f"Skipped tests ({len(reasons)})")
+    width = max(len(name) for name in reasons)
+    for name in sorted(reasons):
+        log(f"{name.ljust(width)}  {reasons[name]}")
+    log_group_end()
+
+
 def set_python_hints_from_cmake_args(cmake_args):
     """Extract ROCPROFSYS_PYTHON_PREFIX and ROCPROFSYS_PYTHON_ENVS from cmake args
     to build ROCPROFSYS_PYTHON_HINTS for CTest's find_program calls."""
@@ -401,6 +484,8 @@ if __name__ == "__main__":
         log(f"CTest dashboard failed: {e}", level="error")
         raise
     finally:
+        summarize_skipped_tests(args.binary_dir)
+
         log_group_start("Collecting test artifacts")
         if "-VV" not in ctest_args:
             for file in glob.glob(
