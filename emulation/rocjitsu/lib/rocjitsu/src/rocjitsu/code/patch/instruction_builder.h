@@ -392,12 +392,13 @@ inline constexpr uint32_t kMaxCdna4AddressFreeScratchPrivateBytes = 0x1000u;
 /// @brief Get the VOP2 v_add_nc_u32 opcode for a target ISA.
 [[nodiscard]] inline constexpr std::optional<uint32_t> vop2_op_add_nc_u32(rj_code_arch_t arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    // CDNA4 names the carry-free E32 form v_add_u32.
-    return 52;
   case ROCJITSU_CODE_ARCH_RDNA4:
   case ROCJITSU_CODE_ARCH_GFX1250:
     return 37;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    // The CDNA4 E32 add writes VCC. Probe arithmetic must use the VCC-neutral
+    // VOP3 sequence returned by build_v_add_nc_u32_words instead.
+    return std::nullopt;
   default:
     return std::nullopt;
   }
@@ -543,6 +544,28 @@ build_v_add_nc_u32_e32(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arc
   if (!op)
     return std::nullopt;
   return pack_vop2(*op, vdst, src0, vsrc1);
+}
+
+/// @brief Encode a VCC-preserving 32-bit vector add for probe arithmetic.
+///
+/// @details RDNA4 uses the one-word `v_add_nc_u32_e32` form. CDNA4 has no
+/// equivalent E32 no-carry form, so it uses `v_add3_u32 vdst, src0, vsrc1, 0`.
+[[nodiscard]] inline std::optional<std::vector<uint32_t>>
+build_v_add_nc_u32_words(uint16_t vdst, uint16_t src0, uint16_t vsrc1, rj_code_arch_t arch) {
+  if (vdst > 255 || src0 > 511 || vsrc1 > 255)
+    return std::nullopt;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    constexpr uint32_t kVAdd3U32Word0 = 0xD1FF0000u;
+    constexpr uint32_t kInlineZero = 128u;
+    const uint32_t word1 = static_cast<uint32_t>(src0) |
+                           (static_cast<uint32_t>(vector_source_vgpr(vsrc1)) << 9u) |
+                           (kInlineZero << 18u);
+    return std::vector<uint32_t>{kVAdd3U32Word0 | vdst, word1};
+  }
+  const auto word = build_v_add_nc_u32_e32(vdst, src0, vsrc1, arch);
+  if (!word)
+    return std::nullopt;
+  return std::vector<uint32_t>{*word};
 }
 
 /// @brief Encode VOP2 `v_and_b32 vdst, src0, vsrc1`.

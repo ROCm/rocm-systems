@@ -98,6 +98,11 @@ Full gfx950 support means:
   behavior, accepts the SGPR 106 boundary despite its partially filled final
   descriptor group, and rejects VGPR 257 / SGPR 107. A synthetic gfx950 patch
   verifies that descriptor field zero is planned as eight VGPRs.
+- 2026-07-13: `P1B` is `DONE`. The final VCC-sensitive arithmetic gap was
+  closed by routing CDNA4 probe adds through LLVM-matched `v_add3_u32` while
+  retaining one-word `v_add_nc_u32_e32` on RDNA4. The unsafe CDNA4 E32 add is
+  rejected explicitly, operand boundaries are covered, and the gfx950 live
+  record probe still passes.
 
 ## DAG Overview
 
@@ -199,7 +204,7 @@ flowchart LR
   D1B["D1B: Extended LDS Forms"]:::todo
   D1C["D1C: Unsupported DS Inventory"]:::todo
   P1A["P1A: Scalar Control Primitives"]:::active
-  P1B["P1B: Vector And Address Primitives"]:::active
+  P1B["P1B: Vector And Address Primitives"]:::done
   P1C["P1C: Report Publication Primitives"]:::active
   I1A["I1A: Workgroup Identity"]:::todo
   I1B["I1B: Stable Wave64 Owner"]:::todo
@@ -775,7 +780,7 @@ Done criteria:
 
 - Scalar-control tests contain no unexplained RDNA4 constants on a gfx950 path.
 
-### P1B: CDNA4 Vector And Address Primitives - ACTIVE
+### P1B: CDNA4 Vector And Address Primitives - DONE
 
 Goal: supply the vector moves, compares, and address arithmetic shared by probe
 families.
@@ -786,6 +791,15 @@ Work:
   LDS, scratch, shadow, and report paths.
 - Test operand boundaries, special operands, and rollback on an unsupported
   encoding.
+
+Result:
+
+- CDNA4 vector ALU, comparison, lane-count, literal move, and address-building
+  primitives have exact-byte and rocJITsu decode coverage.
+- Probe addition uses the VCC-neutral two-word `v_add3_u32` form on CDNA4;
+  LLVM 21.1.8 independently produces `D1FF000A 02020702` for the retained test
+  operands. The VCC-writing E32 alternative is rejected on CDNA4.
+- Boundary inputs fail without emitting a partial instruction sequence.
 
 Done criteria:
 

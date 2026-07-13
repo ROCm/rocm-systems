@@ -613,7 +613,7 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
       build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4);
   const auto cmp_gt =
       build_v_cmp_gt_u32_e32_vcc(scalar_positive_inline_u32(7), 3, ROCJITSU_CODE_ARCH_CDNA4);
-  const auto add = build_v_add_nc_u32_e32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto add = build_v_add_nc_u32_words(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4);
   const auto bit_and =
       build_v_and_b32_e32(10, scalar_positive_inline_u32(7), 3, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(lshl && readfirst && mbcnt_lo && mbcnt_hi && cmp_eq && cmp_ne && cmp_gt && add &&
@@ -625,7 +625,11 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
   EXPECT_EQ(*cmp_eq, 0x7d940680u);
   EXPECT_EQ(*cmp_ne, 0x7d9a0702u);
   EXPECT_EQ(*cmp_gt, 0x7d980687u);
-  EXPECT_EQ(*add, 0x68140702u);
+  EXPECT_EQ(*add, (std::vector<uint32_t>{0xd1ff000au, 0x02020702u}));
+  EXPECT_FALSE(build_v_add_nc_u32_e32(10, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_add_nc_u32_words(256, vector_source_vgpr(2), 3, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_add_nc_u32_words(10, 512, 3, ROCJITSU_CODE_ARCH_CDNA4));
+  EXPECT_FALSE(build_v_add_nc_u32_words(10, vector_source_vgpr(2), 256, ROCJITSU_CODE_ARCH_CDNA4));
   EXPECT_EQ(*bit_and, 0x26140687u);
 
   const auto literal = build_v_mov_b32_e64_literal(10, 0x12345678u, ROCJITSU_CODE_ARCH_CDNA4);
@@ -658,7 +662,10 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
-  for (const auto *words : {&*literal, &*store, &*load, &*atomic_add, &*atomic_swap}) {
+  std::unique_ptr<Instruction> add_inst(decoder->decode(add->data()));
+  ASSERT_NE(add_inst, nullptr);
+  EXPECT_EQ(std::string_view(add_inst->mnemonic()), "v_add3_u32");
+  for (const auto *words : {&*add, &*literal, &*store, &*load, &*atomic_add, &*atomic_swap}) {
     std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
     ASSERT_NE(inst, nullptr);
   }

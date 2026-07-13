@@ -1154,9 +1154,9 @@ find_first_light_access_record_candidates(const ConSanResult &result,
       build_v_lshlrev_b32_e32(scaled_slot_vgpr, scalar_positive_inline_u32(5), slot_vgpr, arch);
   const auto slot_times_8 =
       build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(3), slot_vgpr, arch);
-  const auto slot_times_40 = build_v_add_nc_u32_e32(
+  const auto slot_times_40 = build_v_add_nc_u32_words(
       scaled_slot_vgpr, vector_source_vgpr(scaled_slot_vgpr), tmp_vgpr, arch);
-  const auto address_with_slot = build_v_add_nc_u32_e32(
+  const auto address_with_slot = build_v_add_nc_u32_words(
       address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
   if (!mov_address_lo || !mov_address_hi || !slot_times_32 || !slot_times_8 || !slot_times_40 ||
       !address_with_slot)
@@ -1166,8 +1166,8 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.push_back(*slot_times_32);
   words.push_back(*slot_times_8);
-  words.push_back(*slot_times_40);
-  words.push_back(*address_with_slot);
+  words.insert(words.end(), slot_times_40->begin(), slot_times_40->end());
+  words.insert(words.end(), address_with_slot->begin(), address_with_slot->end());
   return true;
 }
 
@@ -1261,7 +1261,7 @@ append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t 
       address_hi_vgpr, static_cast<uint32_t>(field_address >> 32u), arch);
   const auto slot_times_64 =
       build_v_lshlrev_b32_e32(scaled_slot_vgpr, scalar_positive_inline_u32(6), slot_vgpr, arch);
-  const auto address_with_slot = build_v_add_nc_u32_e32(
+  const auto address_with_slot = build_v_add_nc_u32_words(
       address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
   if (!mov_address_lo || !mov_address_hi || !slot_times_64 || !address_with_slot)
     return false;
@@ -1269,7 +1269,7 @@ append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t 
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.push_back(*slot_times_64);
-  words.push_back(*address_with_slot);
+  words.insert(words.end(), address_with_slot->begin(), address_with_slot->end());
   return true;
 }
 
@@ -1298,22 +1298,22 @@ append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t 
       build_v_lshlrev_b32_e32(scaled_slot_vgpr, scalar_positive_inline_u32(4), slot_vgpr, arch);
   const auto slot_times_64 =
       build_v_lshlrev_b32_e32(address_lo_vgpr, scalar_positive_inline_u32(6), slot_vgpr, arch);
-  const auto slot_times_80 = build_v_add_nc_u32_e32(
+  const auto slot_times_80 = build_v_add_nc_u32_words(
       scaled_slot_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
   const auto mov_address_lo =
       build_v_mov_b32_e64_literal(address_lo_vgpr, static_cast<uint32_t>(field_address), arch);
   const auto mov_address_hi = build_v_mov_b32_e64_literal(
       address_hi_vgpr, static_cast<uint32_t>(field_address >> 32u), arch);
-  const auto address_with_slot = build_v_add_nc_u32_e32(
+  const auto address_with_slot = build_v_add_nc_u32_words(
       address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), scaled_slot_vgpr, arch);
   if (!slot_times_16 || !slot_times_64 || !slot_times_80 || !mov_address_lo || !mov_address_hi ||
       !address_with_slot)
     return false;
   words.push_back(*slot_times_16);
   words.push_back(*slot_times_64);
-  words.push_back(*slot_times_80);
+  words.insert(words.end(), slot_times_80->begin(), slot_times_80->end());
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
-  words.push_back(*address_with_slot);
+  words.insert(words.end(), address_with_slot->begin(), address_with_slot->end());
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   return true;
 }
@@ -2797,12 +2797,12 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
 
   const auto mov_offset = build_v_mov_b32_e64_literal(dst_vgpr, static_byte_offset, arch);
   const auto add_offset =
-      build_v_add_nc_u32_e32(dst_vgpr, vector_source_vgpr(addr_vgpr), dst_vgpr, arch);
+      build_v_add_nc_u32_words(dst_vgpr, vector_source_vgpr(addr_vgpr), dst_vgpr, arch);
   if (!mov_offset || !add_offset)
     return false;
 
   words.insert(words.end(), mov_offset->begin(), mov_offset->end());
-  words.push_back(*add_offset);
+  words.insert(words.end(), add_offset->begin(), add_offset->end());
   return true;
 }
 
@@ -3131,13 +3131,13 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   const auto mask_words = build_v_and_b32_e32_literal(tmp_vgpr, mask, field_vgpr, arch);
   const auto shift_word =
       build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(shift), tmp_vgpr, arch);
-  const auto add_word = build_v_add_nc_u32_e32(
+  const auto add_word = build_v_add_nc_u32_words(
       destination_vgpr, vector_source_vgpr(destination_vgpr), tmp_vgpr, arch);
   if (!mask_words || !shift_word || !add_word)
     return false;
   words.insert(words.end(), mask_words->begin(), mask_words->end());
   words.push_back(*shift_word);
-  words.push_back(*add_word);
+  words.insert(words.end(), add_word->begin(), add_word->end());
   return true;
 }
 
@@ -3147,12 +3147,12 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
   if (value == 0)
     return true;
   const auto mov_value = build_v_mov_b32_e64_literal(tmp_vgpr, value, arch);
-  const auto add_word = build_v_add_nc_u32_e32(
+  const auto add_word = build_v_add_nc_u32_words(
       destination_vgpr, vector_source_vgpr(destination_vgpr), tmp_vgpr, arch);
   if (!mov_value || !add_word)
     return false;
   words.insert(words.end(), mov_value->begin(), mov_value->end());
-  words.push_back(*add_word);
+  words.insert(words.end(), add_word->begin(), add_word->end());
   return true;
 }
 
@@ -3605,7 +3605,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
           effective_lds_byte_offset_vgpr, arch);
       const auto byte_index_shift =
           build_v_lshlrev_b32_e32(tmp_vgpr, scalar_positive_inline_u32(3), tmp_vgpr, arch);
-      const auto address_with_cell = build_v_add_nc_u32_e32(
+      const auto address_with_cell = build_v_add_nc_u32_words(
           address_lo_vgpr, vector_source_vgpr(address_lo_vgpr), tmp_vgpr, arch);
       if (!start_cell_shift || !byte_index_shift || !address_with_cell) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode shadow publish");
@@ -3613,7 +3613,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
       }
       words.push_back(*start_cell_shift);
       words.push_back(*byte_index_shift);
-      words.push_back(*address_with_cell);
+      words.insert(words.end(), address_with_cell->begin(), address_with_cell->end());
       if (cell_index != 0 &&
           !append_add_literal_field(words, address_lo_vgpr,
                                     static_cast<uint32_t>(cell_index * sizeof(uint64_t)), tmp_vgpr,
@@ -5573,7 +5573,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     return std::nullopt;
   }
 
-  const auto increment_epoch = build_v_add_nc_u32_e32(
+  const auto increment_epoch = build_v_add_nc_u32_words(
       *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), *options.moi_epoch_vgpr, arch);
   if (!increment_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow barrier epoch patch could not encode epoch add");
@@ -5583,7 +5583,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   std::vector<uint32_t> words;
   words.reserve(3);
   words.push_back(original_barrier_word);
-  words.push_back(*increment_epoch);
+  words.insert(words.end(), increment_epoch->begin(), increment_epoch->end());
 
   const uint64_t branch_pc =
       cave_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -5605,7 +5605,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   const auto load_epoch = build_address_free_scratch_load_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_load = build_s_wait_loadcnt0(arch);
   const auto increment_epoch =
-      build_v_add_nc_u32_e32(scratch_vgpr, scalar_positive_inline_u32(1), scratch_vgpr, arch);
+      build_v_add_nc_u32_words(scratch_vgpr, scalar_positive_inline_u32(1), scratch_vgpr, arch);
   const auto store_epoch = build_address_free_scratch_store_b32(scratch_vgpr, epoch_offset, arch);
   const auto wait_store = build_s_wait_storecnt0(arch);
   if (!load_epoch || !wait_load || !increment_epoch || !store_epoch || !wait_store) {
@@ -5620,7 +5620,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   words.insert(words.end(), spill.save_words.begin(), spill.save_words.end());
   words.insert(words.end(), load_epoch->begin(), load_epoch->end());
   words.push_back(*wait_load);
-  words.push_back(*increment_epoch);
+  words.insert(words.end(), increment_epoch->begin(), increment_epoch->end());
   words.insert(words.end(), store_epoch->begin(), store_epoch->end());
   words.push_back(*wait_store);
   words.insert(words.end(), spill.restore_words.begin(), spill.restore_words.end());
@@ -6387,13 +6387,13 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not load epoch");
       return std::nullopt;
     }
-    const auto import_epoch = build_v_add_nc_u32_e32(
+    const auto import_epoch = build_v_add_nc_u32_words(
         *options.moi_epoch_vgpr, scalar_positive_inline_u32(1), value_vgpr, arch);
     if (!import_epoch) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not import epoch");
       return std::nullopt;
     }
-    words.push_back(*import_epoch);
+    words.insert(words.end(), import_epoch->begin(), import_epoch->end());
     words.push_back(*restore_exec);
     if (!append_restore_moi_special_state(words, options, arch)) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not restore VCC/SCC");
