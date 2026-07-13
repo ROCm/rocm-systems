@@ -320,6 +320,10 @@ Full gfx950 support means:
   and barrier-ordered negatives, same/wrong-address atomic handoff, typed
   unsupported DS disposition, diagnostic capacity exhaustion, dropped or
   unsupported access records, and dropped barrier records.
+- 2026-07-13: `T2SA` is `DONE`; `T2IS` is now `ACTIVE`. Seven sampled rows
+  pass: standalone and packed publication, deterministic static selection,
+  runtime owner selection, immediate and host-oracle conflict paths, and stale
+  generation rejection.
 
 ## DAG Overview
 
@@ -531,8 +535,8 @@ flowchart LR
   T1B["T1B: Workload And Tier Selection"]:::done
   T2SC["T2SC: SuperCollider Focused Tier"]:::done
   T2RR["T2RR: Record/Replay Focused Tier"]:::done
-  T2SA["T2SA: Sampled Focused Tier"]:::active
-  T2IS["T2IS: Inline-Shadow Focused Tier"]:::todo
+  T2SA["T2SA: Sampled Focused Tier"]:::done
+  T2IS["T2IS: Inline-Shadow Focused Tier"]:::active
   T2R["T2R: Resource And Spill Tier"]:::todo
   T2G{"T2G: Focused gfx950 Accepted"}:::target
   T3A["T3A: Workload Inventory"]:::todo
@@ -1705,7 +1709,7 @@ produce one replay conflict; program/barrier ordering and same-address atomic
 handoff remain clean; wrong-address handoff reports. Capacity, drop, and
 unsupported outcomes are independently typed and bounded.
 
-### T2SA: gfx950 Sampled Focused Tier - ACTIVE
+### T2SA: gfx950 Sampled Focused Tier - DONE
 
 Required rows:
 
@@ -1717,7 +1721,11 @@ Done criteria:
 - Every intended selection and rejection is observable, and the positive race
   reaches both required reporting paths.
 
-### T2IS: gfx950 Inline-Shadow Focused Tier - TODO
+Result: all seven selected rows pass. Static and runtime selection are
+deterministic, the immediate GPU check and host oracle both report the intended
+race, packed publication is covered, and stale generations are rejected.
+
+### T2IS: gfx950 Inline-Shadow Focused Tier - ACTIVE
 
 Required rows:
 
