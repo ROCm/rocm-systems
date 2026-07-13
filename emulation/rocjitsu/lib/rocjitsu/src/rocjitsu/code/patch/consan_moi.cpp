@@ -2351,6 +2351,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   ConSanRegisterRequest request;
   request.reg_class = RegClass::VGPR;
   request.count = scratch_count;
+  request.alignment = options.moi_engine == ConSanMoiEngine::InlineShadow ? 2u : 1u;
   request.current_allocation_count = std::min(plan.current_vgpr_count, ordinary_vgpr_limit);
   request.max_referenced_count = plan.max_referenced_vgpr_count;
   request.architecture_limit = ordinary_vgpr_limit;
@@ -2587,6 +2588,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
 
   uint32_t first = 0;
+  uint32_t scalar_identity_first = 0;
   bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (plan.owner_descriptor_file_offsets.empty())
@@ -2609,6 +2611,10 @@ moi_special_state_sgprs(const ConSanOptions &options) {
           return false;
         }
         first = std::max(first, transaction->patched_abi_count);
+        scalar_identity_first = std::max<uint32_t>(
+            scalar_identity_first,
+            std::max<uint32_t>(transaction->patched_abi_count,
+                               moi_descriptor_sgpr_allocation_count(descriptor, arch)));
       }
     }
   }
@@ -2619,18 +2625,42 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
   }
 
+  const uint32_t fallback_first = util::align_up(first, 2u);
+  // Inline shadow may fall back to five persistent scalar identity SGPRs.
+  // Leave that fresh low window available and place the larger transient
+  // EXEC/VCC/SCC transaction above it. Keeping persistent state low also
+  // avoids the gfx950 live failure observed when it occupied s27:s31.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_engine == ConSanMoiEngine::InlineShadow &&
+      options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+    first = std::max(first, scalar_identity_first + 5u);
+  }
   first = util::align_up(first, 2u);
-  for (uint32_t base = first; base + count <= moi_max_ordinary_sgprs(arch); base += 2u) {
-    if (options.moi_owner_sgpr &&
-        range_overlaps(static_cast<uint16_t>(base), count, *options.moi_owner_sgpr, 1u)) {
-      continue;
+  const auto find_window = [&](uint32_t start) -> std::optional<uint32_t> {
+    for (uint32_t base = start; base + count <= moi_max_ordinary_sgprs(arch); base += 2u) {
+      if (options.moi_owner_sgpr &&
+          range_overlaps(static_cast<uint16_t>(base), count, *options.moi_owner_sgpr, 1u)) {
+        continue;
+      }
+      return base;
     }
-    options.moi_exec_save_sgpr = static_cast<uint16_t>(base);
+    return std::nullopt;
+  };
+  std::optional<uint32_t> selected = find_window(first);
+  if (!selected && fallback_first != first) {
+    selected = find_window(fallback_first);
+    if (selected) {
+      result.warnings.emplace_back(
+          "ConSan MOI placed EXEC-save SGPRs below the preferred scalar identity window");
+    }
+  }
+  if (selected) {
+    options.moi_exec_save_sgpr = static_cast<uint16_t>(*selected);
     options.automatic_moi_exec_save_sgprs = true;
     result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
     result.moi_exec_save_sgprs_automatic = true;
     result.warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
-                                 std::to_string(base) + ":s" + std::to_string(base + count - 1u));
+                                 std::to_string(*selected) + ":s" +
+                                 std::to_string(*selected + count - 1u));
     return true;
   }
 
@@ -4022,8 +4052,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     return false;
   }
   if (base_low != 0) {
-    const auto increment = build_v_add_nc_u32_words(
-        address_hi_vgpr, vector_source_vgpr(address_hi_vgpr), scalar_positive_inline_u32(1), arch);
+    const auto increment = build_v_add_nc_u32_words(address_hi_vgpr, scalar_positive_inline_u32(1),
+                                                    address_hi_vgpr, arch);
     if (!increment ||
         increment->size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
       return false;
@@ -4041,11 +4071,11 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     std::vector<uint32_t> &words, const ConSanMoiCandidate &candidate, const ConSanOptions &options,
     rj_code_arch_t arch, const ConSanMoiReportBufferLayout &layout, uint16_t old_value_vgpr,
     uint16_t old_value_hi_vgpr, uint16_t current_value_vgpr, uint16_t current_field_vgpr,
-    uint16_t lds_byte_offset_vgpr, uint32_t static_byte_offset, uint32_t byte_count) {
+    uint16_t lds_byte_offset_vgpr, uint16_t tmp_vgpr, uint32_t static_byte_offset,
+    uint32_t byte_count) {
   if (!options.moi_exec_save_sgpr || layout.diagnostic_capacity == 0)
     return true;
 
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
   const uint64_t report_base = *options.moi_report_buffer_address;
   const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
 
@@ -4304,8 +4334,14 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
   const uint16_t address_hi_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 1u);
   const uint16_t low_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
   const uint16_t high_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 3u);
-  const uint16_t tmp_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-  const uint16_t old_value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
+  // CDNA4 requires the vdst pair of flat_atomic_swap_x2 to be even-aligned.
+  // Fit both parities of a seven-register scratch window by selecting either
+  // +4:+5 or +5:+6, and use the remaining register as the temporary.
+  const uint16_t old_value_vgpr =
+      static_cast<uint16_t>((*options.scratch_vgpr + 5u) & ~uint16_t{1});
+  const uint16_t tmp_vgpr = old_value_vgpr == *options.scratch_vgpr + 4u
+                                ? static_cast<uint16_t>(*options.scratch_vgpr + 6u)
+                                : static_cast<uint16_t>(*options.scratch_vgpr + 4u);
 
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
   const uint32_t low_literal =
@@ -4335,6 +4371,15 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not save VCC/SCC");
     return std::nullopt;
   }
+  const auto save_exec = build_s_mov_b64(*options.moi_exec_save_sgpr, kWave64ExecLo, arch);
+  if (!save_exec) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not save EXEC");
+    return std::nullopt;
+  }
+  // The normal diagnostic path overwrites this pair with s_and_saveexec, but
+  // that instruction snapshots the same outer EXEC value. The partition
+  // overflow path skips diagnostics, so it needs this explicit snapshot.
+  words.push_back(*save_exec);
   std::vector<size_t> overflow_branch_indices;
   if (!append_sampled_partition_bounds(words, *workgroup_sources, options, arch, address_lo_vgpr,
                                        address_hi_vgpr, overflow_branch_indices)) {
@@ -4415,7 +4460,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
       if (!append_inline_shadow_diagnostic_words(
               words, candidate, options, arch, layout, old_value_vgpr,
               static_cast<uint16_t>(old_value_vgpr + 1u), low_vgpr, high_vgpr,
-              *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count)) {
+              *lds_byte_offset_vgpr, tmp_vgpr, range.static_byte_offset, range.byte_count)) {
         errors.emplace_back("ConSan MOI inline-shadow probe could not encode diagnostic stores");
         return std::nullopt;
       }
@@ -4434,6 +4479,12 @@ find_inline_shadow_access_candidates(const ConSanResult &result) {
     return std::nullopt;
   }
   const size_t restore_index = words.size();
+  const auto restore_exec = build_s_mov_b64(kWave64ExecLo, *options.moi_exec_save_sgpr, arch);
+  if (!restore_exec) {
+    errors.emplace_back("ConSan MOI inline-shadow probe could not restore EXEC");
+    return std::nullopt;
+  }
+  words.push_back(*restore_exec);
   if (!append_restore_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not restore VCC/SCC");
     return std::nullopt;

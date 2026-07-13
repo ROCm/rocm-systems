@@ -496,7 +496,7 @@ Full gfx950 support means:
   and fixed the low/high publication order before acceptance. The authoritative
   focused gate passes 258/258; the omitted-coordinate clean baseline and
   sampled row pass 2/2, and both sampled race/non-vacuity rows pass 2/2.
-- 2026-07-13: `T3IWE`, `T3IWL`, and `T3IW` are `DONE` in commits
+- 2026-07-13: `T3IWE`, `T3IWL`, and `T3IW` were provisionally `DONE` in commits
   `f652c53557` and `8612d33d1b`. Inline exact-shadow cells and atomic release
   slots are partitioned by exact bounded `(x,y,z)`, with checked capacity,
   full 64-bit address carry, typed overflow, one outer VCC/SCC/EXEC
@@ -504,6 +504,26 @@ Full gfx950 support means:
   The focused gate passes 262/262. The complete raw/record-replay/sampled/
   inline omitted-coordinate and clean-isolation matrix passes 14/14 with
   overflow forbidden on every bounded compact-engine row.
+- 2026-07-13: a live inline-shadow launch with deliberately undersized
+  `1x1x1` configured extents reopened `T3IWE` and therefore aggregate `T3IW`.
+  An eight-workgroup clean-isolation kernel aperture-faults when a nonzero
+  workgroup takes the inline out-of-range path; the equivalent sampled run
+  completes and reports typed partition overflow. `T3IWL` remains `DONE`
+  because its distinct correct-extents 14/14 gate is still valid. Acceptance
+  now also requires a live undersized-extents inline row to complete and
+  report typed, nonzero partition overflow without touching shadow state.
+- 2026-07-13: `T3IWE` and aggregate `T3IW` are `DONE` again. The fault was not
+  an out-of-range address: inline auto-allocation placed its 11 transient
+  special-state SGPRs before the five persistent scalar identity SGPRs,
+  pushing persistent state to the failing `s27:s31` window. The allocator now
+  reserves the descriptor-safe five-SGPR identity window first and places the
+  transient transaction above it, with a typed fallback for saturated scalar
+  files. Inline-shadow scratch plans now start on an even VGPR so the 64-bit
+  address and data operands are aligned, while the exact-shadow atomic return
+  pair is selected dynamically to remain even-aligned for either layout. The
+  focused gate passes 262/262; the new registered
+  undersized-extents live row publishes one in-range shadow entry, reports
+  exactly seven partition overflows, and completes without a GPU fault.
 
 ## DAG Overview
 
@@ -2148,6 +2168,10 @@ Done criteria:
 - Every launched workgroup has a distinct recorded `(x,y,z)` identity for all
   three MOI engines, regardless of the guest descriptor's original system-SGPR
   request mask, with exact guest ABI restoration at both hardware entries.
+- A live inline-shadow launch whose configured extents are smaller than the
+  actual grid completes without an aperture fault, reports typed nonzero
+  partition overflow, and does not access exact-shadow or atomic-release state
+  for the rejected workgroups.
 
 Result: commit `7da1e9e7b6` implements the complete CDNA4 descriptor
 and entry-ABI transaction. Synthetic coverage exercises all eight original
@@ -2161,6 +2185,12 @@ extent contracts. The Clang-21 build and authoritative focused suite pass
 record/replay, sampled, and inline-shadow, including a clean alternating-owner
 control with overflow forbidden.
 
+That correct-extents result remains valid. A later live `1x1x1`-extent run
+over an eight-workgroup grid initially aperture-faulted, reopening acceptance.
+The scalar allocation fix and registered undersized-extents regression now
+complete with one exact-shadow entry and exactly seven typed partition
+overflows, so aggregate `T3IW` is accepted again.
+
 The remaining work is deliberately split so neither compact engine becomes a
 single long-running node:
 
@@ -2172,11 +2202,15 @@ single long-running node:
   sampled pass 2/2, and sampled race/non-vacuity rows pass 2/2.
 - `T3IWE: Inline Workgroup Partitions - DONE`: exact-shadow cells and atomic
   release slots are workgroup-local, with checked finite capacity, exact
-  64-bit addressing, and typed out-of-range accounting.
+  64-bit addressing, an even scratch base plus a dynamically even return pair
+  for every 64-bit atomic operand, and typed out-of-range accounting.
+  Correct-extents tests pass, and the live undersized-extents row completes
+  with exactly seven typed overflows and one in-range shadow entry.
 - `T3IWL: Omitted-Coordinate Live Gate - DONE`: all 14 raw, record/replay,
   sampled, and inline-shadow rows pass. The clean-isolation control is green
   for both compact engines, while intentional same-group races remain
-  non-vacuously diagnosed.
+  non-vacuously diagnosed. This node is specifically the correct-extents gate;
+  undersized-extents overflow acceptance belongs to `T3IWE`.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 

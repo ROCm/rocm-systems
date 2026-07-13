@@ -2393,6 +2393,30 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationCompletes"
+            NAME "ConSanMoiGfx950Test.NoCoordinateInlineShadowPartitionOverflow"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=1"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=1"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_clean_grid"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.NoCoordinateInlineShadowPartitionOverflow"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "visible_exact_shadow=1.*partition_overflow=7"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.StableNoCoordinateIdentity"
             NAME "ConSanMoiGfx950Test.StableNoCoordinateIdentityRecordReplay"
             TIMEOUT 30

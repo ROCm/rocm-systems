@@ -878,8 +878,7 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u,
-      0x00980000u,
+      0xEE158004u, 0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -893,9 +892,7 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);
@@ -1164,26 +1161,26 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       0xBFC60000u,
   };
   const auto mov_low = build_v_mov_b32_e64_literal(10, low_literal, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto owner_mask = build_v_and_b32_e32_literal(12, consan_moi_exact_shadow::max_owner, 20,
+  const auto owner_mask = build_v_and_b32_e32_literal(14, consan_moi_exact_shadow::max_owner, 20,
                                                       ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_shift =
-      build_v_lshlrev_b32_e32(12, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift),
-                              12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_lshlrev_b32_e32(14, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift),
+                              14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_add =
-      build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 12, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto epoch_mask = build_v_and_b32_e32_literal(12, consan_moi_exact_shadow::max_epoch, 21,
+      build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 14, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto epoch_mask = build_v_and_b32_e32_literal(14, consan_moi_exact_shadow::max_epoch, 21,
                                                       ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_shift =
-      build_v_lshlrev_b32_e32(12, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
-                              12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_lshlrev_b32_e32(14, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
+                              14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_add =
-      build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_add_nc_u32_e32(10, vector_source_vgpr(10), 14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto mov_high = build_v_mov_b32_e64_literal(11, 0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto start_cell_shift = build_v_lshrrev_b32_e32(
-      12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), 0,
+      14, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift), 0,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
-      8, 10, 13, /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
+      8, 10, 12, /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mov_low);
   ASSERT_TRUE(owner_mask);
   ASSERT_TRUE(owner_shift);
@@ -1281,13 +1278,13 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesScratchAndPersistentVgprs) {
   ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
   ASSERT_TRUE(result.modified);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_EQ(result.resolved_moi_owner_vgpr, 8);
-  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 9);
+  EXPECT_EQ(result.resolved_moi_owner_vgpr, 9);
+  EXPECT_EQ(result.resolved_moi_epoch_vgpr, 10);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  EXPECT_EQ(access->scratch_vgpr, 1);
+  EXPECT_EQ(access->scratch_vgpr, 2);
   EXPECT_EQ(access->spilled_vgpr_count, 0u);
 }
 
@@ -1361,7 +1358,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
   ASSERT_NE(access, result.patches.end());
-  ASSERT_EQ(access->scratch_vgpr, 1);
+  ASSERT_EQ(access->scratch_vgpr, 2);
   EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
   EXPECT_EQ(access->persistent_owner_private_offset, 4u);
 
@@ -1377,7 +1374,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesWave32OwnerShift) {
   std::memcpy(words.data(), patched.text_sections().front()->data() + prologue->trampoline_offset,
               prologue->trampoline_size);
   const auto owner = build_v_lshrrev_b32_e32(
-      /*vdst=*/1, scalar_positive_inline_u32(5), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/2, scalar_positive_inline_u32(5), /*workitem_id_x=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner);
   EXPECT_TRUE(contains_subsequence(words, std::span<const uint32_t>(&*owner, 1)));
 }
@@ -1423,7 +1420,7 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
   ASSERT_NE(barrier, result.patches.end());
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
-  EXPECT_EQ(access->scratch_vgpr, 1);
+  EXPECT_EQ(access->scratch_vgpr, 2);
   EXPECT_EQ(access->spilled_vgpr_count, 7u);
   EXPECT_EQ(access->persistent_epoch_private_offset, 0u);
   EXPECT_EQ(access->required_private_segment_size, 44u);
@@ -1459,13 +1456,13 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
   const std::vector<uint32_t> barrier_words = patch_words(*barrier);
   const std::vector<uint32_t> prologue_words = patch_words(*prologue);
   const auto epoch_load = build_address_free_scratch_load_b32(
-      /*vdst=*/5, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/8, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_barrier_load = build_address_free_scratch_load_b32(
-      /*vdst=*/1, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/2, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_store = build_address_free_scratch_store_b32(
-      /*vsrc=*/1, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vsrc=*/2, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto spill_store = build_address_free_scratch_store_b32(
-      /*vsrc=*/1, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vsrc=*/2, /*byte_offset=*/16, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(epoch_load);
   ASSERT_TRUE(epoch_barrier_load);
   ASSERT_TRUE(epoch_store);
@@ -1517,7 +1514,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
   std::memcpy(text_words.data(), text_section->data(), text_section->size());
 
   const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
-      /*vaddr=*/16, /*vsrc=*/18, /*vdst=*/21, /*return_old_value=*/true, /*scope=*/2,
+      /*vaddr=*/16, /*vsrc=*/18, /*vdst=*/20, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(atomic_swap);
   EXPECT_EQ(count_subsequence(text_words, *atomic_swap), 4u);
@@ -1537,7 +1534,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
 
   const auto mov_cell_offset =
       build_v_mov_b32_e64_literal(/*vdst=*/16, /*literal=*/3, ROCJITSU_CODE_ARCH_RDNA4);
-  const auto add_cell_offset = build_v_add_nc_u32_e32(/*vdst=*/20, vector_source_vgpr(20),
+  const auto add_cell_offset = build_v_add_nc_u32_e32(/*vdst=*/22, vector_source_vgpr(22),
                                                       /*vsrc1=*/16, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mov_cell_offset);
   ASSERT_TRUE(add_cell_offset);
@@ -1583,7 +1580,7 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
     std::memcpy(text_words.data(), text_section->data(), text_section->size());
 
     const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
-        /*vaddr=*/16, /*vsrc=*/18, /*vdst=*/21, /*return_old_value=*/true, /*scope=*/2,
+        /*vaddr=*/16, /*vsrc=*/18, /*vdst=*/20, /*return_old_value=*/true, /*scope=*/2,
         ROCJITSU_CODE_ARCH_RDNA4);
     ASSERT_TRUE(atomic_swap);
     EXPECT_EQ(count_subsequence(text_words, *atomic_swap), expected_cells);
@@ -1633,37 +1630,37 @@ TEST(ConSanMoi, InlineShadowProbeCanEmitGpuConflictDiagnostic) {
   ASSERT_TRUE(save_vcc);
   EXPECT_TRUE(contains_subsequence(text_words, std::array<uint32_t, 2>{*save_scc, *save_vcc}));
   std::vector<uint32_t> expected_conflict_predicate;
-  const auto zero = build_v_mov_b32_e64_literal(/*vdst=*/12, 0, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto zero = build_v_mov_b32_e64_literal(/*vdst=*/14, 0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto nonempty =
-      build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(13), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(12), /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_nonempty =
       build_s_and_saveexec_b64(/*sdst=*/30, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto prior_owner = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift), /*vsrc1=*/13,
+      /*vdst=*/14, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift), /*vsrc1=*/12,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_mask = build_v_and_b32_e32_literal(
-      /*vdst=*/12, consan_moi_exact_shadow::max_owner, /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/14, consan_moi_exact_shadow::max_owner, /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto current_owner = build_v_lshrrev_b32_e32(
       /*vdst=*/11, scalar_positive_inline_u32(consan_moi_exact_shadow::owner_shift), /*vsrc1=*/10,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto current_owner_mask = build_v_and_b32_e32_literal(
       /*vdst=*/11, consan_moi_exact_shadow::max_owner, /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
   const auto owner_ne =
-      build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_conflict =
       build_s_and_saveexec_b64(/*sdst=*/32, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   const auto prior_epoch = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
-      /*vsrc1=*/13, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/14, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift),
+      /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_mask = build_v_and_b32_e32_literal(
-      /*vdst=*/12, consan_moi_exact_shadow::max_epoch, /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vdst=*/14, consan_moi_exact_shadow::max_epoch, /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto current_epoch = build_v_lshrrev_b32_e32(
       /*vdst=*/11, scalar_positive_inline_u32(consan_moi_exact_shadow::epoch_shift), /*vsrc1=*/10,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto current_epoch_mask = build_v_and_b32_e32_literal(
       /*vdst=*/11, consan_moi_exact_shadow::max_epoch, /*vsrc1=*/11, ROCJITSU_CODE_ARCH_RDNA4);
   const auto epoch_eq =
-      build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(11), /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_same_epoch =
       build_s_and_saveexec_b64(/*sdst=*/34, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(zero);
@@ -1840,11 +1837,11 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsLoadAndSuppressesReadRead) {
   EXPECT_TRUE(contains_subsequence(text_words, *mov_read_low));
 
   const auto prior_kind = build_v_and_b32_e32_literal(
-      /*vdst=*/12, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), /*vsrc1=*/13,
+      /*vdst=*/14, static_cast<uint32_t>(consan_moi_exact_shadow::access_kind_mask), /*vsrc1=*/12,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto kind_ne = build_v_cmp_ne_u32_e32_vcc(
       scalar_positive_inline_u32(static_cast<uint32_t>(ConSanMoiShadowAccessKind::Read)),
-      /*vsrc1=*/12, ROCJITSU_CODE_ARCH_RDNA4);
+      /*vsrc1=*/14, ROCJITSU_CODE_ARCH_RDNA4);
   const auto narrow_kind_conflict =
       build_s_and_saveexec_b64(/*sdst=*/36, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(prior_kind);
@@ -2063,8 +2060,8 @@ TEST(ConSanMoi, Gfx950SharedHelperSampledSpillUsesEveryOwnerPrivateLayout) {
 TEST(ConSanMoi, Gfx950SharedHelperInlineSpillUsesEveryOwnerPrivateLayout) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
-  fixture.first_vgpr_granulated = 0;
-  fixture.second_vgpr_granulated = 1;
+  fixture.first_vgpr_granulated = 2;
+  fixture.second_vgpr_granulated = 2;
   fixture.first_private_bytes = 0;
   fixture.second_private_bytes = 20;
   fixture.helper_keeps_v1_v3_live = true;
@@ -2683,6 +2680,9 @@ TEST(ConSanMoi, Gfx950InlineShadowPartitionsExactStateWithChecked64BitAddress) {
   std::memcpy(rewritten.data(), text->data() + rewritten_offset,
               rewritten.size() * sizeof(uint32_t));
   const uint16_t scratch = *access->scratch_vgpr;
+  const uint16_t old_value = static_cast<uint16_t>((scratch + 5u) & ~uint16_t{1});
+  const uint16_t tmp = old_value == scratch + 4u ? static_cast<uint16_t>(scratch + 6u)
+                                                 : static_cast<uint16_t>(scratch + 4u);
   const auto partition =
       build_v_mad_u32_u24(static_cast<uint16_t>(scratch + 3u), vector_source_vgpr(scratch),
                           static_cast<uint16_t>(scratch + 3u), static_cast<uint16_t>(scratch + 1u),
@@ -2707,16 +2707,15 @@ TEST(ConSanMoi, Gfx950InlineShadowPartitionsExactStateWithChecked64BitAddress) {
   const uint32_t base_low = static_cast<uint32_t>(exact_base);
   ASSERT_NE(base_low, 0u);
   const auto no_carry_limit = build_v_mov_b32_e64_literal(
-      static_cast<uint16_t>(scratch + 4u), std::numeric_limits<uint32_t>::max() - base_low,
-      ROCJITSU_CODE_ARCH_CDNA4);
-  const auto carry = build_v_cmp_gt_u32_e32_vcc(
-      vector_source_vgpr(scratch), static_cast<uint16_t>(scratch + 4u), ROCJITSU_CODE_ARCH_CDNA4);
+      tmp, std::numeric_limits<uint32_t>::max() - base_low, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto carry =
+      build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(scratch), tmp, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(no_carry_limit && carry);
   std::vector<uint32_t> carry_sequence(no_carry_limit->begin(), no_carry_limit->end());
   carry_sequence.push_back(*carry);
   EXPECT_TRUE(contains_subsequence(rewritten, carry_sequence));
   const auto overflow_atomic = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
-      scratch, static_cast<uint16_t>(scratch + 4u), static_cast<uint16_t>(scratch + 4u),
+      scratch, tmp, tmp,
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(overflow_atomic);
   EXPECT_TRUE(contains_subsequence(rewritten, *overflow_atomic));
@@ -6420,10 +6419,10 @@ TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {
   std::memcpy(text_words.data(), patched.text_sections().front()->data(),
               patched.text_sections().front()->size());
   const auto start_cell_shift = build_v_lshrrev_b32_e32(
-      /*vdst=*/12, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
+      /*vdst=*/14, scalar_positive_inline_u32(consan_moi_exact_shadow::granule_shift),
       /*vsrc=*/0, ROCJITSU_CODE_ARCH_RDNA4);
   const auto atomic_swap = build_flat_atomic_swap_b64_vaddr_vsrc_vdst(
-      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/13, /*return_old_value=*/true, /*scope=*/2,
+      /*vaddr=*/8, /*vsrc=*/10, /*vdst=*/12, /*return_old_value=*/true, /*scope=*/2,
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(start_cell_shift);
   ASSERT_TRUE(atomic_swap);
@@ -7101,7 +7100,11 @@ TEST(ConSanMoi, Gfx950ScalarBarrierPreservesSpecialState) {
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.moi_scalar_identity_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(result.resolved_moi_state_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_state_epoch_sgpr);
+  ASSERT_TRUE(result.resolved_moi_workgroup_sgprs[2]);
+  EXPECT_LT(static_cast<uint32_t>(*result.resolved_moi_workgroup_sgprs[2]),
+            static_cast<uint32_t>(*result.resolved_moi_exec_save_sgpr));
   const auto barrier = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
   });
