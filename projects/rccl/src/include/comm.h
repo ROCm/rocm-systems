@@ -641,9 +641,9 @@ struct ncclComm {
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;
-  // Monotonic epoch/flag for the LL-protocol DDA all-gather.
-  // Incremented once per LL collective; bank = epoch & 1.
-  uint32_t ddaLLEpoch;
+  // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
+  uint32_t* ddaLLEpochDev;
+  int ddaLLEpochLen;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

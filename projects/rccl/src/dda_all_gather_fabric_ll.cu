@@ -10,6 +10,7 @@
 #include "algorithms/all_gather/all_gather_dda_fabric_ll.h"
 #include "checks.h"
 #include "comm.h"
+#include "dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "fabric_gpu_barrier.h" // meta::comms::kDdaMaxNranks
 
@@ -23,6 +24,7 @@ namespace {
 using meta::comms::kDdaLLAgMaxPerRankBytes;
 using meta::comms::kDdaLLAgSlotStridePkts;
 using meta::comms::LLPacket16;
+using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
 // LL scratch: 2 banks * nRanks slots * kDdaLLAgSlotStridePkts * 16B.
 static inline size_t ddaLLAgScratchSize(int nRanks) {
@@ -35,8 +37,7 @@ static inline size_t ddaLLAgScratchSize(int nRanks) {
 //   blocksPerPeer = clamp(ceil(nPk / kDdaLLAgPktsPerBlock), 1, cap)
 //
 // 256 pkts/block is one packet per thread at 256 threads.
-constexpr size_t kDdaLLAgPktsPerBlock     = 256;
-constexpr int    kDdaLLAgMaxBlocksPerPeer = 8;
+constexpr size_t kDdaLLAgPktsPerBlock = 256;
 
 // Blocks per peer for a given per-rank payload.
 static inline int ddaLLAgBlocksPerPeer(size_t perRankBytes) {
@@ -60,15 +61,6 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
     cudaStream_t stream) {
   const int nRanks = comm->nRanks;
   const size_t perRankBytes = sendcount * sizeof(T);
-  const size_t bankStridePkts = (size_t)nRanks * kDdaLLAgSlotStridePkts;
-
-  // Epoch is uniform across ranks and blocks; never 0 (0 == cleared scratch).
-  uint32_t epoch = ++comm->ddaLLEpoch;
-  if (epoch == 0) {
-    epoch = comm->ddaLLEpoch = 1;
-  }
-  const uint32_t flag = epoch;
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * bankStridePkts;
 
   // grid.x == nRanks (peer), grid.y == blocksPerPeer (packet split, 1 for small
   // messages).
@@ -78,28 +70,30 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   dim3 grid((unsigned)nRanks, (unsigned)blocksPerPeer);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
 
   INFO(
       NCCL_COLL,
-      "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u epoch=%u (block-per-peer, bpp=%d)",
-      nRanks, perRankBytes, grid.x, grid.y, block.x, flag, blocksPerPeer);
+      "DDA fabric AllGather LL: nRanks=%d perRankBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
+      nRanks, perRankBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     meta::comms::ddaAllGatherFabricLL<T, 4><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, flag, bankOffsetPkts);
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
     meta::comms::ddaAllGatherFabricLL<T, 8><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, flag, bankOffsetPkts);
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
     meta::comms::ddaAllGatherFabricLL<T, 0><<<grid, block, 0, stream>>>(
         peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-        perRankBytes, comm->rank, nRanks, flag, bankOffsetPkts);
+        perRankBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 

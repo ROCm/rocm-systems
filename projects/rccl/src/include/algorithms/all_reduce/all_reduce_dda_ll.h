@@ -61,13 +61,28 @@ __global__ void ddaAllReduceFlatLL(
     size_t count,                          // full-message element count
     int selfRank,
     int nRanksRt,
-    uint32_t flag,                         // == epoch; never 0
-    size_t bankOffsetPkts) {               // (epoch & 1) * nRanks * slotStride
+    uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
+    int epochLen) {                        // number of cells in epochDev
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
   const size_t slot = kDdaLLArSlotStridePkts;
+
+  // Flat block id + total launched blocks. tid 0 reads our own epoch cell (all
+  // cells hold the same value) and derives this launch's flag on the device, so
+  // nothing is baked into a HIP graph capture. bank = flag & 1.
+  const int flatBlockId = blockIdx.x;
+  const int total = gridDim.x;
+  __shared__ uint32_t s_flag;
+  if (threadIdx.x == 0) {
+    uint32_t f = epochDev[flatBlockId] + 1u;
+    if (f == 0u) f = 2u;                   // skip 0 sentinel; keep bank parity
+    s_flag = f;
+  }
+  __syncthreads();
+  const uint32_t flag = s_flag;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
@@ -111,6 +126,12 @@ __global__ void ddaAllReduceFlatLL(
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;
+  }
+
+  if (threadIdx.x == 0) {
+    for (int e = flatBlockId; e < epochLen; e += total) {
+      epochDev[e] = flag;
+    }
   }
 }
 
