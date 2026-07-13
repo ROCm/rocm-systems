@@ -70,7 +70,3 @@ class TestAmdSmiApuMetrics(unittest.TestCase):
         }
         self.assertEqual(na_dict_keys, na_full_keys)
         self.assertEqual(na_dict_keys, live_keys)
-
-
-if __name__ == "__main__":
-    unittest.main()
