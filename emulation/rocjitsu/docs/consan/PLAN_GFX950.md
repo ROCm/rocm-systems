@@ -365,6 +365,12 @@ Full gfx950 support means:
   reduction confirms that writing persistent identity into the accumulator
   window corrupts live MFMA state. T3IS remains orange while identity state is
   moved out of the overlapping VGPR window.
+- 2026-07-13: `T3IS` is `DONE`, reaching `T3G`; `T4SC` is now `ACTIVE`.
+  Accumulator-constrained CDNA4 inline-shadow kernels now select the existing
+  derived-owner/private-epoch representation when five persistent identity
+  VGPRs would cross a nonzero `ACCUM_OFFSET`. Private-state prologues also
+  preserve paired kernarg-preload entries. All 209 focused ConSan tests pass,
+  and all 10 guarded selected inline-shadow rows pass in 6.24 seconds.
 
 ## DAG Overview
 
@@ -584,9 +590,9 @@ flowchart LR
   T3SC["T3SC: SuperCollider Selected Workloads"]:::done
   T3RR["T3RR: Record/Replay Selected Workloads"]:::done
   T3SA["T3SA: Sampled Selected Workloads"]:::done
-  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::active
+  T3IS["T3IS: Inline-Shadow Selected Workloads"]:::done
   T3G{"T3G: Selected Workloads Accepted"}:::target
-  T4SC["T4SC: SuperCollider Broad IREE"]:::todo
+  T4SC["T4SC: SuperCollider Broad IREE"]:::active
   T4RR["T4RR: Record/Replay Broad IREE"]:::todo
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
@@ -1864,14 +1870,15 @@ Goal: run the T3A selection under guarded sampled MOI.
 Result: all 10 selected rows pass in 6.03 seconds with
 `RJ_CONSAN_REQUIRE_PATCH=1` and `RJ_CONSAN_MOI_REQUIRE_RECORDS=1`.
 
-### T3IS: Inline-Shadow Selected Workloads - ACTIVE
+### T3IS: Inline-Shadow Selected Workloads - DONE
 
 Goal: run the T3A selection under guarded inline shadow.
 
-Current evidence: 4/10 rows pass. The failing scalar MFMA and scan rows expose
-automatic persistent identity VGPR placement at or above CDNA4
-`ACCUM_OFFSET`; the node remains active until identity state no longer aliases
-the accumulator window and all 10 guarded rows pass.
+Result: all 10 selected rows pass in 6.24 seconds with
+`RJ_CONSAN_REQUIRE_PATCH=1`. When automatic persistent identity would cross a
+nonzero CDNA4 `ACCUM_OFFSET`, inline shadow now uses derived owner plus private
+epoch state instead of writing the accumulator window. The private-state entry
+initializer preserves both kernarg-preload firmware entries.
 
 For each T3 profile node:
 
@@ -1886,7 +1893,7 @@ Done criteria:
 
 `T3G` is reached only when all four T3 profile nodes pass.
 
-### T4SC: SuperCollider Broad IREE - TODO
+### T4SC: SuperCollider Broad IREE - ACTIVE
 
 Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
 

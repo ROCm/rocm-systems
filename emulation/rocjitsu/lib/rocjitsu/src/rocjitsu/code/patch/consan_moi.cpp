@@ -2578,6 +2578,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool configure_automatic_moi_persistent_vgprs(ConSanOptions &options,
+                                                            std::span<const uint8_t> image,
                                                             rj_code_arch_t arch,
                                                             ConSanResult &result) {
   if (options.moi_owner_vgpr || options.moi_epoch_vgpr)
@@ -2610,6 +2611,31 @@ moi_special_state_sgprs(const ConSanOptions &options) {
         "ConSan MOI could not derive automatic persistent VGPRs without an owned candidate "
         "scope");
     return false;
+  }
+  bool crosses_cdna4_accum_offset = false;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
+      for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+        if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset)
+          continue;
+        KD descriptor{};
+        std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+        const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
+            descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+        if (encoded_accum_offset == 0)
+          continue;
+        const uint32_t accum_vgpr_base = (encoded_accum_offset + 1u) * 4u;
+        crosses_cdna4_accum_offset |= persistent_base + 5u > accum_vgpr_base;
+      }
+    }
+  }
+  if (options.moi_engine == ConSanMoiEngine::InlineShadow && crosses_cdna4_accum_offset) {
+    options.moi_init_owner_epoch = true;
+    options.automatic_moi_private_epoch = true;
+    result.moi_private_epoch_automatic = true;
+    result.warnings.emplace_back(
+        "ConSan MOI automatically selected derived-owner/private-epoch CDNA4 state");
+    return true;
   }
   const uint32_t persistent_count = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 5u : 2u;
   if (options.force_private_epoch && arch == ROCJITSU_CODE_ARCH_CDNA4 &&
@@ -5723,6 +5749,29 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
     }
     if (!words)
       return;
+    const bool has_kernarg_preload =
+        AMDHSA_BITS_GET(item.descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
+    std::optional<std::vector<uint32_t>> preload_words;
+    if (has_kernarg_preload) {
+      if (words->size() * sizeof(uint32_t) > kAmdhsaKernelEntryAlignment) {
+        result.errors.emplace_back(
+            "ConSan MOI private-epoch prologue exceeds the kernarg-preload entry window");
+        return;
+      }
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_identity_vgprs) {
+        preload_words = build_cdna4_private_epoch_identity_prologue_words(
+            prologue_text_offset + kAmdhsaKernelEntryAlignment,
+            item.active_entry_text_offset + kAmdhsaKernelEntryAlignment, item.scratch_vgpr,
+            item.layout.epoch_offset, item.spill, item.descriptor, options, result.errors);
+      } else {
+        preload_words = build_private_epoch_prologue_words(
+            prologue_text_offset + kAmdhsaKernelEntryAlignment,
+            item.active_entry_text_offset + kAmdhsaKernelEntryAlignment, item.scratch_vgpr,
+            item.layout.epoch_offset, item.spill, arch, result.errors);
+      }
+      if (!preload_words)
+        return;
+    }
     if (!patcher.redirect_kernel_entry(item.active_descriptor_file_offset,
                                        item.active_entry_text_offset, prologue_text_offset)) {
       result.errors.emplace_back(
@@ -5730,12 +5779,17 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       return;
     }
     append_words_bytes(new_text, *words);
+    if (preload_words) {
+      while (new_text.size() < prologue_text_offset + kAmdhsaKernelEntryAlignment)
+        append_word_bytes(new_text, build_s_nop(0, arch));
+      append_words_bytes(new_text, *preload_words);
+    }
 
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
     info.anchor_offset = item.kernel->entry_text_offset;
     info.trampoline_offset = prologue_text_offset;
-    info.trampoline_size = static_cast<uint32_t>(words->size() * sizeof(uint32_t));
+    info.trampoline_size = static_cast<uint32_t>(new_text.size() - prologue_text_offset);
     info.scratch_vgpr = item.scratch_vgpr;
     info.persistent_epoch_private_offset = item.layout.epoch_offset;
     info.spilled_vgpr_count = 1;
@@ -7653,7 +7707,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_identity_sgprs(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_persistent_vgprs(effective_options, arch, result))
+  if (configure_automatic_moi_persistent_vgprs(effective_options, code_object_bytes, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (!result.resolved_moi_owner_vgpr)
     result.resolved_moi_owner_vgpr = effective_options.moi_owner_vgpr;
