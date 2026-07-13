@@ -99,7 +99,7 @@ uint64_t ComputeRetargetCacheKey(const void* elf_data, size_t elf_size,
   uint64_t hash = FnvHash(elf_data, elf_size);
   hash ^= FnvHash(source_isa.data(), source_isa.size()) * 31;
   hash ^= FnvHash(target_isa.data(), target_isa.size()) * 37;
-  hash ^= entry_trampolines ? 0x1ULL : 0x0ULL;
+  hash ^= entry_trampolines ? 0xDEADBEEF12345678ULL : 0x0ULL;
   return hash;
 }
 
@@ -563,10 +563,16 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
         entry.elf_bytes = std::make_shared<std::vector<uint8_t>>(data, data + *out_elf_size);
       }
       g_retarget_cache.emplace(cache_key, std::move(entry));
+      HOTSWAP_LOG("hotswap: cached key=0x%llx src=%s tgt=%s entry_trampolines=%d "
+                  "in=%zu succeeded=%d\n",
+                  (unsigned long long)cache_key, decision->source_isa.c_str(),
+                  decision->target_isa.c_str(), decision->request_entry_trampolines,
+                  code_object.size, rewritten ? 1 : 0);
     }
   } catch (const std::bad_alloc&) {
-    // OOM during caching — the retarget result in out_elf_buffer is
-    // still valid, we just can't cache it for future loads.
+    HOTSWAP_LOG("hotswap: cache store skipped (OOM) key=0x%llx src=%s tgt=%s in=%zu\n",
+                (unsigned long long)cache_key, decision->source_isa.c_str(),
+                decision->target_isa.c_str(), code_object.size);
   }
 
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
