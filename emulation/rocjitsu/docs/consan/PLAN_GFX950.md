@@ -462,6 +462,13 @@ Full gfx950 support means:
   system SGPR snapshots that dimension as zero even when the dispatch launches
   multiple workgroups. `T3IW` tracks the required descriptor/ABI transaction
   separately and gates semantic/broad acceptance.
+- 2026-07-13: `T3IW` is `ACTIVE`. Commit `7da1e9e7b6` requests all three CDNA4
+  workgroup-ID inputs, snapshots them into every persistent identity
+  representation, and restores the original compact guest ABI at both hardware
+  entries. The transaction covers all eight original coordinate masks,
+  dispatch-pointer insertion, follower inputs, shared helpers, and fresh
+  persistent-state placement; the Clang-21 build and focused gate pass 251/251.
+  Registered multi-workgroup omitted-coordinate tests remain before `DONE`.
 
 ## DAG Overview
 
@@ -684,7 +691,7 @@ flowchart LR
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Accumulator-Safe Scalar State"]:::active
-  T3IW["T3IW: Complete Workgroup-ID ABI"]:::todo
+  T3IW["T3IW: Complete Workgroup-ID ABI"]:::active
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -2073,7 +2080,7 @@ rank a later dead scratch window ahead of spill-required sites. Both automatic
 engines pass #1853 with patch and record emission and no private bytes. The
 guarded selected tiers remain before this node can become `DONE`.
 
-### T3IW: Complete Workgroup-ID ABI - TODO
+### T3IW: Complete Workgroup-ID ABI - ACTIVE
 
 Goal: preserve distinct workgroup identity even when the original kernel did
 not request one or more workgroup-ID system SGPRs.
@@ -2096,6 +2103,14 @@ Done criteria:
 - Every launched workgroup has a distinct recorded `(x,y,z)` identity for all
   three MOI engines, regardless of the guest descriptor's original system-SGPR
   request mask, with exact guest ABI restoration at both hardware entries.
+
+Current result: commit `7da1e9e7b6` implements the complete CDNA4 descriptor
+and entry-ABI transaction. Synthetic coverage exercises all eight original
+workgroup-ID masks, paired entries, existing/missing dispatch-pointer inputs,
+system-input followers, shared helpers, and both successful and fail-closed
+persistent-state allocation. The Clang-21 build and focused suite pass 251/251.
+Live omitted-coordinate multi-workgroup coverage for all three engines is in
+progress, so this node remains `ACTIVE`.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
