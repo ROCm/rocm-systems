@@ -100,10 +100,12 @@ bool IsEnvFlagEnabled(const char* name) {
 
 bool IsHotswapDisabledByEnv() { return IsEnvFlagEnabled("HSA_HOTSWAP_DISABLE"); }
 
-bool IsGfx12_5RewriteRequested() {
+bool AreEntryTrampolinesRequested() {
   constexpr char kEnvName[] = "AMD_COMGR_HOTSWAP_ENTRY_TRAMPOLINES";
-  // Default-on policy owned by ROCR: only literal "0" opts out.
-  return !os::IsEnvVarSet(kEnvName) || os::GetEnvVar(kEnvName) != "0";
+  if (!os::IsEnvVarSet(kEnvName)) {
+    return kDefaultEntryTrampolinesEnabled;
+  }
+  return IsEnvFlagEnabled(kEnvName);
 }
 
 bool IsStrictModeRequested() {
@@ -287,9 +289,8 @@ std::string WithGfx1250SteppingFeature(const std::string& isa_name,
 bool HasCandidateHotswapRewrite(const AgentGfxRevision& gfx,
                                 const RewriteOptions& options) {
   return IsHotswapSupportedGfxRevision(gfx) ||
-         (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
-         (options.gfx12_5_rewrite_enabled &&
-          IsGfx12_5Target(gfx.gfx_target));
+      (options.strict_mode_enabled && gfx.gfx_target == kGfx1250) ||
+      (options.entry_trampolines_enabled && IsGfx12_5Target(gfx.gfx_target));
 }
 
 std::optional<RewriteDecision> DecideHotswapRewrite(
@@ -315,8 +316,7 @@ std::optional<RewriteDecision> DecideHotswapRewrite(
     return decision;
   }
 
-  const bool request_entry_trampolines =
-      options.gfx12_5_rewrite_enabled &&
+  const bool request_entry_trampolines = options.entry_trampolines_enabled &&
       IsGfx12_5Target(gfx.gfx_target) && IsGfx12_5Target(source_gfx);
   const bool request_strict_mode =
       options.strict_mode_enabled && gfx.gfx_target == kGfx1250 &&
@@ -483,7 +483,7 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
 
   const AgentGfxRevision gfx = GetAgentGfxRevision(agent);
   RewriteOptions options;
-  options.gfx12_5_rewrite_enabled = IsGfx12_5RewriteRequested();
+  options.entry_trampolines_enabled = AreEntryTrampolinesRequested();
   options.strict_mode_enabled = IsStrictModeRequested();
   if (!IsAgentEligibleForHotswap(gfx, options)) {
     return {};

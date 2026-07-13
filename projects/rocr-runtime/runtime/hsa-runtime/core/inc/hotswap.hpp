@@ -65,8 +65,11 @@ struct CodeObjectView {
   std::string uri;
 };
 
+// Entry-trampoline rewriting is opt-in while validation is ongoing.
+inline constexpr bool kDefaultEntryTrampolinesEnabled = false;
+
 struct RewriteOptions {
-  bool gfx12_5_rewrite_enabled = true;
+  bool entry_trampolines_enabled = kDefaultEntryTrampolinesEnabled;
   bool strict_mode_enabled = false;
 };
 
