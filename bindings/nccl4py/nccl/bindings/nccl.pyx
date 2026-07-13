@@ -289,6 +289,7 @@ cdef class Config:
         self._ptr[0].graphUsageMode = -2147483648
         self._ptr[0].numRmaCtx = -2147483648
         self._ptr[0].maxP2pPeers = -2147483648
+        self._ptr[0].graphStreamOrdering = -2147483648
 
     def __dealloc__(self):
         cdef ncclConfig_t *ptr
@@ -2908,6 +2909,8 @@ cdef class DevCommRequirements:
         self._ptr[0].ginContextCount = 4
         self._ptr[0].ginConnectionType = NCCL_GIN_CONNECTION_NONE
         self._ptr[0].ginTrafficClass = -2147483648
+        self._ptr[0].ginStrongSignalsRequired = 1
+        self._ptr[0].ginVaSignalsRequired = 1
 
     def __dealloc__(self):
         cdef ncclDevCommRequirements_t *ptr
