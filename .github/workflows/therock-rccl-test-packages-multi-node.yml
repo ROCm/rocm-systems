@@ -3,6 +3,9 @@ name: TheRock Test Packages multi-node for rccl
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        description: "TheRock commit hash to use"
       amdgpu_families:
         type: string
       artifact_group:
@@ -49,7 +52,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: d8e27dff1d165462ffa5bd50057a075b943c97c5 # 2026-07-13
+          ref: ${{ inputs.therock_ref }}
 
       # Centralized arch-specific configuration
       - name: Set arch-specific paths
@@ -139,3 +142,4 @@ jobs:
             --report-path "${REPORT_PATH}" \
             --log-destination "${LOG_DEST}" \
             --index-file-name "index_rccl_test_report.html"
+
