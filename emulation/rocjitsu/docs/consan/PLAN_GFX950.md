@@ -324,6 +324,11 @@ Full gfx950 support means:
   pass: standalone and packed publication, deterministic static selection,
   runtime owner selection, immediate and host-oracle conflict paths, and stale
   generation rejection.
+- 2026-07-13: `T2IS` is `DONE`; `T2R` is now `ACTIVE`. Ten gfx950 inline rows
+  pass across B32, Group-FLAT, B128 multi-cell, read/read, same-wave ordering,
+  barrier ordering, atomic handoff, private epoch, and bounded diagnostics. A
+  new five-cell B128-plus-B32 race produces five diagnostics with four visible
+  and one dropped, directly proving GPU-side overflow accounting.
 
 ## DAG Overview
 
@@ -536,8 +541,8 @@ flowchart LR
   T2SC["T2SC: SuperCollider Focused Tier"]:::done
   T2RR["T2RR: Record/Replay Focused Tier"]:::done
   T2SA["T2SA: Sampled Focused Tier"]:::done
-  T2IS["T2IS: Inline-Shadow Focused Tier"]:::active
-  T2R["T2R: Resource And Spill Tier"]:::todo
+  T2IS["T2IS: Inline-Shadow Focused Tier"]:::done
+  T2R["T2R: Resource And Spill Tier"]:::active
   T2G{"T2G: Focused gfx950 Accepted"}:::target
   T3A["T3A: Workload Inventory"]:::todo
   T3SC["T3SC: SuperCollider Selected Workloads"]:::todo
@@ -1725,7 +1730,7 @@ Result: all seven selected rows pass. Static and runtime selection are
 deterministic, the immediate GPU check and host oracle both report the intended
 race, packed publication is covered, and stale generations are rejected.
 
-### T2IS: gfx950 Inline-Shadow Focused Tier - ACTIVE
+### T2IS: gfx950 Inline-Shadow Focused Tier - DONE
 
 Required rows:
 
@@ -1736,7 +1741,13 @@ Done criteria:
 
 - Positive rows require a diagnostic and ordered/read-only rows forbid one.
 
-### T2R: gfx950 Resource And Spill Focused Tier - TODO
+Result: all ten selected gfx950 rows pass. Native B32, Group-FLAT, and B128
+positives report; read/read, same-wave, barrier-ordered, and same-address atomic
+controls stay clean; wrong-address atomic reports; private epoch survives
+forced spill. The five-cell overflow control reports five total, four visible,
+and one dropped diagnostic.
+
+### T2R: gfx950 Resource And Spill Focused Tier - ACTIVE
 
 Required rows:
 

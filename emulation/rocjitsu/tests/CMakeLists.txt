@@ -2637,6 +2637,28 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.InlineDiagnosticOverflowCompletes"
+            NAME "ConSanMoiGfx950Test.InlineShadowBoundsDiagnosticOverflow"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_inline_diagnostic_overflow"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.InlineShadowBoundsDiagnosticOverflow"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=5 visible_diagnostics=4 dropped_diagnostics=1.*visible_exact_shadow=5"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.SameWaveProgramOrderCompletes"
             NAME "ConSanMoiGfx950Test.InlineShadowKeepsSameWaveProgramOrderClean"
             TIMEOUT 30

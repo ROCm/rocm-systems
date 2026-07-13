@@ -238,6 +238,36 @@ __global__ __launch_bounds__(128) void gfx950_moi_two_wave_b128_race(uint32_t *o
     out[0] = 0x95080001u;
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_inline_diagnostic_overflow(uint32_t *out) {
+  __shared__ uint32_t lds[5];
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address0 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  const uint32_t address4 = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[4]) & 0xffffu);
+  if (tid == 0u || tid == 64u) {
+    register uint32_t value0 asm("v20") = 0x950a0000u | tid;
+    register uint32_t value1 asm("v21") = 0x950a1000u | tid;
+    register uint32_t value2 asm("v22") = 0x950a2000u | tid;
+    register uint32_t value3 asm("v23") = 0x950a3000u | tid;
+    const uint32_t value4 = 0x950a4000u | tid;
+    asm volatile("ds_write_b128 %0, v[20:23]\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address0), "v"(value0), "v"(value1), "v"(value2), "v"(value3)
+                 : "memory");
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address4), "v"(value4)
+                 : "memory");
+  }
+  if (tid == 0u)
+    out[0] = 0x950a0001u;
+}
+
 __global__ __launch_bounds__(128) void gfx950_moi_barrier_ordered_two_wave(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -704,6 +734,19 @@ TEST(ConSanMoiGfx950Test, TwoWaveB128RaceCompletes) {
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
   HIP_ASSERT(hipFree(device_out));
+}
+
+TEST(ConSanMoiGfx950Test, InlineDiagnosticOverflowCompletes) {
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, sizeof(uint32_t)));
+  gfx950_moi_inline_diagnostic_overflow<<<1, 128>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t out = 0;
+  HIP_ASSERT(hipMemcpy(&out, device_out, sizeof(out), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  EXPECT_EQ(out, 0x950a0001u);
 }
 
 TEST(ConSanMoiGfx950Test, BarrierOrderedTwoWaveCompletes) {
