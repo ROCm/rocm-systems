@@ -58,6 +58,17 @@ __global__ __launch_bounds__(64) void gfx950_moi_forced_spill(uint32_t *out) {
   out[base + 3u] = victim3;
 }
 
+__global__ __launch_bounds__(64) void gfx950_standalone_report_publication(uint32_t *out) {
+  const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
+  uint32_t *slot = out + tid;
+  const uint32_t value = 0x95040000u ^ tid;
+  asm volatile("flat_store_dword %0, %1\n\t"
+               "s_waitcnt vmcnt(0) lgkmcnt(0)\n\t"
+               :
+               : "v"(slot), "v"(value)
+               : "memory");
+}
+
 TEST(ConSanMoiGfx950Test, SingleLdsStoreCompletes) {
   uint32_t *device_out = nullptr;
   HIP_ASSERT(hipMalloc(&device_out, sizeof(uint32_t)));
@@ -91,6 +102,22 @@ TEST(ConSanMoiGfx950Test, ForcedSpillPreservesLiveVgprs) {
     EXPECT_EQ(out[base + 2u], 0x30500000u ^ (tid * 5u)) << "tid=" << tid;
     EXPECT_EQ(out[base + 3u], 0x40500000u ^ (tid * 7u)) << "tid=" << tid;
   }
+}
+
+TEST(ConSanMoiGfx950Test, StandaloneReportPublication) {
+  constexpr uint32_t kThreads = 64;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kThreads * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kThreads * sizeof(uint32_t)));
+  gfx950_standalone_report_publication<<<1, kThreads>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kThreads);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t tid = 0; tid < kThreads; ++tid)
+    EXPECT_EQ(out[tid], 0x95040000u ^ tid) << "tid=" << tid;
 }
 
 } // namespace

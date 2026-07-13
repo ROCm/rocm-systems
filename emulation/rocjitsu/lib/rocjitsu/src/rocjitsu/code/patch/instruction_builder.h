@@ -897,25 +897,28 @@ build_flat_atomic_swap_b64_vaddr_vsrc_vdst(uint16_t vaddr, uint16_t vsrc, uint16
   return pack_sop1(sop1_op_mov_b32(arch), sdst, ssrc0);
 }
 
-/// @brief Encode RDNA4 `s_mov_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
+/// @brief Encode RDNA4/CDNA4 `s_mov_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_mov_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
   if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 126 ||
       ssrc0 > 255)
     return std::nullopt;
-  return pack_sop1(1, sdst, ssrc0);
+  const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSMovB64Sop1 : rdna4::kSMovB64Sop1;
+  return pack_sop1(op, sdst, ssrc0);
 }
 
-/// @brief Encode RDNA4 `s_and_saveexec_b64 s[sdst:sdst+1], s[ssrc0:ssrc0+1]`.
+/// @brief Encode RDNA4/CDNA4 `s_and_saveexec_b64`.
 [[nodiscard]] inline constexpr std::optional<uint32_t>
 build_s_and_saveexec_b64(uint16_t sdst, uint16_t ssrc0, rj_code_arch_t arch) {
   if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 126 ||
       ssrc0 > 255)
     return std::nullopt;
-  return pack_sop1(arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x20 : 0x21, sdst, ssrc0);
+  const uint32_t op =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSAndSaveExecB64Sop1 : rdna4::kSAndSaveExecB64Sop1;
+  return pack_sop1(op, sdst, ssrc0);
 }
 
-/// @brief Encode RDNA4 `s_cselect_b32 sdst, ssrc0, ssrc1`.
+/// @brief Encode RDNA4/CDNA4 `s_cselect_b32 sdst, ssrc0, ssrc1`.
 ///
 /// This is useful for materializing SCC without changing it: choose inline 1
 /// when SCC is set and inline 0 otherwise.
@@ -924,11 +927,12 @@ build_s_cselect_b32(uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_
   if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || sdst > 127 ||
       ssrc0 > 255 || ssrc1 > 255)
     return std::nullopt;
-  const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCselectB32Sop2 : 0x30;
+  const uint32_t op =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCselectB32Sop2 : rdna4::kSCselectB32Sop2;
   return pack_sop2(op, sdst, ssrc0, ssrc1);
 }
 
-/// @brief Encode RDNA4 `s_cmp_lg_u32 ssrc0, ssrc1`.
+/// @brief Encode RDNA4/CDNA4 `s_cmp_lg_u32 ssrc0, ssrc1`.
 ///
 /// Comparing a previously materialized SCC value with inline zero restores
 /// SCC to that saved Boolean value.
@@ -937,16 +941,18 @@ build_s_cmp_lg_u32(uint16_t ssrc0, uint16_t ssrc1, rj_code_arch_t arch) {
   if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) || ssrc0 > 255 ||
       ssrc1 > 255)
     return std::nullopt;
-  constexpr uint32_t kRdna4SopcCmpLgU32 = 7;
-  return pack_sopc(kRdna4SopcCmpLgU32, ssrc0, ssrc1);
+  const uint32_t op =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCmpLgU32Sopc : rdna4::kSCmpLgU32Sopc;
+  return pack_sopc(op, ssrc0, ssrc1);
 }
 
-/// @brief Encode RDNA4 `s_cbranch_vccz`.
+/// @brief Encode RDNA4/CDNA4 `s_cbranch_vccz`.
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_cbranch_vccz(int16_t offset_dwords,
                                                                             rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4)
     return std::nullopt;
-  const uint32_t op = arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCbranchVcczSopp : 35;
+  const uint32_t op =
+      arch == ROCJITSU_CODE_ARCH_CDNA4 ? cdna4::kSCbranchVcczSopp : rdna4::kSCbranchVcczSopp;
   return pack_sopp(op, static_cast<uint16_t>(offset_dwords));
 }
 

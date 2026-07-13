@@ -2701,9 +2701,9 @@ build_lds_check_trap_words(std::span<const uint8_t> original_bytes, const ConSan
     return std::nullopt;
   }
   auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
-  constexpr uint16_t kRdna4VccLo = 106;
-  const uint32_t save_vcc = build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch);
-  const uint32_t restore_vcc = build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch);
+  constexpr uint16_t kWave64VccLo = 106;
+  const uint32_t save_vcc = build_s_mov_b32(vcc_save_sgpr, kWave64VccLo, arch);
+  const uint32_t restore_vcc = build_s_mov_b32(kWave64VccLo, vcc_save_sgpr, arch);
   if (!wait_dscnt || !skip_action) {
     errors.emplace_back("ConSan LDS check/trap proof could not encode sequence");
     return std::nullopt;

@@ -2274,6 +2274,10 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StandaloneReportPublication"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.SingleLdsStoreCompletes"
             NAME "ConSanMoiGfx950Test.SingleLdsStoreRecordReplay"
             TIMEOUT 30

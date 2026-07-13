@@ -5,9 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <string_view>
+#include <utility>
 
 namespace rocjitsu {
 namespace {
@@ -689,6 +693,49 @@ TEST(InstructionBuilder, BuildCdna4ProbePrimitives) {
   for (const auto *words : {&*add, &*literal, &*store, &*load, &*atomic_add, &*atomic_swap}) {
     std::unique_ptr<Instruction> inst(decoder->decode(words->data()));
     ASSERT_NE(inst, nullptr);
+  }
+}
+
+TEST(InstructionBuilder, BuildCdna4ScalarControlMatchesLlvmAndDecoder) {
+  const uint32_t branch = build_s_branch(1, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto trap = build_s_trap(2, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t mov_b32 =
+      build_s_mov_b32(20, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto mov_b64 = build_s_mov_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto save_exec = build_s_and_saveexec_b64(20, 22, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto save_scc = build_s_cselect_b32(
+      20, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto restore_scc =
+      build_s_cmp_lg_u32(20, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4);
+  const auto branch_vccz = build_s_cbranch_vccz(1, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(trap && mov_b64 && save_exec && save_scc && restore_scc && branch_vccz);
+
+  // Independently assembled by LLVM for gfx950.
+  EXPECT_EQ(branch, 0xbf820001u);
+  EXPECT_EQ(*trap, 0xbf920002u);
+  EXPECT_EQ(mov_b32, 0xbe940081u);
+  EXPECT_EQ(*mov_b64, 0xbe940116u);
+  EXPECT_EQ(*save_exec, 0xbe942016u);
+  EXPECT_EQ(*save_scc, 0x85148081u);
+  EXPECT_EQ(*restore_scc, 0xbf078014u);
+  EXPECT_EQ(*branch_vccz, 0xbf860001u);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<std::pair<uint32_t, std::string_view>, 8> cases = {{
+      {branch, "s_branch"},
+      {*trap, "s_trap"},
+      {mov_b32, "s_mov_b32"},
+      {*mov_b64, "s_mov_b64"},
+      {*save_exec, "s_and_saveexec_b64"},
+      {*save_scc, "s_cselect_b32"},
+      {*restore_scc, "s_cmp_lg_u32"},
+      {*branch_vccz, "s_cbranch_vccz"},
+  }};
+  for (const auto &[word, mnemonic] : cases) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&word));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(std::string_view(inst->mnemonic()), mnemonic);
   }
 }
 

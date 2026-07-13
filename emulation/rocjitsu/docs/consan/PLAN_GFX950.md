@@ -155,6 +155,13 @@ Full gfx950 support means:
   generator uses native CDNA4 call/return and DS encodings; its two owners have
   different register pressure and private sizes yet receive one compatible
   44-byte spill layout while an unrelated descriptor remains untouched.
+- 2026-07-13: `P1A` and `P1C` are `DONE`. Scalar builders now select generated
+  CDNA4/RDNA4 opcodes explicitly and use architecture-neutral wave64 EXEC/VCC
+  names; LLVM-matched gfx950 bytes and decoder tests cover branch, trap, moves,
+  EXEC narrowing, SCC preservation, and VCC branching. A standalone no-LDS
+  gfx950 kernel publishes 64 known global words with `flat_store_dword` and the
+  required zero VM/LGKM wait, proving report visibility independently of an
+  access probe.
 
 ## DAG Overview
 
@@ -272,9 +279,9 @@ flowchart LR
   D1A["D1A: Basic LDS Decode"]:::done
   D1B["D1B: Extended LDS Forms"]:::todo
   D1C["D1C: Unsupported DS Inventory"]:::todo
-  P1A["P1A: Scalar Control Primitives"]:::active
+  P1A["P1A: Scalar Control Primitives"]:::done
   P1B["P1B: Vector And Address Primitives"]:::done
-  P1C["P1C: Report Publication Primitives"]:::active
+  P1C["P1C: Report Publication Primitives"]:::done
   I1A["I1A: Workgroup Identity"]:::todo
   I1B["I1B: Stable Wave64 Owner"]:::todo
   I1C["I1C: Optional HW_ID Experiment"]:::todo
@@ -855,7 +862,7 @@ Done criteria:
 - Every DS opcode seen in representative gfx950 objects has a normalized form
   or a typed exclusion.
 
-### P1A: CDNA4 Scalar Control Primitives - ACTIVE
+### P1A: CDNA4 Scalar Control Primitives - DONE
 
 Goal: supply and independently validate scalar control-flow/state primitives.
 
@@ -896,7 +903,7 @@ Done criteria:
 - Every admitted primitive round-trips through rocJITsu decode and, where
   representable, LLVM assembly/disassembly.
 
-### P1C: CDNA4 Report Publication Primitives - ACTIVE
+### P1C: CDNA4 Report Publication Primitives - DONE
 
 Goal: prove global report-buffer stores and their required completion sequence
 before composing full engines.

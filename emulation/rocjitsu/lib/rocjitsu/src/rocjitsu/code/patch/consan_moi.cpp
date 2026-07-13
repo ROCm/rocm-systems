@@ -601,10 +601,12 @@ std::optional<uint32_t> consan_moi_encode_descriptor_register_count(uint32_t req
 
 namespace {
 
-inline constexpr uint16_t kRdna4ExecLo = 126;
-inline constexpr uint16_t kRdna4ExecHi = 127;
-inline constexpr uint16_t kRdna4VccLo = 106;
-inline constexpr uint16_t kRdna4WorkitemIdX = 0;
+// CDNA4 and RDNA4 share these wave64 architectural operand numbers. Ordinary
+// SGPR allocation remains architecture-specific and never includes them.
+inline constexpr uint16_t kWave64ExecLo = 126;
+inline constexpr uint16_t kWave64ExecHi = 127;
+inline constexpr uint16_t kWave64VccLo = 106;
+inline constexpr uint16_t kWorkitemIdX = 0;
 inline constexpr uint16_t kScalarOperandTtmpBase = 108;
 inline constexpr uint16_t kTtmpRdna4GridYz = 7;
 inline constexpr uint16_t kTtmpRdna4GridX = 9;
@@ -2116,7 +2118,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   request.force_spill = options.force_vgpr_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
   if (!options.moi_owner_vgpr && options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId)
-    request.forbidden.expand({RegClass::VGPR, kRdna4WorkitemIdX, 1});
+    request.forbidden.expand({RegClass::VGPR, kWorkitemIdX, 1});
   if (options.moi_owner_vgpr)
     request.forbidden.expand({RegClass::VGPR, *options.moi_owner_vgpr, 1});
   if (options.moi_epoch_vgpr)
@@ -2267,7 +2269,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
   const auto save_scc = build_s_cselect_b32(registers->scc_save_sgpr, scalar_positive_inline_u32(1),
                                             scalar_positive_inline_u32(0), arch);
-  const auto save_vcc = build_s_mov_b64(registers->vcc_save_sgpr, kRdna4VccLo, arch);
+  const auto save_vcc = build_s_mov_b64(registers->vcc_save_sgpr, kWave64VccLo, arch);
   if (!save_scc || !save_vcc)
     return false;
   // Snapshot SCC before any instrumentation instruction can modify it.
@@ -2282,7 +2284,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   const auto registers = moi_special_state_sgprs(options);
   if (!registers)
     return false;
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, registers->vcc_save_sgpr, arch);
+  const auto restore_vcc = build_s_mov_b64(kWave64VccLo, registers->vcc_save_sgpr, arch);
   const auto restore_scc =
       build_s_cmp_lg_u32(registers->scc_save_sgpr, scalar_positive_inline_u32(0), arch);
   if (!restore_vcc || !restore_scc)
@@ -2922,7 +2924,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     const uint16_t value_vgpr = static_cast<uint16_t>(
         *options.scratch_vgpr + (options.moi_dynamic_access_records ? 4u : 2u));
     const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI first-light probe could not encode owner derivation");
       return std::nullopt;
@@ -2994,7 +2996,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
       const auto slot_in_capacity =
           build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(value_vgpr), slot_vgpr, arch);
       const auto narrow_exec =
-          build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+          build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
       if (!mov_capacity || !slot_in_capacity || !narrow_exec) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not encode capacity guard");
@@ -3084,7 +3086,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;
       }
-      const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+      const auto restore_exec = build_s_mov_b64(kWave64ExecLo, *options.moi_exec_save_sgpr, arch);
       if (!restore_exec) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not restore EXEC");
         return std::nullopt;
@@ -3124,12 +3126,12 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
             words, access_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
             workgroup_sources.z, *options.scratch_vgpr, arch) ||
         !append_store_u32_scalar_src(
-            words, access_record_base + offsetof(ConSanMoiAccessRecord, lane_mask), kRdna4ExecLo,
+            words, access_record_base + offsetof(ConSanMoiAccessRecord, lane_mask), kWave64ExecLo,
             *options.scratch_vgpr, arch) ||
         !append_store_u32_scalar_src(
             words,
             access_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
-            kRdna4ExecHi, *options.scratch_vgpr, arch) ||
+            kWave64ExecHi, *options.scratch_vgpr, arch) ||
         (options.moi_owner_vgpr &&
          !append_store_u32_vgpr(words,
                                 access_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
@@ -3230,7 +3232,7 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
       return false;
     }
     const auto owner = build_v_lshrrev_b32_e32(
-        tmp_vgpr, scalar_positive_inline_u32(*private_owner_shift), kRdna4WorkitemIdX, arch);
+        tmp_vgpr, scalar_positive_inline_u32(*private_owner_shift), kWorkitemIdX, arch);
     if (!owner) {
       errors.emplace_back("ConSan MOI inline-shadow probe could not derive owner from workitem id");
       return false;
@@ -3358,7 +3360,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   const auto prior_nonempty =
       build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(old_value_vgpr), tmp_vgpr, arch);
   const auto narrow_nonempty =
-      build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+      build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
   if (!mov_zero || !prior_nonempty || !narrow_nonempty)
     return false;
   words.insert(words.end(), mov_zero->begin(), mov_zero->end());
@@ -3376,7 +3378,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   const auto owner_ne =
       build_v_cmp_ne_u32_e32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
   const auto narrow_conflict = build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kWave64VccLo, arch);
   if (!owner_ne || !narrow_conflict)
     return false;
   words.push_back(*owner_ne);
@@ -3395,7 +3397,8 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     }
     const auto epoch_eq =
         build_v_cmp_eq_u32_e32_vcc(vector_source_vgpr(current_field_vgpr), tmp_vgpr, arch);
-    const auto narrow_same_epoch = build_s_and_saveexec_b64(next_exec_save_sgpr, kRdna4VccLo, arch);
+    const auto narrow_same_epoch =
+        build_s_and_saveexec_b64(next_exec_save_sgpr, kWave64VccLo, arch);
     if (!epoch_eq || !narrow_same_epoch)
       return false;
     words.push_back(*epoch_eq);
@@ -3411,7 +3414,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
     const auto kind_ne = build_v_cmp_ne_u32_e32_vcc(
         scalar_positive_inline_u32(static_cast<uint32_t>(current_kind)), tmp_vgpr, arch);
     const auto narrow_kind_conflict =
-        build_s_and_saveexec_b64(next_exec_save_sgpr, kRdna4VccLo, arch);
+        build_s_and_saveexec_b64(next_exec_save_sgpr, kWave64VccLo, arch);
     if (!prior_kind || !kind_ne || !narrow_kind_conflict)
       return false;
     words.insert(words.end(), prior_kind->begin(), prior_kind->end());
@@ -3422,7 +3425,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   const uint16_t slot_vgpr = current_field_vgpr;
   constexpr uint16_t kScalarInlineMinusOne = 0xC1;
   const auto save_conflict_exec =
-      build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
+      build_s_mov_b64(static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kWave64ExecLo, arch);
   const auto mbcnt_lo = build_v_mbcnt_lo_u32_b32(tmp_vgpr, kScalarInlineMinusOne,
                                                  scalar_positive_inline_u32(0), arch);
   const auto mbcnt_hi =
@@ -3430,7 +3433,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   const auto first_active_lane =
       build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), tmp_vgpr, arch);
   const auto narrow_representative = build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kWave64VccLo, arch);
   if (!save_conflict_exec || !mbcnt_lo || !mbcnt_hi || !first_active_lane || !narrow_representative)
     return false;
   words.push_back(*save_conflict_exec);
@@ -3447,7 +3450,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
   const auto slot_in_capacity =
       build_v_cmp_gt_u32_e32_vcc(vector_source_vgpr(tmp_vgpr), slot_vgpr, arch);
   const auto narrow_capacity = build_s_and_saveexec_b64(
-      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+      static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kWave64VccLo, arch);
   if (!mov_capacity || !slot_in_capacity || !narrow_capacity)
     return false;
   words.insert(words.end(), mov_capacity->begin(), mov_capacity->end());
@@ -3535,7 +3538,7 @@ find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const
       !store_literal(offsetof(ConSanMoiDiagnosticRecord, second_lds_byte_count), byte_count))
     return false;
 
-  const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+  const auto restore_exec = build_s_mov_b64(kWave64ExecLo, *options.moi_exec_save_sgpr, arch);
   if (!restore_exec)
     return false;
   words.push_back(*restore_exec);
@@ -4057,7 +4060,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   const uint64_t prior_address = *options.moi_report_buffer_address + sampled_watchpoints_offset +
                                  static_cast<uint64_t>(record_index - 1u) * sizeof(uint64_t);
 
-  const auto save_vcc = build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+  const auto save_vcc = build_s_mov_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
   if (!save_vcc ||
       !append_load_u32_vgpr(words, prior_address, prior_low_vgpr, *options.scratch_vgpr, arch) ||
       !append_load_u32_vgpr(words, prior_address + sizeof(uint32_t), prior_high_vgpr,
@@ -4155,7 +4158,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   }
 
   const size_t restore_index = words.size();
-  const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, *options.moi_exec_save_sgpr, arch);
+  const auto restore_vcc = build_s_mov_b64(kWave64VccLo, *options.moi_exec_save_sgpr, arch);
   if (!restore_vcc) {
     errors.emplace_back("ConSan MOI sampled checker could not restore VCC");
     return false;
@@ -4215,7 +4218,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
     const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI sampled probe could not encode owner derivation");
       return std::nullopt;
@@ -4274,7 +4277,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
 
   std::optional<size_t> runtime_skip_branch_index;
   if (runtime_sampled) {
-    const auto save_vcc = build_s_mov_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+    const auto save_vcc = build_s_mov_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
     const auto selected_owner = build_v_and_b32_e32_literal(
         low_vgpr, options.moi_runtime_sample_stride - 1u, owner_vgpr, arch);
     const auto selected = build_v_cmp_eq_u32_e32_vcc(
@@ -4344,7 +4347,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       return std::nullopt;
     }
     const auto skip = build_s_cbranch_vccz(static_cast<int16_t>(skipped_words), arch);
-    const auto restore_vcc = build_s_mov_b64(kRdna4VccLo, *options.moi_exec_save_sgpr, arch);
+    const auto restore_vcc = build_s_mov_b64(kWave64VccLo, *options.moi_exec_save_sgpr, arch);
     if (!skip || !restore_vcc) {
       errors.emplace_back("ConSan MOI runtime sampled probe could not restore VCC");
       return std::nullopt;
@@ -5054,7 +5057,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   switch (owner_source) {
   case ConSanMoiOwnerSource::WorkitemId: {
     auto owner_init = build_v_lshrrev_b32_e32(
-        owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kRdna4WorkitemIdX, arch);
+        owner_vgpr, scalar_positive_inline_u32(owner_shift_bits), kWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI owner/epoch prologue could not encode owner VGPR init");
       return std::nullopt;
@@ -5488,7 +5491,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
     const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI barrier record patch could not encode owner derivation");
       return std::nullopt;
@@ -5525,7 +5528,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
                                                  vector_source_vgpr(lane_rank_vgpr), arch);
   const auto first_active_lane =
       build_v_cmp_eq_u32_e32_vcc(scalar_positive_inline_u32(0), lane_rank_vgpr, arch);
-  const auto save_exec = build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+  const auto save_exec = build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
   if (!mbcnt_lo || !mbcnt_hi || !first_active_lane || !save_exec) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC narrowing");
     return std::nullopt;
@@ -5599,7 +5602,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     return std::nullopt;
   }
   const auto skip_record = build_s_cbranch_vccz(static_cast<int16_t>(record_words.size()), arch);
-  const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+  const auto restore_exec = build_s_mov_b64(kWave64ExecLo, *options.moi_exec_save_sgpr, arch);
   if (!skip_record || !restore_exec) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode EXEC restore");
     return std::nullopt;
@@ -6377,14 +6380,14 @@ reject_inline_atomic_candidate_scratch_overlap(const ConSanAtomicSite &site, uin
     }
 
     const auto narrow_if_valid =
-        build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kRdna4VccLo, arch);
+        build_s_and_saveexec_b64(*options.moi_exec_save_sgpr, kWave64VccLo, arch);
     const auto narrow_if_low_matches = build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kWave64VccLo, arch);
     const auto narrow_if_high_matches = build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kRdna4VccLo, arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u), kWave64VccLo, arch);
     const auto narrow_if_other_owner = build_s_and_saveexec_b64(
-        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), kRdna4VccLo, arch);
-    const auto restore_exec = build_s_mov_b64(kRdna4ExecLo, *options.moi_exec_save_sgpr, arch);
+        static_cast<uint16_t>(*options.moi_exec_save_sgpr + 6u), kWave64VccLo, arch);
+    const auto restore_exec = build_s_mov_b64(kWave64ExecLo, *options.moi_exec_save_sgpr, arch);
     if (!narrow_if_valid || !narrow_if_low_matches || !narrow_if_high_matches ||
         !narrow_if_other_owner || !restore_exec) {
       errors.emplace_back("ConSan MOI inline atomic acquire patch could not encode EXEC ops");
@@ -6723,7 +6726,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 2u);
     const auto owner_init = build_v_lshrrev_b32_e32(
-        value_vgpr, scalar_positive_inline_u32(*owner_shift), kRdna4WorkitemIdX, arch);
+        value_vgpr, scalar_positive_inline_u32(*owner_shift), kWorkitemIdX, arch);
     if (!owner_init) {
       errors.emplace_back("ConSan MOI atomic record patch could not encode owner derivation");
       return std::nullopt;
