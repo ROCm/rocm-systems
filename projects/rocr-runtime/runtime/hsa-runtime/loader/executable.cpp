@@ -1607,8 +1607,16 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
+  // The AIE path is selected from ELF content alone, so guard the downcast: an
+  // AIE code object targeted at a non-AIE agent is a caller error, not UB.
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  if (!core_agent || core_agent->device_type() != core::Agent::DeviceType::kAmdAieDevice) {
+    logger_ << "LoaderError: AIE code object loaded onto a non-AIE agent\n";
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  }
+  auto* aie_agent = static_cast<AMD::AieAgent*>(core_agent);
+
   // Arch-vs-agent validation: the section name must match one the agent accepts.
-  auto* aie_agent = static_cast<AMD::AieAgent*>(core::Agent::Convert(agent));
   const auto& arches = aie_agent->supported_arch_names();
   if (std::find(arches.begin(), arches.end(), aie_code->GetArchSectionName()) == arches.end()) {
     logger_ << "LoaderError: code object arch does not match agent\n";
@@ -1645,21 +1653,32 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     return HSA_STATUS_SUCCESS;
   };
 
+  const auto kernel_names = aie_code->GetKernelNames();
+
   // Reject duplicate (name, agent) before allocating anything.
-  for (const auto& kernel_name : aie_code->GetKernelNames()) {
+  for (const auto& kernel_name : kernel_names) {
     if (agent_symbols_.count(std::make_pair(kernel_name, agent))) {
       logger_ << "LoaderError: kernel already defined: " << kernel_name << "\n";
       return HSA_STATUS_ERROR_VARIABLE_ALREADY_DEFINED;
     }
   }
 
-  for (const auto& kernel_name : aie_code->GetKernelNames()) {
+  // Stage symbols locally; only publish into agent_symbols_ once every blob has
+  // been placed, so a mid-loop failure leaves no dangling handles behind. Device
+  // buffers already recorded on loaded_obj are freed via Destroy() on failure.
+  std::vector<std::shared_ptr<AieKernelSymbol>> staged_symbols;
+  staged_symbols.reserve(kernel_names.size());
+  for (const auto& kernel_name : kernel_names) {
     const auto* ki = aie_code->GetKernel(kernel_name);
     uint64_t insts_dev = 0, pdi_dev = 0;
-    if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS)
+    if (auto s = place_blob(ki->insts_data, ki->insts_size, &insts_dev); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
       return s;
-    if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS)
+    }
+    if (auto s = place_blob(ki->pdi_data, ki->pdi_size, &pdi_dev); s != HSA_STATUS_SUCCESS) {
+      loaded_obj->Destroy();
       return s;
+    }
 
     auto desc = std::make_unique<AMD::AieKernelDescriptor>();
     desc->version = AMD::kAieKernelDescriptorVersion;
@@ -1676,8 +1695,13 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     auto kernel_sym =
         std::make_shared<AieKernelSymbol>(kernel_name, desc_ptr, ki->kernarg_size, ki->num_cols);
     kernel_sym->agent = agent;
-    agent_symbols_[std::make_pair(kernel_name, agent)] = kernel_sym;
-    aie_kernel_symbols_.push_back(kernel_sym);
+    staged_symbols.push_back(std::move(kernel_sym));
+  }
+
+  // All allocations succeeded: publish symbols and take ownership of loaded_obj.
+  for (size_t i = 0; i < kernel_names.size(); ++i) {
+    agent_symbols_[std::make_pair(kernel_names[i], agent)] = staged_symbols[i];
+    aie_kernel_symbols_.push_back(staged_symbols[i]);
   }
 
   objects.push_back(loaded_obj);
