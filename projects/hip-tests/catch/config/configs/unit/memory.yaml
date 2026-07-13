@@ -1986,6 +1986,9 @@ memory:
   Unit_hipMemPrefetchBatchAsync_MultiDevice:
     <<: *level_2
     tags: [query]
+  Unit_hipMemPrefetchBatchAsync_ManagedGlobalVariable:
+    <<: *level_2
+    tags: [query]
   Unit_hipMemDiscardBatchAsync_NegativeTests:
     <<: *level_2
     tags: [query]
