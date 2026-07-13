@@ -3242,7 +3242,7 @@ rank_passes_filter(std::optional<std::uint64_t> current_rank,
             return true;
         });
 
-        if(*current_rank >= ws)
+        if(*current_rank > max_rank)
         {
             LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
                         "existing ranks [0-{}]",
