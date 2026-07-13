@@ -610,7 +610,7 @@ flowchart LR
   T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SC["T4SC: SuperCollider Broad IREE"]:::active
-  T4RR["T4RR: Record/Replay Broad IREE"]:::todo
+  T4RR["T4RR: Record/Replay Broad IREE"]:::active
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
   T4G{"T4G: Broad Compatibility Accepted"}:::target
@@ -2001,10 +2001,21 @@ baseline (13 data-tiled/MXFP4 matmuls plus one TOSA stream matmul), confirming
 that the first broad failures were not intrinsic workload failures. Their
 isolated instrumented reruns still fail, so they are now being classified as
 expected SuperCollider mismatch traps versus a second instrumentation defect.
+An isolated logged `dt_f32` run is confirmed typed: one B64 store check patch
+at text `0x8f8` branches to a local cave at `0x2140`, then the first dispatch
+terminates with the documented default `s_trap 0` mismatch exception. The
+other data-tiled/MXFP4 family members remain to be individually typed because
+parallel GPU exceptions can contaminate neighboring subprocess results.
 
-### T4RR: Record/Replay Broad IREE - TODO
+### T4RR: Record/Replay Broad IREE - ACTIVE
 
 Goal: run the same inventory under standard record/replay.
+
+Current status: `ACTIVE`. The first parallel sweep exposed failures in large
+data-tiled/MXFP4 and dot workloads, including memory-aperture exceptions; a
+simultaneous GPU exception can contaminate other subprocesses, so these are
+being rerun individually before attribution. This broad profile deliberately
+does not require a patch or record from every object.
 
 ### T4SA: Sampled Broad IREE - TODO
 
