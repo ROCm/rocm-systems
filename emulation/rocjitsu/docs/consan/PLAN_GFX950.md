@@ -469,6 +469,14 @@ Full gfx950 support means:
   dispatch-pointer insertion, follower inputs, shared helpers, and fresh
   persistent-state placement; the Clang-21 build and focused gate pass 251/251.
   Registered multi-workgroup omitted-coordinate tests remain before `DONE`.
+- 2026-07-13: omitted-coordinate live tests exposed a second, independent
+  workgroup-isolation defect after the entry ABI was fixed. Record/replay sees
+  all eight launched `(x,y,z)` groups, but sampled watchpoints are indexed only
+  by static site and inline exact-shadow entries only by LDS cell. A clean
+  eight-group alternating-owner control therefore reports false cross-group
+  conflicts in both engines. `T3IW` is split into completed entry work
+  (`T3IWA`) and parallel sampled/inline partition work (`T3IWS`/`T3IWE`);
+  `T3IWL` is the final live acceptance gate.
 
 ## DAG Overview
 
@@ -691,7 +699,11 @@ flowchart LR
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Accumulator-Safe Scalar State"]:::active
-  T3IW["T3IW: Complete Workgroup-ID ABI"]:::active
+  T3IWA["T3IWA: Complete Entry Workgroup ABI"]:::done
+  T3IWS["T3IWS: Sampled Workgroup Partitions"]:::active
+  T3IWE["T3IWE: Inline Workgroup Partitions"]:::active
+  T3IWL["T3IWL: Omitted-Coordinate Live Gate"]:::active
+  T3IW{"T3IW: Workgroup Identity Accepted"}:::target
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -733,7 +745,12 @@ flowchart LR
   T3SA --> T3G
   T3IS --> T3IO
   T3IO --> T3IR
-  T3IO --> T3IW
+  T3IO --> T3IWA
+  T3IWA --> T3IWS
+  T3IWA --> T3IWE
+  T3IWS --> T3IWL
+  T3IWE --> T3IWL
+  T3IWL --> T3IW
   T3IO --> T3IA
   T3IR --> T3IL
   T3IW --> T3IL
@@ -2111,6 +2128,21 @@ system-input followers, shared helpers, and both successful and fail-closed
 persistent-state allocation. The Clang-21 build and focused suite pass 251/251.
 Live omitted-coordinate multi-workgroup coverage for all three engines is in
 progress, so this node remains `ACTIVE`.
+
+The remaining work is deliberately split so neither compact engine becomes a
+single long-running node:
+
+- `T3IWA: Complete Entry Workgroup ABI - DONE`: request/snapshot x/y/z and
+  restore every original guest ABI shape; 251/251 focused tests pass.
+- `T3IWS: Sampled Workgroup Partitions - ACTIVE`: make static watchpoint slots
+  and immediate checks workgroup-local, with checked finite-capacity behavior.
+- `T3IWE: Inline Workgroup Partitions - ACTIVE`: make exact-shadow cells
+  workgroup-local, with checked finite-capacity behavior and no probabilistic
+  aliasing.
+- `T3IWL: Omitted-Coordinate Live Gate - ACTIVE`: the raw and record/replay
+  omitted-coordinate rows pass. The new clean-isolation control intentionally
+  remains red for sampled and inline until `T3IWS` and `T3IWE` land; it proves
+  the current false cross-group conflicts are non-vacuous.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
