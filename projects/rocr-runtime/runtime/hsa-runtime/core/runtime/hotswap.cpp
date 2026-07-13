@@ -44,8 +44,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -59,6 +61,9 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include "core/inc/hotswap_gfx_query.hpp"
@@ -99,7 +104,7 @@ uint64_t ComputeRetargetCacheKey(const void* elf_data, size_t elf_size,
   uint64_t hash = FnvHash(elf_data, elf_size);
   hash ^= FnvHash(source_isa.data(), source_isa.size()) * 31;
   hash ^= FnvHash(target_isa.data(), target_isa.size()) * 37;
-  hash ^= entry_trampolines ? 0x1ULL : 0x0ULL;
+  hash ^= entry_trampolines ? 0xDEADBEEF12345678ULL : 0x0ULL;
   return hash;
 }
 
@@ -114,6 +119,171 @@ constexpr size_t kMaxRetargetCacheEntries = 256;
 
 std::mutex g_retarget_cache_mutex;
 std::unordered_map<uint64_t, CachedRetargetResult> g_retarget_cache;
+
+// Path of the COMGR library that actually loaded; set by GetComgrApi. Folded
+// into the disk-cache salt so a toolchain swap invalidates persisted entries.
+std::string g_comgr_lib_path;
+
+// -- Disk-persistent tier for the retarget cache ------------------------------
+//
+// The in-memory cache above only lives for the current process, so every fresh
+// launch re-pays the full COMGR retarget (dominated by disassembling a large
+// .text). This tier persists the retargeted ELF to disk keyed by the same
+// content hash, so repeat runs -- and unrelated processes -- skip COMGR
+// entirely. Entries are namespaced by a salt derived from the loaded COMGR
+// library (path + size + mtime) plus a format version, so a toolchain change
+// naturally invalidates stale results. POSIX-only; a no-op on Windows.
+
+constexpr char kDiskCacheMagic[8] = {'H', 'S', 'H', 'O', 'T', 'S', 'W', '2'};
+constexpr uint32_t kDiskCacheFormatVersion = 1;
+
+struct DiskCacheHeader {
+  char magic[8];
+  uint32_t format_version;
+  uint32_t reserved;
+  uint64_t comgr_salt;
+  uint64_t payload_size;
+};
+
+bool IsDiskCacheDisabledByEnv() {
+  // Default-on; only an explicit false-like value opts out.
+  if (!os::IsEnvVarSet("HSA_HOTSWAP_DISK_CACHE")) {
+    return false;
+  }
+  std::string v = os::GetEnvVar("HSA_HOTSWAP_DISK_CACHE");
+  std::transform(v.begin(), v.end(), v.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return v == "0" || v == "off" || v == "false" || v == "no" || v == "n" || v == "f";
+}
+
+std::string GetDiskCacheDir() {
+#if defined(_WIN32) || defined(_WIN64)
+  return {};
+#else
+  if (IsDiskCacheDisabledByEnv()) {
+    return {};
+  }
+  if (os::IsEnvVarSet("HSA_HOTSWAP_CACHE_DIR")) {
+    const std::string d = os::GetEnvVar("HSA_HOTSWAP_CACHE_DIR");
+    if (!d.empty()) {
+      return d;
+    }
+  }
+  if (os::IsEnvVarSet("XDG_CACHE_HOME")) {
+    const std::string d = os::GetEnvVar("XDG_CACHE_HOME");
+    if (!d.empty()) {
+      return d + "/rocm/hotswap";
+    }
+  }
+  if (os::IsEnvVarSet("HOME")) {
+    const std::string h = os::GetEnvVar("HOME");
+    if (!h.empty()) {
+      return h + "/.cache/rocm/hotswap";
+    }
+  }
+  return {};
+#endif
+}
+
+#if !defined(_WIN32) && !defined(_WIN64)
+uint64_t ComgrIdentitySalt() {
+  uint64_t salt = static_cast<uint64_t>(kDiskCacheFormatVersion) * 1000003ULL;
+  if (!g_comgr_lib_path.empty()) {
+    salt ^= FnvHash(g_comgr_lib_path.data(), g_comgr_lib_path.size());
+    struct stat st = {};
+    if (::stat(g_comgr_lib_path.c_str(), &st) == 0) {
+      salt ^= static_cast<uint64_t>(st.st_size) * 2654435761ULL;
+      salt ^= static_cast<uint64_t>(st.st_mtime) * 40503ULL;
+    }
+  }
+  return salt;
+}
+
+bool MakeDirs(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  for (size_t i = 1; i < path.size(); ++i) {
+    if (path[i] == '/') {
+      const std::string sub = path.substr(0, i);
+      if (::mkdir(sub.c_str(), 0755) != 0 && errno != EEXIST) {
+        return false;
+      }
+    }
+  }
+  return ::mkdir(path.c_str(), 0755) == 0 || errno == EEXIST;
+}
+
+std::string DiskCacheSubdir(const std::string& dir, uint64_t salt) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "/%016llx", static_cast<unsigned long long>(salt));
+  return dir + buf;
+}
+
+std::string DiskCachePath(const std::string& dir, uint64_t key, uint64_t salt) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "/%016llx.co", static_cast<unsigned long long>(key));
+  return DiskCacheSubdir(dir, salt) + buf;
+}
+
+std::shared_ptr<std::vector<uint8_t>> ReadDiskCache(const std::string& path, uint64_t salt) {
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) {
+    return nullptr;
+  }
+  std::shared_ptr<std::vector<uint8_t>> result;
+  DiskCacheHeader hdr = {};
+  if (std::fread(&hdr, sizeof(hdr), 1, f) == 1 &&
+      std::memcmp(hdr.magic, kDiskCacheMagic, sizeof(hdr.magic)) == 0 &&
+      hdr.format_version == kDiskCacheFormatVersion && hdr.comgr_salt == salt &&
+      hdr.payload_size > 0) {
+    try {
+      auto bytes = std::make_shared<std::vector<uint8_t>>(hdr.payload_size);
+      if (std::fread(bytes->data(), 1, hdr.payload_size, f) == hdr.payload_size) {
+        result = std::move(bytes);
+      }
+    } catch (const std::bad_alloc&) {
+      result = nullptr;
+    }
+  }
+  std::fclose(f);
+  return result;
+}
+
+void WriteDiskCache(const std::string& dir, uint64_t key, uint64_t salt, const void* data,
+                    size_t size) {
+  if (dir.empty() || !data || size == 0) {
+    return;
+  }
+  if (!MakeDirs(DiskCacheSubdir(dir, salt))) {
+    return;
+  }
+  const std::string final_path = DiskCachePath(dir, key, salt);
+  char suffix[64];
+  std::snprintf(suffix, sizeof(suffix), ".%d.%llu.tmp", static_cast<int>(::getpid()),
+                static_cast<unsigned long long>(key));
+  const std::string tmp_path = final_path + suffix;
+
+  std::FILE* f = std::fopen(tmp_path.c_str(), "wb");
+  if (!f) {
+    return;
+  }
+  DiskCacheHeader hdr = {};
+  std::memcpy(hdr.magic, kDiskCacheMagic, sizeof(hdr.magic));
+  hdr.format_version = kDiskCacheFormatVersion;
+  hdr.reserved = 0;
+  hdr.comgr_salt = salt;
+  hdr.payload_size = size;
+  const bool ok = std::fwrite(&hdr, sizeof(hdr), 1, f) == 1 &&
+                  std::fwrite(data, 1, size, f) == size;
+  std::fclose(f);
+
+  // Atomic publish: a partial writer never exposes a truncated entry.
+  if (!ok || ::rename(tmp_path.c_str(), final_path.c_str()) != 0) {
+    ::remove(tmp_path.c_str());
+  }
+}
+#endif  // !_WIN32 && !_WIN64
 
 constexpr char kGfx1250[] = "gfx1250";
 constexpr char kGfx1250B0Feature[] = ":gfx1250-b0-specific+";
@@ -286,6 +456,7 @@ ComgrApi* GetComgrApi() {
 
       if (ResolveComgrApi(lib, &api)) {
         ready = true;
+        g_comgr_lib_path = name;
         HOTSWAP_LOG("hotswap: loaded COMGR from %s\n", name);
         return true;
       }
@@ -504,6 +675,11 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
       code_object.data, code_object.size, decision->source_isa,
       decision->target_isa, decision->request_entry_trampolines);
 
+#if !defined(_WIN32) && !defined(_WIN64)
+  const std::string disk_cache_dir = GetDiskCacheDir();
+  const uint64_t disk_cache_salt = disk_cache_dir.empty() ? 0ULL : ComgrIdentitySalt();
+#endif
+
   // Cache lookup: grab a shared_ptr under the lock, then copy outside it.
   {
     std::shared_ptr<std::vector<uint8_t>> cached_bytes;
@@ -544,6 +720,40 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
     }
   }
 
+#if !defined(_WIN32) && !defined(_WIN64)
+  // Disk tier: another process (or a previous run) may have already persisted
+  // the retargeted ELF. On a hit, copy it out and promote it into the in-memory
+  // cache so the rest of this process avoids even the disk read.
+  if (!disk_cache_dir.empty()) {
+    const std::string disk_path = DiskCachePath(disk_cache_dir, cache_key, disk_cache_salt);
+    std::shared_ptr<std::vector<uint8_t>> disk_bytes = ReadDiskCache(disk_path, disk_cache_salt);
+    if (disk_bytes) {
+      OwnedElfBuffer buf(std::malloc(disk_bytes->size()), &std::free);
+      if (buf) {
+        std::memcpy(buf.get(), disk_bytes->data(), disk_bytes->size());
+        *out_elf_buffer = std::move(buf);
+        *out_elf_size = disk_bytes->size();
+        try {
+          std::scoped_lock lock(g_retarget_cache_mutex);
+          if (g_retarget_cache.find(cache_key) == g_retarget_cache.end() &&
+              g_retarget_cache.size() < kMaxRetargetCacheEntries) {
+            CachedRetargetResult entry;
+            entry.succeeded = true;
+            entry.elf_bytes = disk_bytes;
+            g_retarget_cache.emplace(cache_key, std::move(entry));
+          }
+        } catch (const std::bad_alloc&) {
+          // Promotion is best-effort; the disk result is already returned.
+        }
+        HOTSWAP_LOG("hotswap: disk cache hit src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu\n",
+                    decision->source_isa.c_str(), decision->target_isa.c_str(),
+                    decision->request_entry_trampolines, code_object.size, disk_bytes->size());
+        return true;
+      }
+    }
+  }
+#endif
+
   const bool rewritten =
       RetargetCodeObject(code_object.data, code_object.size,
                          decision->source_isa.c_str(), decision->target_isa.c_str(),
@@ -567,7 +777,22 @@ bool TryRetargetCodeObject(const CodeObjectView& code_object, hsa_agent_t agent,
   } catch (const std::bad_alloc&) {
     // OOM during caching — the retarget result in out_elf_buffer is
     // still valid, we just can't cache it for future loads.
+    HOTSWAP_LOG("hotswap: retarget cache store skipped (out of memory); "
+                "returning uncached result for src=%s tgt=%s\n",
+                decision->source_isa.c_str(), decision->target_isa.c_str());
   }
+
+#if !defined(_WIN32) && !defined(_WIN64)
+  // Persist a successful retarget so future launches (this or any process) can
+  // skip COMGR entirely. Best-effort: failures never affect the returned result.
+  if (rewritten && !disk_cache_dir.empty()) {
+    WriteDiskCache(disk_cache_dir, cache_key, disk_cache_salt, (*out_elf_buffer).get(),
+                   *out_elf_size);
+    HOTSWAP_LOG("hotswap: disk cache store src=%s tgt=%s in=%zu out=%zu\n",
+                decision->source_isa.c_str(), decision->target_isa.c_str(), code_object.size,
+                *out_elf_size);
+  }
+#endif
 
   HOTSWAP_LOG("hotswap: rewrite src=%s tgt=%s entry_trampolines=%d in=%zu out=%zu changed=%d\n",
               decision->source_isa.c_str(), decision->target_isa.c_str(),
