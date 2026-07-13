@@ -148,6 +148,13 @@ Full gfx950 support means:
   support reasons when it skips. An LLVM-matched CPU fixture retains gfx950 DS
   read/write, barrier, FLAT read/write, DS atomic, and end-program words and
   inventories every initial native family without a GPU.
+- 2026-07-13: `A3B`, `A3C`, and `R1C` are `DONE`, reaching `F0`. Deterministic
+  gfx950 fixtures cover dead allocation, eight-register descriptor growth,
+  forced spill from zero and nonzero private layouts, scalar exhaustion, and
+  transactional dynamic-stack rejection. A dual-architecture shared-helper
+  generator uses native CDNA4 call/return and DS encodings; its two owners have
+  different register pressure and private sizes yet receive one compatible
+  44-byte spill layout while an unrelated descriptor remains untouched.
 
 ## DAG Overview
 
@@ -182,11 +189,11 @@ flowchart LR
   A1C["A1C: Close Inventory"]:::done
   A2["A2: Capability And Target Dispatch"]:::done
   A3A["A3A: Basic ISA Fixtures"]:::done
-  A3B["A3B: Private And Pressure Fixtures"]:::todo
-  A3C["A3C: Shared-Helper Fixture"]:::todo
+  A3B["A3B: Private And Pressure Fixtures"]:::done
+  A3C["A3C: Shared-Helper Fixture"]:::done
   R1A["R1A: Limits And Descriptor Geometry"]:::done
   R1B["R1B: Scalar And Special State"]:::done
-  R1C["R1C: Owners And Transaction Tests"]:::todo
+  R1C["R1C: Owners And Transaction Tests"]:::done
   F0{"F0: gfx950 Foundation Ready"}:::target
 
   B0 --> A1A
@@ -223,7 +230,7 @@ flowchart LR
   IS1C["IS1C: Multi-Cell And Diagnostics"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
   AT1B["AT1B: Inline Atomic Handoff"]:::todo
-  R1C["R1C: Owners And Transaction Tests"]:::todo
+  R1C["R1C: Owners And Transaction Tests"]:::done
   S7A["S7A: Sampled Spill Parity"]:::todo
   S7B["S7B: Inline Access Spill Parity"]:::todo
   S7C["S7C: Barrier And Atomic Spill Parity"]:::todo
@@ -533,7 +540,7 @@ Done criteria:
 - CPU-only tests can inventory the initial gfx950 native instruction families
   without a GPU.
 
-### A3B: gfx950 Private And Pressure Fixtures - TODO
+### A3B: gfx950 Private And Pressure Fixtures - DONE
 
 Goal: retain deterministic resource and private-memory inputs separately from
 the basic instruction fixtures.
@@ -549,7 +556,7 @@ Done criteria:
 - CPU-only tests can distinguish dead, growth, spill-required, and rejected
   private-layout outcomes.
 
-### A3C: gfx950 Shared-Helper Fixture - TODO
+### A3C: gfx950 Shared-Helper Fixture - DONE
 
 Goal: retain one object that proves all-owner behavior for shared helper text.
 
@@ -615,7 +622,7 @@ Done criteria:
 - Synthetic allocation covers scalar-full, special-state, and system-SGPR
   boundary cases without emitting a probe.
 
-### R1C: CDNA4 Owners And Resource Transactions - TODO
+### R1C: CDNA4 Owners And Resource Transactions - DONE
 
 Goal: prove shared ownership and transactional allocation outcomes using the
 audited R1A/R1B model.

@@ -596,6 +596,7 @@ std::vector<uint8_t> make_rdna4_code_object_with_local_function(
 }
 
 struct TwoKernelSharedFixtureOptions {
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
   uint32_t first_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
   uint32_t second_vgpr_granulated = kRdna4Wave64AllVgprsGranulated;
   uint32_t first_private_bytes = 0;
@@ -607,29 +608,29 @@ struct TwoKernelSharedFixtureOptions {
 };
 
 std::vector<uint8_t>
-make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &options = {}) {
+make_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOptions &options = {}) {
   constexpr uint16_t kReturnSgpr = 30;
+  const uint32_t call_op = options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x15u : 0x14u;
+  const uint32_t setpc_op = options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0x1du : 0x48u;
+  const uint32_t all_vgprs_granulated =
+      options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 31u : kRdna4Wave64AllVgprsGranulated;
   std::vector<uint32_t> first_kernel{0};
   if (options.first_continuation_uses_v1) {
-    first_kernel.push_back(
-        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
+    first_kernel.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), options.arch));
   }
-  first_kernel.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
-  std::vector<uint32_t> second_kernel{0, build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
-  const std::vector<uint32_t> unrelated_kernel{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  first_kernel.push_back(build_s_endpgm(options.arch));
+  std::vector<uint32_t> second_kernel{0, build_s_endpgm(options.arch)};
+  const std::vector<uint32_t> unrelated_kernel{build_s_endpgm(options.arch)};
   std::vector<uint32_t> helper{
-      0xD8340000u,
+      options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 0xD81A0000u : 0xD8340000u,
       0x00000000u, // ds_store_b32 v0, v0
   };
   if (options.helper_keeps_v1_v3_live) {
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), ROCJITSU_CODE_ARCH_RDNA4));
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/2, vector_source_vgpr(2), ROCJITSU_CODE_ARCH_RDNA4));
-    helper.push_back(
-        build_v_mov_b32_e32(/*vdst=*/3, vector_source_vgpr(3), ROCJITSU_CODE_ARCH_RDNA4));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/1, vector_source_vgpr(1), options.arch));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/2, vector_source_vgpr(2), options.arch));
+    helper.push_back(build_v_mov_b32_e32(/*vdst=*/3, vector_source_vgpr(3), options.arch));
   }
-  helper.push_back(pack_sop1(/*s_setpc_b64=*/0x48, 0, kReturnSgpr));
+  helper.push_back(pack_sop1(setpc_op, 0, kReturnSgpr));
 
   const uint64_t first_entry = 0;
   const uint64_t second_entry = first_kernel.size() * sizeof(uint32_t);
@@ -637,10 +638,10 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   const uint64_t helper_entry =
       (first_kernel.size() + second_kernel.size() + unrelated_kernel.size()) * sizeof(uint32_t);
   first_kernel[0] = pack_sopk(
-      /*s_call_b64=*/0x14, kReturnSgpr,
+      call_op, kReturnSgpr,
       static_cast<uint16_t>((helper_entry - (first_entry + sizeof(uint32_t))) / sizeof(uint32_t)));
   second_kernel[0] = pack_sopk(
-      /*s_call_b64=*/0x14, kReturnSgpr,
+      call_op, kReturnSgpr,
       static_cast<uint16_t>((helper_entry - (second_entry + sizeof(uint32_t))) / sizeof(uint32_t)));
 
   constexpr uint64_t text_offset = 0x100;
@@ -690,7 +691,8 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  ehdr.e_flags = options.arch == ROCJITSU_CODE_ARCH_CDNA4 ? EF_AMDGPU_MACH_AMDGCN_GFX950
+                                                          : EF_AMDGPU_MACH_AMDGCN_GFX1201;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
@@ -729,7 +731,7 @@ make_rdna4_two_kernel_shared_helper_code_object(const TwoKernelSharedFixtureOpti
                    options.second_vgpr_granulated, options.second_private_bytes,
                    options.second_wave32);
   write_descriptor(rodata_offset + 2u * descriptor_size, rodata_vaddr + 2u * descriptor_size,
-                   unrelated_entry, kRdna4Wave64AllVgprsGranulated, 0, false);
+                   unrelated_entry, all_vgprs_granulated, 0, false);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
 
@@ -1882,7 +1884,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
 }
 
 TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
 
@@ -1903,8 +1905,61 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   EXPECT_EQ(plan.scratch_vgpr_count, 3u);
 }
 
+TEST(ConSanMoi, Gfx950SharedHelperSpillUsesEveryOwnerResourceAndPrivateLayout) {
+  TwoKernelSharedFixtureOptions fixture;
+  fixture.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  fixture.first_vgpr_granulated = 0;
+  fixture.second_vgpr_granulated = 1;
+  fixture.first_private_bytes = 0;
+  fixture.second_private_bytes = 20;
+  fixture.helper_keeps_v1_v3_live = true;
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.functions.size(), 1u);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
+  EXPECT_EQ(plan.scratch_vgpr, 1u);
+  EXPECT_EQ(plan.original_private_segment_size, 20u);
+  ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const ConSanPatchInfo &patch = result.patches.front();
+  EXPECT_EQ(patch.spilled_vgpr_count, 3u);
+  EXPECT_EQ(patch.required_private_segment_size, 44u);
+  EXPECT_EQ(patch.owner_descriptor_file_offsets, plan.owner_descriptor_file_offsets);
+
+  const std::vector<uint32_t> expected_save = expected_vgpr_spill_words(
+      /*base=*/1, /*count=*/3, /*restore=*/false, /*slot_base=*/32, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(expected_save.empty());
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  std::vector<uint32_t> trampoline(patch.trampoline_size / sizeof(uint32_t));
+  std::memcpy(trampoline.data(), patched.text_sections().front()->data() + patch.trampoline_offset,
+              patch.trampoline_size);
+  EXPECT_TRUE(std::equal(expected_save.begin(), expected_save.end(), trampoline.begin()));
+
+  for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
+    KD descriptor{};
+    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+                sizeof(descriptor));
+    if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
+    else if (kernel.name == "unrelated_kernel")
+      EXPECT_EQ(descriptor.private_segment_fixed_size, 0u);
+  }
+}
+
 TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnchanged) {
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object();
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   ASSERT_TRUE(original.is_valid());
   const auto original_unrelated =
@@ -1961,7 +2016,7 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
   fixture.first_vgpr_granulated = 0;
   fixture.second_vgpr_granulated = 0;
   fixture.helper_keeps_v1_v3_live = true;
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -1997,7 +2052,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_private_bytes = 0;
   fixture.second_private_bytes = 20;
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.force_vgpr_spill = true;
@@ -2044,7 +2099,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
 TEST(ConSanMoi, SharedHelperRejectsAssignmentLiveInAnyOwnerScope) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_continuation_uses_v1 = true;
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.scratch_vgpr = 1;
@@ -2062,7 +2117,7 @@ TEST(ConSanMoi, SharedHelperRejectsAssignmentLiveInAnyOwnerScope) {
 }
 
 TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object();
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object();
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::InlineShadow;
@@ -2104,7 +2159,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_private_bytes = 0;
   fixture.second_private_bytes = 20;
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::InlineShadow;
@@ -2160,7 +2215,7 @@ TEST(ConSanMoi, SharedPrivateOwnerRejectsIncompatibleWaveSizes) {
   TwoKernelSharedFixtureOptions fixture;
   fixture.first_wave32 = true;
   fixture.second_wave32 = false;
-  const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
+  const std::vector<uint8_t> bytes = make_two_kernel_shared_helper_code_object(fixture);
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   ASSERT_TRUE(original.is_valid());
   for (const AmdGpuKernelInfo &kernel : original.kernels()) {
@@ -2520,6 +2575,47 @@ TEST(ConSanMoi, Gfx950ResourcePlanDecodesEightVgprsFromZeroDescriptorField) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 8u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
+}
+
+TEST(ConSanMoi, Gfx950PressureFixtureGrowsDescriptorAfterLiveWindow) {
+  std::vector<uint32_t> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+  };
+  for (uint16_t vgpr = 1; vgpr < 8; ++vgpr)
+    text_words.push_back(
+        build_v_mov_b32_e32(vgpr, vector_source_vgpr(vgpr), ROCJITSU_CODE_ARCH_CDNA4));
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4));
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_descriptor_pressure",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_TRUE(result.modified);
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
+  EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::DescriptorGrowth);
+  EXPECT_EQ(plan.current_vgpr_count, 8u);
+  EXPECT_EQ(plan.max_referenced_vgpr_count, 8u);
+  EXPECT_EQ(plan.scratch_vgpr, 8u);
+  EXPECT_EQ(plan.required_vgpr_count, 11u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  KD descriptor{};
+  std::memcpy(&descriptor,
+              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              sizeof(descriptor));
+  EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                            kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
 }
 
 TEST(ConSanMoi, Gfx950InventoriesBasicLdsReadWriteAndExcludesAtomic) {
@@ -2940,6 +3036,34 @@ TEST(ConSanMoi, FirstLightProbeRejectsSpillingDynamicStackKernel) {
 
   EXPECT_TRUE(result.errors.empty());
   EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("dynamic-stack") != std::string::npos;
+  }));
+}
+
+TEST(ConSanMoi, Gfx950DynamicStackPressureFixtureRollsBackSpillTransaction) {
+  const std::array<uint32_t, 3> text_words = {
+      0xD81A0000u,
+      0x00000000u, // ds_write_b32 v0, v0
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_dynamic_spill",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/true, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+  options.force_vgpr_spill = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_FALSE(result.modified);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  ASSERT_EQ(result.resource_plans.size(), 1u);
+  EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("dynamic-stack") != std::string::npos;
   }));
