@@ -14,11 +14,23 @@ inputs:
     description: Sandbox runner label to use if the shared CI config cannot be loaded
     required: false
     default: linux-mi325-gpu-rocm-cpu-sandbox
+  fallback-gfx950-runner:
+    description: Runner label for gfx950 if the shared CI config cannot be loaded
+    required: false
+    default: linux-mi355-1gpu-ossci-rocm
+  fallback-gfx90a-runner:
+    description: Runner label for gfx90a if the shared CI config cannot be loaded
+    required: false
+    default: linux-gfx90a-gpu-rocm
+  fallback-gfx1151-runner:
+    description: Runner label for gfx1151 if the shared CI config cannot be loaded
+    required: false
+    default: linux-gfx1151-gpu-rocm
 
 outputs:
   gfx90a_runner:
-    description: Linux gfx950 test runner label
-    value:
+    description: Linux gfx90a test runner label
+    value: ${{ steps.runner.outputs.gfx90a_runner }}
   gfx94x_runner:
     description: Linux gfx94x test runner label
     value: ${{ steps.runner.outputs.gfx94x_runner }}
@@ -27,10 +39,10 @@ outputs:
     value: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
   gfx950_runner:
     description: Linux gfx950 test runner label
-    value:
+    value: ${{ steps.runner.outputs.gfx950_runner }}
   gfx1151_runner:
     description: Linux gfx1151 test runner label
-    value:
+    value: ${{ steps.runner.outputs.gfx1151_runner }}
 
 runs:
   using: composite
@@ -50,4 +62,7 @@ runs:
         CI_CONFIG_PATH: ${{ inputs.config-path }}
         FALLBACK_GFX94X_RUNNER: ${{ inputs.fallback-gfx94x-runner }}
         FALLBACK_GFX94X_SANDBOX_RUNNER: ${{ inputs.fallback-gfx94x-sandbox-runner }}
+        FALLBACK_GFX950_RUNNER: ${{ inputs.fallback-gfx950-runner }}
+        FALLBACK_GFX90A_RUNNER: ${{ inputs.fallback-gfx90a-runner }}
+        FALLBACK_GFX1151_RUNNER: ${{ inputs.fallback-gfx1151-runner }}
       run: python3 "${GITHUB_ACTION_PATH}/resolve_ci_config.py"

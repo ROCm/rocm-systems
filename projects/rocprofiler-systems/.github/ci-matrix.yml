@@ -1,12 +1,13 @@
 # Matrix definitions for rocprofiler-systems-continuous-integration
+# Runner labels are resolved from ROCm/therock-ci-config at workflow runtime.
 
 matrix-nightly:
   # MI355
-  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }
   # MI325
-  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-core42-ossci-rocm' }
-  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', runner: 'linux-gfx942-1gpu-core42-ossci-rocm' }
+  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X' }
+  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X' }
 matrix-ci:
   # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', runner: 'linux-mi355-1gpu-ossci-rocm' }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950' }

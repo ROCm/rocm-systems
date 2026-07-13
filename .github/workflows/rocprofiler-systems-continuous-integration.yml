@@ -61,7 +61,27 @@ env:
   EXCLUDED_LABELS: "thread_limit"
 
 jobs:
+  ci_config:
+    name: Load CI config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
   prepare_matrix:
+    needs: ci_config
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
@@ -74,12 +94,30 @@ jobs:
       - name: Generate and output matrix
         id: generate_matrix
         working-directory: projects/rocprofiler-systems/.github
+        env:
+          GFX950_RUNNER: ${{ needs.ci_config.outputs.gfx950_runner }}
+          GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-nightly' -I=0 -o=json)
           else
             MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ci' -I=0 -o=json)
           fi
+
+          # Map arch to resolved runner labels from therock-ci-config
+          declare -A RUNNER_MAP=(
+            ["gfx950"]="$GFX950_RUNNER"
+            ["gfx94X"]="$GFX94X_RUNNER"
+          )
+          for arch in "${!RUNNER_MAP[@]}"; do
+            runner="${RUNNER_MAP[$arch]}"
+            if [ -n "$runner" ]; then
+              MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | \
+                jq --arg arch "$arch" --arg runner "$runner" \
+                '[.[] | if .arch == $arch then .runner = $runner else . end]')
+            fi
+          done
+
           echo "matrix=${MATRIX_CONTENT}" >> $GITHUB_OUTPUT
 
   ubuntu:

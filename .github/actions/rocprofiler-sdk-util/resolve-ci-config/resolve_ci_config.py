@@ -7,12 +7,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+GPU_FAMILIES = ["gfx94x", "gfx950", "gfx90a", "gfx1151"]
+TRIGGER_TYPES = ["presubmit", "postsubmit", "nightly"]
+
 
 def warn(message: str) -> None:
     print(f"::warning::{message}")
 
 
-def load_gfx94x_linux_config(config_path: Path) -> dict[str, Any]:
+def load_gpu_configs(config_path: Path) -> dict[str, dict[str, Any]]:
     if not config_path.exists():
         warn("CI config checkout missing. Using fallback runner labels.")
         return {}
@@ -22,11 +25,11 @@ def load_gfx94x_linux_config(config_path: Path) -> dict[str, Any]:
         from ci_config_api import load_config_v1
 
         config = load_config_v1(config_path)
-        return (
-            config.get_gpu_families(["presubmit"])
-            .get("gfx94x", {})
-            .get("linux", {})
-        )
+        all_families = config.get_gpu_families(TRIGGER_TYPES)
+        return {
+            family: all_families.get(family, {}).get("linux", {})
+            for family in GPU_FAMILIES
+        }
     except Exception as exc:
         warn(f"Failed to load CI config: {exc}. Using fallback runner labels.")
         return {}
@@ -40,23 +43,25 @@ def set_outputs(outputs: dict[str, str]) -> None:
 
 def main() -> None:
     config_path = Path(os.environ["CI_CONFIG_PATH"])
-    fallback_runner = os.environ["FALLBACK_GFX94X_RUNNER"]
-    fallback_sandbox_runner = os.environ["FALLBACK_GFX94X_SANDBOX_RUNNER"]
+    gpu_configs = load_gpu_configs(config_path)
 
-    gfx94x_linux_config = load_gfx94x_linux_config(config_path)
-    runner = gfx94x_linux_config.get("test-runs-on") or fallback_runner
-    sandbox_runner = (
-        gfx94x_linux_config.get("test-runs-on-sandbox") or fallback_sandbox_runner
-    )
+    outputs: dict[str, str] = {}
+    for family in GPU_FAMILIES:
+        linux_config = gpu_configs.get(family, {})
+        fallback_env = f"FALLBACK_{family.upper()}_RUNNER"
+        fallback = os.environ.get(fallback_env, "")
 
-    print(f"Using gfx94x runner: {runner}")
+        runner = linux_config.get("test-runs-on") or fallback
+        outputs[f"{family}_runner"] = runner
+        print(f"Using {family} runner: {runner}")
+
+    fallback_sandbox = os.environ.get("FALLBACK_GFX94X_SANDBOX_RUNNER", "")
+    gfx94x_config = gpu_configs.get("gfx94x", {})
+    sandbox_runner = gfx94x_config.get("test-runs-on-sandbox") or fallback_sandbox
+    outputs["gfx94x_sandbox_runner"] = sandbox_runner
     print(f"Using gfx94x sandbox runner: {sandbox_runner}")
-    set_outputs(
-        {
-            "gfx94x_runner": runner,
-            "gfx94x_sandbox_runner": sandbox_runner,
-        }
-    )
+
+    set_outputs(outputs)
 
 
 if __name__ == "__main__":
