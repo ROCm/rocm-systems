@@ -145,28 +145,35 @@ struct reader_t
     /**
      *@section Track-Scoped Event Queries (On-Demand, Not Stored)
      * Fetch events scoped to a single track by its track_info_t::id. Unlike
-     * get_events_for_track(), gpu_queue / dma tracks return ONLY the events for
-     * that specific queue / stream, not all events sharing a (nid,pid,tid) context.
+     * get_events_for_track(), gpu_queue / dma / stream / memory / kernel_dispatch_pmc
+     * tracks return ONLY the events for that specific queue, agent, or stream, not all
+     * events sharing a (nid,pid,tid) context.
      */
 
     /**
      * @brief Get all interval events on a track, scoped to that track's identity
-     * @param track_id Track identifier from track_info_t::id (cpu_thread/gpu_queue/dma)
+     * @param track_id Track identifier from track_info_t::id. Valid interval
+     *                 track types: cpu_thread, gpu_queue, dma, stream, memory,
+     *                 kernel_dispatch_pmc. counter and memory_activity are
+     *                 scalar-only; they return empty — use get_scalar_track().
      * @param filter Optional time-window / pagination filter
-     * @return Interval events ordered by start ascending, with level and parent_id
-     *         precomputed and per-event category resolved to its display string. Empty
-     *         (not an error) if track_id is unknown or a counter track.
+     * @return Interval events ordered by start ascending, with level and
+     *         parent_id precomputed and per-event category resolved. Empty
+     *         (not an error) if track_id is unknown or scalar-only.
      */
     [[nodiscard]] reader_types::interval_event_list_t get_interval_track(
         size_t                              track_id,
         const reader_types::event_filter_t& filter = {}) const;
 
     /**
-     * @brief Get all scalar (timestamp,value) samples on a counter track
-     * @param track_id Track identifier from track_info_t::id (must be a counter track)
+     * @brief Get all scalar (timestamp,value) samples on a counter or
+     *        memory_activity track
+     * @param track_id Track identifier from track_info_t::id. Valid scalar
+     *                 track types: counter, memory_activity. All other track
+     *                 types return empty — use get_interval_track() instead.
      * @param filter Optional time-window / pagination filter (types is ignored)
-     * @return Scalar events ordered by timestamp ascending. Empty (not an error) if
-     *         track_id is unknown or is not a counter track.
+     * @return Scalar events ordered by timestamp ascending. Empty (not an
+     *         error) if track_id is unknown or interval-only.
      */
     [[nodiscard]] reader_types::scalar_event_list_t get_scalar_track(
         size_t                              track_id,

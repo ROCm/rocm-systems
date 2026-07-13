@@ -305,13 +305,14 @@ enum class track_type_t
                           ///< GetRocprofPerformanceCountersTrackQuery GROUP BY exactly.
                           ///< Distinct from the `counter` (SMI sample-based) track type.
                           ///< Use get_interval_track(); scalar read returns empty.
-    memory_activity       ///< agent_info populated. Scalar track of cumulative bytes
-                          ///< allocated per agent over time, keyed (nid, pid, agent_id),
-                          ///< computed from rocpd_memory_allocate (ALLOC +size / FREE
-    ///< -size; FREE agent_id and size recovered via address self-join
-    ///< to the prior ALLOC; REALLOC/RECLAIM no-op). Mirrors Optiq's
-    ///< GetRocprofMemoryActivity* synthesis (load_id 7). Use
-    ///< get_scalar_track(); interval read returns empty.
+    memory_activity       ///< agent_info populated. Scalar track of cumulative
+                          ///< bytes-allocated per agent over time, keyed
+                          ///< (nid, pid, agent_id). Computed from
+                          ///< rocpd_memory_allocate: ALLOC adds size, FREE
+                          ///< subtracts size (agent_id/size recovered from prior
+                          ///< ALLOC via address map), REALLOC/RECLAIM are no-op.
+                          ///< Mirrors Optiq GetRocprofMemoryActivity* (load_id 7).
+                          ///< Use get_scalar_track(); interval read returns empty.
 };
 
 /**
@@ -353,7 +354,7 @@ struct track_info_t
                      ///< optionally counter.
     std::shared_ptr<queue_info_t>  queue_info;   ///< gpu_queue, memory.
     std::shared_ptr<stream_info_t> stream_info;  ///< stream.
-    std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter.
+    std::shared_ptr<pmc_info_t>    pmc_info;     ///< counter, kernel_dispatch_pmc.
 };
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
@@ -589,7 +590,8 @@ using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
 struct interval_event_t
 {
     size_t opaque_id{};  ///< SQLite row id of the event in its per-type table
-                         ///< (region / kernel_dispatch / memory_copy). Pass to the
+                         ///< (region / kernel_dispatch / memory_copy / memory_allocate /
+                         ///< rocpd_pmc_event for kernel_dispatch_pmc). Pass to the
                          ///< get_*_details() method selected by the track's type, or by
                          ///< op_kind below for stream tracks.
     timestamp_ns_t start{};       ///< Event start (nanoseconds).
