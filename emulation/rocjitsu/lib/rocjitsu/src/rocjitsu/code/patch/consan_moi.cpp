@@ -1701,6 +1701,90 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   return moi_descriptor_enables_dispatch_ptr(desc) ? 0u : 2u;
 }
 
+struct Cdna4IdentityAbiTransaction {
+  uint16_t dispatch_sgpr = 0;
+  uint32_t dispatch_insertion_width = 0;
+  uint32_t workgroup_insertion_width = 0;
+  uint32_t original_abi_count = 0;
+  uint32_t patched_abi_count = 0;
+  std::array<uint16_t, 3> workgroup_sources{};
+  std::vector<std::pair<uint16_t, uint16_t>> guest_restore_moves;
+};
+
+[[nodiscard]] std::optional<Cdna4IdentityAbiTransaction>
+build_cdna4_identity_abi_transaction(const KD &descriptor, std::vector<std::string> &errors) {
+  Cdna4IdentityAbiTransaction transaction;
+  transaction.dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
+  transaction.dispatch_insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
+  transaction.original_abi_count =
+      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
+  const uint32_t original_user_count = moi_descriptor_user_sgpr_count(descriptor);
+  if (original_user_count < transaction.dispatch_sgpr) {
+    errors.emplace_back("ConSan MOI CDNA4 identity transaction has an invalid user-SGPR ABI");
+    return std::nullopt;
+  }
+
+  uint32_t original_workgroup_count = 0;
+  for (uint32_t dimension = 0; dimension < 3; ++dimension)
+    original_workgroup_count +=
+        moi_descriptor_enables_workgroup_id(descriptor, dimension) ? 1u : 0u;
+  transaction.workgroup_insertion_width = 3u - original_workgroup_count;
+  const uint32_t patched_user_count = original_user_count + transaction.dispatch_insertion_width;
+  transaction.patched_abi_count = transaction.original_abi_count +
+                                  transaction.dispatch_insertion_width +
+                                  transaction.workgroup_insertion_width;
+  if (transaction.patched_abi_count > moi_max_ordinary_sgprs(ROCJITSU_CODE_ARCH_CDNA4)) {
+    errors.emplace_back("ConSan MOI CDNA4 identity transaction exceeds SGPR bounds");
+    return std::nullopt;
+  }
+
+  for (uint32_t dimension = 0; dimension < 3; ++dimension)
+    transaction.workgroup_sources[dimension] =
+        static_cast<uint16_t>(patched_user_count + dimension);
+
+  for (uint32_t destination = transaction.dispatch_sgpr; destination < original_user_count;
+       ++destination) {
+    if (transaction.dispatch_insertion_width != 0) {
+      transaction.guest_restore_moves.emplace_back(
+          static_cast<uint16_t>(destination),
+          static_cast<uint16_t>(destination + transaction.dispatch_insertion_width));
+    }
+  }
+
+  uint32_t original_workgroup_rank = 0;
+  for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+    if (!moi_descriptor_enables_workgroup_id(descriptor, dimension))
+      continue;
+    transaction.guest_restore_moves.emplace_back(
+        static_cast<uint16_t>(original_user_count + original_workgroup_rank),
+        transaction.workgroup_sources[dimension]);
+    ++original_workgroup_rank;
+  }
+  uint32_t original_system_destination = original_user_count + original_workgroup_count;
+  uint32_t patched_system_source = patched_user_count + 3u;
+  if (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2,
+                      kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO)) {
+    transaction.guest_restore_moves.emplace_back(
+        static_cast<uint16_t>(original_system_destination++),
+        static_cast<uint16_t>(patched_system_source++));
+  }
+  if (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
+    transaction.guest_restore_moves.emplace_back(static_cast<uint16_t>(original_system_destination),
+                                                 static_cast<uint16_t>(patched_system_source));
+  }
+  std::erase_if(transaction.guest_restore_moves,
+                [](const auto &move) { return move.first == move.second; });
+  std::ranges::sort(transaction.guest_restore_moves,
+                    [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+  return transaction;
+}
+
+void append_cdna4_identity_guest_abi_restore(std::vector<uint32_t> &words,
+                                             const Cdna4IdentityAbiTransaction &transaction) {
+  for (const auto &[destination, source] : transaction.guest_restore_moves)
+    words.push_back(build_s_mov_b32(destination, source, ROCJITSU_CODE_ARCH_CDNA4));
+}
+
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources>
 moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                                  rj_code_arch_t arch, std::vector<std::string> &errors) {
@@ -1742,7 +1826,8 @@ moi_descriptor_workgroup_sources(std::span<const uint8_t> image, uint64_t descri
 moi_probe_workgroup_sources(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
                             const ConSanOptions &options, rj_code_arch_t arch,
                             std::vector<std::string> &errors) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.automatic_moi_scalar_identity) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4 && options.moi_workgroup_sgprs[0] &&
+      options.moi_workgroup_sgprs[1] && options.moi_workgroup_sgprs[2]) {
     if (!options.moi_workgroup_sgprs[0] || !options.moi_workgroup_sgprs[1] ||
         !options.moi_workgroup_sgprs[2]) {
       errors.emplace_back("ConSan MOI CDNA4 stable workgroup identity has no persistent SGPRs");
@@ -2512,6 +2597,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool configure_automatic_moi_exec_save_sgprs(ConSanOptions &options,
+                                                           std::span<const uint8_t> image,
                                                            rj_code_arch_t arch,
                                                            ConSanResult &result) {
   if (options.moi_exec_save_sgpr)
@@ -2527,6 +2613,24 @@ moi_special_state_sgprs(const ConSanOptions &options) {
       continue;
     found_owned_scope = true;
     first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
+      for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+        if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset)
+          continue;
+        KD descriptor{};
+        std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+        std::vector<std::string> transaction_errors;
+        const auto transaction =
+            build_cdna4_identity_abi_transaction(descriptor, transaction_errors);
+        if (!transaction) {
+          result.errors.insert(result.errors.end(), transaction_errors.begin(),
+                               transaction_errors.end());
+          return false;
+        }
+        first = std::max(first, transaction->patched_abi_count);
+      }
+    }
   }
   if (!found_owned_scope) {
     result.warnings.emplace_back(
@@ -2595,6 +2699,7 @@ moi_special_state_sgprs(const ConSanOptions &options) {
 }
 
 [[nodiscard]] bool configure_automatic_moi_identity_sgprs(ConSanOptions &options,
+                                                          std::span<const uint8_t> image,
                                                           rj_code_arch_t arch,
                                                           ConSanResult &result) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA4 ||
@@ -2602,15 +2707,32 @@ moi_special_state_sgprs(const ConSanOptions &options) {
       !options.moi_report_buffer_address || options.moi_identity_sgpr)
     return false;
 
+  const uint16_t identity_count = options.force_private_epoch ? 5u : 2u;
   uint32_t first = 0;
+  uint32_t fresh_first = 0;
   bool found_owned_scope = false;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (plan.owner_descriptor_file_offsets.empty())
       continue;
     found_owned_scope = true;
-    // The dispatch-pointer ABI transaction inserts two user SGPRs before the
-    // original inputs. Keep the unpack temporaries above both views.
     first = std::max<uint32_t>(first, plan.max_referenced_sgpr_count + 2u);
+    for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
+      if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset)
+        continue;
+      KD descriptor{};
+      std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+      std::vector<std::string> transaction_errors;
+      const auto transaction = build_cdna4_identity_abi_transaction(descriptor, transaction_errors);
+      if (!transaction) {
+        result.errors.insert(result.errors.end(), transaction_errors.begin(),
+                             transaction_errors.end());
+        return false;
+      }
+      first = std::max(first, transaction->patched_abi_count);
+      fresh_first = std::max<uint32_t>(
+          fresh_first, std::max<uint32_t>(transaction->patched_abi_count,
+                                          moi_descriptor_sgpr_allocation_count(descriptor, arch)));
+    }
   }
   if (!found_owned_scope) {
     result.warnings.emplace_back(
@@ -2618,22 +2740,39 @@ moi_special_state_sgprs(const ConSanOptions &options) {
     return false;
   }
 
-  for (uint32_t base = first; base + 2u <= moi_max_ordinary_sgprs(arch); ++base) {
-    if (options.moi_exec_save_sgpr &&
-        range_overlaps(static_cast<uint16_t>(base), 2u, *options.moi_exec_save_sgpr,
-                       moi_exec_save_sgpr_count(options)))
-      continue;
-    if (options.moi_owner_sgpr &&
-        range_overlaps(static_cast<uint16_t>(base), 2u, *options.moi_owner_sgpr, 1u))
-      continue;
+  const auto find_window = [&](uint32_t start) -> std::optional<uint32_t> {
+    for (uint32_t base = start; base + identity_count <= moi_max_ordinary_sgprs(arch); ++base) {
+      if (options.moi_exec_save_sgpr &&
+          range_overlaps(static_cast<uint16_t>(base), identity_count, *options.moi_exec_save_sgpr,
+                         moi_exec_save_sgpr_count(options)))
+        continue;
+      if (options.moi_owner_sgpr &&
+          range_overlaps(static_cast<uint16_t>(base), identity_count, *options.moi_owner_sgpr, 1u))
+        continue;
+      return base;
+    }
+    return std::nullopt;
+  };
+  std::optional<uint32_t> selected = find_window(options.force_private_epoch ? fresh_first : first);
+  if (selected) {
+    const uint32_t base = *selected;
     options.moi_identity_sgpr = static_cast<uint16_t>(base);
     result.resolved_moi_identity_sgpr = options.moi_identity_sgpr;
+    if (options.force_private_epoch) {
+      for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+        options.moi_workgroup_sgprs[dimension] = static_cast<uint16_t>(base + 2u + dimension);
+      }
+    }
     result.warnings.emplace_back("ConSan MOI automatically assigned CDNA4 identity SGPRs s" +
-                                 std::to_string(base) + ":s" + std::to_string(base + 1u));
+                                 std::to_string(base) + ":s" +
+                                 std::to_string(base + identity_count - 1u));
     return true;
   }
 
-  result.errors.emplace_back("ConSan MOI could not place two fresh CDNA4 identity SGPRs");
+  result.errors.emplace_back(options.force_private_epoch
+                                 ? "ConSan MOI could not place a fresh five-SGPR private "
+                                   "workgroup identity window above the guest allocation"
+                                 : "ConSan MOI could not place fresh CDNA4 identity SGPRs");
   return false;
 }
 
@@ -2713,10 +2852,12 @@ moi_special_state_sgprs(const ConSanOptions &options) {
   }
   if (needs_cdna4_scalar_fallback) {
     options.moi_init_owner_epoch = true;
-    uint32_t scalar_base = 0;
+    uint32_t referenced_scalar_base = 0;
+    uint32_t fresh_scalar_base = 0;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
       if (!plan.owner_descriptor_file_offsets.empty()) {
-        scalar_base = std::max<uint32_t>(scalar_base, plan.max_referenced_sgpr_count + 2u);
+        referenced_scalar_base =
+            std::max<uint32_t>(referenced_scalar_base, plan.max_referenced_sgpr_count + 2u);
         // Persistent state lives for the whole kernel, not merely around the
         // selected patch site. Keep it above every owner's original scalar
         // allocation instead of trusting instruction-level reference scans
@@ -2728,37 +2869,59 @@ moi_special_state_sgprs(const ConSanOptions &options) {
             continue;
           KD descriptor{};
           std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-          scalar_base = std::max<uint32_t>(scalar_base,
-                                           moi_descriptor_sgpr_allocation_count(descriptor, arch));
+          fresh_scalar_base = std::max<uint32_t>(
+              fresh_scalar_base, moi_descriptor_sgpr_allocation_count(descriptor, arch));
+          std::vector<std::string> transaction_errors;
+          const auto transaction =
+              build_cdna4_identity_abi_transaction(descriptor, transaction_errors);
+          if (!transaction) {
+            result.errors.insert(result.errors.end(), transaction_errors.begin(),
+                                 transaction_errors.end());
+            return false;
+          }
+          referenced_scalar_base = std::max(referenced_scalar_base, transaction->patched_abi_count);
+          fresh_scalar_base = std::max(fresh_scalar_base, transaction->patched_abi_count);
         }
       }
     }
     constexpr uint16_t kScalarIdentityCount = 5u;
-    while (scalar_base + kScalarIdentityCount <= moi_max_ordinary_sgprs(arch)) {
-      const bool overlaps_exec =
-          options.moi_exec_save_sgpr &&
-          range_overlaps(static_cast<uint16_t>(scalar_base), kScalarIdentityCount,
-                         *options.moi_exec_save_sgpr, moi_exec_save_sgpr_count(options));
-      const bool overlaps_owner = options.moi_owner_sgpr &&
-                                  range_overlaps(static_cast<uint16_t>(scalar_base),
-                                                 kScalarIdentityCount, *options.moi_owner_sgpr, 1u);
-      if (!overlaps_exec && !overlaps_owner)
-        break;
-      ++scalar_base;
+    const auto find_window = [&](uint32_t first) -> std::optional<uint32_t> {
+      for (uint32_t base = first; base + kScalarIdentityCount <= moi_max_ordinary_sgprs(arch);
+           ++base) {
+        const bool overlaps_exec =
+            options.moi_exec_save_sgpr &&
+            range_overlaps(static_cast<uint16_t>(base), kScalarIdentityCount,
+                           *options.moi_exec_save_sgpr, moi_exec_save_sgpr_count(options));
+        const bool overlaps_owner =
+            options.moi_owner_sgpr &&
+            range_overlaps(static_cast<uint16_t>(base), kScalarIdentityCount,
+                           *options.moi_owner_sgpr, 1u);
+        if (!overlaps_exec && !overlaps_owner)
+          return base;
+      }
+      return std::nullopt;
+    };
+    std::optional<uint32_t> scalar_base = find_window(fresh_scalar_base);
+    if (!scalar_base) {
+      scalar_base = find_window(referenced_scalar_base);
+      if (scalar_base) {
+        result.warnings.emplace_back(
+            "ConSan MOI selected a globally unreferenced in-allocation five-SGPR identity window");
+      }
     }
-    if (scalar_base + kScalarIdentityCount > moi_max_ordinary_sgprs(arch)) {
+    if (!scalar_base) {
       result.errors.emplace_back(
           "ConSan MOI CDNA4 accumulator fallback has no five-SGPR identity window");
       return false;
     }
-    options.moi_identity_sgpr = static_cast<uint16_t>(scalar_base);
+    options.moi_identity_sgpr = static_cast<uint16_t>(*scalar_base);
     result.resolved_moi_identity_sgpr = options.moi_identity_sgpr;
     options.automatic_moi_scalar_identity = true;
     result.moi_scalar_identity_automatic = true;
-    options.moi_state_owner_sgpr = static_cast<uint16_t>(scalar_base);
-    options.moi_state_epoch_sgpr = static_cast<uint16_t>(scalar_base + 1u);
+    options.moi_state_owner_sgpr = static_cast<uint16_t>(*scalar_base);
+    options.moi_state_epoch_sgpr = static_cast<uint16_t>(*scalar_base + 1u);
     for (uint32_t dimension = 0; dimension < 3; ++dimension) {
-      options.moi_workgroup_sgprs[dimension] = static_cast<uint16_t>(scalar_base + 2u + dimension);
+      options.moi_workgroup_sgprs[dimension] = static_cast<uint16_t>(*scalar_base + 2u + dimension);
     }
     result.warnings.emplace_back(
         "ConSan MOI automatically selected five-SGPR CDNA4 identity state");
@@ -2831,7 +2994,7 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
     required_count =
         std::max<uint16_t>(required_count, static_cast<uint16_t>(*options.moi_owner_sgpr + 1u));
   }
-  if (options.automatic_moi_scalar_identity && options.moi_workgroup_sgprs[2]) {
+  if (options.moi_workgroup_sgprs[2]) {
     required_count = std::max<uint16_t>(
         required_count, static_cast<uint16_t>(*options.moi_workgroup_sgprs[2] + 1u));
   }
@@ -2884,7 +3047,8 @@ struct MoiPrivateEpochLayout {
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
     const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
-      (options.automatic_moi_identity_vgprs || options.automatic_moi_scalar_identity)) {
+      (options.automatic_moi_identity_vgprs || options.automatic_moi_scalar_identity ||
+       options.moi_workgroup_sgprs[2])) {
     if (resources.owner_descriptor_file_offsets.empty()) {
       warnings.emplace_back("ConSan MOI shared record owner has no owning descriptor");
       return std::nullopt;
@@ -5625,19 +5789,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const uint16_t epoch_vgpr = *options.moi_epoch_vgpr;
   const uint16_t size_x_sgpr = *options.moi_identity_sgpr;
   const uint16_t size_y_sgpr = static_cast<uint16_t>(size_x_sgpr + 1u);
-  const uint16_t dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
-  const uint32_t insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
-  const uint32_t original_abi_count =
-      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
-  if (moi_descriptor_user_sgpr_count(descriptor) < dispatch_sgpr ||
-      original_abi_count + insertion_width > kMaxCdna4Sgprs) {
-    errors.emplace_back("ConSan MOI CDNA4 dispatch-pointer ABI transaction exceeds SGPR bounds");
+  const auto transaction = build_cdna4_identity_abi_transaction(descriptor, errors);
+  if (!transaction)
     return std::nullopt;
-  }
 
   // AQL kernel-dispatch packets store workgroup_size_x/y as adjacent uint16_t
   // fields at byte offset 4. One scalar dword load obtains both values.
-  const auto load_group_xy = build_s_load_dword(size_x_sgpr, dispatch_sgpr,
+  const auto load_group_xy = build_s_load_dword(size_x_sgpr, transaction->dispatch_sgpr,
                                                 /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait_group_xy = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
   if (!load_group_xy || !wait_group_xy) {
@@ -5646,19 +5804,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
 
   std::vector<uint32_t> words;
-  words.reserve(40u + original_abi_count);
+  words.reserve(40u + transaction->guest_restore_moves.size());
   words.insert(words.end(), load_group_xy->begin(), load_group_xy->end());
 
-  // System SGPRs follow the user-SGPR block, so a newly inserted dispatch
-  // pointer shifts every original workgroup input by two registers. Snapshot
-  // the shifted values before restoring the guest-visible layout.
+  // The patched descriptor requests all three coordinates. Snapshot them
+  // before restoring the exact original guest ABI.
   for (uint32_t dimension = 0; dimension < 3; ++dimension) {
     const uint16_t destination = *options.moi_workgroup_vgprs[dimension];
-    const auto original_source = moi_descriptor_workgroup_id_sgpr(descriptor, dimension);
-    const uint16_t source = original_source
-                                ? static_cast<uint16_t>(*original_source + insertion_width)
-                                : scalar_positive_inline_u32(0);
-    words.push_back(build_v_mov_b32_e32(destination, source, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(build_v_mov_b32_e32(destination, transaction->workgroup_sources[dimension],
+                                        ROCJITSU_CODE_ARCH_CDNA4));
   }
   words.push_back(*wait_group_xy);
   constexpr uint16_t kInline16 = kScalarPositiveInlineBase + 16u;
@@ -5696,13 +5850,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   words.push_back(
       build_v_mov_b32_e32(epoch_vgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
 
-  if (insertion_width != 0) {
-    for (uint32_t destination = dispatch_sgpr; destination < original_abi_count; ++destination) {
-      words.push_back(build_s_mov_b32(static_cast<uint16_t>(destination),
-                                      static_cast<uint16_t>(destination + insertion_width),
-                                      ROCJITSU_CODE_ARCH_CDNA4));
-    }
-  }
+  append_cdna4_identity_guest_abi_restore(words, *transaction);
 
   const uint64_t branch_pc =
       prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
@@ -5825,25 +5973,20 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
                                                   uint32_t owner_offset, const KD &descriptor,
                                                   const ConSanOptions &options,
                                                   std::vector<std::string> &errors) {
-  if (!options.moi_identity_sgpr || scratch_vgpr == kWorkitemIdX ||
-      static_cast<uint32_t>(scratch_vgpr) + 2u > kMaxVgprs) {
+  if (!options.moi_identity_sgpr || !options.moi_workgroup_sgprs[0] ||
+      !options.moi_workgroup_sgprs[1] || !options.moi_workgroup_sgprs[2] ||
+      scratch_vgpr == kWorkitemIdX || static_cast<uint32_t>(scratch_vgpr) + 2u > kMaxVgprs) {
     errors.emplace_back("ConSan MOI CDNA4 private identity has incomplete temporary state");
     return std::nullopt;
   }
   const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
   const uint16_t size_x_sgpr = *options.moi_identity_sgpr;
   const uint16_t size_y_sgpr = static_cast<uint16_t>(size_x_sgpr + 1u);
-  const uint16_t dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
-  const uint32_t insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
-  const uint32_t original_abi_count =
-      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
-  if (moi_descriptor_user_sgpr_count(descriptor) < dispatch_sgpr ||
-      original_abi_count + insertion_width > kMaxCdna4Sgprs) {
-    errors.emplace_back("ConSan MOI CDNA4 private identity ABI transaction exceeds SGPR bounds");
+  const auto transaction = build_cdna4_identity_abi_transaction(descriptor, errors);
+  if (!transaction)
     return std::nullopt;
-  }
-  const auto load_group_xy =
-      build_s_load_dword(size_x_sgpr, dispatch_sgpr, /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load_group_xy = build_s_load_dword(size_x_sgpr, transaction->dispatch_sgpr,
+                                                /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait_group_xy = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
   const auto owner_store = build_cdna4_address_free_scratch_store_b32(scratch_vgpr, owner_offset,
                                                                       ROCJITSU_CODE_ARCH_CDNA4);
@@ -5866,6 +6009,11 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
   // private operations the entry stub needs.
   words.reserve(40u);
   words.insert(words.end(), load_group_xy->begin(), load_group_xy->end());
+  for (uint32_t dimension = 0; dimension < 3; ++dimension) {
+    words.push_back(build_s_mov_b32(*options.moi_workgroup_sgprs[dimension],
+                                    transaction->workgroup_sources[dimension],
+                                    ROCJITSU_CODE_ARCH_CDNA4));
+  }
   words.push_back(*wait_group_xy);
   constexpr uint16_t kInline16 = kScalarPositiveInlineBase + 16u;
   words.push_back(build_s_lshr_b32(size_y_sgpr, size_x_sgpr, kInline16, ROCJITSU_CODE_ARCH_CDNA4));
@@ -5902,13 +6050,7 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
       build_v_mov_b32_e32(scratch_vgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
   words.insert(words.end(), epoch_store->begin(), epoch_store->end());
   words.push_back(*wait_store);
-  if (insertion_width != 0) {
-    for (uint32_t destination = dispatch_sgpr; destination < original_abi_count; ++destination) {
-      words.push_back(build_s_mov_b32(static_cast<uint16_t>(destination),
-                                      static_cast<uint16_t>(destination + insertion_width),
-                                      ROCJITSU_CODE_ARCH_CDNA4));
-    }
-  }
+  append_cdna4_identity_guest_abi_restore(words, *transaction);
   const uint64_t branch_pc =
       prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
   const auto branch = compute_sopp_branch_simm16(branch_pc, original_entry_text_offset);
@@ -5933,17 +6075,11 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
   const uint16_t tmp_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
   const uint16_t owner_sgpr = *options.moi_state_owner_sgpr;
   const uint16_t epoch_sgpr = *options.moi_state_epoch_sgpr;
-  const uint16_t dispatch_sgpr = moi_descriptor_dispatch_ptr_sgpr(descriptor);
-  const uint32_t insertion_width = moi_descriptor_dispatch_insertion_width(descriptor);
-  const uint32_t original_abi_count =
-      moi_descriptor_abi_sgpr_count(descriptor, ROCJITSU_CODE_ARCH_CDNA4);
-  if (moi_descriptor_user_sgpr_count(descriptor) < dispatch_sgpr ||
-      original_abi_count + insertion_width > kMaxCdna4Sgprs) {
-    errors.emplace_back("ConSan MOI CDNA4 scalar identity ABI transaction exceeds SGPR bounds");
+  const auto transaction = build_cdna4_identity_abi_transaction(descriptor, errors);
+  if (!transaction)
     return std::nullopt;
-  }
-  const auto load_group_xy =
-      build_s_load_dword(owner_sgpr, dispatch_sgpr, /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
+  const auto load_group_xy = build_s_load_dword(owner_sgpr, transaction->dispatch_sgpr,
+                                                /*byte_offset=*/4u, ROCJITSU_CODE_ARCH_CDNA4);
   const auto wait_group_xy = build_s_wait_lds0(ROCJITSU_CODE_ARCH_CDNA4);
   if (!load_group_xy || !wait_group_xy) {
     errors.emplace_back("ConSan MOI CDNA4 scalar identity could not load dispatch dimensions");
@@ -5954,12 +6090,9 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
   words.reserve(40u);
   words.insert(words.end(), load_group_xy->begin(), load_group_xy->end());
   for (uint32_t dimension = 0; dimension < 3; ++dimension) {
-    const auto original_source = moi_descriptor_workgroup_id_sgpr(descriptor, dimension);
-    const uint16_t source = original_source
-                                ? static_cast<uint16_t>(*original_source + insertion_width)
-                                : scalar_positive_inline_u32(0);
-    words.push_back(
-        build_s_mov_b32(*options.moi_workgroup_sgprs[dimension], source, ROCJITSU_CODE_ARCH_CDNA4));
+    words.push_back(build_s_mov_b32(*options.moi_workgroup_sgprs[dimension],
+                                    transaction->workgroup_sources[dimension],
+                                    ROCJITSU_CODE_ARCH_CDNA4));
   }
   words.push_back(*wait_group_xy);
   constexpr uint16_t kInline16 = kScalarPositiveInlineBase + 16u;
@@ -5997,13 +6130,7 @@ build_cdna4_private_epoch_identity_prologue_words(uint64_t prologue_text_offset,
   words.push_back(*read_owner);
   words.push_back(
       build_s_mov_b32(epoch_sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA4));
-  if (insertion_width != 0) {
-    for (uint32_t destination = dispatch_sgpr; destination < original_abi_count; ++destination) {
-      words.push_back(build_s_mov_b32(static_cast<uint16_t>(destination),
-                                      static_cast<uint16_t>(destination + insertion_width),
-                                      ROCJITSU_CODE_ARCH_CDNA4));
-    }
-  }
+  append_cdna4_identity_guest_abi_restore(words, *transaction);
   const uint64_t branch_pc =
       prologue_text_offset + static_cast<uint64_t>(words.size()) * sizeof(uint32_t);
   const auto branch = compute_sopp_branch_simm16(branch_pc, original_entry_text_offset);
@@ -6042,6 +6169,15 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, std::span<const
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
+  if (enable_dispatch_ptr && arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    const auto transaction = build_cdna4_identity_abi_transaction(desc, errors);
+    if (!transaction)
+      return false;
+    required_sgpr_count = std::max(required_sgpr_count, transaction->patched_abi_count);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1u);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1u);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1u);
+  }
   if (enable_dispatch_ptr && !moi_descriptor_enables_dispatch_ptr(desc)) {
     const uint32_t user_sgpr_count = moi_descriptor_user_sgpr_count(desc);
     if (user_sgpr_count > 29u) {
@@ -6189,7 +6325,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       active.descriptor_file_offset = item.active_descriptor_file_offset;
       const uint32_t required_vgpr_count = static_cast<uint32_t>(item.scratch_vgpr) + 2u;
       const uint32_t required_sgpr_count =
-          std::max<uint32_t>(*options.moi_identity_sgpr + 2u,
+          std::max<uint32_t>(*options.moi_workgroup_sgprs[2] + 1u,
                              moi_descriptor_abi_sgpr_count(item.descriptor, arch) +
                                  moi_descriptor_dispatch_insertion_width(item.descriptor));
       if (!grow_moi_kernel_descriptor_registers(patcher, active_bytes, active, required_vgpr_count,
@@ -8502,9 +8638,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_owner_sgpr(effective_options, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_exec_save_sgprs(effective_options, arch, result))
+  if (configure_automatic_moi_exec_save_sgprs(effective_options, code_object_bytes, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
-  if (configure_automatic_moi_identity_sgprs(effective_options, arch, result))
+  if (configure_automatic_moi_identity_sgprs(effective_options, code_object_bytes, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
   if (configure_automatic_moi_persistent_vgprs(effective_options, code_object_bytes, arch, result))
     rebuild_moi_resource_plans(code_object_bytes, effective_options, arch, result);
