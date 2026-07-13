@@ -390,6 +390,11 @@ Full gfx950 support means:
   Because record/replay and sampled builders still assume persistent identity,
   the engine-independent accumulator fix is split into `T3IR` after the
   bounded inline private-owner node `T3IO`.
+- 2026-07-13: `T3IO` is `DONE`; `T3IR` is now `ACTIVE`. Inline-shadow private
+  state now snapshots the correctly flattened gfx950 wave owner and epoch at
+  both hardware entries, keeps persistent and ephemeral private slots
+  disjoint, and never rederives owner from mutable `v0` at a probe. The focused
+  ConSan/resource/placement filter passes 225/225.
 
 ## DAG Overview
 
@@ -610,8 +615,8 @@ flowchart LR
   T3RR["T3RR: Record/Replay Selected Workloads"]:::done
   T3SA["T3SA: Sampled Selected Workloads"]:::done
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
-  T3IO["T3IO: Stable Private Owner State"]:::active
-  T3IR["T3IR: Private Record/Sampled State"]:::todo
+  T3IO["T3IO: Stable Private Owner State"]:::done
+  T3IR["T3IR: Private Record/Sampled State"]:::active
   T3IA["T3IA: Private-State Atomic Ordering"]:::todo
   T3IL["T3IL: Inline Semantic Regressions"]:::todo
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -1920,7 +1925,7 @@ that value is mutable guest state and is not a flattened wave identity for
 multidimensional workgroups. The fallback also lacks inline atomic handoff
 patches. The following nodes close those gaps before `T3G`.
 
-### T3IO: Stable Private Owner State - ACTIVE
+### T3IO: Stable Private Owner State - DONE
 
 Goal: preserve correct gfx950 inline-shadow owner/epoch identity without
 crossing `ACCUM_OFFSET`.
@@ -1942,7 +1947,16 @@ Done criteria:
 - Synthetic tests prove stable owner layout and paired-entry initialization,
   including multidimensional identity and descriptor boundaries.
 
-### T3IR: Private Record/Replay And Sampled State - TODO
+Result: private state places epoch at the aligned original private extent,
+owner in the next dword, and ephemeral spills at the next 16-byte boundary.
+gfx950 entry stubs flatten packed `(x,y,z)` to a wave64 owner, store owner and
+zero epoch, spill/restore both temporaries, restore the dispatch-pointer ABI,
+and preserve paired kernarg-preload entries. Inline access and barrier probes
+load the snapshotted state. Exact-boundary, overlap, multiple-owner, invalid
+descriptor, shared-layout, and paired-entry regressions pass; the complete
+focused filter is 225/225.
+
+### T3IR: Private Record/Replay And Sampled State - ACTIVE
 
 Goal: reuse accumulator-safe private identity in record/replay and sampled
 access-record paths.
