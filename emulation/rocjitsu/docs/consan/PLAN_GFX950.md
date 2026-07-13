@@ -202,6 +202,11 @@ Full gfx950 support means:
   access patch and identity prologue. The live two-site control statically
   selects site one, whose only active lane is owner one, and requires the
   decoded generation-one write entry for exact cell range `[1,2)`.
+- 2026-07-13: `SA1B` is `DONE`. Runtime owner masking selects owner one and
+  rejects owner zero in a guarded two-wave control while preserving VCC. The
+  bounded immediate checker now assigns successful sampled patches sequential
+  slots (instead of aliasing every patch), compares slot one against slot zero,
+  and reports exactly one same-cell two-owner conflict on gfx950.
 
 ## DAG Overview
 
@@ -332,7 +337,7 @@ flowchart LR
   RR1A["RR1A: Access Record Emission"]:::done
   RR1B["RR1B: Record/Replay Live Semantics"]:::done
   SA1A["SA1A: Static Sampled Publication"]:::done
-  SA1B["SA1B: Runtime Selection And Check"]:::todo
+  SA1B["SA1B: Runtime Selection And Check"]:::done
   SA1C["SA1C: Sampled Host Oracle"]:::todo
   IS1A["IS1A: Shadow Atomic Primitive"]:::todo
   IS1B["IS1B: Single-Cell Inline Shadow"]:::todo
@@ -1202,7 +1207,7 @@ Done criteria:
 - Deterministic static sampling selects the expected wave and publishes the
   expected range and generation.
 
-### SA1B: gfx950 Runtime Selection And Immediate Check - TODO
+### SA1B: gfx950 Runtime Selection And Immediate Check - DONE
 
 Goal: add runtime selection and bounded immediate checking to SA1A.
 
@@ -1210,6 +1215,14 @@ Work:
 
 - Port runtime power-of-two owner selection.
 - Port optional immediate checking and its bounded report path.
+
+Result:
+
+- A runtime stride-two/offset-one control publishes only owner one's site and
+  exact cell while the owner-zero site remains absent.
+- Successful sampled patches receive sequential report slots; the second
+  patch checks the first, increments the bounded immediate-conflict counter
+  once, and leaves two visible sampled entries for the host oracle.
 
 Done criteria:
 

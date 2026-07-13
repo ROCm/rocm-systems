@@ -4649,8 +4649,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
     std::vector<std::string> candidate_errors;
+    const uint32_t sampled_record_index = static_cast<uint32_t>(planned_patches.size());
     auto words = build_direct_sampled_watchpoint_words(
-        bytes, candidate, candidate_options, arch, options.moi_sampled_check ? 1u : 0u,
+        bytes, candidate, candidate_options, arch, sampled_record_index,
         layout.sampled_watchpoints_offset, candidate_errors);
     if (!words) {
       result.warnings.insert(result.warnings.end(), candidate_errors.begin(),

@@ -2412,6 +2412,52 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StaticSampledSelectionCompletes"
+            NAME "ConSanMoiGfx950Test.RuntimeSampledSelectsOwnerOne"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=sampled"
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=2"
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_static_sampled_selection"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.RuntimeSampledSelectsOwnerOne"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto sampled reader=[0-9]+ index=1 kind=2 owner=1 epoch=0 generation=1 cells=\\[1,2\\) consumed=false"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.TwoWaveRaceCompletes"
+            NAME "ConSanMoiGfx950Test.SampledImmediateCheckReportsTwoWaveRace"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=sampled"
+                "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_two_wave_race"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.SampledImmediateCheckReportsTwoWaveRace"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "sampled_watchpoints=[0-9]+ visible_sampled=2 sampled_conflicts=1 sampled_immediate_conflicts=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.ForcedSpillPreservesLiveVgprs"
             NAME "ConSanMoiGfx950Test.ForcedSpillRecordReplay"
             TIMEOUT 30
