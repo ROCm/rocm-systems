@@ -107,6 +107,10 @@ Full gfx950 support means:
   in MOI emission was replaced by target dispatch. CDNA4 general FLAT paths
   wait for both VM and LGKM counters, LDS paths wait for LGKM, exact encodings
   decode as `s_waitcnt`, and the live gfx950 producer/publication probe passes.
+- 2026-07-13: `D1A` is `DONE`. An LLVM-matched gfx950 fixture now inventories
+  B32 LDS read/write operands and widths while excluding `ds_add_u32` from
+  ordinary access candidates; the admitted write composes with the live
+  record path's architecture-neutral range lowering.
 
 ## DAG Overview
 
@@ -204,7 +208,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   F0{"F0: Foundation Ready"}:::target
-  D1A["D1A: Basic LDS Decode"]:::active
+  D1A["D1A: Basic LDS Decode"]:::done
   D1B["D1B: Extended LDS Forms"]:::todo
   D1C["D1C: Unsupported DS Inventory"]:::todo
   P1A["P1A: Scalar Control Primitives"]:::active
@@ -722,7 +726,7 @@ Done criteria:
 
 ## Native Probe Nodes
 
-### D1A: CDNA4 Basic LDS Decode - ACTIVE
+### D1A: CDNA4 Basic LDS Decode - DONE
 
 Goal: convert the basic gfx950 B32 LDS read/write forms into ConSan's semantic
 access model without importing RDNA4 raw layouts.
@@ -732,6 +736,14 @@ Work:
 - Decode address/data/destination registers and the combined 16-bit byte
   offset for basic single-address forms.
 - Normalize byte ranges and rounded shadow-cell ranges.
+
+Result:
+
+- A retained gfx950 code-object fixture covers `ds_write_b32` with a nonzero
+  byte offset, `ds_read_b32`, and an adjacent `ds_add_u32` exclusion.
+- CPU tests verify decoded address/data/destination registers, widths, access
+  kinds, and candidate filtering; the live access-record smoke verifies the
+  admitted write composes with range lowering and publication.
 
 Done criteria:
 

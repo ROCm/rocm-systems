@@ -2486,6 +2486,42 @@ TEST(ConSanMoi, Gfx950ResourcePlanDecodesEightVgprsFromZeroDescriptorField) {
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
 }
 
+TEST(ConSanMoi, Gfx950InventoriesBasicLdsReadWriteAndExcludesAtomic) {
+  const std::array<uint32_t, 7> text_words = {
+      0xD81A000Cu,
+      0x00000100u, // ds_write_b32 v0, v1 offset:12
+      0xD86C0000u,
+      0x01000000u, // ds_read_b32 v1, v0
+      0xD8000000u,
+      0x00000100u, // ds_add_u32 v0, v1
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "gfx950_basic_lds",
+                                 /*vgpr_granulated=*/0, /*wave32=*/false,
+                                 /*uses_dynamic_stack=*/false, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::Moi;
+
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+  ASSERT_EQ(result.kernels.size(), 1u);
+  EXPECT_EQ(result.kernels.front().stats.lds_write_count, 1u);
+  EXPECT_EQ(result.kernels.front().stats.lds_read_count, 1u);
+  ASSERT_EQ(result.moi_candidates.size(), 2u);
+  EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_write_b32");
+  EXPECT_EQ(result.moi_candidates[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(result.moi_candidates[0].addr_vgpr, 0u);
+  EXPECT_EQ(result.moi_candidates[0].data_vgpr, 1u);
+  EXPECT_EQ(result.moi_candidates[0].width_bits, 32u);
+  EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_read_b32");
+  EXPECT_EQ(result.moi_candidates[1].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(result.moi_candidates[1].addr_vgpr, 0u);
+  EXPECT_EQ(result.moi_candidates[1].dst_vgpr, 1u);
+  EXPECT_EQ(result.moi_candidates[1].width_bits, 32u);
+}
+
 TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {
   std::array<uint32_t, 170> text_words{};
   text_words[0] = 0xD8340000u;
