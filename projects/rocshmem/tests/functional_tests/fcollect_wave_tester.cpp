@@ -134,7 +134,7 @@ FcollectWaveTester<T1>::FcollectWaveTester(TesterArguments args)
     std::cerr << "Not enough teams (" << num_teams << ") for "
               << args.num_wgs * num_warps << " wavefronts. "
               << "Set ROCSHMEM_MAX_NUM_TEAMS accordingly." << std::endl;
-    abort();
+    exit(0);
   }
 
   CHECK_HIP(hipMalloc(&team_fcollect_wave_world_dup,
