@@ -47,27 +47,27 @@ struct ptrace_data_t
 };
 
 void
-ptrace_runner(pid_t                       _pid,
-              std::atomic<ptrace_data_t>& ptrace_data,
-              std::atomic<bool>&          running,
-              std::atomic<bool>&          thread_done)
+ptrace_runner(pid_t              _pid,
+              ptrace_data_t&     ptrace_data,
+              std::atomic<bool>& running,
+              std::atomic<bool>& thread_done)
 {
     while(thread_done.load() == false)
     {
-        // When running becomes true, a new ptrace operation has been requested with ptrace_data as
-        // its parameters
-        if(running.load() == true)
+        // Acquire-load: synchronises with the producer's release-store of running=true.
+        // Everything the producer wrote to ptrace_data before that store is now visible.
+        if(running.load(std::memory_order_acquire) == true)
         {
             errno = 0;
-            // Load ptrace_data, then call ptrace with its parameters.
-            auto _ptrace_data = ptrace_data.load();
+            // Plain read: safe because the acquire above establishes happens-before.
+            auto _ptrace_data = ptrace_data;
             auto retval       = ptrace(_ptrace_data.op, _pid, _ptrace_data.addr, _ptrace_data.data);
-            // Write back the results of the ptrace operation, then store to ptrace_data.
+            // Write back the results; the release store below makes them visible to the producer.
             _ptrace_data.retval       = retval;
             _ptrace_data.ptrace_errno = errno;
-            ptrace_data.store(_ptrace_data);
-            // Clear running, indicating the requested operation is complete.
-            running.store(false);
+            ptrace_data               = _ptrace_data;
+            // Release-store: signals completion and flushes the result writes to the producer.
+            running.store(false, std::memory_order_release);
         }
         std::this_thread::yield();
     }
@@ -78,7 +78,7 @@ class PTraceRunner
     struct ptrace_runner_data_t
     {
         // Shared data for the ptrace operation
-        std::atomic<ptrace_data_t> data = {};
+        ptrace_data_t data = {};
 
         // Shared flag, indicates the runner thread should operate on data
         // Set by run when data is ready
@@ -203,12 +203,20 @@ public:
                 return;
             }
 
-            // Set up the next operation
-            runner_data.data.store(ptrace_data);
+            if(runner_data.running.load(std::memory_order_acquire))
+            {
+                ROCP_ERROR << "[rocprofiler-sdk-rocattach] previous ptrace operation is still "
+                              "in-flight";
+                runner_error = true;
+                return;
+            }
 
-            // Set running to true, requesting a ptrace operation be performed in ptrace_runner()
-            // with the parameters in data
-            runner_data.running.store(true);
+            // Plain write: the release-store of running below flushes this to the worker thread.
+            runner_data.data = ptrace_data;
+
+            // Release-store: makes the data write above visible to the worker thread's
+            // acquire-load of running.
+            runner_data.running.store(true, std::memory_order_release);
 
             // Wait for running to be set to false, which indicates ptrace_runner() has finished the
             // requested ptrace operation.
@@ -221,7 +229,9 @@ public:
                 return;
             }
 
-            ptrace_data = runner_data.data.load();
+            // Plain read: wait_for_eq currently uses the default seq_cst load, which provides
+            // acquire semantics. If wait_for_eq changes to a relaxed load, this must be revisited.
+            ptrace_data = runner_data.data;
 
             // If detaching, join the thread and remove its references
             if(op == PTRACE_DETACH)
