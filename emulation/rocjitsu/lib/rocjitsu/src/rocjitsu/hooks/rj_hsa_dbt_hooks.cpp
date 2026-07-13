@@ -22,7 +22,6 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
-#include "rocjitsu/code/dbt/virtual_lds_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -106,7 +105,6 @@ using rocjitsu::SHN_UNDEF;
 using rocjitsu::SHT_NULL;
 using rocjitsu::SHT_STRTAB;
 using rocjitsu::TranslationDiagnostic;
-using rocjitsu::VirtualLdsDispatchState;
 using rocjitsu::VirtualLdsKernelMetadata;
 using rocjitsu::write_kernarg_extension_wrapper;
 
@@ -2449,6 +2447,17 @@ void map_pointer_info_accessible_agents(uint32_t *num_agents_accessible, hsa_age
 [[nodiscard]] bool is_kernel_dispatch_packet(const hsa_kernel_dispatch_packet_t &packet) {
   return aql_packet_type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
 }
+
+/// @brief GPU-visible virtual-LDS state consumed by the translated entry prologue.
+struct VirtualLdsDispatchState {
+  uint64_t backing_base = 0;
+  uint32_t stride_x = 0;
+  uint32_t stride_y = 0;
+  uint32_t stride_z = 0;
+  uint32_t reserved = 0;
+};
+
+static_assert(sizeof(VirtualLdsDispatchState) == 24);
 
 /// @brief Per-dispatch buffers owned by a queue slot after virtual-LDS rewrite.
 struct VirtualLdsDispatchBuffers {

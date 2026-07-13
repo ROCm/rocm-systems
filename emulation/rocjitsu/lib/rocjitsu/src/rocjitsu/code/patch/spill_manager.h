@@ -7,7 +7,6 @@
 #ifndef ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 #define ROCJITSU_CODE_PATCH_SPILL_MANAGER_H_
 
-#include "rocjitsu/code/private_segment_allocator.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstddef>
@@ -76,7 +75,7 @@ public:
   [[nodiscard]] bool reserve(const RegisterSet &set);
 
   /// @returns The bumped total per-lane scratch bytes.
-  [[nodiscard]] uint32_t total_private_bytes() const { return slots_.high_water_mark(); }
+  [[nodiscard]] uint32_t total_private_bytes() const { return total_bytes_; }
 
   /// @returns Slot offset previously allocated for @p reg, or nullopt.
   [[nodiscard]] std::optional<uint32_t> offset_for(RegisterRef reg) const;
@@ -90,8 +89,10 @@ private:
     }
   };
 
-  uint32_t limit_; ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
-  PrivateSegmentCursor slots_; ///< Shared range arithmetic; DBI owns stable slot identity.
+  uint32_t base_offset_; ///< First DBI slot. align_up(orig, 16).
+  uint32_t total_bytes_; ///< Bumped private_segment_fixed_size.
+  uint32_t limit_;       ///< Hard per-lane scratch cap (inclusive: offset+kSlotBytes <= limit OK).
+  uint32_t next_offset_; ///< Next free byte within DBI zone.
   std::unordered_map<std::pair<RegClass, uint16_t>, uint32_t, RegKeyHash> reg_to_offset_;
 };
 

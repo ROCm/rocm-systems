@@ -6,7 +6,6 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 
-#include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
@@ -86,16 +85,17 @@ void append_wait_all(std::vector<uint32_t> &words) { Cdna3ScratchEmitter::append
 
 void append_memory_instruction(std::vector<uint32_t> &words, const Cdna3VirtualLdsAccess &access,
                                uint8_t saddr) {
-  Cdna3Emitter::FlatGlobalOperands operands{};
+  Cdna3MemoryInstructionBuilder::FlatGlobalOperands operands{};
   operands.signed_offset13 = access.byte_offset;
   operands.sc0 = true;
   operands.addr = access.address_vgpr;
   operands.saddr = saddr;
   operands.acc = access.acc;
 
-  const auto encoded = access.is_load
-                           ? Cdna3Emitter::flat_global_load(operands, access.op, access.data_vgpr)
-                           : Cdna3Emitter::flat_global_store(operands, access.op, access.data_vgpr);
+  const auto encoded =
+      access.is_load
+          ? Cdna3MemoryInstructionBuilder::flat_global_load(operands, access.op, access.data_vgpr)
+          : Cdna3MemoryInstructionBuilder::flat_global_store(operands, access.op, access.data_vgpr);
   words.push_back(encoded.first);
   words.push_back(encoded.second);
 }

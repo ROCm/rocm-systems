@@ -14,9 +14,8 @@ rj_add_object_library(rocjitsu_code
     dbt/hazard_tracker.cpp
     dbt/kernel_descriptor_translator.cpp
     dbt/lane_permutation.cpp
-    dbt/semantic/cdna4_to_cdna3_virtual_lds.cpp
+    dbt/lds_virtualization.cpp
     dbt/semantic/cdna3_lds.cpp
-    dbt/semantic/cdna3_emitter.cpp
     dbt/semantic/cdna3_scratch.cpp
     dbt/semantic/cdna4_to_cdna3.cpp
     dbt/semantic/cdna4_to_rdna_common.cpp

@@ -33,8 +33,8 @@ namespace {
 } // namespace
 
 SpillManager::SpillManager(uint32_t original_private_bytes, uint32_t per_lane_scratch_limit)
-    : limit_(per_lane_scratch_limit),
-      slots_(util::align_up(original_private_bytes, kDbiZoneAlignment)) {}
+    : base_offset_(util::align_up(original_private_bytes, kDbiZoneAlignment)),
+      total_bytes_(base_offset_), limit_(per_lane_scratch_limit), next_offset_(base_offset_) {}
 
 std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
   // Reject indices past the per-class hardware bound (or unsupported classes
@@ -50,10 +50,13 @@ std::optional<uint32_t> SpillManager::allocate_slot(RegisterRef reg) {
     return std::nullopt;
   }
   // Overflow-safe equivalent of `next_offset_ + kSlotBytes > limit_`.
-  auto offset = slots_.allocate(kSlotBytes, kSlotBytes, limit_);
-  if (!offset)
+  if (static_cast<uint64_t>(next_offset_) + kSlotBytes > limit_) {
     return std::nullopt;
-  reg_to_offset_.emplace(key, *offset);
+  }
+  const uint32_t offset = next_offset_;
+  next_offset_ += kSlotBytes;
+  total_bytes_ = next_offset_;
+  reg_to_offset_.emplace(key, offset);
   return offset;
 }
 
@@ -92,7 +95,7 @@ bool SpillManager::reserve(const RegisterSet &set) {
     if (!reg_to_offset_.contains(key))
       ++num_new;
   });
-  if (num_new > 0 && !slots_.preview(kSlotBytes * num_new, kSlotBytes, limit_)) {
+  if (num_new > 0 && static_cast<uint64_t>(next_offset_) + kSlotBytes * num_new > limit_) {
     return false;
   }
 

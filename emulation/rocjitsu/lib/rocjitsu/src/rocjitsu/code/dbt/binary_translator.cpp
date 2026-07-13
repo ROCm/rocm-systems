@@ -278,12 +278,6 @@ struct KernelTranslationScope {
   std::vector<BasicBlock *> blocks;
 };
 
-/// @brief Descriptor state mutated by one kernel-scope translation transaction.
-struct DescriptorVariantCheckpoint {
-  size_t index = 0;
-  KdTranslation translation;
-};
-
 [[nodiscard]] uint64_t kernel_scope_key(const KdTranslation &kernel) {
   assert(kernel.entry_text_offset <= (std::numeric_limits<uint64_t>::max() >> 1) &&
          "kernel entry offset is too large to pack with variant bit");
@@ -293,17 +287,6 @@ struct DescriptorVariantCheckpoint {
 [[nodiscard]] bool same_kernel_scope_variant(const KdTranslation &lhs, const KdTranslation &rhs) {
   return lhs.entry_text_offset == rhs.entry_text_offset &&
          lhs.needs_lds_overflow_buf == rhs.needs_lds_overflow_buf;
-}
-
-[[nodiscard]] std::vector<DescriptorVariantCheckpoint>
-checkpoint_scope_descriptors(std::span<const KdTranslation> translations,
-                             const KdTranslation &scope_translation) {
-  std::vector<DescriptorVariantCheckpoint> checkpoint;
-  for (size_t i = 0; i < translations.size(); ++i) {
-    if (same_kernel_scope_variant(translations[i], scope_translation))
-      checkpoint.push_back({.index = i, .translation = translations[i]});
-  }
-  return checkpoint;
 }
 
 [[nodiscard]] size_t kernel_translation_scope_count(std::span<const KdTranslation> kernels) {
@@ -2073,11 +2056,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
     const uint64_t source_entry = scope.translation->entry_text_offset;
     const bool skipped_uses_virtual_lds = scope.translation->needs_lds_overflow_buf;
-    auto skipped_text =
-        append_skipped_kernel_stub(translated_text,
-                                   {.source_entry = scope.translation->entry_text_offset,
-                                    .has_kernarg_preload = scope.translation->has_kernarg_preload},
-                                   host_arch_);
+    auto skipped_text = append_skipped_kernel_stub(translated_text, *scope.translation, host_arch_);
     if (!skipped_text.ok) {
       append_error(result.diagnostics, materialization_diagnostic_kind(skipped_text),
                    skipped_text.message, skipped_text.source_offset);
@@ -2111,9 +2090,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     return true;
   };
 
-  auto fail_or_skip_kernel =
-      [&](const KernelTranslationScope &scope, KernelFailure failure, size_t output_begin,
-          const std::vector<DescriptorVariantCheckpoint> &descriptor_snapshot) -> bool {
+  auto fail_or_skip_kernel = [&](const KernelTranslationScope &scope, KernelFailure failure,
+                                 size_t output_begin,
+                                 const std::vector<KdTranslation> &descriptor_snapshot) -> bool {
     if (!skip_failed_kernels) {
       append_error(result.diagnostics, failure.kind, std::move(failure.message),
                    failure.guest_offset, std::move(failure.mnemonic),
@@ -2123,14 +2102,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
     const uint64_t source_entry = scope.translation->entry_text_offset;
     translated_text.resize(output_begin);
-    for (const DescriptorVariantCheckpoint &saved : descriptor_snapshot) {
-      if (saved.index >= descriptor_translations.size()) {
-        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
-                     "descriptor checkpoint index changed during skip rollback", source_entry);
-        return false;
-      }
-      descriptor_translations[saved.index] = saved.translation;
+    if (descriptor_translations.size() != descriptor_snapshot.size()) {
+      append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                   "descriptor snapshot size changed during skip rollback", source_entry);
+      return false;
     }
+    for (size_t i = 0; i < descriptor_translations.size(); ++i)
+      descriptor_translations[i] = descriptor_snapshot[i];
 
     KernelTranslationScope restored_scope = scope;
     restored_scope.translation = nullptr;
@@ -2166,8 +2144,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       continue;
 
     const size_t output_begin = translated_text.size();
-    const auto descriptor_snapshot =
-        checkpoint_scope_descriptors(descriptor_translations, *scope.translation);
+    const std::vector<KdTranslation> descriptor_snapshot = descriptor_translations;
     bool skip_scope = false;
 
     if (!scope.translation->supported) {
@@ -2195,6 +2172,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // the output .text. This lets instruction expansions change block sizes
     // without precomputing speculative side-region offsets.
     KernelTextLayout layout;
+    layout.translation = scope.translation;
     layout.source_entry = scope.translation->entry_text_offset;
 
     TranslationContext kernel_context(
@@ -2241,12 +2219,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
     }
 
-    layout.entry_plan = {
-        .has_kernarg_preload = scope.translation->has_kernarg_preload,
-        .kernarg_preload_entry_text_offset = scope.translation->kernarg_preload_entry_text_offset,
-        .prologue_words = scope.translation->prologue_words,
-    };
-    if (!kernarg_preload_launch_window_fits(layout.entry_plan)) {
+    if (!kernarg_preload_launch_window_fits(*scope.translation)) {
       auto failure = make_kernel_failure(
           DiagnosticKind::KernelDescriptor,
           "kernel descriptor prologue does not fit in the 256-byte kernarg preload compatibility "
@@ -2840,7 +2813,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     // recovered indirect transfer windows.
     auto patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);
     if (!patched_direct_branches.ok &&
-        patched_direct_branches.reason == TextLayoutFailureReason::BranchOutOfRange) {
+        patched_direct_branches.message.find("exceeds encoded branch range") != std::string::npos) {
       if (auto sgpr = reserve_long_branch_sgpr_pair(kernel_context)) {
         layout.long_branch_sgpr = *sgpr;
         patched_direct_branches = patch_direct_branch_fixups(translated_text, layout, host_arch_);

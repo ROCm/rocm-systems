@@ -3,7 +3,6 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
 
-#include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
@@ -42,16 +41,16 @@ bool Cdna3ScratchEmitter::can_address(const SemanticSpillRange &range) {
 
 void Cdna3ScratchEmitter::append_store_dword(std::vector<uint32_t> &words, uint8_t vgpr,
                                              uint32_t byte_offset) {
-  auto [w0, w1] =
-      Cdna3Emitter::flat_scratch_dword(cdna3::kFlatStoreDwordFlat, vgpr, byte_offset, false);
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_scratch_dword(cdna3::kFlatStoreDwordFlat,
+                                                                    vgpr, byte_offset, false);
   words.push_back(w0);
   words.push_back(w1);
 }
 
 void Cdna3ScratchEmitter::append_load_dword(std::vector<uint32_t> &words, uint8_t vgpr,
                                             uint32_t byte_offset) {
-  auto [w0, w1] =
-      Cdna3Emitter::flat_scratch_dword(cdna3::kFlatLoadDwordFlat, vgpr, byte_offset, true);
+  auto [w0, w1] = Cdna3MemoryInstructionBuilder::flat_scratch_dword(cdna3::kFlatLoadDwordFlat, vgpr,
+                                                                    byte_offset, true);
   words.push_back(w0);
   words.push_back(w1);
 }

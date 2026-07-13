@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include "rocjitsu/code/private_segment_allocator.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -102,7 +101,7 @@ public:
 
 private:
   TranslationContext &context_;
-  PrivateSegmentCursor cursor_;
+  uint32_t cursor_ = 0;
 };
 
 /// @brief Architecture-neutral register and spill-slot allocator for one rule.
