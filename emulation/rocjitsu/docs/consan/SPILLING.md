@@ -268,7 +268,7 @@ The focused CPU/synthetic suite is:
   --gtest_filter='ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
-The current focused ConSan result is 231/231. It covers allocation precedence,
+The current focused ConSan result is 233/233. It covers allocation precedence,
 forbidden ranges, rollback, gfx1201 and gfx950 encodings and waits,
 descriptor/metadata growth, zero-private kernels, dynamic-stack rejection,
 shared-owner dead/fresh/spill layouts, mixed-wave rejection, persistent state,

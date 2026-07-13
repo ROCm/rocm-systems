@@ -411,6 +411,18 @@ Full gfx950 support means:
   all 231 focused tests pass, but that same live row still raises a memory
   aperture exception, so `T3IR` remains open until the separate private-ABI
   fault is reduced.
+- 2026-07-13: `T3IA` is `DONE`; `T3IL` is now `ACTIVE`. Inline atomic release
+  and acquire patches use the same gfx950 private owner/epoch layout as access
+  and barrier patches, reserve spill slots after persistent state, and create
+  an entry initializer even for atomic-only kernels. Release publishes loaded
+  private identity; acquire compares private owner and stores imported epoch
+  back with a completion wait. All 233 focused tests pass.
+- 2026-07-13: the post-`T4SV` broad SuperCollider sweep improved from 244/259
+  to 254/259, and every former silent-corruption family passed. Five tail
+  failures remain under reduction: two are dispatch-time hardware exceptions,
+  while at least one residual data-tiled object now fails during replacement
+  executable creation after patching begins. `T4SC` therefore remains
+  `ACTIVE`; loader failures are not accepted as mismatch diagnostics.
 
 ## DAG Overview
 
@@ -633,8 +645,8 @@ flowchart LR
   T3IS["T3IS: Initial Inline-Shadow Selected Pass"]:::done
   T3IO["T3IO: Stable Private Owner State"]:::done
   T3IR["T3IR: Private Record/Sampled State"]:::active
-  T3IA["T3IA: Private-State Atomic Ordering"]:::active
-  T3IL["T3IL: Inline Semantic Regressions"]:::todo
+  T3IA["T3IA: Private-State Atomic Ordering"]:::done
+  T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
   T4SC["T4SC: SuperCollider Broad IREE"]:::active
@@ -1995,7 +2007,7 @@ Done criteria:
 - Record/replay and sampled emit non-vacuous private-state records without
   touching accumulator VGPRs, and the isolated MXFP4 row passes.
 
-### T3IA: Private-State Atomic Ordering - ACTIVE
+### T3IA: Private-State Atomic Ordering - DONE
 
 Goal: retain release/acquire epoch handoff when owner and epoch live in private
 state.
@@ -2013,7 +2025,12 @@ Done criteria:
 - Automatic accumulator-overlap selection emits atomic ordering patches and
   focused release/acquire tests pass.
 
-### T3IL: Inline Semantic Regressions - TODO
+Result: release/acquire caves load the private owner/epoch representation,
+acquire writes imported epoch back to private memory and waits for completion,
+and atomic-only kernels receive the paired-entry-aware initializer. Shared
+layout and forced-spill regressions pass in the 233-test focused filter.
+
+### T3IL: Inline Semantic Regressions - ACTIVE
 
 Goal: prove the completed private representation on synthetic and live gfx950
 workloads.
@@ -2092,6 +2109,12 @@ serial individual runs classify seven family rows as mismatch traps and seven
 as silent numerical corruption. A logged corrupt MXFP4 row uses SuperCollider
 scratch `v132` in a 136-VGPR MFMA kernel, so `T4SV` now blocks acceptance until
 scratch allocation respects the accumulator alias boundary.
+After `T4SV`, the broad sweep passes 254/259 and all former silent-corruption
+families pass, including the three MXFP4 Llama rows. The remaining five are
+being rerun from clean baseline processes: dispatch-time mismatch exceptions
+can contaminate later parallel HIP processes, but a reproducible data-tiled
+replacement-object load failure is still an instrumentation defect until
+reduced.
 
 ### T4RR: Record/Replay Broad IREE - ACTIVE
 
