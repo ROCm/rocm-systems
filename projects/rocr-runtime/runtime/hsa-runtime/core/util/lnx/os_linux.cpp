@@ -896,7 +896,6 @@ int DmaBufDup(int dmabuf) {
   if (dmabuf < 0) return -1;
   int dup_fd = ::dup(dmabuf);
   if (dup_fd < 0) {
-    LogPrint(HSA_AMD_LOG_FLAG_INFO, "dup dmabuf failed: %s", strerror(errno));
     return -1;
   }
   return dup_fd;

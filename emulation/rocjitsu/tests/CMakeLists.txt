@@ -670,6 +670,38 @@ target_link_libraries(
 rj_configure_target(hsa_hooks_unit_test TEST)
 gtest_discover_tests(hsa_hooks_unit_test)
 
+# --- Interposer loader initialization regression tests ---
+
+add_library(early_mmap_preload SHARED early_mmap_preload_test.cpp)
+rj_configure_target(early_mmap_preload TEST)
+add_dependencies(early_mmap_preload rocjitsu_shared)
+
+add_executable(early_mmap_driver early_mmap_driver_test.cpp)
+rj_configure_target(early_mmap_driver TEST)
+
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(early_mmap_driver)
+    install(
+        TARGETS early_mmap_preload
+        LIBRARY DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
+    )
+endif()
+
+# Keep rocjitsu first in LD_PRELOAD. The loader maps it before
+# early_mmap_preload, but runs early_mmap_preload's constructor before
+# init_interposer(). That constructor calls mmap/munmap early enough to exercise
+# the pre-init fallback; verifying the exact path directly would require adding
+# observable test state to the interposer.
+rj_add_test(
+    NAME "InterposerTest.EarlyMmapBeforeRocjitsuConstructor"
+    COMMAND $<TARGET_FILE:early_mmap_driver>
+    ENVIRONMENT
+        "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>:$<TARGET_FILE:early_mmap_preload>"
+    INSTALL_COMMAND "bin/early_mmap_driver"
+    INSTALL_ENVIRONMENT
+        "LD_PRELOAD=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu${CMAKE_SHARED_LIBRARY_SUFFIX}:bin/${CMAKE_SHARED_LIBRARY_PREFIX}early_mmap_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
+)
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
 
