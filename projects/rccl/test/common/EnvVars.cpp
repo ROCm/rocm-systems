@@ -338,6 +338,11 @@ namespace RcclUnitTesting
     return gpuPriorityOrder;
   }
 
+  int EnvVars::GetNumDetectedGpus() const
+  {
+    return numDetectedGpus;
+  }
+
   std::vector<int> const& EnvVars::GetIsMultiProcessList()
   {
     return isMultiProcessList;

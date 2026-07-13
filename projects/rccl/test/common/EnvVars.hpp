@@ -46,6 +46,7 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
+    int GetNumDetectedGpus() const;
     void ShowConfig();
 
   protected:
