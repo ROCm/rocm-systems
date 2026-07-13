@@ -1607,10 +1607,6 @@ class Isa {
   /// @returns This Isa's stepping version.
   uint32_t versionStepping() const { return versionStepping_; }
 
-  /// @returns This Isa's base SIMDs per CU, derived from ISA version (gfx9 and earlier: 4,
-  /// gfx10+: 2). Online devices report the driver/HSA value via Device::info().simdPerCU_.
-  uint32_t simdPerCU() const { return (versionMajor_ <= 9) ? 4 : 2; }
-
   /// @returns This Isa's work-items processed per SIMD, derived from ISA version
   /// (gfx9 and earlier: 16, gfx10+: 32).
   uint32_t simdWidth() const { return (versionMajor_ <= 9) ? 16 : 32; }
