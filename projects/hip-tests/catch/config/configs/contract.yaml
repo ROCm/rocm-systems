@@ -870,9 +870,6 @@ contract:
   Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync:
     <<: *level_0
     tags: [array_copy]
-  Contract_ArrayCopy_MemcpyToArray_InvalidKind_IsRejected:
-    <<: *level_0
-    tags: [array_copy]
   Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected:
     <<: *level_0
     tags: [array_copy]

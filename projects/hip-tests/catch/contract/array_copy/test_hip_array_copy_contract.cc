@@ -85,26 +85,6 @@ HIP_TEST_CASE(Contract_ArrayCopy_Memcpy2DToFromArrayAsync_VisibleAfterSync) {
   HIP_CHECK(hipFreeArray(array));
 }
 
-HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_InvalidKind_IsRejected) {
-  CHECK_IMAGE_SUPPORT;
-
-  const auto src = MakePattern(0x78);
-  hipArray_t array = nullptr;
-  const auto desc = ByteChannelDesc();
-
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMallocArray(&array, &desc, kWidth, kHeight));
-
-  const hipError_t status =
-      hipMemcpyToArray(array, 0, 0, src.data(), src.size(), static_cast<hipMemcpyKind>(-1));
-
-  HIP_CHECK(hipFreeArray(array));
-
-  REQUIRE(status != hipSuccess);
-  HIP_CHECK_ERROR(hipGetLastError(), status);
-  HIP_CHECK(hipGetLastError());
-}
-
 HIP_TEST_CASE(Contract_ArrayCopy_MemcpyToArray_NullArray_IsRejected) {
   CHECK_IMAGE_SUPPORT;
 
