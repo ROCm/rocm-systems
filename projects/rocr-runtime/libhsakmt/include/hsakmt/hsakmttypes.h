@@ -375,6 +375,8 @@ typedef struct _HsaNodeProperties
 
     HSAuint32       NativeSDMASupported;   // 0 - not supported, 1 - device provides the native SDMA user queue
     HSAuint32       NativeSDMAEpilogueBytes; // Per-doorbell epilogue size in the native SDMA user queue
+    HSAuint32       MaxPhysCUperEngine;    // Max number of physical CUs an engine can have.
+                                           // Used to calculate scratch space for GFX13.
 } HsaNodeProperties;
 
 

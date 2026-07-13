@@ -1075,6 +1075,24 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   core::AqlPacket *pkt = NULL;
   uint64_t dispatch_id = UINT64_MAX;
 
+  // Use max total physical CUs in calculations (instead of available CUs)
+  bool use_physical_cus = (agent_->supported_isas()[0]->GetMajorVersion() >= 13);
+
+  // Max number of physical CUs
+  uint32_t phys_cu_count = 0;
+  // Number of active/available CUs
+  const uint32_t cu_count = amd_queue_.max_cu_id + 1;
+
+  if (use_physical_cus) {
+    const uint32_t phys_cu_per_engine = agent_->properties().MaxPhysCUperEngine;
+    assert(phys_cu_per_engine > 0);
+    if (phys_cu_per_engine > 0) {
+      phys_cu_count = phys_cu_per_engine * agent_->properties().NumShaderBanks;
+    } else {  // Fallback to old path if property is 0 or not set
+      use_physical_cus = false;
+    }
+  }
+
   /* These fields need to be binary compatible between hsa_kernel_dispatch_packet_t and
      hsa_amd_ext_kernel_dispatch_packet_t.
    */
@@ -1137,8 +1155,6 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
     uint64_t groups_z = ceil_divide(pkt.dispatch_grid_size_z(), pkt.dispatch.workgroup_size_z);
     uint64_t groups = groups_x * groups_y * groups_z;
 
-    const uint32_t cu_count = amd_queue_.max_cu_id + 1;
-
     const uint32_t engines = agent_->properties().NumShaderBanks;
 
     const uint32_t symmetric_cus = AlignDown(cu_count, engines);
@@ -1176,8 +1192,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   auto calc_device_slots = [&]() {
     // Get the hw maximum scratch slot count taking into consideration asymmetric harvest.
     const uint32_t engines = agent_->properties().NumShaderBanks;
-    const uint32_t cu_count = amd_queue_.max_cu_id + 1;
-    return AlignUp(cu_count, engines) * agent_->properties().MaxSlotsScratchCU;
+    return AlignUp((use_physical_cus ? phys_cu_count : cu_count), engines) * agent_->properties().MaxSlotsScratchCU;
   };
 
   assert(core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
@@ -2108,11 +2123,19 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12_Gfx13() {
     return;
   }
 
+  bool use_physical_cus = (agent_->supported_isas()[0]->GetMajorVersion() >= 13);
+
   const auto& agent_props = agent_->properties();
   const uint32_t num_xcc = agent_props.NumXcc;
 
   // Determine the maximum number of waves device can support
-  uint32_t num_cus = agent_props.NumFComputeCores / (agent_props.NumSIMDPerCU * num_xcc);
+  uint32_t num_cus = 0;
+  if (use_physical_cus && (agent_props.MaxPhysCUperEngine > 0)) {
+    num_cus = agent_props.MaxPhysCUperEngine * agent_props.NumShaderBanks;
+  } else {
+    num_cus = agent_props.NumFComputeCores / (agent_props.NumSIMDPerCU * num_xcc);
+  }
+
   uint32_t max_scratch_waves = num_cus * agent_props.MaxSlotsScratchCU;
 
   // Scratch is allocated program COMPUTE_TMPRING_SIZE register
@@ -2127,7 +2150,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12_Gfx13() {
   uint32_t num_waves =
       queue_scratch_.main_size / (tmpring_size.bits.WAVESIZE * queue_scratch_.mem_alignment_size);
 
-  // For GFX11 we specify number of waves per engine instead of total
+  // For GFX11 and up, we specify number of waves per engine instead of total
   num_waves /= agent_->properties().NumShaderBanks;
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
   amd_queue_.compute_tmpring_size = tmpring_size.u32All;
