@@ -4,12 +4,16 @@
 #include "common/delimit.hpp"
 
 #include <gtest/gtest.h>
+#include <list>
+#include <set>
 #include <string>
 #include <vector>
 
 using namespace rocprofsys::common;
 
-using strvec = std::vector<std::string>;
+using strvec  = std::vector<std::string>;
+using strset  = std::set<std::string>;
+using strlist = std::list<std::string>;
 
 TEST(delimit_test, basic_split)
 {
@@ -42,3 +46,13 @@ TEST(delimit_test, no_delimiter_present)
 }
 
 TEST(delimit_test, empty_input) { EXPECT_EQ(delimit("", ","), strvec{}); }
+
+TEST(delimit_test, set_container_dedups_and_sorts)
+{
+    EXPECT_EQ((delimit<strset>("c,a,b,a", ",")), (strset{ "a", "b", "c" }));
+}
+
+TEST(delimit_test, list_container_preserves_order)
+{
+    EXPECT_EQ((delimit<strlist>("c,a,b,a", ",")), (strlist{ "c", "a", "b", "a" }));
+}
