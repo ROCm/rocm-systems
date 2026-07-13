@@ -22,9 +22,8 @@ namespace amd {
 namespace roc {
 namespace D3D11Interop {
 
-// Per-device set of ROCr devices that have been LUID-verified against a D3D11 adapter.
-// Only LUID association is cached; extension objects are created per-query from the
-// resource's owning ID3D11Device to handle multiple D3D11 devices on the same adapter.
+// Extension objects are cached per-ID3D11Device in the OpenCL context to support
+// multiple D3D11 devices on the same adapter across contexts/threads.
 static PFNAmdDxExtCreate11 gAmdDxExtCreate11 = nullptr;
 static std::once_flag gAmdDxExtCreate11Flag;
 
@@ -87,6 +86,11 @@ bool associateD3D11Device(const Device* device, ID3D11Device* pd3d11Device,
     return true;
   }
 
+  amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
+  if (ctx->getD3D11Ext(pd3d11Device)) {
+    return true;
+  }
+
   // Create and cache IAmdDxExtCLInterop in the context, keyed by pd3d11Device.
   // This avoids per-query extension creation in multithread/multicontext scenarios.
   PFNAmdDxExtCreate11 AmdDxExtCreate11 = GetAmdDxExtCreate11();
@@ -97,7 +101,6 @@ bool associateD3D11Device(const Device* device, ID3D11Device* pd3d11Device,
       IAmdDxExtCLInterop* pCLExt =
           static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
       if (pCLExt) {
-        amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
         ctx->setD3D11Ext(pd3d11Device, pExt, pCLExt);
       } else {
         pExt->Release();
@@ -146,12 +149,12 @@ bool Export(const Memory* memory, D3D11Object* d3d11Obj,
     }
   }
 
-  // Query SRD using an extension created from the resource's owning ID3D11Device.
-  // Extension objects are not cached because multiple ID3D11Device instances may exist
-  // on the same adapter across contexts/threads; each must use its own extension object.
+  // Query SRD using an extension cached in the OpenCL context, keyed by the resource's ownving
+  // ID3D11Device. This supports multiple ID3D11Device instances on the same adapter across
+  // contexts/threads.
   if (srd && srdSize) {
     // plane -1 means "full resource" which is no longer valid; treat as plane 0.
-    // Because Pal in D3D doesn't support quering SRD of the full resource of types
+    // Because Pal in D3D doesn't support querying SRD of the full resource of types
     // DXGI_FORMAT_NV12 and DXGI_FORMAT_P010.
     UINT planeIndex = 0;
     if (isYUV) {
@@ -164,7 +167,7 @@ bool Export(const Memory* memory, D3D11Object* d3d11Obj,
           planeIndex = 1;
           break;
         default:
-          LogPrintfError("Unexpexted plane %d", d3d11Obj->getPlane());
+          LogPrintfError("Unexpected plane %d", d3d11Obj->getPlane());
           return false;
       }
     }

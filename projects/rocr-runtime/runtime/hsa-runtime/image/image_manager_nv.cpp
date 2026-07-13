@@ -283,7 +283,6 @@ hsa_status_t ImageManagerNv::PopulateImageSrd(Image& image,
     uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
     uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
     if (img_width < srd_width || img_height < srd_height) {
-      fprintf(stderr, "updated size!\n");
       w1.f.WIDTH    = img_width & 0x3u;
       w2.f.WIDTH_HI = img_width >> 2;
       w2.f.HEIGHT   = img_height;

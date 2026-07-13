@@ -267,8 +267,6 @@ hsa_status_t ImageManagerGfx11::PopulateImageSrd(Image& image,
   ImageProperty image_prop = ImageLut().MapFormat(image.desc.format, image.desc.geometry);
   if ((image_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED) ||
      (image_prop.element_size == 0)) {
-      fprintf(stderr, "ImageManagerGfx11::PopulateImageSrd(order=0x%xh, type=0x%xh) not supported\n",
-            image.desc.format.channel_order, image.desc.format.channel_type);
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
   }
 
@@ -299,7 +297,6 @@ hsa_status_t ImageManagerGfx11::PopulateImageSrd(Image& image,
     uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
     uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
     if (img_width < srd_width || img_height < srd_height) {
-      fprintf(stderr, "updated size!\n");
       w1.f.WIDTH    = img_width & 0x3u;
       w2.f.WIDTH_HI = img_width >> 2;
       w2.f.HEIGHT   = img_height;

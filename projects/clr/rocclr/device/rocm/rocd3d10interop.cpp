@@ -84,6 +84,11 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
     return true;
   }
 
+  amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
+  if (ctx->getD3D10Ext(pd3d10Device)) {
+    return true;
+  }
+
   PFNAmdDxExtCreate AmdDxExtCreate = GetAmdDxExtCreate();
   if (AmdDxExtCreate) {
     IAmdDxExt* pExt = nullptr;
@@ -92,7 +97,6 @@ bool associateD3D10Device(const Device* device, ID3D10Device* pd3d10Device,
       IAmdDxExtCLInterop* pCLExt =
           static_cast<IAmdDxExtCLInterop*>(pExt->GetExtInterface(AmdDxExtCLInteropID));
       if (pCLExt) {
-        amd::Context* ctx = static_cast<amd::Context*>(gfxContext);
         ctx->setD3D10Ext(pd3d10Device, pExt, pCLExt);
       } else {
         pExt->Release();
