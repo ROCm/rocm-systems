@@ -1532,8 +1532,9 @@ std::vector<uint32_t> expand_tensor_dma_vimage(const Instruction &inst, uint32_t
 }
 
 ExpandResult expand_scaled_vglobal(const Instruction &inst, uint32_t, uint64_t,
-                                   const LivenessAnalysis &liveness, TranslationContext &context,
-                                   const LaneLayout *, const LaneLayout *) {
+                                   std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                   TranslationContext &context, const LaneLayout *,
+                                   const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VglobalMachineInst))
     return ExpandResult::not_handled();
@@ -1587,8 +1588,9 @@ ExpandResult expand_scaled_vglobal(const Instruction &inst, uint32_t, uint64_t,
 }
 
 ExpandResult expand_scaled_vscratch(const Instruction &inst, uint32_t, uint64_t,
-                                    const LivenessAnalysis &liveness, TranslationContext &context,
-                                    const LaneLayout *, const LaneLayout *) {
+                                    std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                    TranslationContext &context, const LaneLayout *,
+                                    const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VscratchMachineInst))
     return ExpandResult::not_handled();
@@ -1638,6 +1640,7 @@ ExpandResult expand_scaled_vscratch(const Instruction &inst, uint32_t, uint64_t,
 }
 
 ExpandResult expand_global_atomic_add_f64(const Instruction &inst, uint32_t, uint64_t,
+                                          std::span<const uint8_t>,
                                           const LivenessAnalysis &liveness,
                                           TranslationContext &context, const LaneLayout *,
                                           const LaneLayout *) {
@@ -1817,8 +1820,9 @@ ExpandResult expand_global_atomic_add_f64(const Instruction &inst, uint32_t, uin
 }
 
 ExpandResult expand_scaled_smem(const Instruction &inst, uint32_t, uint64_t,
-                                const LivenessAnalysis &liveness, TranslationContext &context,
-                                const LaneLayout *, const LaneLayout *) {
+                                std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                TranslationContext &context, const LaneLayout *,
+                                const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::SmemMachineInst))
     return ExpandResult::not_handled();
@@ -2487,8 +2491,8 @@ std::vector<uint32_t> expand_global_load_tr6_b96(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_ds_store_2addr_b64(const Instruction &inst, uint32_t, uint64_t,
-                                                const LivenessAnalysis &, const LaneLayout *,
-                                                const LaneLayout *) {
+                                                std::span<const uint8_t>, const LivenessAnalysis &,
+                                                const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::VdsMachineInst))
     return {};
@@ -2654,7 +2658,7 @@ std::vector<uint32_t> expand_ds_transpose_load(const Instruction &inst, uint32_t
 }
 
 std::vector<uint32_t> expand_native_global_transpose_load(const Instruction &inst, uint32_t,
-                                                          uint64_t,
+                                                          uint64_t, std::span<const uint8_t>,
                                                           const LivenessAnalysis &liveness,
                                                           const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -2697,12 +2701,13 @@ std::vector<uint32_t> expand_native_global_transpose_load(const Instruction &ins
 }
 
 std::vector<uint32_t> lower_s_clause_to_nop(const Instruction &, uint32_t host_arch, uint64_t,
-                                            const LivenessAnalysis &, const LaneLayout *,
-                                            const LaneLayout *) {
+                                            std::span<const uint8_t>, const LivenessAnalysis &,
+                                            const LaneLayout *, const LaneLayout *) {
   return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
 }
 
 std::vector<uint32_t> lower_s_set_vgpr_msb_to_setreg(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &, const LaneLayout *,
                                                      const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -2941,7 +2946,7 @@ sop2_scalar64_source_parts(const Instruction &inst, uint16_t src, uint8_t operan
 }
 
 ExpandResult lower_s_mul_u64_literal64(const Instruction &inst, uint32_t host_arch, uint64_t,
-                                       const LivenessAnalysis &liveness,
+                                       std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                        TranslationContext &context, const LaneLayout *,
                                        const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3010,7 +3015,7 @@ ExpandResult lower_s_mul_u64_literal64(const Instruction &inst, uint32_t host_ar
 }
 
 ExpandResult lower_s_cmp_u64_literal64(const Instruction &inst, uint32_t host_arch, uint64_t,
-                                       const LivenessAnalysis &liveness,
+                                       std::span<const uint8_t>, const LivenessAnalysis &liveness,
                                        TranslationContext &context, const LaneLayout *,
                                        const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3207,6 +3212,7 @@ std::vector<uint32_t> lower_s_add_sub_nc_u64_to_carry_chain(const Instruction &i
 }
 
 std::vector<uint32_t> lower_s_add_nc_u64_to_carry_chain(const Instruction &inst, uint32_t, uint64_t,
+                                                        std::span<const uint8_t>,
                                                         const LivenessAnalysis &liveness,
                                                         const LaneLayout *, const LaneLayout *) {
   return lower_s_add_sub_nc_u64_to_carry_chain(inst, liveness, false);
@@ -3218,11 +3224,10 @@ std::vector<uint32_t> lower_s_sub_nc_u64_to_borrow_chain(const Instruction &inst
   return lower_s_add_sub_nc_u64_to_carry_chain(inst, liveness, true);
 }
 
-std::vector<uint32_t> lower_gfx1250_grid_mode_s_getreg_to_zero(const Instruction &inst,
-                                                               uint32_t host_arch, uint64_t,
-                                                               const LivenessAnalysis &,
-                                                               const LaneLayout *,
-                                                               const LaneLayout *) {
+std::vector<uint32_t>
+lower_gfx1250_grid_mode_s_getreg_to_zero(const Instruction &inst, uint32_t host_arch, uint64_t,
+                                         std::span<const uint8_t>, const LivenessAnalysis &,
+                                         const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != sizeof(uint32_t))
     return {};
@@ -3235,11 +3240,10 @@ std::vector<uint32_t> lower_gfx1250_grid_mode_s_getreg_to_zero(const Instruction
                           static_cast<rj_code_arch_t>(host_arch))};
 }
 
-std::vector<uint32_t> preserve_gfx1250_replay_mode_s_setreg_imm32(const Instruction &inst, uint32_t,
-                                                                  uint64_t,
-                                                                  const LivenessAnalysis &,
-                                                                  const LaneLayout *,
-                                                                  const LaneLayout *) {
+std::vector<uint32_t>
+preserve_gfx1250_replay_mode_s_setreg_imm32(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>, const LivenessAnalysis &,
+                                            const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != 2 * static_cast<int>(sizeof(uint32_t)))
     return {};
@@ -3252,6 +3256,7 @@ std::vector<uint32_t> preserve_gfx1250_replay_mode_s_setreg_imm32(const Instruct
 }
 
 std::vector<uint32_t> preserve_same_sop1_encoding(const Instruction &inst, uint32_t, uint64_t,
+                                                  std::span<const uint8_t>,
                                                   const LivenessAnalysis &, const LaneLayout *,
                                                   const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3261,6 +3266,7 @@ std::vector<uint32_t> preserve_same_sop1_encoding(const Instruction &inst, uint3
 }
 
 std::vector<uint32_t> lower_s_sendmsg_rtn_to_rdna4(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &, const LaneLayout *,
                                                    const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3276,6 +3282,7 @@ std::vector<uint32_t> lower_s_sendmsg_rtn_to_rdna4(const Instruction &inst, uint
 }
 
 std::vector<uint32_t> lower_gfx1250_resource_word2_movk(const Instruction &inst, uint32_t, uint64_t,
+                                                        std::span<const uint8_t>,
                                                         const LivenessAnalysis &,
                                                         const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3297,6 +3304,7 @@ std::vector<uint32_t> lower_gfx1250_resource_word2_movk(const Instruction &inst,
 }
 
 std::vector<uint32_t> lower_gfx1250_resource_s_mov_b32(const Instruction &inst, uint32_t, uint64_t,
+                                                       std::span<const uint8_t>,
                                                        const LivenessAnalysis &, const LaneLayout *,
                                                        const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3344,8 +3352,8 @@ std::vector<uint32_t> expand_v_mov_b64_sources(uint8_t vdst, uint16_t src0,
 }
 
 std::vector<uint32_t> expand_v_mov_b64(const Instruction &inst, uint32_t, uint64_t,
-                                       const LivenessAnalysis &, const LaneLayout *,
-                                       const LaneLayout *) {
+                                       std::span<const uint8_t>, const LivenessAnalysis &,
+                                       const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < static_cast<int>(sizeof(uint32_t)) ||
       inst.size() % static_cast<int>(sizeof(uint32_t)) != 0)
@@ -3359,8 +3367,8 @@ std::vector<uint32_t> expand_v_mov_b64(const Instruction &inst, uint32_t, uint64
 }
 
 std::vector<uint32_t> expand_v_mov_b64_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                            const LivenessAnalysis &, const LaneLayout *,
-                                            const LaneLayout *) {
+                                            std::span<const uint8_t>, const LivenessAnalysis &,
+                                            const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
     return {};
@@ -3377,8 +3385,9 @@ std::vector<uint32_t> expand_v_mov_b64_vop3(const Instruction &inst, uint32_t, u
 }
 
 ExpandResult lower_vop2_f64_literal64(const Instruction &inst, uint32_t, uint64_t,
-                                      const LivenessAnalysis &liveness, TranslationContext &context,
-                                      const LaneLayout *, const LaneLayout *) {
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
+                                      const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != 3 * static_cast<int>(sizeof(uint32_t)))
     return ExpandResult::not_handled();
@@ -3417,6 +3426,7 @@ ExpandResult lower_vop2_f64_literal64(const Instruction &inst, uint32_t, uint64_
 }
 
 std::vector<uint32_t> expand_v_cvt_f32_f16_e32_high_src(const Instruction &inst, uint32_t, uint64_t,
+                                                        std::span<const uint8_t>,
                                                         const LivenessAnalysis &liveness,
                                                         const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3454,8 +3464,8 @@ std::vector<uint32_t> expand_v_cvt_f32_f16_e32_high_src(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_mov_b16(const Instruction &inst, uint32_t, uint64_t,
-                                       const LivenessAnalysis &liveness, const LaneLayout *,
-                                       const LaneLayout *) {
+                                       std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                       const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(uint32_t))
     return {};
@@ -3674,6 +3684,7 @@ std::vector<uint32_t> expand_v_add_nc_u64(uint8_t vdst, const Vector64SourcePart
 }
 
 std::vector<uint32_t> expand_v_add_nc_u64_e32(const Instruction &inst, uint32_t, uint64_t,
+                                              std::span<const uint8_t>,
                                               const LivenessAnalysis &liveness, const LaneLayout *,
                                               const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3698,6 +3709,7 @@ std::vector<uint32_t> expand_v_add_nc_u64_e32(const Instruction &inst, uint32_t,
 }
 
 std::vector<uint32_t> expand_v_add_nc_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness, const LaneLayout *,
                                                const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3722,6 +3734,7 @@ std::vector<uint32_t> expand_v_add_nc_u64_vop3(const Instruction &inst, uint32_t
 }
 
 std::vector<uint32_t> expand_v_sub_nc_u64_e32(const Instruction &inst, uint32_t, uint64_t,
+                                              std::span<const uint8_t>,
                                               const LivenessAnalysis &liveness, const LaneLayout *,
                                               const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3746,6 +3759,7 @@ std::vector<uint32_t> expand_v_sub_nc_u64_e32(const Instruction &inst, uint32_t,
 }
 
 std::vector<uint32_t> expand_v_sub_nc_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness, const LaneLayout *,
                                                const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3770,8 +3784,8 @@ std::vector<uint32_t> expand_v_sub_nc_u64_vop3(const Instruction &inst, uint32_t
 }
 
 std::vector<uint32_t> expand_v_add_f16_e32(const Instruction &inst, uint32_t, uint64_t,
-                                           const LivenessAnalysis &, const LaneLayout *,
-                                           const LaneLayout *) {
+                                           std::span<const uint8_t>, const LivenessAnalysis &,
+                                           const LaneLayout *, const LaneLayout *) {
   constexpr uint16_t kOpVAddF16Vop3 = 306;
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop2MachineInst))
@@ -3810,6 +3824,7 @@ std::vector<uint32_t> expand_v_add_f16_e32(const Instruction &inst, uint32_t, ui
 }
 
 std::vector<uint32_t> expand_v_mad_u32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3858,6 +3873,7 @@ std::vector<uint32_t> expand_v_mad_u32_vop3(const Instruction &inst, uint32_t, u
 }
 
 std::vector<uint32_t> expand_v_mad_nc_64_32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>,
                                                  const LivenessAnalysis &liveness,
                                                  const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3912,6 +3928,7 @@ std::vector<uint32_t> expand_v_mad_nc_64_32_vop3(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_mul_u64_e32(const Instruction &inst, uint32_t, uint64_t,
+                                           std::span<const uint8_t>,
                                            const LivenessAnalysis &liveness, const LaneLayout *,
                                            const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3936,6 +3953,7 @@ std::vector<uint32_t> expand_v_mul_u64_e32(const Instruction &inst, uint32_t, ui
 }
 
 std::vector<uint32_t> expand_v_mul_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -3962,6 +3980,7 @@ std::vector<uint32_t> expand_v_mul_u64_vop3(const Instruction &inst, uint32_t, u
 }
 
 std::vector<uint32_t> expand_v_lshl_add_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>,
                                                  const LivenessAnalysis &liveness,
                                                  const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4047,6 +4066,7 @@ std::vector<uint32_t> expand_v_lshl_add_u64_vop3(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_lshl_add_u32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>,
                                                  const LivenessAnalysis &liveness,
                                                  const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4104,6 +4124,7 @@ std::vector<uint32_t> expand_v_lshl_add_u32_vop3(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_lshl_or_b32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4160,8 +4181,8 @@ std::vector<uint32_t> expand_v_lshl_or_b32_vop3(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_lshlrev_b64_e32(const Instruction &inst, uint32_t, uint64_t,
-                                               const LivenessAnalysis &, const LaneLayout *,
-                                               const LaneLayout *) {
+                                               std::span<const uint8_t>, const LivenessAnalysis &,
+                                               const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop2MachineInst))
     return {};
@@ -4363,6 +4384,7 @@ std::vector<uint32_t> expand_v_minmax_64_vop3(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_max_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   constexpr uint16_t kOpCmpGtU64 = 92;
@@ -4370,6 +4392,7 @@ std::vector<uint32_t> expand_v_max_u64_vop3(const Instruction &inst, uint32_t, u
 }
 
 std::vector<uint32_t> expand_v_min_u64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   constexpr uint16_t kOpCmpLtU64 = 89;
@@ -4377,6 +4400,7 @@ std::vector<uint32_t> expand_v_min_u64_vop3(const Instruction &inst, uint32_t, u
 }
 
 std::vector<uint32_t> expand_v_min_i64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   constexpr uint16_t kOpCmpLtI64 = 81;
@@ -4384,6 +4408,7 @@ std::vector<uint32_t> expand_v_min_i64_vop3(const Instruction &inst, uint32_t, u
 }
 
 std::vector<uint32_t> expand_v_max_i64_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, const LaneLayout *,
                                             const LaneLayout *) {
   constexpr uint16_t kOpCmpGtI64 = 84;
@@ -4433,6 +4458,7 @@ stage_pk_high_lane_vdst_low_source(const Instruction &inst, const LivenessAnalys
 }
 
 std::vector<uint32_t> expand_v_pk_add_f32_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4478,6 +4504,7 @@ std::vector<uint32_t> expand_v_pk_add_f32_vop3p(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_pk_mul_f32_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4523,6 +4550,7 @@ std::vector<uint32_t> expand_v_pk_mul_f32_vop3p(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_pk_fma_f32_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -4614,6 +4642,7 @@ std::vector<uint32_t> expand_v_pk_fma_f32_vop3p(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_fma_mix_f32_f16_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6068,6 +6097,7 @@ void append_v_mov_b32_broadcast(std::vector<uint32_t> &words, uint8_t vdst, uint
 constexpr uint16_t k16BitK32WmmaScratchSearchBase = 208;
 
 std::vector<uint32_t> expand_v_wmma_f32_16x16x32_f16(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6153,6 +6183,7 @@ std::vector<uint32_t> expand_v_wmma_f32_16x16x32_f16(const Instruction &inst, ui
 }
 
 std::vector<uint32_t> expand_v_wmma_f32_16x16x32_bf16(const Instruction &inst, uint32_t, uint64_t,
+                                                      std::span<const uint8_t>,
                                                       const LivenessAnalysis &liveness,
                                                       const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6324,6 +6355,7 @@ std::vector<uint32_t> expand_v_wmma_packed16_16x16x32(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_wmma_f16_16x16x32_f16(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   constexpr uint8_t kOpWmmaF16_16x16x16_F16 = 66;
@@ -6331,6 +6363,7 @@ std::vector<uint32_t> expand_v_wmma_f16_16x16x32_f16(const Instruction &inst, ui
 }
 
 std::vector<uint32_t> expand_v_wmma_bf16_16x16x32_bf16(const Instruction &inst, uint32_t, uint64_t,
+                                                       std::span<const uint8_t>,
                                                        const LivenessAnalysis &liveness,
                                                        const LaneLayout *, const LaneLayout *) {
   constexpr uint8_t kOpWmmaBf16_16x16x16_Bf16 = 67;
@@ -6338,7 +6371,7 @@ std::vector<uint32_t> expand_v_wmma_bf16_16x16x32_bf16(const Instruction &inst, 
 }
 
 std::vector<uint32_t> expand_v_wmma_bf16f32_16x16x32_bf16(const Instruction &inst, uint32_t,
-                                                          uint64_t,
+                                                          uint64_t, std::span<const uint8_t>,
                                                           const LivenessAnalysis &liveness,
                                                           const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6425,6 +6458,7 @@ std::vector<uint32_t> expand_v_wmma_bf16f32_16x16x32_bf16(const Instruction &ins
 }
 
 std::vector<uint32_t> expand_v_wmma_f32_16x16x4_f32(const Instruction &inst, uint32_t, uint64_t,
+                                                    std::span<const uint8_t>,
                                                     const LivenessAnalysis &liveness,
                                                     const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6507,7 +6541,7 @@ std::vector<uint32_t> expand_v_wmma_f32_16x16x4_f32(const Instruction &inst, uin
 }
 
 std::vector<uint32_t> expand_v_wmma_f32_16x16x128_f8f6f4_fp4_fp4(const Instruction &inst, uint32_t,
-                                                                 uint64_t,
+                                                                 uint64_t, std::span<const uint8_t>,
                                                                  const LivenessAnalysis &liveness,
                                                                  const LaneLayout *,
                                                                  const LaneLayout *) {
@@ -6841,6 +6875,7 @@ ExpandResult lower_v_wmma_f32_32x16x128_f4_scalar(const Instruction &inst,
                                                   const LivenessAnalysis &liveness, bool scaled);
 
 ExpandResult expand_v_wmma_scale_f32_16x16x128_f8f6f4(const Instruction &inst, uint32_t, uint64_t,
+                                                      std::span<const uint8_t>,
                                                       const LivenessAnalysis &liveness,
                                                       TranslationContext &, const LaneLayout *,
                                                       const LaneLayout *) {
@@ -6868,6 +6903,7 @@ ExpandResult expand_v_wmma_scale_f32_16x16x128_f8f6f4(const Instruction &inst, u
 }
 
 std::vector<uint32_t> expand_v_wmma_i32_16x16x64_iu8(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -6978,6 +7014,7 @@ std::vector<uint32_t> expand_v_wmma_i32_16x16x64_iu8(const Instruction &inst, ui
 }
 
 std::vector<uint32_t> expand_v_swmmac_f32_16x16x64_f16(const Instruction &inst, uint32_t, uint64_t,
+                                                       std::span<const uint8_t>,
                                                        const LivenessAnalysis &liveness,
                                                        const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -7082,6 +7119,7 @@ std::vector<uint32_t> expand_v_swmmac_f32_16x16x64_f16(const Instruction &inst, 
 }
 
 std::vector<uint32_t> expand_v_swmmac_16x16x128_f8(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -7191,6 +7229,7 @@ std::vector<uint32_t> expand_v_swmmac_16x16x128_f8(const Instruction &inst, uint
 }
 
 std::vector<uint32_t> expand_v_swmmac_i32_16x16x128_iu8(const Instruction &inst, uint32_t, uint64_t,
+                                                        std::span<const uint8_t>,
                                                         const LivenessAnalysis &liveness,
                                                         const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -7520,6 +7559,7 @@ std::vector<uint32_t> expand_v_wmma_f16_16x16xk_f8(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_wmma_f16_16x16x64_f8(const Instruction &inst, uint32_t, uint64_t,
+                                                    std::span<const uint8_t>,
                                                     const LivenessAnalysis &liveness,
                                                     const LaneLayout *, const LaneLayout *) {
   return expand_v_wmma_f16_16x16xk_f8(inst, liveness, 8, 4);
@@ -8012,7 +8052,7 @@ expand_v_wmma_f32_16x16x128_fp8_fp8_scalar_fallback(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_wmma_f32_16x16x128_fp8_fp8(const Instruction &inst, uint32_t,
-                                                          uint64_t,
+                                                          uint64_t, std::span<const uint8_t>,
                                                           const LivenessAnalysis &liveness,
                                                           const LaneLayout *, const LaneLayout *) {
   auto words = expand_v_wmma_f32_16x16x128_fp8_fp8_dot4_fallback(inst, liveness);
@@ -8025,6 +8065,7 @@ std::vector<uint32_t> expand_v_wmma_f32_16x16x128_fp8_fp8(const Instruction &ins
 }
 
 std::vector<uint32_t> expand_v_wmma_f16_16x16x128_f8(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   return expand_v_wmma_f16_16x16x128_f8_dot4_fallback(inst, liveness);
@@ -8209,6 +8250,7 @@ ExpandResult lower_v_wmma_f32_32x16x128_f4_scalar(const Instruction &inst,
 }
 
 ExpandResult expand_v_wmma_f32_32x16x128_f4(const Instruction &inst, uint32_t, uint64_t,
+                                            std::span<const uint8_t>,
                                             const LivenessAnalysis &liveness, TranslationContext &,
                                             const LaneLayout *, const LaneLayout *) {
   return lower_v_wmma_f32_32x16x128_f4_scalar(inst, liveness, false);
@@ -8482,7 +8524,8 @@ ExpandResult lower_v_wmma_scale_f32_16x16x128_f8f6f4_scalar(const Instruction &i
 }
 
 ExpandResult expand_v_wmma_f32_16x16x128_f8f6f4(const Instruction &inst, uint32_t pc,
-                                                uint64_t guest_pc, const LivenessAnalysis &liveness,
+                                                uint64_t guest_pc, std::span<const uint8_t>,
+                                                const LivenessAnalysis &liveness,
                                                 TranslationContext &,
                                                 const LaneLayout *input_layout,
                                                 const LaneLayout *output_layout) {
@@ -8507,7 +8550,7 @@ ExpandResult expand_v_wmma_f32_16x16x128_f8f6f4(const Instruction &inst, uint32_
     return ExpandResult::success(std::move(words));
   }
 
-  auto words = expand_v_wmma_f32_16x16x128_f8f6f4_fp4_fp4(inst, pc, guest_pc, liveness,
+  auto words = expand_v_wmma_f32_16x16x128_f8f6f4_fp4_fp4(inst, pc, guest_pc, {}, liveness,
                                                           input_layout, output_layout);
   if (!words.empty())
     return ExpandResult::success(std::move(words));
@@ -8532,6 +8575,7 @@ enum class PermlaneFamilyOp : uint8_t { Bcast, Up, Down, Xor };
 }
 
 ExpandResult expand_v_permlane_family_b32(const Instruction &inst, uint32_t, uint64_t,
+                                          std::span<const uint8_t>,
                                           const LivenessAnalysis &liveness,
                                           TranslationContext &context, const LaneLayout *,
                                           const LaneLayout *) {
@@ -8673,8 +8717,9 @@ ExpandResult expand_v_permlane_family_b32(const Instruction &inst, uint32_t, uin
 }
 
 ExpandResult expand_v_permlane_idx_gen_b32(const Instruction &inst, uint32_t, uint64_t,
-                                           const LivenessAnalysis &, TranslationContext &,
-                                           const LaneLayout *, const LaneLayout *) {
+                                           std::span<const uint8_t>, const LivenessAnalysis &,
+                                           TranslationContext &, const LaneLayout *,
+                                           const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
     return ExpandResult::not_handled();
@@ -8705,8 +8750,9 @@ ExpandResult expand_v_permlane_idx_gen_b32(const Instruction &inst, uint32_t, ui
 }
 
 ExpandResult expand_v_bitop3_b32_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                      const LivenessAnalysis &liveness, TranslationContext &context,
-                                      const LaneLayout *, const LaneLayout *) {
+                                      std::span<const uint8_t>, const LivenessAnalysis &liveness,
+                                      TranslationContext &context, const LaneLayout *,
+                                      const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
     return ExpandResult::not_handled();
@@ -8934,8 +8980,8 @@ std::vector<uint32_t> lower_v_cvt_f32_bf16_to_shift(uint8_t vdst, uint16_t src0,
 }
 
 std::vector<uint32_t> expand_v_cvt_f32_bf16_vop1(const Instruction &inst, uint32_t, uint64_t,
-                                                 const LivenessAnalysis &, const LaneLayout *,
-                                                 const LaneLayout *) {
+                                                 std::span<const uint8_t>, const LivenessAnalysis &,
+                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
     return {};
@@ -8954,8 +9000,8 @@ std::vector<uint32_t> expand_v_cvt_f32_bf16_vop1(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_cvt_f32_bf16_vop3(const Instruction &inst, uint32_t, uint64_t,
-                                                 const LivenessAnalysis &, const LaneLayout *,
-                                                 const LaneLayout *) {
+                                                 std::span<const uint8_t>, const LivenessAnalysis &,
+                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
     return {};
@@ -8978,6 +9024,7 @@ std::vector<uint32_t> expand_v_cvt_f32_bf16_vop3(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_cvt_f32_fp8_e5m3_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                     std::span<const uint8_t>,
                                                      const LivenessAnalysis &liveness,
                                                      const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9212,6 +9259,7 @@ void append_f32_to_e5m3_sr(std::vector<uint32_t> &words, uint8_t result, uint8_t
 }
 
 ExpandResult expand_v_cvt_pk_fp8_f32_e5m3_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness,
                                                TranslationContext &context, const LaneLayout *,
                                                const LaneLayout *) {
@@ -9276,6 +9324,7 @@ ExpandResult expand_v_cvt_pk_fp8_f32_e5m3_vop3(const Instruction &inst, uint32_t
 }
 
 ExpandResult expand_v_cvt_sr_fp8_f32_e5m3_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness,
                                                TranslationContext &context, const LaneLayout *,
                                                const LaneLayout *) {
@@ -9380,6 +9429,7 @@ std::vector<uint32_t> lower_v_cvt_f16_f8(uint8_t vdst, uint16_t src0, uint8_t op
 }
 
 std::vector<uint32_t> expand_v_cvt_f16_fp8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9397,6 +9447,7 @@ std::vector<uint32_t> expand_v_cvt_f16_fp8_vop1(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_cvt_f16_bf8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9414,6 +9465,7 @@ std::vector<uint32_t> expand_v_cvt_f16_bf8_vop1(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_cvt_f16_f8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness, bool bf8) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
@@ -9435,13 +9487,13 @@ std::vector<uint32_t> expand_v_cvt_f16_f8_vop3(const Instruction &inst, uint32_t
 std::vector<uint32_t> expand_v_cvt_f16_fp8_vop3(const Instruction &inst, uint32_t host_arch,
                                                 uint64_t offset, const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
-  return expand_v_cvt_f16_f8_vop3(inst, host_arch, offset, liveness, /*bf8=*/false);
+  return expand_v_cvt_f16_f8_vop3(inst, host_arch, offset, {}, liveness, /*bf8=*/false);
 }
 
 std::vector<uint32_t> expand_v_cvt_f16_bf8_vop3(const Instruction &inst, uint32_t host_arch,
                                                 uint64_t offset, const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
-  return expand_v_cvt_f16_f8_vop3(inst, host_arch, offset, liveness, /*bf8=*/true);
+  return expand_v_cvt_f16_f8_vop3(inst, host_arch, offset, {}, liveness, /*bf8=*/true);
 }
 
 std::vector<uint32_t> lower_v_cvt_pk_f8_f16(uint8_t vdst, uint16_t src0, uint8_t opsel,
@@ -9492,12 +9544,14 @@ std::vector<uint32_t> expand_v_cvt_pk_f8_f16_vop3(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_fp8_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_pk_f8_f16_vop3(inst, liveness, /*bf8=*/false);
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_bf8_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_pk_f8_f16_vop3(inst, liveness, /*bf8=*/true);
@@ -9547,6 +9601,7 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f8(uint8_t vdst, uint16_t src0, bool sr
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_fp8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9565,6 +9620,7 @@ std::vector<uint32_t> expand_v_cvt_pk_f16_fp8_vop1(const Instruction &inst, uint
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_bf8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9602,12 +9658,14 @@ std::vector<uint32_t> expand_v_cvt_pk_f16_f8_vop3(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_fp8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_pk_f16_f8_vop3(inst, liveness, /*bf8=*/false);
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_bf8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_pk_f16_f8_vop3(inst, liveness, /*bf8=*/true);
@@ -9660,18 +9718,21 @@ std::vector<uint32_t> expand_v_cvt_sr_f8_f16_vop3(const Instruction &inst,
 }
 
 std::vector<uint32_t> expand_v_cvt_sr_fp8_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_sr_f8_f16_vop3(inst, liveness, /*bf8=*/false);
 }
 
 std::vector<uint32_t> expand_v_cvt_sr_bf8_f16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   return expand_v_cvt_sr_f8_f16_vop3(inst, liveness, /*bf8=*/true);
 }
 
 std::vector<uint32_t> expand_v_fma_mix_f32_bf16_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                      std::span<const uint8_t>,
                                                       const LivenessAnalysis &liveness,
                                                       const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9750,6 +9811,7 @@ std::vector<uint32_t> expand_v_fma_mix_f32_bf16_vop3p(const Instruction &inst, u
 }
 
 std::vector<uint32_t> expand_v_fma_mixlo_bf16_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                    std::span<const uint8_t>,
                                                     const LivenessAnalysis &liveness,
                                                     const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9843,6 +9905,7 @@ void append_merge_b16_result(std::vector<uint32_t> &words, uint8_t vdst, uint8_t
 }
 
 std::vector<uint32_t> expand_v_bitop3_b16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                               std::span<const uint8_t>,
                                                const LivenessAnalysis &liveness, const LaneLayout *,
                                                const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9917,6 +9980,7 @@ std::vector<uint32_t> expand_v_bitop3_b16_vop3(const Instruction &inst, uint32_t
 }
 
 std::vector<uint32_t> expand_v_lshlrev_b16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
                                                 const LivenessAnalysis &liveness,
                                                 const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -9973,6 +10037,7 @@ std::vector<uint32_t> expand_v_lshlrev_b16_vop3(const Instruction &inst, uint32_
 }
 
 std::vector<uint32_t> expand_v_or_b16_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                           std::span<const uint8_t>,
                                            const LivenessAnalysis &liveness, const LaneLayout *,
                                            const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -10040,6 +10105,7 @@ void append_f32_to_bf16_rne(std::vector<uint32_t> &words, uint8_t result, uint8_
 }
 
 ExpandResult expand_v_cvt_sr_pk_f16_bf16_f32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                  std::span<const uint8_t>,
                                                   const LivenessAnalysis &liveness,
                                                   TranslationContext &context, const LaneLayout *,
                                                   const LaneLayout *) {
@@ -10168,6 +10234,7 @@ ExpandResult expand_v_cvt_sr_pk_f16_bf16_f32_vop3(const Instruction &inst, uint3
 }
 
 std::vector<uint32_t> expand_v_pk_add_bf16_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>,
                                                  const LivenessAnalysis &liveness,
                                                  const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -10245,6 +10312,7 @@ std::vector<uint32_t> expand_v_pk_add_bf16_vop3p(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_pk_fma_bf16_vop3p(const Instruction &inst, uint32_t, uint64_t,
+                                                 std::span<const uint8_t>,
                                                  const LivenessAnalysis &liveness,
                                                  const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -10330,6 +10398,7 @@ std::vector<uint32_t> expand_v_pk_fma_bf16_vop3p(const Instruction &inst, uint32
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_bf16_f32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                    std::span<const uint8_t>,
                                                     const LivenessAnalysis &liveness,
                                                     const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -10389,6 +10458,7 @@ std::vector<uint32_t> expand_v_cvt_pk_bf16_f32_vop3(const Instruction &inst, uin
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_f32_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
                                                    const LivenessAnalysis &liveness,
                                                    const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
@@ -10942,6 +11012,7 @@ void append_materialize_e8m0_scale(std::vector<uint32_t> &words, uint8_t scale, 
 }
 
 ExpandResult expand_v_cvt_scaled_lowp_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                           std::span<const uint8_t>,
                                            const LivenessAnalysis &liveness,
                                            TranslationContext &context, const LaneLayout *,
                                            const LaneLayout *) {
@@ -11422,8 +11493,8 @@ struct VopdXyFields {
 }
 
 std::vector<uint32_t> expand_vopd3(const Instruction &inst, uint32_t host_arch, uint64_t,
-                                   const LivenessAnalysis &, const LaneLayout *,
-                                   const LaneLayout *) {
+                                   std::span<const uint8_t>, const LivenessAnalysis &,
+                                   const LaneLayout *, const LaneLayout *) {
   auto fields = decode_vopd3(inst);
   if (!fields || fields->x.vdst == fields->y.vdst)
     return {};
@@ -11450,8 +11521,8 @@ std::vector<uint32_t> expand_vopd3(const Instruction &inst, uint32_t host_arch, 
 }
 
 std::vector<uint32_t> expand_vopd_xy(const Instruction &inst, uint32_t host_arch, uint64_t,
-                                     const LivenessAnalysis &, const LaneLayout *,
-                                     const LaneLayout *) {
+                                     std::span<const uint8_t>, const LivenessAnalysis &,
+                                     const LaneLayout *, const LaneLayout *) {
   auto fields = decode_vopd_xy(inst);
   if (!fields || fields->x.vdst == fields->y.vdst)
     return {};
@@ -11478,8 +11549,8 @@ std::vector<uint32_t> expand_vopd_xy(const Instruction &inst, uint32_t host_arch
 }
 
 std::vector<uint32_t> expand_s_wait_kmcnt(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, const LaneLayout *,
-                                          const LaneLayout *) {
+                                          std::span<const uint8_t>, const LivenessAnalysis &,
+                                          const LaneLayout *, const LaneLayout *) {
   const auto *raw = inst.raw_encoding();
   if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::SoppMachineInst))
     return {};
@@ -11493,9 +11564,17 @@ std::vector<uint32_t> expand_s_wait_kmcnt(const Instruction &inst, uint32_t, uin
 
 template <auto Fn>
 ExpandResult legacy_expand_adapter(const Instruction &inst, uint32_t host_arch, uint64_t offset,
+                                   std::span<const uint8_t> source_text,
                                    const LivenessAnalysis &liveness, TranslationContext &,
                                    const LaneLayout *guest_layout, const LaneLayout *host_layout) {
-  auto words = Fn(inst, host_arch, offset, liveness, guest_layout, host_layout);
+  std::vector<uint32_t> words;
+  if constexpr (requires {
+                  Fn(inst, host_arch, offset, source_text, liveness, guest_layout, host_layout);
+                }) {
+    words = Fn(inst, host_arch, offset, source_text, liveness, guest_layout, host_layout);
+  } else {
+    words = Fn(inst, host_arch, offset, liveness, guest_layout, host_layout);
+  }
   if (words.empty())
     return ExpandResult::not_handled();
   return ExpandResult::success(std::move(words));

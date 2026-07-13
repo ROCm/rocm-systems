@@ -70,6 +70,7 @@ reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope
 /// Supported pairs return a failure if the instruction definitely accesses LDS
 /// storage but this lowering cannot preserve it safely.
 [[nodiscard]] ExpandResult lower_virtual_lds_instruction(const Instruction &inst,
+                                                         const LivenessAnalysis &liveness,
                                                          TranslationContext &context,
                                                          rj_code_arch_t guest_arch,
                                                          rj_code_arch_t host_arch);

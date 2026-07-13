@@ -21,13 +21,12 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <limits>
 #include <numeric>
-// Standard library
 #include <optional>
+// Standard library
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -794,13 +793,12 @@ void adjust_kernel_descriptor_entry_offsets_in_moved_sections(
 } // namespace
 
 CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
-    : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0), text_size_(0),
-      text_vaddr_(0), text_tail_size_(0) {
+    : image_(obj.image_data(), obj.image_data() + obj.image_size()), text_offset_(0),
+      text_size_(0) {
   auto &text_secs = obj.text_sections();
   if (!text_secs.empty()) {
     text_offset_ = text_secs[0]->sectionOffset();
     text_size_ = text_secs[0]->size();
-    text_vaddr_ = text_secs[0]->vaddr();
   }
 }
 
@@ -1214,6 +1212,11 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
   desc->private_segment_fixed_size = translation.target_private_size;
   desc->group_segment_fixed_size = translation.target_lds_size;
+  desc->kernarg_size = translation.target_kernarg_size;
+  if (translation.has_kernarg_segment_ptr) {
+    AMDHSA_BITS_SET(desc->kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  }
   if (translation.clears_kernarg_preload)
     desc->kernarg_preload = 0;
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
@@ -1227,6 +1230,76 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
                                *prologue_entry))
       return false;
   }
+  return true;
+}
+
+bool CodeObjectPatcher::append_nonalloc_section(std::string_view name,
+                                                std::span<const uint8_t> contents,
+                                                uint64_t alignment) {
+  if (name.empty() || contents.empty())
+    return false;
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+    return false;
+  if (image_.size() < sizeof(Elf64_Ehdr))
+    return false;
+
+  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
+  if (header.e_shoff == 0 || header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shnum == 0)
+    return false;
+  if (header.e_shstrndx == SHN_UNDEF || header.e_shstrndx >= header.e_shnum)
+    return false;
+  if (!image_contains_range(image_.size(), header.e_shoff,
+                            static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr)))
+    return false;
+
+  auto shdrs = read_section_headers(image_, header);
+  auto phdrs = read_program_headers(image_, header);
+  Elf64_Shdr &shstrtab = shdrs[header.e_shstrndx];
+  if (shstrtab.sh_type != SHT_STRTAB ||
+      !image_contains_range(image_.size(), shstrtab.sh_offset, shstrtab.sh_size))
+    return false;
+  if (shstrtab.sh_size > std::numeric_limits<uint32_t>::max() ||
+      name.size() > std::numeric_limits<uint32_t>::max() - shstrtab.sh_size - 1 ||
+      shdrs.size() >= std::numeric_limits<uint16_t>::max())
+    return false;
+
+  std::vector<uint8_t> new_shstrtab(
+      image_.begin() + static_cast<std::ptrdiff_t>(shstrtab.sh_offset),
+      image_.begin() + static_cast<std::ptrdiff_t>(shstrtab.sh_offset + shstrtab.sh_size));
+  const uint32_t section_name_offset = static_cast<uint32_t>(new_shstrtab.size());
+  new_shstrtab.insert(new_shstrtab.end(), name.begin(), name.end());
+  new_shstrtab.push_back('\0');
+
+  const uint64_t payload_offset = align_up(image_.size(), alignment);
+  if (payload_offset < image_.size())
+    return false;
+  image_.resize(static_cast<size_t>(payload_offset), 0);
+  image_.insert(image_.end(), contents.begin(), contents.end());
+
+  const uint64_t shstrtab_offset = image_.size();
+  image_.insert(image_.end(), new_shstrtab.begin(), new_shstrtab.end());
+  constexpr uint64_t kSectionHeaderAlignment = 8;
+  const uint64_t new_shoff = align_up(image_.size(), kSectionHeaderAlignment);
+  if (new_shoff < image_.size())
+    return false;
+  image_.resize(static_cast<size_t>(new_shoff), 0);
+
+  shstrtab.sh_offset = shstrtab_offset;
+  shstrtab.sh_size = new_shstrtab.size();
+  shstrtab.sh_addralign = 1;
+  Elf64_Shdr section{};
+  section.sh_name = section_name_offset;
+  section.sh_type = SHT_PROGBITS;
+  section.sh_flags = 0;
+  section.sh_offset = payload_offset;
+  section.sh_size = contents.size();
+  section.sh_addralign = alignment;
+  shdrs.push_back(section);
+
+  header.e_shoff = new_shoff;
+  header.e_shnum = static_cast<uint16_t>(shdrs.size());
+  image_.resize(static_cast<size_t>(new_shoff + shdrs.size() * sizeof(Elf64_Shdr)), 0);
+  write_elf_tables(image_, header, shdrs, phdrs);
   return true;
 }
 
@@ -1454,8 +1527,6 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
   return true;
 }
 
-std::vector<uint8_t> CodeObjectPatcher::emit() const & { return image_; }
-
-std::vector<uint8_t> CodeObjectPatcher::emit() && { return std::move(image_); }
+std::vector<uint8_t> CodeObjectPatcher::emit() const { return image_; }
 
 } // namespace rocjitsu

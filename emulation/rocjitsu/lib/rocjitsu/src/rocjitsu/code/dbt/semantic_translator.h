@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -63,10 +62,10 @@ public:
   SemanticTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch);
 
   /// @brief Try to expand/lower an instruction via the expand rules table.
-  /// @param inst        The decoded instruction.
-  /// @param offset      Byte offset of the instruction in .text.
-  /// @param source_text Full source .text bytes for rules that need modifier/literal payloads.
-  /// @param liveness    Kernel-scoped live-before data used for scratch register allocation.
+  /// @param inst      The decoded instruction.
+  /// @param offset    Byte offset of the instruction in .text.
+  /// @param source_text Full source .text bytes for rules with trailing payloads.
+  /// @param liveness  Kernel-scoped live-before data used for scratch register allocation.
   /// @returns Structured expansion status and replacement words.
   [[nodiscard]] ExpandResult try_lower_expand(const Instruction &inst, uint64_t offset,
                                               std::span<const uint8_t> source_text,
@@ -80,6 +79,7 @@ public:
   /// Callers that already recovered the raw opcode can use this overload so
   /// semantic rule lookup still keys on the architectural operation.
   [[nodiscard]] ExpandResult try_lower_expand_with_opcode(const Instruction &inst, uint64_t offset,
+                                                          std::span<const uint8_t> source_text,
                                                           const LivenessAnalysis &liveness,
                                                           TranslationContext &context,
                                                           uint16_t opcode) const;
@@ -87,21 +87,7 @@ public:
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 
 private:
-  [[nodiscard]] static constexpr uint32_t packed_rule_key(uint16_t encoding_id, uint16_t opcode) {
-    return (static_cast<uint32_t>(encoding_id) << 16) | opcode;
-  }
-
-  [[nodiscard]] bool has_expand_rule_encoding(uint16_t encoding_id) const {
-    const size_t word_index = encoding_id / 64;
-    return word_index < expand_rule_encoding_bits_.size() &&
-           (expand_rule_encoding_bits_[word_index] & (uint64_t{1} << (encoding_id % 64))) != 0;
-  }
-
-  [[nodiscard]] const TranslationRule *find_expand_rule(const Instruction &inst) const;
-
-  std::span<const TranslationRule> expand_rules_;   ///< Sorted by (src_encoding_id, src_opcode).
-  std::vector<uint32_t> expand_rule_keys_;          ///< Packed keys parallel to expand_rules_.
-  std::vector<uint64_t> expand_rule_encoding_bits_; ///< Cheap encoding prefilter for hot scans.
+  std::span<const TranslationRule> expand_rules_; ///< Sorted by (src_encoding_id, src_opcode).
   rj_code_arch_t host_arch_;
 };
 

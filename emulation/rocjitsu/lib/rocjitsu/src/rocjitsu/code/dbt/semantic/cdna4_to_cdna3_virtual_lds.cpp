@@ -7,6 +7,7 @@
 #include "rocjitsu/code/dbt/semantic/cdna3_emitter.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_scratch.h"
+#include "rocjitsu/code/dbt/semantic/gfx1250_to_rdna4_virtual_lds.h"
 #include "rocjitsu/code/dbt/virtual_lds_abi.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/encodings.h"
@@ -646,7 +647,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
 /// optionally spills that pointer for descriptor-full kernels that borrow the
 /// base SGPR pair around each lowered DS instruction.
 [[nodiscard]] bool append_cdna3_virtual_lds_entry_prologue(KdTranslation &translation) {
-  if (!translation.needs_lds_overflow_buf)
+  if (!translation.needs_virtual_lds_buffer)
     return true;
   const uint16_t pointer_base_sgpr = translation.kernarg_segment_ptr_sgpr;
   if (!translation.has_kernarg_segment_ptr)
@@ -659,9 +660,9 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
       translation.virtual_lds_lowering.prologue_temp_sgpr + 1 >= kCdnaOrdinarySgprLimit ||
       pointer_base_sgpr > 126)
     return false;
-  if (translation.lds_overflow_kernarg_pointer_offset > kCdnaSmemImmediateByteOffsetMax)
+  if (translation.virtual_lds_kernarg_pointer_offset > kCdnaSmemImmediateByteOffsetMax)
     return false;
-  if (translation.lds_overflow_kernarg_pointer_offset >
+  if (translation.virtual_lds_kernarg_pointer_offset >
       kCdnaSmemImmediateByteOffsetMax - kVirtualLdsRuntimeStateBytes)
     return false;
   if (translation.kernarg_wrapper_original_pointer_offset > kCdnaSmemImmediateByteOffsetMax)
@@ -674,9 +675,9 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   }
 
   auto valid_workgroup_sgpr = [](int16_t sgpr) { return sgpr < 0 || sgpr <= 126; };
-  if (!valid_workgroup_sgpr(translation.lds_overflow_workgroup_id_sgpr_x) ||
-      !valid_workgroup_sgpr(translation.lds_overflow_workgroup_id_sgpr_y) ||
-      !valid_workgroup_sgpr(translation.lds_overflow_workgroup_id_sgpr_z)) {
+  if (!valid_workgroup_sgpr(translation.virtual_lds_workgroup_id_sgpr_x) ||
+      !valid_workgroup_sgpr(translation.virtual_lds_workgroup_id_sgpr_y) ||
+      !valid_workgroup_sgpr(translation.virtual_lds_workgroup_id_sgpr_z)) {
     return false;
   }
 
@@ -684,7 +685,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   const auto temp = static_cast<uint8_t>(translation.virtual_lds_lowering.prologue_temp_sgpr);
   const auto product = static_cast<uint8_t>(temp + 1);
   uint8_t state_sbase = static_cast<uint8_t>(pointer_base_sgpr);
-  uint32_t state_offset = translation.lds_overflow_kernarg_pointer_offset;
+  uint32_t state_offset = translation.virtual_lds_kernarg_pointer_offset;
 
   auto append_smem_load_dword = [&](uint8_t dst, uint8_t sbase, uint32_t offset) {
     auto [load0, load1] = Cdna3Emitter::smem_load_dword(dst, sbase, offset);
@@ -737,9 +738,9 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   //   offset = wg_x * stride_x + wg_y * stride_y + wg_z * stride_z.
   translation.prologue_words.push_back(
       build_s_mov_b32(temp, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_CDNA3));
-  append_stride_term(translation.lds_overflow_workgroup_id_sgpr_x, kVirtualLdsStateStrideXOffset);
-  append_stride_term(translation.lds_overflow_workgroup_id_sgpr_y, kVirtualLdsStateStrideYOffset);
-  append_stride_term(translation.lds_overflow_workgroup_id_sgpr_z, kVirtualLdsStateStrideZOffset);
+  append_stride_term(translation.virtual_lds_workgroup_id_sgpr_x, kVirtualLdsStateStrideXOffset);
+  append_stride_term(translation.virtual_lds_workgroup_id_sgpr_y, kVirtualLdsStateStrideYOffset);
+  append_stride_term(translation.virtual_lds_workgroup_id_sgpr_z, kVirtualLdsStateStrideZOffset);
 
   append_smem_load_dwordx2(base, state_sbase, state_offset + kVirtualLdsStateBackingBaseOffset);
   translation.prologue_words.push_back(build_cdna3_s_add_u32(base, base, temp));
@@ -1749,33 +1750,45 @@ lower_cdna4_to_cdna3_virtual_lds_ds_instruction(const Instruction &inst,
 } // namespace
 
 bool supports_virtual_lds_sidecars(rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
-  return guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3;
+  return (guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3) ||
+         (guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && host_arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+          gfx1250_to_rdna4_supports_virtual_lds());
 }
 
 bool source_instruction_uses_virtualizable_lds(const Instruction &inst, rj_code_arch_t guest_arch,
                                                rj_code_arch_t host_arch) {
   if (supports_virtual_lds_sidecars(guest_arch, host_arch))
-    return cdna4_to_cdna3_source_instruction_uses_virtualizable_lds(inst);
+    return guest_arch == ROCJITSU_CODE_ARCH_GFX1250
+               ? gfx1250_source_instruction_uses_virtualizable_lds(inst)
+               : cdna4_to_cdna3_source_instruction_uses_virtualizable_lds(inst);
   return false;
 }
 
 std::optional<VirtualLdsBaseSgprReservation>
 reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
                                    const KdTranslation &translation, rj_code_arch_t host_arch) {
-  if (host_arch != ROCJITSU_CODE_ARCH_CDNA3)
-    return std::nullopt;
-  return reserve_cdna3_virtual_lds_base_sgpr_pair(context, blocks, translation, host_arch);
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return reserve_rdna4_virtual_lds_base_sgpr_pair(context, translation);
+  if (host_arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return reserve_cdna3_virtual_lds_base_sgpr_pair(context, blocks, translation, host_arch);
+  return std::nullopt;
 }
 
 bool append_virtual_lds_entry_prologue(KdTranslation &translation, rj_code_arch_t host_arch) {
-  if (host_arch != ROCJITSU_CODE_ARCH_CDNA3)
-    return false;
-  return append_cdna3_virtual_lds_entry_prologue(translation);
+  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return append_rdna4_virtual_lds_entry_prologue(translation);
+  if (host_arch == ROCJITSU_CODE_ARCH_CDNA3)
+    return append_cdna3_virtual_lds_entry_prologue(translation);
+  return false;
 }
 
-ExpandResult lower_virtual_lds_instruction(const Instruction &inst, TranslationContext &context,
-                                           rj_code_arch_t guest_arch, rj_code_arch_t host_arch) {
-  if (supports_virtual_lds_sidecars(guest_arch, host_arch))
+ExpandResult lower_virtual_lds_instruction(const Instruction &inst,
+                                           const LivenessAnalysis &liveness,
+                                           TranslationContext &context, rj_code_arch_t guest_arch,
+                                           rj_code_arch_t host_arch) {
+  if (guest_arch == ROCJITSU_CODE_ARCH_GFX1250 && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return lower_gfx1250_to_rdna4_virtual_lds_instruction(inst, liveness, context);
+  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA4 && host_arch == ROCJITSU_CODE_ARCH_CDNA3)
     return lower_cdna4_to_cdna3_virtual_lds_ds_instruction(inst, context);
   return ExpandResult::not_handled();
 }

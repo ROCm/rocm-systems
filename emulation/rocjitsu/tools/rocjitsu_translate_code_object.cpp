@@ -42,6 +42,8 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) {
     return "expand-failed";
   case rocjitsu::DiagnosticKind::ResourceLimit:
     return "resource-limit";
+  case rocjitsu::DiagnosticKind::KernelSkipped:
+    return "kernel-skipped";
   }
   return "unknown";
 }

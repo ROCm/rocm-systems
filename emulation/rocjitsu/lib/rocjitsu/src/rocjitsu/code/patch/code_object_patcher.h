@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -15,12 +16,6 @@ namespace rocjitsu {
 
 class AmdGpuCodeObject;
 struct KdTranslation;
-
-/// @brief Location of a sidecar kernel descriptor appended into a loaded ELF segment.
-struct AppendedSidecarDescriptor {
-  uint64_t file_offset = 0;
-  uint64_t vaddr = 0;
-};
 
 class CodeObjectPatcher {
 public:
@@ -123,6 +118,11 @@ public:
   ///          materialized successfully; false if the original .text section
   ///          header could not be found.
   [[nodiscard]] bool append_cave_section(std::string_view section_name = ".rj_translations");
+
+  /// Append runtime metadata that must remain outside loadable segments.
+  [[nodiscard]] bool append_nonalloc_section(std::string_view name,
+                                             std::span<const uint8_t> contents,
+                                             uint64_t alignment = 1);
 
   /// @brief Set the .text-relative byte offset where the cave body will be placed.
   /// This must be called before any apply_semantic() calls so branch offsets

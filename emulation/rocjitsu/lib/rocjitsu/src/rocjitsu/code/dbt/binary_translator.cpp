@@ -23,8 +23,10 @@
 #include "rocjitsu/code/dbt/semantic_translator.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <algorithm>
@@ -320,13 +322,6 @@ void append_error(std::vector<TranslationDiagnostic> &diagnostics, DiagnosticKin
                   std::string mnemonic = {}, std::vector<std::string> required_work = {}) {
   append_diagnostic(diagnostics, DiagnosticSeverity::Error, kind, std::move(message), guest_offset,
                     std::move(mnemonic), std::move(required_work));
-}
-
-void append_warning(std::vector<TranslationDiagnostic> &diagnostics, DiagnosticKind kind,
-                    std::string message, std::optional<uint64_t> guest_offset = std::nullopt,
-                    std::string mnemonic = {}, std::vector<std::string> required_work = {}) {
-  append_diagnostic(diagnostics, DiagnosticSeverity::Warning, kind, std::move(message),
-                    guest_offset, std::move(mnemonic), std::move(required_work));
 }
 
 void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
@@ -3461,8 +3456,7 @@ lower_gfx1250_high_bank_shadow_instruction(std::span<const uint8_t> text, const 
 
     gfx1250::VdsMachineInst src{};
     std::memcpy(&src, raw, sizeof(src));
-    rdna4::VdsMachineInst dst{};
-    std::memcpy(&dst, raw, sizeof(dst));
+    gfx1250::VdsMachineInst dst = src;
 
     std::vector<HighBankShadowSlot> loads;
     std::vector<HighBankShadowSlot> stores;
@@ -3501,11 +3495,11 @@ lower_gfx1250_high_bank_shadow_instruction(std::span<const uint8_t> text, const 
 
     std::array<uint32_t, 2> words{};
     std::memcpy(words.data(), &dst, sizeof(dst));
-    auto wrapped = wrap_high_bank_shadow_private_spills(inst, {words[0], words[1]}, loads, stores,
-                                                        liveness, plan);
-    if (!wrapped)
-      return unsupported();
-    return {HighBankShadowLoweringKind::Lowered, std::move(*wrapped), {}};
+    return {HighBankShadowLoweringKind::RemappedGuest,
+            {words[0], words[1]},
+            {},
+            std::move(loads),
+            std::move(stores)};
   }
 
   if (starts_with(mnemonic, "buffer_")) {
@@ -6498,14 +6492,10 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
   std::vector<BasicBlock *> stack{&entry};
 
   while (!stack.empty()) {
-    const size_t block_idx = stack.back();
+    BasicBlock *block = stack.back();
     stack.pop_back();
     if (block == nullptr || !reachable.insert(block).second)
       continue;
-    reachable[block_idx] = 1;
-    reached_indices.push_back(block_idx);
-    BasicBlock *block = blocks[block_idx].get();
-    assert(block != nullptr && "reachable walk stack should contain only decoded blocks");
 
     for (BasicBlock *succ : block->successors()) {
       if (succ == nullptr)
@@ -6513,16 +6503,15 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
       if (succ->start_offset() != entry.start_offset() &&
           kernel_entries.contains(succ->start_offset()))
         continue;
-      push_block(succ);
+      stack.push_back(succ);
     }
   }
 
-  std::ranges::sort(reached_indices);
   std::vector<BasicBlock *> ordered;
-  ordered.reserve(reached_indices.size());
-  for (size_t block_idx : reached_indices) {
-    if (blocks[block_idx])
-      ordered.push_back(blocks[block_idx].get());
+  ordered.reserve(reachable.size());
+  for (const auto &block : blocks) {
+    if (block && reachable.contains(block.get()))
+      ordered.push_back(block.get());
   }
   return ordered;
 }
@@ -6756,16 +6745,14 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   std::unordered_set<uint64_t> entry_set(entries.begin(), entries.end());
   std::vector<KdTranslation *> ordered_kernels;
   ordered_kernels.reserve(kernels.size());
-  std::unordered_set<uint64_t> seen_scopes;
+  std::unordered_set<uint64_t> seen_entries;
   for (KdTranslation &kernel : kernels) {
-    if (seen_scopes.insert(kernel_scope_key(kernel)).second)
+    if (seen_entries.insert(kernel.entry_text_offset).second)
       ordered_kernels.push_back(&kernel);
   }
 
   std::ranges::sort(ordered_kernels, [](const auto *lhs, const auto *rhs) {
-    if (lhs->entry_text_offset != rhs->entry_text_offset)
-      return lhs->entry_text_offset < rhs->entry_text_offset;
-    return lhs->needs_lds_overflow_buf < rhs->needs_lds_overflow_buf;
+    return lhs->entry_text_offset < rhs->entry_text_offset;
   });
 
   scopes.reserve(ordered_kernels.size());
@@ -6777,6 +6764,60 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     scopes.push_back({kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set)});
   }
   return scopes;
+}
+
+[[nodiscard]] bool append_virtual_lds_metadata(CodeObjectPatcher &patcher,
+                                               std::span<const KdTranslation> translations,
+                                               std::vector<TranslationDiagnostic> &diagnostics) {
+  if (!std::ranges::any_of(translations, [](const KdTranslation &translation) {
+        return translation.needs_virtual_lds_buffer;
+      }))
+    return true;
+
+  const auto patched_image = patcher.image_bytes();
+  AmdGpuCodeObject patched_object(patched_image.data(), patched_image.size());
+  if (!patched_object.is_valid()) {
+    append_error(diagnostics, DiagnosticKind::ResourceLimit,
+                 "translated ELF cannot be reparsed for virtual LDS metadata");
+    return false;
+  }
+  std::vector<VirtualLdsKernelMetadata> metadata;
+  for (const KdTranslation &translation : translations) {
+    if (!translation.needs_virtual_lds_buffer)
+      continue;
+    std::string kernel_name = translation.symbol_name;
+    if (kernel_name.ends_with(".kd"))
+      kernel_name.resize(kernel_name.size() - 3u);
+    const uint64_t descriptor_vaddr = patched_object.kernel_descriptor_offset(kernel_name);
+    if (descriptor_vaddr == 0) {
+      append_error(diagnostics, DiagnosticKind::KernelDescriptor,
+                   "virtual LDS metadata cannot resolve kernel descriptor " + kernel_name);
+      return false;
+    }
+    VirtualLdsKernelMetadata record{};
+    record.kernel_name = std::move(kernel_name);
+    record.normal_descriptor_vaddr = descriptor_vaddr;
+    record.virtual_descriptor_vaddr = descriptor_vaddr;
+    record.static_lds_bytes = translation.virtual_lds_size;
+    record.kernarg_size = translation.kernarg_size;
+    record.backing_pointer_kernarg_offset = translation.virtual_lds_kernarg_pointer_offset;
+    record.virtual_lds_base_sgpr = translation.virtual_lds_lowering.base_sgpr;
+    record.flags = kVirtualLdsFlagRuntimeStateBlock;
+    if (translation.workgroup_id_sgpr_x >= 0)
+      record.flags |= kVirtualLdsFlagWorkgroupIdX;
+    if (translation.workgroup_id_sgpr_y >= 0)
+      record.flags |= kVirtualLdsFlagWorkgroupIdY;
+    if (translation.workgroup_id_sgpr_z >= 0)
+      record.flags |= kVirtualLdsFlagWorkgroupIdZ;
+    metadata.push_back(std::move(record));
+  }
+  const auto bytes = serialize_virtual_lds_metadata(metadata);
+  if (bytes.empty() || !patcher.append_nonalloc_section(kVirtualLdsMetadataSectionName, bytes, 8)) {
+    append_error(diagnostics, DiagnosticKind::ResourceLimit,
+                 "virtual LDS runtime metadata could not be appended");
+    return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -6844,6 +6885,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // TODO: Have lowerings report their actual highest temporary VGPR demand and
   // use that instead of this conservative floor.
   descriptor_options.minimum_vgprs = conservative_lowering_minimum_vgprs(guest_arch_, host_arch_);
+  const bool can_virtualize_lds = supports_virtual_lds_sidecars(guest_arch_, host_arch_);
+  descriptor_options.allow_oversized_lds = can_virtualize_lds;
   auto descriptor_translations = descriptor_translator.translate_image(
       patcher.image_bytes(), patcher.text_offset(), patcher.text_size(), descriptor_options);
   if (descriptor_translations.empty()) {
@@ -6923,13 +6966,53 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     }
   }
 
+  // Static oversized LDS takes one path: the complete allocation is moved to
+  // a global backing buffer. No prefix remains in hardware LDS.
+  if (can_virtualize_lds) {
+    const uint32_t host_lds_limit = arch_lds_bytes(host_arch_);
+    for (KdTranslation &translation : descriptor_translations) {
+      if (host_lds_limit == 0 || translation.target_lds_size <= host_lds_limit)
+        continue;
+
+      KernelDescriptorTranslationOptions virtual_options = descriptor_options;
+      virtual_options.kernel_overrides = {};
+      virtual_options.virtualize_lds = true;
+      virtual_options.allow_oversized_lds = false;
+      for (const KernelDescriptorResourceOverride &override : descriptor_overrides) {
+        if (override.entry_text_offset != translation.entry_text_offset)
+          continue;
+        virtual_options.minimum_vgprs =
+            std::max(virtual_options.minimum_vgprs, override.minimum_vgprs);
+        virtual_options.target_vgpr_count_override = std::max(
+            virtual_options.target_vgpr_count_override, override.target_vgpr_count_override);
+        virtual_options.minimum_sgprs =
+            std::max(virtual_options.minimum_sgprs, override.minimum_sgprs);
+        virtual_options.group_segment_fixed_size_addend =
+            std::max(virtual_options.group_segment_fixed_size_addend,
+                     override.group_segment_fixed_size_addend);
+        virtual_options.private_segment_fixed_size_addend =
+            std::max(virtual_options.private_segment_fixed_size_addend,
+                     override.private_segment_fixed_size_addend);
+      }
+      auto virtualized = descriptor_translator.translate_descriptor(
+          patcher.image_bytes(), translation.descriptor_file_offset, translation.entry_text_offset,
+          virtual_options, translation.symbol_name);
+      if (!virtualized) {
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "full LDS virtualization descriptor could not be computed");
+        return leave_unchanged();
+      }
+      translation = std::move(*virtualized);
+    }
+    scopes = kernel_translation_scopes(blocks, descriptor_translations);
+  }
+
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
-    if (translation.supported || !skip_failed_kernels)
-      append_diagnostics(result.diagnostics, translation.diagnostics);
+    append_diagnostics(result.diagnostics, translation.diagnostics);
     descriptors_supported &= translation.supported;
   }
-  if (!descriptors_supported && !skip_failed_kernels) {
+  if (!descriptors_supported) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                  "kernel descriptor translation requires unsupported resource or ABI "
                  "virtualization; leaving code object unchanged");
@@ -6944,42 +7027,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     std::memcpy(translated_text.data() + offset, text.data() + offset, inst_size);
     if (!trace_callback_)
       return;
-    pending.push_back({.source_offset = offset,
-                       .source_size = static_cast<uint32_t>(inst.size()),
-                       .source_words = raw_words_for_inst(inst),
-                       .legalization = leg,
-                       .copied_original = copied_original,
-                       .semantic_lowering = semantic_lowering,
-                       .changed = changed,
-                       .target_offset = target_offset,
-                       .target_words = std::move(target_words)});
-  };
 
-  auto flush_traces = [&](std::vector<PendingTrace> &pending, uint64_t target_delta) {
-    if (!trace_callback_)
-      return;
-    for (PendingTrace &trace : pending) {
-      trace_callback_({.source_offset = trace.source_offset,
-                       .source_size = trace.source_size,
-                       .source_words = trace.source_words,
-                       .legalization = trace.legalization,
-                       .copied_original = trace.copied_original,
-                       .semantic_lowering = trace.semantic_lowering,
-                       .changed = trace.changed,
-                       .emitted_in_cave = false,
-                       .target_offset = trace.target_offset + target_delta,
-                       .target_words = trace.target_words});
-    }
-  };
-
-  auto copy_original_instruction = [&](const Instruction &inst, uint64_t offset,
-                                       std::vector<uint8_t> &kernel_text,
-                                       std::vector<PendingTrace> &pending_traces) {
-    const uint32_t inst_size = inst.size();
-    const uint64_t target_offset = kernel_text.size();
-    const auto *words = reinterpret_cast<const uint32_t *>(text.data() + offset);
-    std::vector<uint32_t> copied_words(words, words + inst_size / sizeof(uint32_t));
-    append_words(kernel_text, copied_words);
     // Continued-failure mode is diagnostic-only. Emit an explicit copy event so
     // diff reports make it clear which failed source instruction was preserved.
     const auto source_words = raw_words_for_inst(inst);
@@ -7027,6 +7075,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // 2. Otherwise preserve source addresses and let apply_semantic() choose
   //    among local padding caves, unreachable-text caves, branch islands, and
   //    appended .rj_translations fallback caves for each size-growing rewrite.
+  const bool has_virtual_lds =
+      std::ranges::any_of(descriptor_translations, [](const KdTranslation &translation) {
+        return translation.needs_virtual_lds_buffer;
+      });
   if (supports_expanded_text_copy(guest_arch_, host_arch_, text.size(),
                                   covered_range_bytes(protected_ranges), descriptor_translations,
                                   scopes)) {
@@ -7050,7 +7102,40 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       configure_liveness_scratch(guest_arch_, host_arch_, scope, liveness);
       TranslationContext expanded_context(
           scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
-          scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
+          scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count,
+          scope.translation->target_private_size);
+      if (scope.translation->needs_virtual_lds_buffer) {
+        auto reservation = reserve_virtual_lds_base_sgpr_pair(
+            expanded_context, KernelBlockScope(scope.blocks), *scope.translation, host_arch_);
+        if (!reservation) {
+          fail_expanded_copy("full LDS virtualization cannot reserve its backing-buffer SGPRs");
+          break;
+        }
+        // The backing pointer is live for the entire guest body.  Resource
+        // accounting alone does not keep per-instruction semantic scratch
+        // allocation from borrowing it, so make the pair unavailable to the
+        // liveness allocator as well.  The prologue-only temp pair may be
+        // reused after entry.
+        liveness.reserve_scratch_registers({RegClass::SGPR, reservation->base, 2});
+        expanded_context.virtualize_lds = true;
+        expanded_context.virtual_lds_base_sgpr = reservation->base;
+        expanded_context.virtual_lds_base_sgpr_spill_per_use = reservation->spill_per_use;
+        expanded_context.virtual_lds_kernarg_segment_ptr_sgpr =
+            scope.translation->kernarg_segment_ptr_sgpr;
+        expanded_context.virtual_lds_kernarg_pointer_offset =
+            scope.translation->virtual_lds_kernarg_pointer_offset;
+        if (!scope.translation->virtual_lds_lowering.configured) {
+          scope.translation->virtual_lds_lowering.configured = true;
+          scope.translation->virtual_lds_lowering.base_sgpr = reservation->base;
+          scope.translation->virtual_lds_lowering.prologue_temp_sgpr = reservation->prologue_temp;
+          scope.translation->virtual_lds_lowering.base_sgpr_spill_per_use =
+              reservation->spill_per_use;
+          if (!append_virtual_lds_entry_prologue(*scope.translation, host_arch_)) {
+            fail_expanded_copy("full LDS virtualization cannot materialize its entry prologue");
+            break;
+          }
+        }
+      }
       std::optional<HighBankBlockModeMap> high_bank_entry_modes;
       if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
         high_bank_entry_modes = gfx1250_high_bank_entry_modes_for_scope(scope);
@@ -7117,7 +7202,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
           uint32_t source_size = inst_size;
           std::vector<uint32_t> words;
-          if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (words.empty() && guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 &&
+              host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
             auto shadow_lowering = lower_gfx1250_high_bank_shadow_instruction(
                 text, inst, offset, liveness, high_bank_shadow_plan, high_bank_shadow_state);
             if (shadow_lowering.kind == HighBankShadowLoweringKind::Unsupported) {
@@ -7192,6 +7278,18 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               words = lower_raw_gfx1250_v_mul_u64_vop3(text, offset, inst, liveness, source_size);
             if (words.empty())
               words = lower_raw_gfx1250_v_mul_u64_e32(text, offset, inst, liveness, source_size);
+          }
+          if (words.empty()) {
+            auto virtual_lds_expansion = lower_virtual_lds_instruction(
+                inst, liveness, expanded_context, guest_arch_, host_arch_);
+            if (virtual_lds_expansion.status == ExpandStatus::Failed) {
+              fail_expanded_copy(virtual_lds_expansion.message.empty()
+                                     ? "full LDS virtualization failed"
+                                     : std::move(virtual_lds_expansion.message));
+              break;
+            }
+            if (virtual_lds_expansion.status == ExpandStatus::Success)
+              words = std::move(virtual_lds_expansion.words);
           }
           if (words.empty())
             words = translate_instruction_words(inst, offset, liveness, expanded_context, text,
@@ -7331,6 +7429,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         updated_options.minimum_vgprs =
             std::max(conservative_lowering_minimum_vgprs(guest_arch_, host_arch_), required_vgprs);
         updated_options.minimum_sgprs = required_sgprs;
+        updated_options.virtualize_lds = scope.translation->needs_virtual_lds_buffer;
         if (const auto override_it = std::ranges::find_if(
                 descriptor_overrides,
                 [&](const KernelDescriptorResourceOverride &override) {
@@ -7361,6 +7460,14 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           fail_expanded_copy(
               "expanded text copy requires unsupported descriptor scratch resources");
           break;
+        }
+        if (scope.translation->needs_virtual_lds_buffer) {
+          updated->virtual_lds_lowering = scope.translation->virtual_lds_lowering;
+          if (!append_virtual_lds_entry_prologue(*updated, host_arch_)) {
+            fail_expanded_copy(
+                "expanded text copy could not recompute its full-LDS virtualization prologue");
+            break;
+          }
         }
         *scope.translation = std::move(*updated);
       }
@@ -7546,6 +7653,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
       if (target_mach_)
         patcher.update_elf_flags(target_mach_);
+      if (!append_virtual_lds_metadata(patcher, descriptor_translations, result.diagnostics))
+        return leave_unchanged();
 
       result.elf_bytes = patcher.emit();
       warnings_ = nullptr;
@@ -7600,15 +7709,53 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
       continue;
-    assert(scope.translation != nullptr && "kernel scope should have descriptor translation");
-    if (scope.translation->skipped)
-      continue;
 
     TranslationContext kernel_context(
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
-        scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
+        scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count,
+        scope.translation->target_private_size);
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), make_liveness_options());
     configure_liveness_scratch(guest_arch_, host_arch_, scope, liveness);
+    if (scope.translation->needs_virtual_lds_buffer) {
+      if (scope_has_shared_blocks(scope, block_reach_counts)) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "full LDS virtualization does not support a CFG block shared with another "
+                     "kernel entry",
+                     scope.translation->entry_text_offset);
+        return leave_unchanged();
+      }
+      auto reservation = reserve_virtual_lds_base_sgpr_pair(
+          kernel_context, KernelBlockScope(scope.blocks), *scope.translation, host_arch_);
+      if (!reservation) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "full LDS virtualization cannot reserve its backing-buffer SGPRs",
+                     scope.translation->entry_text_offset);
+        return leave_unchanged();
+      }
+      // The backing pointer remains live until s_endpgm.  Reserve it in the
+      // scratch allocator as well as in descriptor resource accounting.
+      liveness.reserve_scratch_registers({RegClass::SGPR, reservation->base, 2});
+      kernel_context.virtualize_lds = true;
+      kernel_context.virtual_lds_base_sgpr = reservation->base;
+      kernel_context.virtual_lds_base_sgpr_spill_per_use = reservation->spill_per_use;
+      kernel_context.virtual_lds_kernarg_segment_ptr_sgpr =
+          scope.translation->kernarg_segment_ptr_sgpr;
+      kernel_context.virtual_lds_kernarg_pointer_offset =
+          scope.translation->virtual_lds_kernarg_pointer_offset;
+      if (!scope.translation->virtual_lds_lowering.configured) {
+        scope.translation->virtual_lds_lowering.configured = true;
+        scope.translation->virtual_lds_lowering.base_sgpr = reservation->base;
+        scope.translation->virtual_lds_lowering.prologue_temp_sgpr = reservation->prologue_temp;
+        scope.translation->virtual_lds_lowering.base_sgpr_spill_per_use =
+            reservation->spill_per_use;
+        if (!append_virtual_lds_entry_prologue(*scope.translation, host_arch_)) {
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "full LDS virtualization cannot materialize its entry prologue",
+                       scope.translation->entry_text_offset);
+          return leave_unchanged();
+        }
+      }
+    }
     std::optional<HighBankBlockModeMap> high_bank_entry_modes;
     std::optional<HighBankShadowPlan> high_bank_shadow_plan;
     if (guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4) {
@@ -7864,13 +8011,48 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
 
         const uint16_t dst_opcode = leg ? leg->target_opcode : inst.opcode();
 
+        {
+          auto expansion = lower_virtual_lds_instruction(inst, active_liveness, active_context,
+                                                         guest_arch_, host_arch_);
+          if (expansion.status == ExpandStatus::Failed) {
+            append_error(result.diagnostics, DiagnosticKind::ExpandFailed,
+                         expansion.message.empty() ? "full LDS virtualization failed"
+                                                   : expansion.message,
+                         offset, std::string(inst.mnemonic()), std::move(expansion.required_work));
+            return leave_unchanged();
+          }
+          if (expansion.status == ExpandStatus::Success) {
+            const bool emitted_in_cave = expansion.words.size() * sizeof(uint32_t) > inst_size;
+            const uint64_t target_offset =
+                emitted_in_cave ? patcher.cave_start() + patcher.cave_body_size() : offset;
+            SemanticReplacement repl{offset, offset + inst_size, std::string(inst.mnemonic()),
+                                     std::move(expansion.words)};
+            if (!apply_semantic_for_inst(repl))
+              return leave_unchanged();
+            if (trace_callback_) {
+              trace_callback_({.source_offset = offset,
+                               .source_size = inst_size,
+                               .source_words = raw_words_for_inst(inst),
+                               .legalization = leg,
+                               .copied_original = false,
+                               .semantic_lowering = true,
+                               .changed = true,
+                               .emitted_in_cave = emitted_in_cave,
+                               .target_offset = target_offset,
+                               .target_words = repl.target_words});
+            }
+            offset += inst_size;
+            continue;
+          }
+        }
+
         // Try semantic lowering before raw encoding translation. A matched
         // semantic rule that cannot safely emit code is a translation error:
         // falling through would silently preserve guest semantics on the wrong
         // host ISA.
-        if (has_semantic_expand_rule) {
-          auto expansion =
-              semantic_translator_->try_lower_expand(inst, offset, active_liveness, active_context);
+        {
+          auto expansion = semantic_translator_->try_lower_expand(inst, offset, text,
+                                                                  active_liveness, active_context);
           if (expansion.status == ExpandStatus::Failed) {
             append_error(result.diagnostics, DiagnosticKind::ExpandFailed,
                          expansion.message.empty()
@@ -7903,6 +8085,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                 offset += inst_size;
                 continue;
               }
+              return leave_unchanged();
             }
             if (trace_callback_) {
               const auto source_words = raw_words_for_inst(inst);
@@ -7970,9 +8153,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         offset += inst_size;
       }
     }
-    if (skip_scope)
-      continue;
-    layout.body_end = kernel_text.size();
 
     if (continue_after_failure && has_error_diagnostic(result.diagnostics))
       continue;
@@ -7984,25 +8164,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
     if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
       scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
-    if (kernel_context.required_private_segment_fixed_size >
-        kernel_context.private_segment_fixed_size)
-      scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
 
     if (scope.translation->target_vgpr_count != kernel_context.num_vgprs ||
-        scope.translation->target_sgpr_count != kernel_context.num_sgprs ||
-        scope.translation->target_private_size != kernel_context.private_segment_fixed_size) {
-      // Semantic rules may allocate descriptor-backed scratch registers or
-      // per-lane private spill slots beyond the kernel's original resources.
-      // Recompute the descriptor with those larger minimums before patching it
-      // into the output image.
+        scope.translation->target_sgpr_count != kernel_context.num_sgprs) {
+      // Semantic rules may allocate descriptor-backed scratch registers beyond
+      // the kernel's original SGPR/VGPR counts. Recompute the descriptor with
+      // those larger minimums before patching it into the output image.
       KernelDescriptorTranslationOptions descriptor_options;
       descriptor_options.minimum_vgprs = scope.translation->target_vgpr_count;
       descriptor_options.minimum_sgprs = scope.translation->target_sgpr_count;
-      descriptor_options.private_segment_fixed_size_addend =
-          scope.translation->target_private_size - kernel_context.private_segment_fixed_size;
-      descriptor_options.virtualize_lds = scope.translation->needs_lds_overflow_buf;
-      descriptor_options.allow_oversized_lds =
-          can_emit_sidecar_descriptors && !scope.translation->needs_lds_overflow_buf;
+      descriptor_options.virtualize_lds = scope.translation->needs_virtual_lds_buffer;
 
       // Descriptor growth is intentionally done after instruction lowering so
       // each kernel is translated once. Only descriptors that enter this code
@@ -8010,75 +8181,44 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       // recompute unrelated kernels and risks mixing diagnostics across scopes.
       bool recomputed_descriptor = false;
       for (KdTranslation &translation : descriptor_translations) {
-        if (!same_kernel_scope_variant(translation, *scope.translation))
+        if (translation.entry_text_offset != scope.translation->entry_text_offset)
           continue;
 
         auto updated = descriptor_translator.translate_descriptor(
             patcher.image_bytes(), translation.descriptor_file_offset,
             translation.entry_text_offset, descriptor_options, translation.symbol_name);
         if (!updated) {
-          auto failure =
-              make_kernel_failure(DiagnosticKind::KernelDescriptor,
-                                  "kernel descriptor translation could not be recomputed");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
-            skip_scope = true;
-            break;
-          }
-          return leave_unchanged();
-        }
-        updated->kernel_name = translation.kernel_name;
-        updated->sidecar_descriptor = translation.sidecar_descriptor;
-        updated->virtual_lds_lowering = translation.virtual_lds_lowering;
-        if (!append_virtual_lds_entry_prologue(*updated, host_arch_)) {
-          auto failure = make_kernel_failure(
-              DiagnosticKind::KernelDescriptor,
-              "virtual LDS lowering cannot materialize backing-buffer pointer entry prologue");
-          if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
-            skip_scope = true;
-            break;
-          }
+          append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                       "kernel descriptor translation could not be recomputed; leaving code object "
+                       "unchanged");
           return leave_unchanged();
         }
 
-        if (!updated->supported) {
-          if (skip_failed_kernels) {
-            auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
-                                               "kernel descriptor translation requires unsupported "
-                                               "resource or ABI virtualization");
-            for (const TranslationDiagnostic &diagnostic : updated->diagnostics) {
-              if (diagnostic.severity != DiagnosticSeverity::Error)
-                continue;
-              failure.kind = diagnostic.kind;
-              failure.message = diagnostic.message;
-              failure.guest_offset = diagnostic.guest_offset;
-              failure.mnemonic = diagnostic.mnemonic;
-              failure.required_work = diagnostic.required_work;
-              break;
-            }
-            if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot)) {
-              skip_scope = true;
-              break;
-            }
+        if (translation.needs_virtual_lds_buffer) {
+          updated->virtual_lds_lowering = translation.virtual_lds_lowering;
+          if (!append_virtual_lds_entry_prologue(*updated, host_arch_)) {
+            append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                         "full LDS virtualization entry prologue could not be recomputed");
+            return leave_unchanged();
           }
-          append_diagnostics(result.diagnostics, updated->diagnostics);
+        }
+
+        append_diagnostics(result.diagnostics, updated->diagnostics);
+        if (!updated->supported) {
           append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
                        "kernel descriptor translation requires unsupported resource or ABI "
                        "virtualization; leaving code object unchanged");
           return leave_unchanged();
         }
-        append_diagnostics(result.diagnostics, updated->diagnostics);
 
         translation = std::move(*updated);
         recomputed_descriptor = true;
       }
-      if (skip_scope)
-        continue;
 
       if (!recomputed_descriptor) {
-        auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
-                                           "kernel descriptor translation could not be recomputed");
-        if (fail_or_skip_kernel(scope, std::move(failure), output_begin, descriptor_snapshot))
-          continue;
+        append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
+                     "kernel descriptor translation could not be recomputed; leaving code object "
+                     "unchanged");
         return leave_unchanged();
       }
     }
@@ -8136,6 +8276,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
   if (target_mach_)
     patcher.update_elf_flags(target_mach_);
+
+  if (has_virtual_lds &&
+      !append_virtual_lds_metadata(patcher, descriptor_translations, result.diagnostics))
+    return leave_unchanged();
 
   warnings_ = nullptr;
   diagnostics_ = nullptr;
@@ -8195,8 +8339,8 @@ std::vector<uint32_t> BinaryTranslator::translate_instruction_words(
 
   const uint16_t dst_opcode = leg ? leg->target_opcode : source_opcode;
 
-  auto expansion = semantic_translator_->try_lower_expand_with_opcode(inst, offset, liveness,
-                                                                      context, source_opcode);
+  auto expansion = semantic_translator_->try_lower_expand_with_opcode(
+      inst, offset, orig_text, liveness, context, source_opcode);
   if (expansion.status == ExpandStatus::Failed) {
     if (warnings_)
       warnings_->push_back(expansion.message.empty()
@@ -8258,6 +8402,12 @@ std::vector<uint32_t> BinaryTranslator::translate_remapped_guest_instruction_wor
 
   const auto *bytes = reinterpret_cast<const uint8_t *>(guest_words.data());
   const std::span<const uint8_t> remapped_text(bytes, guest_words.size() * sizeof(uint32_t));
+  auto virtual_lds =
+      lower_virtual_lds_instruction(*remapped, liveness, context, guest_arch_, host_arch_);
+  if (virtual_lds.status == ExpandStatus::Success)
+    return std::move(virtual_lds.words);
+  if (virtual_lds.status == ExpandStatus::Failed)
+    return {};
   return translate_instruction_words(*remapped, 0, liveness, context, remapped_text,
                                      rdna4_grid_x_sgpr, rdna4_grid_yz_sgpr);
 }

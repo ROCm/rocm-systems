@@ -23,6 +23,7 @@ rj_add_object_library(rocjitsu_code
     dbt/semantic/cdna4_to_rdna3.cpp
     dbt/semantic/cdna4_to_rdna4.cpp
     dbt/semantic/gfx1250_to_rdna4.cpp
+    dbt/semantic/gfx1250_to_rdna4_virtual_lds.cpp
     dbt/semantic_translator.cpp
     dbt/semantic_scratch.cpp
     patch/sidecar_metadata.cpp

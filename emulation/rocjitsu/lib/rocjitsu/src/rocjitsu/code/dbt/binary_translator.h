@@ -123,13 +123,7 @@ struct BinaryTranslatorOptions {
   /// not for execution.
   bool debug_continue_after_failure = false;
 
-  /// @brief Preserve a failed kernel body and keep translating independent kernels.
-  ///
-  /// @details This is intended for load-time DBT of large code objects where not
-  /// every kernel symbol is necessarily dispatched. A failed kernel is replaced
-  /// by a minimal target-ISA trap stub, while the diagnostic is reported as a
-  /// skipped-kernel warning. The symbol remains loadable so other kernels in the
-  /// same code object are not blocked by one untranslated kernel.
+  /// @brief Preserve successfully translated kernels when another kernel fails.
   bool skip_failed_kernels = false;
 };
 
@@ -223,7 +217,7 @@ private:
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
   /// @details Extracts raw encoding words, calls the per-pair encoding translate
-  /// function, and appends the result to the translated text cursor.
+  /// function, and writes the result into the translated text at the given offset.
   /// Falls back to copying the original encoding if translation produces no output.
   ///
   /// @param inst       The decoded guest instruction.
