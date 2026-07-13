@@ -114,7 +114,7 @@ AlltoallWaveTester<T1>::AlltoallWaveTester(TesterArguments args)
 
   if (num_teams < num_warps * args.num_wgs){
     printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
-    abort();
+    exit(0);
   }
 
   CHECK_HIP(hipMalloc(&alltoall_wave_world_dup,
