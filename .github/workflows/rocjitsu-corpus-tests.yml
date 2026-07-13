@@ -232,6 +232,10 @@ jobs:
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
               --timeout 15; then
               corpus_status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${corpus_status}"
 
       - name: Run corpus tests
         if: matrix.name == 'release'
