@@ -1,6 +1,8 @@
 name: TheRock CI for rccl
 
 on:
+  schedule:
+    - cron: '17 6 * * 0'  # Weekly, Sunday 06:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -43,7 +45,10 @@ jobs:
           echo "Changed files:"
           git diff --name-only HEAD^
 
-          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled/manual run — always run CI"
+          elif git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
             echo "run_linux_ci=true" >> "$GITHUB_OUTPUT"
             echo "RCCL changes detected"
           else
@@ -67,6 +72,7 @@ jobs:
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
+      event_name: ${{ github.event_name }}
       cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF
         -DTHEROCK_BUILD_TESTING=ON
