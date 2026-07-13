@@ -1007,13 +1007,14 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   const auto mov_address_hi =
       build_v_mov_b32_e64_literal(address_hi_vgpr, static_cast<uint32_t>(address >> 32u), arch);
   const auto load = build_flat_load_b32_vaddr_vdst(address_lo_vgpr, destination_vgpr, arch);
-  if (!mov_address_lo || !mov_address_hi || !load)
+  const auto wait = build_s_wait_flat_load0(arch);
+  if (!mov_address_lo || !mov_address_hi || !load || !wait)
     return false;
 
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.insert(words.end(), load->begin(), load->end());
-  words.push_back(kWaitLoadcnt0);
+  words.push_back(*wait);
   return true;
 }
 
@@ -1067,14 +1068,15 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   const auto mov_one = build_v_mov_b32_e64_literal(value_vgpr, 1u, arch);
   const auto atomic_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       address_lo_vgpr, value_vgpr, value_vgpr, /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add)
+  const auto wait = build_s_wait_flat_load0(arch);
+  if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add || !wait)
     return false;
 
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.insert(words.end(), mov_one->begin(), mov_one->end());
   words.insert(words.end(), atomic_add->begin(), atomic_add->end());
-  words.push_back(kWaitLoadcnt0);
+  words.push_back(*wait);
   return append_store_u32_vgpr(words, event_index_address, value_vgpr, scratch_vgpr, arch);
 }
 
@@ -1092,14 +1094,15 @@ find_first_light_access_record_candidates(const ConSanResult &result,
   const auto atomic_add =
       build_flat_atomic_add_u32_vaddr_vsrc_vdst(address_lo_vgpr, result_vgpr, result_vgpr,
                                                 /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add)
+  const auto wait = build_s_wait_flat_load0(arch);
+  if (!mov_address_lo || !mov_address_hi || !mov_one || !atomic_add || !wait)
     return false;
 
   words.insert(words.end(), mov_address_lo->begin(), mov_address_lo->end());
   words.insert(words.end(), mov_address_hi->begin(), mov_address_hi->end());
   words.insert(words.end(), mov_one->begin(), mov_one->end());
   words.insert(words.end(), atomic_add->begin(), atomic_add->end());
-  words.push_back(kWaitLoadcnt0);
+  words.push_back(*wait);
   return true;
 }
 
@@ -2861,7 +2864,12 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResu
     std::memcpy(&word, bytes.data() + candidate.file_offset + offset, sizeof(word));
     words.push_back(word);
   }
-  words.push_back(kWaitDscnt0);
+  const auto lds_wait = build_s_wait_lds0(arch);
+  if (!lds_wait) {
+    errors.emplace_back("ConSan MOI first-light probe could not encode LDS completion wait");
+    return std::nullopt;
+  }
+  words.push_back(*lds_wait);
 
   const uint64_t base = *options.moi_report_buffer_address;
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
@@ -4606,8 +4614,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
-    result.warnings.emplace_back("ConSan MOI first-light probe currently supports only RDNA4");
+  if (arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA4) {
+    result.warnings.emplace_back(
+        "ConSan MOI first-light probe has no native backend for this architecture");
     return;
   }
   if (options.moi_report_buffer_size < consan_moi_report_buffer_min_bytes(1, 0, 0, 0)) {

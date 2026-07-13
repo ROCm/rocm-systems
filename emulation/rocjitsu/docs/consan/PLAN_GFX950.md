@@ -87,6 +87,11 @@ Full gfx950 support means:
   round-trips through the decoder and passes 10 repeated full-EXEC plus 10
   repeated partial-EXEC hardware runs on the MI355X. `A2`, `P1A`, `P1B`, `W1`,
   and `S5` are active in the first implementation slice.
+- 2026-07-13: first native gfx950 record/replay access probe executes without
+  guest corruption and publishes one visible record. This closed the first
+  CDNA4 LDS-versus-FLAT wait integration bug. `D1A`, `P1C`, `RR1A`, and `T1A`
+  are active; dynamic records and field-level host assertions remain before
+  `RR1A` can become `DONE`.
 
 ## DAG Overview
 
@@ -98,11 +103,11 @@ work item. `A --> B` means `A` is a hard prerequisite of `B`.
 ```mermaid
 flowchart LR
   B0["B0: gfx1201 Accepted Baseline"]:::done
-  E0["E0: gfx950 Local Environment"]:::todo
-  A1A["A1A: Locate Architecture Assumptions"]:::todo
-  A1B["A1B: Classify Assumptions"]:::todo
-  A1C["A1C: Close Inventory"]:::todo
-  A2["A2: Capability And Target Dispatch"]:::todo
+  E0["E0: gfx950 Local Environment"]:::done
+  A1A["A1A: Locate Architecture Assumptions"]:::done
+  A1B["A1B: Classify Assumptions"]:::done
+  A1C["A1C: Close Inventory"]:::done
+  A2["A2: Capability And Target Dispatch"]:::active
   A3A["A3A: Basic ISA Fixtures"]:::todo
   A3B["A3B: Private And Pressure Fixtures"]:::todo
   A3C["A3C: Shared-Helper Fixture"]:::todo
@@ -124,6 +129,7 @@ flowchart LR
   R1C --> F0
 
   classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
 ```
@@ -133,11 +139,11 @@ flowchart LR
 ```mermaid
 flowchart LR
   F0{"F0: Foundation Ready"}:::target
-  S1["S1: CDNA4 Scratch ISA Contract"]:::todo
-  S2["S2: Scratch Encoders And Decode Tests"]:::todo
+  S1["S1: CDNA4 Scratch ISA Contract"]:::done
+  S2["S2: Scratch Encoders And Decode Tests"]:::done
   S3["S3: Private-Segment Transaction Audit"]:::todo
-  S4["S4: Standalone Live VGPR Round Trip"]:::todo
-  S5["S5: Target-Dispatched Spill Backend"]:::todo
+  S4["S4: Standalone Live VGPR Round Trip"]:::done
+  S5["S5: Target-Dispatched Spill Backend"]:::active
   RR1A["RR1A: Access Record Emission"]:::todo
   S6["S6: Forced-Spill Record/Replay"]:::todo
   SA1C["SA1C: Sampled Host Oracle"]:::todo
@@ -172,6 +178,8 @@ flowchart LR
   R1C --> S7D
   S7D --> SP
 
+  classDef done fill:#93c47d,stroke:#274e13,stroke-width:2px,color:#000;
+  classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
 ```
@@ -181,20 +189,20 @@ flowchart LR
 ```mermaid
 flowchart LR
   F0{"F0: Foundation Ready"}:::target
-  D1A["D1A: Basic LDS Decode"]:::todo
+  D1A["D1A: Basic LDS Decode"]:::active
   D1B["D1B: Extended LDS Forms"]:::todo
   D1C["D1C: Unsupported DS Inventory"]:::todo
-  P1A["P1A: Scalar Control Primitives"]:::todo
-  P1B["P1B: Vector And Address Primitives"]:::todo
-  P1C["P1C: Report Publication Primitives"]:::todo
+  P1A["P1A: Scalar Control Primitives"]:::active
+  P1B["P1B: Vector And Address Primitives"]:::active
+  P1C["P1C: Report Publication Primitives"]:::active
   I1A["I1A: Workgroup Identity"]:::todo
   I1B["I1B: Stable Wave64 Owner"]:::todo
   I1C["I1C: Optional HW_ID Experiment"]:::todo
-  W1["W1: Non-Scratch Wait Semantics"]:::todo
+  W1["W1: Non-Scratch Wait Semantics"]:::active
   B1A["B1A: Barrier Decode And Emission"]:::todo
   B1B["B1B: Engine Barrier Semantics"]:::todo
   SC1["SC1: SuperCollider Native LDS"]:::todo
-  RR1A["RR1A: Access Record Emission"]:::todo
+  RR1A["RR1A: Access Record Emission"]:::active
   RR1B["RR1B: Record/Replay Live Semantics"]:::todo
   SA1A["SA1A: Static Sampled Publication"]:::todo
   SA1B["SA1B: Runtime Selection And Check"]:::todo
@@ -259,6 +267,7 @@ flowchart LR
   FLC --> NP
   AT1B --> NP
 
+  classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
 ```
@@ -269,7 +278,7 @@ flowchart LR
 flowchart LR
   SP{"SP: Spill Accepted"}:::target
   NP{"NP: Native Probe Parity"}:::target
-  T1A["T1A: Target-Aware Test Registration"]:::todo
+  T1A["T1A: Target-Aware Test Registration"]:::active
   T1B["T1B: Workload And Tier Selection"]:::todo
   T2SC["T2SC: SuperCollider Focused Tier"]:::todo
   T2RR["T2RR: Record/Replay Focused Tier"]:::todo
@@ -322,6 +331,7 @@ flowchart LR
   D2 --> M0
   X1 --> M0
 
+  classDef active fill:#f6b26b,stroke:#783f04,stroke-width:2px,color:#000;
   classDef todo fill:#b7b7b7,stroke:#434343,stroke-width:2px,color:#000;
   classDef target fill:#b4a7d6,stroke:#351c75,stroke-width:2px,color:#000;
   classDef blocked fill:#e06666,stroke:#660000,stroke-width:2px,color:#000;
@@ -688,7 +698,7 @@ Done criteria:
 
 ## Native Probe Nodes
 
-### D1A: CDNA4 Basic LDS Decode - TODO
+### D1A: CDNA4 Basic LDS Decode - ACTIVE
 
 Goal: convert the basic gfx950 B32 LDS read/write forms into ConSan's semantic
 access model without importing RDNA4 raw layouts.
@@ -767,7 +777,7 @@ Done criteria:
 - Every admitted primitive round-trips through rocJITsu decode and, where
   representable, LLVM assembly/disassembly.
 
-### P1C: CDNA4 Report Publication Primitives - TODO
+### P1C: CDNA4 Report Publication Primitives - ACTIVE
 
 Goal: prove global report-buffer stores and their required completion sequence
 before composing full engines.
@@ -892,7 +902,7 @@ Done criteria:
 - Clean and racy marker-buffer controls pass with `REQUIRE_PATCH=1`; the racy
   case reports without relying on a destructive proof probe.
 
-### RR1A: gfx950 Access Record Emission - TODO
+### RR1A: gfx950 Access Record Emission - ACTIVE
 
 Goal: emit and decode the static and dynamic access-record ABI before relying
 on replay semantics.
@@ -1089,7 +1099,7 @@ Done criteria:
 
 ## Qualification Nodes
 
-### T1A: Target-Aware Test Registration - TODO
+### T1A: Target-Aware Test Registration - ACTIVE
 
 Goal: let one test definition register the appropriate gfx1201 or gfx950
 controls.

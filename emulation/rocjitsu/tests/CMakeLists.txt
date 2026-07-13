@@ -2262,6 +2262,30 @@ if(RJ_ENABLE_HIP_TESTS)
             "ConSanSpillHipTest.Gfx950PartialExecVgprScratchRoundTrip"
         )
 
+        rj_add_hip_test(
+            hip_consan_moi_gfx950_test
+            ARCH gfx950
+            SOURCE dbi/hip_consan_moi_gfx950_test.hip
+        )
+        add_dependencies(hip_consan_moi_gfx950_test_target rocjitsu_dbi_hooks)
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.SingleLdsStoreCompletes"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.SingleLdsStoreCompletes"
+            NAME "ConSanMoiGfx950Test.SingleLdsStoreRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=1"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
         # generic HIP smoke tests are built for a local RDNA host such as
