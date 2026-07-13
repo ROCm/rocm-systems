@@ -496,6 +496,14 @@ Full gfx950 support means:
   and fixed the low/high publication order before acceptance. The authoritative
   focused gate passes 258/258; the omitted-coordinate clean baseline and
   sampled row pass 2/2, and both sampled race/non-vacuity rows pass 2/2.
+- 2026-07-13: `T3IWE`, `T3IWL`, and `T3IW` are `DONE` in commits
+  `f652c53557` and `8612d33d1b`. Inline exact-shadow cells and atomic release
+  slots are partitioned by exact bounded `(x,y,z)`, with checked capacity,
+  full 64-bit address carry, typed overflow, one outer VCC/SCC/EXEC
+  transaction, persistent/scalar/private identity, and shared-helper support.
+  The focused gate passes 262/262. The complete raw/record-replay/sampled/
+  inline omitted-coordinate and clean-isolation matrix passes 14/14 with
+  overflow forbidden on every bounded compact-engine row.
 
 ## DAG Overview
 
@@ -720,9 +728,9 @@ flowchart LR
   T3IR["T3IR: Accumulator-Safe Scalar State"]:::done
   T3IWA["T3IWA: Complete Entry Workgroup ABI"]:::done
   T3IWS["T3IWS: Sampled Workgroup Partitions"]:::done
-  T3IWE["T3IWE: Inline Workgroup Partitions"]:::active
-  T3IWL["T3IWL: Omitted-Coordinate Live Gate"]:::active
-  T3IW{"T3IW: Workgroup Identity Accepted"}:::target
+  T3IWE["T3IWE: Inline Workgroup Partitions"]:::done
+  T3IWL["T3IWL: Omitted-Coordinate Live Gate"]:::done
+  T3IW{"T3IW: Workgroup Identity Accepted"}:::done
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
@@ -2117,7 +2125,7 @@ engines pass #1853 with patch and record emission and no private bytes. Fresh
 guarded selected record/replay and sampled runs both pass 10/10, including all
 three high-SGPR batch matmuls and the previously collateral scan row.
 
-### T3IW: Complete Workgroup-ID ABI - ACTIVE
+### T3IW: Complete Workgroup-ID ABI - DONE
 
 Goal: preserve distinct workgroup identity even when the original kernel did
 not request one or more workgroup-ID system SGPRs.
@@ -2141,15 +2149,17 @@ Done criteria:
   three MOI engines, regardless of the guest descriptor's original system-SGPR
   request mask, with exact guest ABI restoration at both hardware entries.
 
-Current result: commit `7da1e9e7b6` implements the complete CDNA4 descriptor
+Result: commit `7da1e9e7b6` implements the complete CDNA4 descriptor
 and entry-ABI transaction. Synthetic coverage exercises all eight original
 workgroup-ID masks, paired entries, existing/missing dispatch-pointer inputs,
 system-input followers, shared helpers, and both successful and fail-closed
 persistent-state allocation. Commits `324f39b022` and `878e45ef1b` complete
-sampled workgroup-local storage. The Clang-21 build and authoritative focused
-suite pass 258/258. Live omitted-coordinate raw, record/replay, and sampled
-coverage passes; inline-shadow partitioning remains in progress, so this node
-remains `ACTIVE`.
+sampled workgroup-local storage; commits `f652c53557` and `8612d33d1b`
+complete inline exact-shadow and atomic-release partitioning plus exact live
+extent contracts. The Clang-21 build and authoritative focused suite pass
+262/262. The complete omitted-coordinate matrix passes 14/14 across raw,
+record/replay, sampled, and inline-shadow, including a clean alternating-owner
+control with overflow forbidden.
 
 The remaining work is deliberately split so neither compact engine becomes a
 single long-running node:
@@ -2160,13 +2170,13 @@ single long-running node:
   immediate checks are workgroup-local under exact bounded mixed-radix
   partitioning. Focused tests pass 258/258; live clean-isolation baseline plus
   sampled pass 2/2, and sampled race/non-vacuity rows pass 2/2.
-- `T3IWE: Inline Workgroup Partitions - ACTIVE`: make exact-shadow cells
-  workgroup-local, with checked finite-capacity behavior and no probabilistic
-  aliasing.
-- `T3IWL: Omitted-Coordinate Live Gate - ACTIVE`: the raw, record/replay, and
-  sampled omitted-coordinate rows pass. The clean-isolation control is green
-  for sampled and remains red only for inline until `T3IWE` lands; it proves
-  the remaining false cross-group conflict is non-vacuous.
+- `T3IWE: Inline Workgroup Partitions - DONE`: exact-shadow cells and atomic
+  release slots are workgroup-local, with checked finite capacity, exact
+  64-bit addressing, and typed out-of-range accounting.
+- `T3IWL: Omitted-Coordinate Live Gate - DONE`: all 14 raw, record/replay,
+  sampled, and inline-shadow rows pass. The clean-isolation control is green
+  for both compact engines, while intentional same-group races remain
+  non-vacuously diagnosed.
 
 ### T3IA: Private-State Atomic Ordering - DONE
 
