@@ -708,7 +708,7 @@ WriteInterceptor(const void* packets,
                                        .queue_id  = queue.get_id(),
                                        .stream_id = 0,
                                        .event_id  = gpu_events::get_gpu_event_id(),
-                                       .type_id   = op}};
+                                       .type_id   = static_cast<uint8_t>(op)}};
 
                 {
                     auto tracer_data = _packet_data.callback_record;
