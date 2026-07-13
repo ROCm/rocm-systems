@@ -183,6 +183,21 @@ contract:
   Contract_PeerAccess_EnableTwice_ThenDisable_RoundTripsWhenAvailable:
     <<: *level_0
     tags: [peer_access]
+  Contract_PeerCopy_SelfDevice1D_CopiesBytes:
+    <<: *level_0
+    tags: [peer_copy]
+  Contract_PeerCopy_SelfDevice1DAsync_CopiesBytesAfterSync:
+    <<: *level_0
+    tags: [peer_copy]
+  Contract_PeerCopy_SelfDevice3D_CopiesExtent:
+    <<: *level_0
+    tags: [peer_copy]
+  Contract_PeerCopy_SelfDevice3DAsync_CopiesExtentAfterSync:
+    <<: *level_0
+    tags: [peer_copy]
+  Contract_PeerCopy_InvalidDevice_IsRejected:
+    <<: *level_0
+    tags: [peer_copy]
   Contract_Stream_CreateDestroy_Succeeds:
     <<: *level_0
     tags: [stream]
