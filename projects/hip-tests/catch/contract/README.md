@@ -42,6 +42,7 @@ The first domains are:
 - `occupancy_variable`: potential-block-size with-flags and variable-shared-memory occupancy contracts
 - `graph_capture`: stream capture lifecycle and captured memcpy graph contracts
 - `stream_capture_mode`: stream capture mode exchange and v2 capture-info contracts
+- `capture_to_graph`: capture-into-provided-graph and capture-dependency-update contracts
 - `graph_kernel`: graph kernel node contracts with tiny in-source kernels
 - `graph_event`: graph event record and wait node contracts
 - `graph_topology`: graph node, root, edge, dependency, and dependent introspection contracts

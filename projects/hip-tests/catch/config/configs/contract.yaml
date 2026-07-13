@@ -591,6 +591,15 @@ contract:
   Contract_StreamCaptureMode_GetCaptureInfoV2_NullStatus_IsRejected:
     <<: *level_0
     tags: [stream_capture_mode]
+  Contract_CaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph:
+    <<: *level_0
+    tags: [capture_to_graph]
+  Contract_CaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpectedValue:
+    <<: *level_0
+    tags: [capture_to_graph]
+  Contract_CaptureToGraph_UpdateCaptureDependencies_AddsToDependencySet:
+    <<: *level_0
+    tags: [capture_to_graph]
   Contract_GraphKernel_AddKernelNode_WritesExpectedValue:
     <<: *level_0
     tags: [graph_kernel]
