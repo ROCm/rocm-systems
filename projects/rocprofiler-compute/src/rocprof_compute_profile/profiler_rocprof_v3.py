@@ -99,7 +99,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             "-d",
             args.output_directory,
             "-o",
-            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
+            "%pid%_ps_file",
         ]
 
         if args.attach_pid:
