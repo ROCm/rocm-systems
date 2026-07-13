@@ -70,6 +70,20 @@ bool TryAddMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
   HIP_CHECK(status);
   return true;
 }
+
+// Attempts to add a driver-style memory free node for dev_ptr. Returns false if
+// the runtime path does not support driver graph memory free nodes.
+bool TryAddDrvMemFreeNode(hipGraphNode_t* node, hipGraph_t graph,
+                          const hipGraphNode_t* deps, size_t num_deps,
+                          hipDeviceptr_t dev_ptr) {
+  const hipError_t status =
+      hipDrvGraphAddMemFreeNode(node, graph, deps, num_deps, dev_ptr);
+  if (status == hipErrorNotSupported) {
+    return false;
+  }
+  HIP_CHECK(status);
+  return true;
+}
 }  // namespace
 
 HIP_TEST_CASE(Contract_GraphMemNodes_AllocNode_ReturnsDevicePtr) {
@@ -181,3 +195,89 @@ HIP_TEST_CASE(Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing) {
 
   REQUIRE(reserved_after <= reserved_before);
 }
+
+HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_ResetsHighWatermark) {
+  const int device = CurrentDevice();
+
+  uint64_t used_high = 0;
+  const hipError_t query_status =
+      hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &used_high);
+  if (query_status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("Graph memory attribute queries are not supported by this runtime path.");
+  }
+  HIP_CHECK(query_status);
+
+  // The used-memory high watermark is resettable: writing zero must be accepted
+  // (or reported unsupported), and a subsequent query must report the watermark
+  // at zero. Only the high-watermark attributes are writable.
+  uint64_t zero = 0;
+  const hipError_t set_status =
+      hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &zero);
+  if (set_status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("Setting graph memory attributes is not supported by this runtime path.");
+  }
+  HIP_CHECK(set_status);
+
+  uint64_t used_high_after = 1;
+  HIP_CHECK(
+      hipDeviceGetGraphMemAttribute(device, hipGraphMemAttrUsedMemHigh, &used_high_after));
+  REQUIRE(used_high_after == 0);
+}
+
+HIP_TEST_CASE(Contract_GraphMemNodes_SetGraphMemAttribute_CurrentAttribute_IsRejected) {
+  const int device = CurrentDevice();
+
+  // The current-usage attributes are read-only accounting values, not settable
+  // knobs. Attempting to write one must be rejected rather than silently
+  // accepted (or reported unsupported if the set path is unavailable).
+  uint64_t zero = 0;
+  const hipError_t status =
+      hipDeviceSetGraphMemAttribute(device, hipGraphMemAttrUsedMemCurrent, &zero);
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("Setting graph memory attributes is not supported by this runtime path.");
+  }
+  REQUIRE(status != hipSuccess);
+}
+
+#if HT_AMD
+HIP_TEST_CASE(Contract_GraphMemNodes_DrvFreeNode_AddsToGraph) {
+  if (!TryTrimGraphMemory()) {
+    HIP_SKIP_TEST("Graph memory trimming is not supported by this runtime path.");
+  }
+
+  hipGraph_t graph = nullptr;
+  hipGraphNode_t alloc_node = nullptr;
+  hipGraphNode_t free_node = nullptr;
+  hipMemAllocNodeParams params = CurrentDeviceAllocParams();
+
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  if (!TryAddMemAllocNode(&alloc_node, graph, &params)) {
+    HIP_CHECK(hipGraphDestroy(graph));
+    TryTrimGraphMemory();
+    HIP_SKIP_TEST("Graph memory allocation nodes are not supported by this runtime path.");
+  }
+  REQUIRE(params.dptr != nullptr);
+
+  // The driver-style free node consumes the pointer produced by the alloc node
+  // and must run after it, so the alloc node is its only dependency. The node is
+  // only added and introspected structurally; launching a graph containing a
+  // memory free node is intentionally not exercised (it aborts on some runtime
+  // paths), matching the runtime free-node contract in this domain.
+  if (!TryAddDrvMemFreeNode(&free_node, graph, &alloc_node, 1,
+                            reinterpret_cast<hipDeviceptr_t>(params.dptr))) {
+    HIP_CHECK(hipGraphDestroy(graph));
+    TryTrimGraphMemory();
+    HIP_SKIP_TEST("Driver graph memory free nodes are not supported by this runtime path.");
+  }
+  REQUIRE(free_node != nullptr);
+
+  // The added node reports the memory-free node type.
+  hipGraphNodeType type{};
+  HIP_CHECK(hipGraphNodeGetType(free_node, &type));
+  REQUIRE(type == hipGraphNodeTypeMemFree);
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  TryTrimGraphMemory();
+}
+#endif  // HT_AMD

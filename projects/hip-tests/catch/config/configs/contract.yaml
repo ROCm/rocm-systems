@@ -729,6 +729,15 @@ contract:
   Contract_GraphMemNodes_GraphMemAttribute_TrimIsNonIncreasing:
     <<: *level_0
     tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_SetGraphMemAttribute_ResetsHighWatermark:
+    <<: *level_0
+    tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_SetGraphMemAttribute_CurrentAttribute_IsRejected:
+    <<: *level_0
+    tags: [graph_mem_nodes]
+  Contract_GraphMemNodes_DrvFreeNode_AddsToGraph:
+    <<: *level_0
+    tags: [graph_mem_nodes]
   Contract_GraphGenericNode_AddMemsetNode_LaunchesExpectedValue:
     <<: *level_0
     tags: [graph_generic_node]
