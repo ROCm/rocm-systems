@@ -564,7 +564,7 @@ find_undefined_function_symbol(const std::unordered_set<object_t*>& _objects,
         SymTab::Symtab* symtab = nullptr;
         if(!SymTab::Symtab::openFile(symtab, binary_path))
         {
-            verbprintf(2, "Failed to open Symtab for: %s\n", binary_path.c_str());
+            verbprintf(1, "Failed to open Symtab for: %s\n", binary_path.c_str());
             continue;
         }
 
