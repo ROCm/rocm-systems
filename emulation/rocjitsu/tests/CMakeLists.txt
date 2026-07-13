@@ -2324,6 +2324,200 @@ if(RJ_ENABLE_HIP_TESTS)
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableOneDimensionalIdentity"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableTwoDimensionalIdentity"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentity"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationCompletes"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationCompletes"
+            NAME "ConSanMoiGfx950Test.NoCoordinateCleanIsolationSampled"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=sampled"
+                "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                # Select only the deliberately alternating target write. The
+                # preceding ticket read is synchronization machinery, not part
+                # of the cross-workgroup isolation assertion.
+                "RJ_CONSAN_MOI_SAMPLE_STRIDE=2"
+                "RJ_CONSAN_MOI_SAMPLE_OFFSET=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_clean_grid"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationSampled"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "visible_sampled=[1-9][0-9]* sampled_conflicts=0 sampled_immediate_conflicts=0"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationCompletes"
+            NAME "ConSanMoiGfx950Test.NoCoordinateCleanIsolationInlineShadow"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_clean_grid"
+                "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.NoCoordinateCleanIsolationInlineShadow"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=0 visible_diagnostics=0.*visible_exact_shadow=[1-9][0-9]*"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentity"
+            NAME "ConSanMoiGfx950Test.StableNoCoordinateIdentityRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_identity_grid"
+                "RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS=8"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentityRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto identity reader=[0-9]+ workgroups=8 multi_owner_workgroups=8"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentity"
+            NAME "ConSanMoiGfx950Test.StableNoCoordinateIdentitySampled"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=sampled"
+                "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_identity_grid"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentitySampled"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "sampled_watchpoints=[0-9]+ visible_sampled=[1-9][0-9]* sampled_conflicts=[1-9][0-9]*"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentity"
+            NAME "ConSanMoiGfx950Test.StableNoCoordinateIdentityInlineShadow"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_no_coordinate_identity_grid"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableNoCoordinateIdentityInlineShadow"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=[1-9][0-9]* visible_diagnostics=[1-9][0-9]*.*visible_exact_shadow=1"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableOneDimensionalIdentity"
+            NAME "ConSanMoiGfx950Test.StableOneDimensionalIdentityRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_1d_identity_grid"
+                "RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS=8"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableOneDimensionalIdentityRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto identity reader=[0-9]+ workgroups=8 multi_owner_workgroups=8"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableTwoDimensionalIdentity"
+            NAME "ConSanMoiGfx950Test.StableTwoDimensionalIdentityRecordReplay"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=record_replay"
+                "RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_2d_identity_grid"
+                "RJ_CONSAN_TEST_REQUIRE_IDENTITY_GROUPS=8"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableTwoDimensionalIdentityRecordReplay"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "auto identity reader=[0-9]+ workgroups=8 multi_owner_workgroups=8"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
             "ConSanMoiGfx950Test.StableThreeDimensionalIdentity"
             NAME "ConSanMoiGfx950Test.StableThreeDimensionalIdentityRecordReplay"
             TIMEOUT 30
@@ -2344,6 +2538,57 @@ if(RJ_ENABLE_HIP_TESTS)
             PROPERTIES
                 PASS_REGULAR_EXPRESSION
                     "auto identity reader=[0-9]+ workgroups=8 multi_owner_workgroups=8"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableTwoDimensionalIdentity"
+            NAME "ConSanMoiGfx950Test.StableTwoDimensionalIdentitySampled"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=sampled"
+                "RJ_CONSAN_MOI_SAMPLED_CHECK=1"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_2d_identity_grid"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableTwoDimensionalIdentitySampled"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "sampled_watchpoints=[0-9]+ visible_sampled=[1-9][0-9]* sampled_conflicts=[1-9][0-9]*"
+        )
+        rj_add_hip_test_case(
+            hip_consan_moi_gfx950_test
+            "ConSanMoiGfx950Test.StableOneDimensionalIdentity"
+            NAME "ConSanMoiGfx950Test.StableOneDimensionalIdentityInlineShadow"
+            TIMEOUT 30
+            ENVIRONMENT
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_FLAVOR=moi"
+                "RJ_CONSAN_MOI_ENGINE=inline_shadow"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_X=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Y=2"
+                "RJ_CONSAN_MOI_WORKGROUP_EXTENT_Z=2"
+                "RJ_CONSAN_TEST_KERNEL_FILTER=gfx950_moi_1d_identity_grid"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_REQUIRE_DIAGNOSTICS=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MAX_PATCHES=2"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+        )
+        set_tests_properties(
+            "ConSanMoiGfx950Test.StableOneDimensionalIdentityInlineShadow"
+            PROPERTIES
+                PASS_REGULAR_EXPRESSION
+                    "diagnostics=[1-9][0-9]* visible_diagnostics=[1-9][0-9]*.*visible_exact_shadow=1"
         )
         rj_add_hip_test_case(
             hip_consan_moi_gfx950_test

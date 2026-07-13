@@ -162,6 +162,129 @@ __global__ __launch_bounds__(128) void gfx950_moi_identity_grid(uint32_t *out) {
     out[group] = 0x95050000u | group;
 }
 
+__global__ __launch_bounds__(128) void gfx950_moi_1d_identity_grid(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t local = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t group = static_cast<uint32_t>(blockIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (local == 0u) {
+    const uint32_t value = 0x95100000u | group;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 64u) {
+    const uint32_t value = 0x95100040u | group;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 0u)
+    out[group] = 0x95100000u | group;
+}
+
+__global__ __launch_bounds__(128) void gfx950_moi_2d_identity_grid(uint32_t *out) {
+  __shared__ uint32_t lds[1];
+  const uint32_t local = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t group = static_cast<uint32_t>(blockIdx.x) +
+                         static_cast<uint32_t>(gridDim.x) * static_cast<uint32_t>(blockIdx.y);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (local == 0u) {
+    const uint32_t value = 0x95200000u | group;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 64u) {
+    const uint32_t value = 0x95200040u | group;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 0u)
+    out[group] = 0x95200000u | group;
+}
+
+__global__
+__launch_bounds__(128) void gfx950_moi_no_coordinate_identity_grid(uint32_t *completion_count) {
+  __shared__ uint32_t lds[1];
+  const uint32_t local = static_cast<uint32_t>(threadIdx.x);
+  const uint32_t address = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[0]) & 0xffffu);
+  if (local == 0u) {
+    const uint32_t value = 0x95300000u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 64u) {
+    const uint32_t value = 0x95300040u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+  if (local == 0u)
+    atomicAdd(completion_count, 1u);
+}
+
+// Deliberately does not reference blockIdx or gridDim. The original descriptor
+// therefore has no semantic need for any workgroup-ID system SGPR, while the
+// launch still contains eight independent workgroups. Lane zero obtains a
+// unique global ticket and broadcasts it with LDS atomics, which ConSan
+// intentionally excludes from ordinary access instrumentation. Ticket parity
+// selects either Wave64 owner zero or owner one to perform the sole ordinary
+// LDS write in that group. Correct workgroup isolation is clean; substituting
+// zero for every workgroup coordinate aliases alternating owners and reports a
+// false conflict.
+__global__
+__launch_bounds__(128) void gfx950_moi_no_coordinate_clean_grid(uint32_t *completion_count) {
+  __shared__ uint32_t ticket_slot;
+  __shared__ uint32_t target[1];
+  const uint32_t local = static_cast<uint32_t>(threadIdx.x);
+  if (local == 0u)
+    atomicExch(&ticket_slot, atomicAdd(completion_count, 1u));
+  __syncthreads();
+  if (local == 0u || local == 64u) {
+    const uint32_t ticket = atomicAdd(&ticket_slot, 0u);
+    const uint32_t owner = local >> 6u;
+    if ((ticket & 1u) != owner)
+      return;
+    const uint32_t address =
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&target[0]) & 0xffffu);
+    const uint32_t value = 0x95310000u;
+    asm volatile("ds_write_b32 %0, %1\n\t"
+                 ".rept 128\n\t"
+                 "s_nop 0\n\t"
+                 ".endr\n\t"
+                 :
+                 : "v"(address), "v"(value)
+                 : "memory");
+  }
+}
+
 __global__ __launch_bounds__(128) void gfx950_moi_two_wave_race(uint32_t *out) {
   __shared__ uint32_t lds[1];
   const uint32_t tid = static_cast<uint32_t>(threadIdx.x);
@@ -751,6 +874,66 @@ TEST(ConSanMoiGfx950Test, StableThreeDimensionalIdentity) {
   HIP_ASSERT(hipFree(device_out));
   for (uint32_t group = 0; group < kGroups; ++group)
     EXPECT_EQ(out[group], 0x95050000u | group) << "group=" << group;
+}
+
+TEST(ConSanMoiGfx950Test, StableOneDimensionalIdentity) {
+  constexpr uint32_t kGroups = 8;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kGroups * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kGroups * sizeof(uint32_t)));
+  gfx950_moi_1d_identity_grid<<<dim3(kGroups, 1, 1), 128>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kGroups);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t group = 0; group < kGroups; ++group)
+    EXPECT_EQ(out[group], 0x95100000u | group) << "group=" << group;
+}
+
+TEST(ConSanMoiGfx950Test, StableTwoDimensionalIdentity) {
+  constexpr uint32_t kGroups = 8;
+  uint32_t *device_out = nullptr;
+  HIP_ASSERT(hipMalloc(&device_out, kGroups * sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_out, 0, kGroups * sizeof(uint32_t)));
+  gfx950_moi_2d_identity_grid<<<dim3(4, 2, 1), 128>>>(device_out);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  std::vector<uint32_t> out(kGroups);
+  HIP_ASSERT(
+      hipMemcpy(out.data(), device_out, out.size() * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_out));
+  for (uint32_t group = 0; group < kGroups; ++group)
+    EXPECT_EQ(out[group], 0x95200000u | group) << "group=" << group;
+}
+
+TEST(ConSanMoiGfx950Test, StableNoCoordinateIdentity) {
+  uint32_t *device_completion_count = nullptr;
+  HIP_ASSERT(hipMalloc(&device_completion_count, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_completion_count, 0, sizeof(uint32_t)));
+  gfx950_moi_no_coordinate_identity_grid<<<dim3(2, 2, 2), 128>>>(device_completion_count);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t completion_count = 0;
+  HIP_ASSERT(hipMemcpy(&completion_count, device_completion_count, sizeof(completion_count),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_completion_count));
+  EXPECT_EQ(completion_count, 8u);
+}
+
+TEST(ConSanMoiGfx950Test, NoCoordinateCleanIsolationCompletes) {
+  uint32_t *device_completion_count = nullptr;
+  HIP_ASSERT(hipMalloc(&device_completion_count, sizeof(uint32_t)));
+  HIP_ASSERT(hipMemset(device_completion_count, 0, sizeof(uint32_t)));
+  gfx950_moi_no_coordinate_clean_grid<<<dim3(2, 2, 2), 128>>>(device_completion_count);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+  uint32_t completion_count = 0;
+  HIP_ASSERT(hipMemcpy(&completion_count, device_completion_count, sizeof(completion_count),
+                       hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(device_completion_count));
+  EXPECT_EQ(completion_count, 8u);
 }
 
 TEST(ConSanMoiGfx950Test, TwoWaveRaceCompletes) {
