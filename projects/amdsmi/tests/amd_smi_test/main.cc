@@ -282,6 +282,7 @@ TEST(GpuFunctionalReadWrite, TestComputePartitionReadWrite) {
 }
 
 TEST(GpuFunctionalReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestComputePartitionMemAllocModeReadWrite tst;
   RunGenericTest(&tst);
@@ -308,6 +309,7 @@ TEST(GpuFunctionalReadOnly, TestGPUCacheRead) {
 
 TEST(GpuFunctionalReadWrite, TestMemoryReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
