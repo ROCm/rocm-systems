@@ -65,6 +65,7 @@ inline std::string
 join_va(Args&&... args)
 {
     std::ostringstream oss;
+    oss << std::boolalpha;  // render bool args as "true"/"false", not 1/0
     const char*        sep = "";
     ((oss << sep << args, sep = " "), ...);
     return oss.str();

@@ -44,6 +44,7 @@ std::string
 format_args(Args&&... args)
 {
     std::ostringstream oss;
+    oss << std::boolalpha;  // render bool args as "true"/"false", not 1/0
     const char*        separator = "";
 
     auto append_arg = [&oss, &separator](const auto& arg) {
