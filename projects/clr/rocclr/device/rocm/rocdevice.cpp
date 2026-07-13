@@ -1955,6 +1955,11 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
 // ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
+  // validateOnly never started a session; nothing to dissociate.
+  if (validateOnly) {
+    return true;
+  }
+
   bool success = true;
 
 #ifdef _WIN32
@@ -1974,9 +1979,7 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
     void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
     if (glDevice != nullptr) {
       if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
-        if (validateOnly) {
-          LogWarning("Failed GlInterop::glDissociate()");
-        }
+        LogWarning("Failed GlInterop::glDissociate()");
         success = false;
       }
     }

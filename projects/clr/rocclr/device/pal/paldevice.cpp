@@ -1942,13 +1942,16 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
     return true;
   }
 
+  // validateOnly never started a session; nothing to dissociate.
+  if (validateOnly) {
+    return true;
+  }
+
   void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
   if (glDevice != nullptr) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }
