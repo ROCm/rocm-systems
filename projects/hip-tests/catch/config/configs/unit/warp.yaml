@@ -27,6 +27,9 @@ warp:
   Unit_hipShflSync:
     <<: *level_2
     tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipWarpSync_32BitMask:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
   Unit_hipVoteSync_Any:
     <<: *level_2
     tags: [deviceLib, vote]

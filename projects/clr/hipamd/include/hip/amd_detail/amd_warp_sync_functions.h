@@ -82,7 +82,7 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
   union {
     unsigned long long l;
     T d;
-  } u;
+  } u = {};
   u.d = val;
   // NOTE: The builtin returns int, so we first cast it to unsigned int and only
   // then extend it to 64 bits.
@@ -98,11 +98,30 @@ template <typename T> __device__ inline T __hip_readfirstlane(T val) {
   return u.d;
 }
 
-// When compiling for wave32 mode, ignore the upper half of the 64-bit mask.
-#define __hip_adjust_mask_for_wave32(MASK)                                                         \
-  do {                                                                                             \
-    if (static_cast<int>(warpSize) == 32) MASK &= 0xFFFFFFFF;                                      \
-  } while (0)
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx1250__)
+#define __hip_sync_mask_type_valid(MaskT)                                                          \
+  (__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8)
+#else
+#define __hip_sync_mask_type_valid(MaskT)                                                          \
+  (__hip_internal::is_integral<MaskT>::value && (sizeof(MaskT) == 4 || sizeof(MaskT) == 8))
+#endif
+
+template <typename MaskT> __device__ inline unsigned long long __hip_prepare_sync_mask(MaskT mask) {
+  unsigned long long mask64;
+  if constexpr (sizeof(MaskT) == 4) {
+    mask64 = static_cast<unsigned long long>(static_cast<unsigned int>(mask));
+  } else {
+    mask64 = static_cast<unsigned long long>(mask);
+  }
+
+  // When compiling/running in wave32 mode, ignore the upper half of the 64-bit mask.
+  if (static_cast<int>(warpSize) == 32) mask64 &= 0xFFFFFFFFull;
+  return mask64;
+}
+
+#define __HIP_SYNC_MASK_ERROR                                                                      \
+  "The mask must be a 64-bit integer (or a 32-bit integer on wave32 targets). "                    \
+  "Implicitly promoting a smaller integer is almost always an error."
 
 // We use a macro to expand each builtin into a waterfall that implements the
 // mask semantics:
@@ -174,10 +193,9 @@ __device__ inline void __syncwarp() {
 }
 
 template <typename MaskT> __device__ inline void __syncwarp(MaskT mask) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_check_mask(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
   return __syncwarp();
 }
 
@@ -185,28 +203,24 @@ template <typename MaskT> __device__ inline void __syncwarp(MaskT mask) {
 
 template <typename MaskT>
 __device__ inline unsigned long long __ballot_sync(MaskT mask, int predicate) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
-  return __ballot(predicate) & mask;
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
+  return __ballot(predicate) & mask64;
 }
 
 template <typename MaskT> __device__ inline int __all_sync(MaskT mask, int predicate) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  return __ballot_sync(mask, predicate) == mask;
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
+  return (__ballot(predicate) & mask64) == mask64;
 }
 
 template <typename MaskT> __device__ inline int __any_sync(MaskT mask, int predicate) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  return __ballot_sync(mask, predicate) != 0;
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
+  return (__ballot(predicate) & mask64) != 0;
 }
 
 // __match_any, __match_all and sync variants
@@ -235,12 +249,10 @@ template <typename T> __device__ inline unsigned long long __match_any(T value) 
 
 template <typename MaskT, typename T>
 __device__ inline unsigned long long __match_any_sync(MaskT mask, T value) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
-  return __match_any(value) & mask;
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
+  return __match_any(value) & mask64;
 }
 
 template <typename T> __device__ inline unsigned long long __match_all(T value, int* pred) {
@@ -261,12 +273,10 @@ template <typename T> __device__ inline unsigned long long __match_all(T value, 
 
 template <typename MaskT, typename T>
 __device__ inline unsigned long long __match_all_sync(MaskT mask, T value, int* pred) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  MaskT retval = 0;
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_do_sync(retval, __match_all, mask, value, pred);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long retval = 0;
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_do_sync(retval, __match_all, mask64, value, pred);
   return retval;
 }
 
@@ -274,41 +284,33 @@ __device__ inline unsigned long long __match_all_sync(MaskT mask, T value, int* 
 
 template <typename MaskT, typename T>
 __device__ inline T __shfl_sync(MaskT mask, MAYBE_UNDEF T var, int srcLane, int width = warpSize) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
   return __shfl(var, srcLane, width);
 }
 
 template <typename MaskT, typename T>
 __device__ inline T __shfl_up_sync(MaskT mask, MAYBE_UNDEF T var, unsigned int delta, int width = warpSize) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
   return __shfl_up(var, delta, width);
 }
 
 template <typename MaskT, typename T>
 __device__ inline T __shfl_down_sync(MaskT mask, MAYBE_UNDEF T var, unsigned int delta, int width = warpSize) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
   return __shfl_down(var, delta, width);
 }
 
 template <typename MaskT, typename T>
 __device__ inline T __shfl_xor_sync(MaskT mask, MAYBE_UNDEF T var, int laneMask, int width = warpSize) {
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
-  __hip_check_mask(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  __hip_check_mask(mask64);
   return __shfl_xor(var, laneMask, width);
 }
 
@@ -322,26 +324,25 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   static constexpr int kNumOfPermutes = (sizeof(T) < 4)?
                                         1 :
                                         (sizeof(T) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
-  static constexpr auto kMaskNumBits = sizeof(MaskT) * 8;
-  static constexpr auto alignment = alignof(T) <= 4? 4 : alignof(T);
-  static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
-                "The mask must be a 64-bit integer. "
-                "Implicitly promoting a smaller integer is almost always an error.");
-  __hip_adjust_mask_for_wave32(mask);
+  static_assert(__hip_sync_mask_type_valid(MaskT), __HIP_SYNC_MASK_ERROR);
+  unsigned long long mask64 = __hip_prepare_sync_mask(mask);
+  static constexpr auto kMaskNumBits = sizeof(unsigned long long) * 8;
   unsigned int laneId;
   unsigned int maskIdx;
   // next bit to aggregate with
   int nextBit;
 
+  __hip_check_mask(mask64);
+
   // if doing the binary reduction tree, this will increase by two in every iteration
   int modulo = 1;
-  int leadingZeroes = __clzll(mask);
+  int leadingZeroes = __clzll(mask64);
   int firstLane;
   int lastLane = kMaskNumBits - leadingZeroes - 1;
   int maskNumBits;
   int numIterations;
-
   // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
+  static constexpr auto alignment = alignof(T) <= 4? 4 : alignof(T);
   using ResultType = typename __hip_internal::conditional<
                        isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2),
                        permuteType, permuteType[kNumOfPermutes]>::type;
@@ -356,8 +357,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     }
   };
 
-  __hip_check_mask(mask);
-  maskNumBits = __popcll(mask);
+  maskNumBits = __popcll(mask64);
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
                      // using -O0
@@ -369,7 +369,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   }
 #endif
 
-  firstLane = __builtin_ctzll(mask);
+  firstLane = __builtin_ctzll(mask64);
   laneId = __lane_id();
   nextBit = laneId;
   // the number of iterations needs to be at least log2(number of bits on)
@@ -379,14 +379,14 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     // the number of bits in the mask is a power of 2
     numIterations -= 1;
 
-  maskIdx = __popcll(((1ul << laneId) - 1) & mask);
-  mask >>= laneId;
-  mask >>= 1ul;
+  maskIdx = __popcll(((1ull << laneId) - 1) & mask64);
+  mask64 >>= laneId;
+  mask64 >>= 1ull;
 
   if constexpr (isPrimitiveType && (sizeof(T) == 2 || sizeof(T) == 4)) { 
     result = val;
   } else {
-    __builtin_memcpy(result, &val, sizeof(T));
+    __builtin_memcpy(result, &val, sizeof(result));
   }
 
   // add the values from the lanes using a reduction tree (first the threads with even-numbered
@@ -403,8 +403,8 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
       // find the position to aggregate with; although we could just call fns64() that will probably
       // be very slow when called multiple times in this for loop; this is equivalent
       for (int i = 0; i < increment; i++) {
-        next = __builtin_ctzll(mask) + 1;
-        mask >>= next;
+        next = __builtin_ctzll(mask64) + 1;
+        mask64 >>= next;
         nextBit += next;
       }
     }
@@ -707,9 +707,11 @@ __device__ inline unsigned long long __reduce_xor_sync(MaskT mask, unsigned long
 
 #undef __hip_do_sync
 #undef __hip_check_mask
-#undef __hip_adjust_mask_for_wave32
 
 #endif  // HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
+
+#undef __hip_sync_mask_type_valid
+#undef __HIP_SYNC_MASK_ERROR
 
 #pragma pop_macro("MAYBE_UNDEF")
 
