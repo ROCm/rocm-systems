@@ -105,7 +105,7 @@ register override does not guess that every descriptor owns it.
 
 Persistent inline-shadow state follows the same ownership rule. A shared
 helper either uses one owner/epoch VGPR representation for every owner or one
-common private-epoch layout. Workitem-ID-derived private ownership additionally
+common private owner/epoch layout. Workitem-ID-derived private ownership additionally
 requires all owners to agree on wave size, because wave32 and wave64 use
 different owner shifts.
 
@@ -137,10 +137,10 @@ For shared text, the DBI zone begins at
 shared save/fill instructions are therefore valid for every owner, and all
 owners grow to the same sufficient extent.
 
-When inline shadow falls back to a private epoch, the persistent epoch dword
-is placed first. Ephemeral access/prologue/barrier spill leases begin in a
-separately aligned zone above it, preventing persistent and temporary state
-from overlapping.
+When inline shadow falls back to private state, the persistent epoch dword is
+placed first and its owner dword immediately follows. Ephemeral
+access/prologue/barrier spill leases begin in a separately aligned zone above
+both, preventing persistent and temporary state from overlapping.
 
 On gfx950, the address-free FLAT_SCRATCH encoding has a signed 13-bit byte
 offset. ConSan uses only non-negative, dword-aligned offsets, so the last
@@ -208,9 +208,10 @@ Two CDNA4 descriptor details participate in the same transaction. First,
 ordinary VGPR allocation and persistent identity placement must remain below a
 nonzero `COMPUTE_PGM_RSRC3.ACCUM_OFFSET`; ConSan does not spill AccVGPRs.
 Second, kernarg preloading can expose two hardware entries exactly 256 bytes
-apart. Owner/epoch and private-state redirection emit a corresponding pair of
-entry stubs and return each to its matching original path. A single redirected
-stub is not a valid substitute for both firmware entry paths.
+apart. Persistent-VGPR owner/epoch, five-SGPR scalar identity, and private
+owner/epoch entry redirection each emit a corresponding pair of entry stubs
+and return each to its matching original path. A single redirected stub is not
+a valid substitute for both firmware entry paths.
 
 ## Current support boundary
 
@@ -220,9 +221,9 @@ The committed R1 boundary is:
 | --- | --- |
 | Static record/replay access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
 | Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
-| Inline-shadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private-epoch fallback. |
+| Inline-shadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private owner/epoch fallback. |
 | Reachable shared access helpers | One all-owner-compatible dead, fresh, or common spill plan. |
-| Private-epoch entry/barrier temporaries | Saved and restored through the target-dispatched gfx1201/gfx950 private path. |
+| Private owner/epoch entry/barrier temporaries | Saved and restored through the target-dispatched gfx1201/gfx950 private path. |
 | Dynamic record, barrier, diagnostic, and atomic scalar state | Automatic descriptor-backed SGPR windows with EXEC/VCC/SCC preservation; gfx950 preserves full wave64 VCC while RDNA4 SuperCollider compare paths need `VCC_LO`. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans; explicit register variables are debug overrides. |
 | SGPR spilling | Not implemented; full-file pressure fails closed. |
@@ -265,13 +266,14 @@ The focused CPU/synthetic suite is:
 
 ```sh
 ./emulation/rocjitsu/build/tests/rocjitsu_tests \
-  --gtest_filter='ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
+  '--gtest_filter=ConSan.*:ConSanMoi.*:ConSanResourcePlan.*:DbiPatchPlacementPlanner.*:TrampolineBuilder.*'
 ```
 
-The current focused ConSan result is 242/242. It covers allocation precedence,
-forbidden ranges, rollback, gfx1201 and gfx950 encodings and waits,
-descriptor/metadata growth, zero-private kernels, dynamic-stack rejection,
-shared-owner dead/fresh/spill layouts, mixed-wave rejection, persistent state,
+At checkpoint commit `324f39b022`, the authoritative focused ConSan result is
+258/258. It covers allocation precedence, forbidden ranges, rollback, gfx1201
+and gfx950 encodings and waits, descriptor/metadata growth, zero-private
+kernels, dynamic-stack rejection, shared-owner dead/fresh/spill layouts,
+mixed-wave rejection, persistent state and workgroup partitioning,
 barrier/atomic rollout, bounded summaries, and staged text-growth descriptor
 updates.
 
@@ -279,18 +281,18 @@ The live target-aware tier includes forced-spill tests whose victim VGPRs
 remain live across instrumentation:
 
 ```sh
-ctest -j8 --output-on-failure \
-  -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.'
+ctest --test-dir ./emulation/rocjitsu/build \
+  -R '^ConSan(SpillHipTest\.Gfx950|LdsGfx950Test\.|MoiGfx950Test\.)' \
+  --parallel 8 --timeout 30 --output-on-failure
 ```
 
-The established gfx1201 resource/behavior result is 29/29. gfx950 focused spill
-and engine tiers also pass; its broad IREE qualification remains in progress.
-Notable controls include record/replay and sampled forced-spill preservation,
-zero-to-nonzero private dispatch backing, private-epoch barriers, inline
-diagnostics, and atomic handoff behavior, all without register-number
-configuration. The established gfx1201 independent hip-moi control suite is
-189/189, and all three engines complete its 209-test IREE compatibility sweep.
-See
+This selects the registered gfx950 focused live tier; add `-N` to enumerate it
+without execution. Record a result only after running it on the target. Notable
+controls include record/replay and sampled forced-spill preservation,
+zero-to-nonzero private dispatch backing, private owner/epoch barriers,
+omitted-coordinate identity, inline diagnostics, and atomic handoff behavior,
+all without register-number configuration. Historical gfx1201 results do not
+establish a gfx950 result. See
 [LOCAL_TESTING.md](LOCAL_TESTING.md) for workspace paths and the broader test
 ladder.
 
@@ -310,7 +312,11 @@ ladder.
 - `tests/patch/consan_test.cpp`: synthetic plan, encoding, patch-shape, and
   descriptor-isolation coverage.
 - `tests/dbi/hip_consan_moi_test.hip`: live semantic and spill-preservation
-  tests.
+  tests for gfx1201.
+- `tests/dbi/hip_consan_spill_gfx950_test.hip`: gfx950 native scratch spill,
+  dispatch-private growth, and partial-EXEC controls.
+- `tests/dbi/hip_consan_moi_gfx950_test.hip`: gfx950 identity, semantic,
+  omitted-coordinate, engine, and spill-preservation controls.
 
 For the overall sanitizer architecture, continue with [DESIGN.md](DESIGN.md).
 For user-facing controls, see [USAGE.md](USAGE.md) and

@@ -69,10 +69,11 @@ s_waitcnt vmcnt(0)                         BF8C0F70
 
 The FLAT_SCRATCH offset is a signed 13-bit byte field. ConSan uses only
 non-negative dword-aligned slots, so the last accepted slot begins at 4092 and
-the first rejected private extent is 4096 bytes. Both accesses are predicated
-by EXEC. Empty EXEC performs no lane access; a partial EXEC saves and restores
-only active lanes. A `VM_CNT=0` wait follows the stores before any victim VGPR
-is clobbered and follows the loads before guest use.
+a complete per-lane private extent of 4096 bytes is valid. Planning rejects
+any extent greater than 4096 bytes. Both accesses are predicated by EXEC.
+Empty EXEC performs no lane access; a partial EXEC saves and restores only
+active lanes. A `VM_CNT=0` wait follows the stores before any victim VGPR is
+clobbered and follows the loads before guest use.
 
 CPU tests round-trip the words through the CDNA4 decoder and preserve the
 existing gfx1201 bytes. `ConSanSpillHipTest.Gfx950VgprScratchRoundTrip` and
@@ -88,18 +89,25 @@ zero in the focused compute probes. The ISA manual also explicitly warns that
 `HW_ID` reports physical placement which may change during a wave's lifetime.
 Neither source participates in standard ConSan correctness.
 
-ConSan instead performs a reversible AMDHSA entry transaction. It enables the
-standard AQL dispatch-pointer user SGPR pair, snapshots the descriptor-selected
-workgroup X/Y/Z system SGPRs into three persistent VGPRs before guest code can
+ConSan instead performs a reversible AMDHSA entry transaction. The patched ABI
+requests the standard AQL dispatch-pointer user SGPR pair and all three
+workgroup X/Y/Z system SGPRs, even when the original guest descriptor omitted
+one or more coordinates. The entry prologue snapshots those values into the
+persistent representation selected by the resource plan before guest code can
 reuse them, and reads packed 16-bit workgroup X/Y dimensions from the dispatch
 packet. From AMDHSA's packed workitem VGPR0 it computes
 `x + size_x * (y + size_y * z)`, divides by the wave64 width, initializes the
-persistent owner/epoch pair, and then shifts every original ABI SGPR back to
-its pre-instrumentation number before branching to the original entry.
+persistent owner/epoch pair, and then restores the original guest-visible
+enable mask, SGPR order, and SGPR values before branching to the original
+entry.
 
 LLVM-matched SMEM and VOP3 fixtures cover the dispatch load and multiply-add
-encodings. A synthetic descriptor test covers dispatch-pointer insertion,
-system-SGPR snapshots, original-ABI restoration, and persistent record inputs.
-The guarded `StableThreeDimensionalIdentityRecordReplay` hardware test launches
-eight 3D workgroups with two waves each and requires all eight distinct
-workgroup keys and the exact owner set `{0,1}` in every group.
+encodings. Synthetic descriptor fixtures cover dispatch-pointer insertion,
+all-coordinate snapshots for originally omitted coordinate masks, original-ABI
+restoration, and persistent record inputs. The guarded
+`StableNoCoordinateIdentityRecordReplay` and
+`NoCoordinateCleanIsolationSampled`/`NoCoordinateCleanIsolationInlineShadow`
+rows provide the corresponding live omitted-coordinate gates. The separate
+guarded `StableThreeDimensionalIdentityRecordReplay` test launches eight 3D
+workgroups with two waves each and requires all eight distinct workgroup keys
+and the exact owner set `{0,1}` in every group.
