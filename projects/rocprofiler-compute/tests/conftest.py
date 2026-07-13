@@ -245,6 +245,8 @@ def binary_handler_profile_rocprof_compute(request):
         num_ranks: Number of MPI ranks (1 = no MPI, >1 = use mpirun).
         capture_output: If True, capture stdout/stderr and return
             (returncode, stdout, stderr) tuple instead of just returncode.
+        stream: If True, echo child output line by line as it is produced
+            (requires capture_output).
 
     Returns:
         If capture_output is False: returncode (int)

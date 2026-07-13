@@ -239,34 +239,34 @@ def strip_ansi(s: str) -> str:
     return ansi_escape.sub("", s)
 
 
+def _tee(pipe, sink, out) -> None:
+    """Echo each line from pipe to sink while accumulating it in out."""
+    with pipe:
+        for line in pipe:
+            print(line, end="", file=sink)
+            out.append(line)
+
+
 def run_subprocess(
-    command, capture_output=False, stream=False, text=True
+    command, capture_output=False, stream=False
 ) -> subprocess.CompletedProcess:
-    """Run command and return a CompletedProcess.
+    """Run command in text mode and return a CompletedProcess.
 
     capture_output: capture stdout and stderr onto the returned object.
     stream: echo output line by line as the child produces it (requires
         capture_output); otherwise captured output is printed once at the end.
-    text: decode output as text rather than bytes.
     """
     if not capture_output:
-        return subprocess.run(command, text=text)
+        return subprocess.run(command, text=True)
 
     if not stream:
         # Capture everything, then echo it in one shot after the child exits.
-        process = subprocess.run(command, text=text, capture_output=True)
+        process = subprocess.run(command, text=True, capture_output=True)
         if process.stdout:
             print(process.stdout, end="")
         if process.stderr:
             print(process.stderr, end="", file=sys.stderr)
         return process
-
-    # Echo each line as it arrives while accumulating it for the return value.
-    def _tee(pipe, sink, out):
-        with pipe:
-            for line in pipe:
-                print(line, end="", file=sink)
-                out.append(line)
 
     # Read each pipe on its own thread; reading serially can deadlock if one
     # fills its buffer while we block on the other.
@@ -274,7 +274,7 @@ def run_subprocess(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=text,
+        text=True,
         bufsize=1,
     )
     out_buf, err_buf = [], []

@@ -42,7 +42,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -108,7 +107,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -173,7 +171,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
@@ -238,7 +235,6 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_pc_sampling
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
     labels:
