@@ -118,6 +118,23 @@ table AmdgpuConfig {
   num_gpus: uint32 = 1;          // Number of simulated GPU instances.
 }
 
+/// DBT guest-GPU discovery mode.
+///
+/// When enabled, the KFD interposer does not start the simulated VM. Instead it
+/// forwards real host-GPU KFD ioctls to /dev/kfd and appends one synthetic guest
+/// GPU to the topology seen by ROCR. HSA hooks then map execution-facing calls
+/// from the guest agent to the host agent and translate guest code objects to
+/// host code objects before loading them.
+table DbtGuestConfig {
+  enabled: bool = false;          // Enables GuestKfd discovery mode.
+  guest_isa: string;              // Guest ISA advertised by the synthetic agent, e.g. "gfx950".
+  host_isa: string;               // Host ISA used for execution and DBT output, e.g. "gfx942".
+  host_gpu_id: uint32 = 0;        // Preferred host KFD topology gpu_id, not HIP ordinal/node id; 0 matches topology to host_isa.
+  log_level: int32 = 0;           // DBT hook logging: 0 off, 1 info, 2 verbose, 3 debug.
+  signal_backtrace: bool = false; // Install a best-effort crash backtrace handler in the HSA hook.
+  guest_device: KfdDeviceInfo;    // Synthetic guest KFD/sysfs identity appended to host topology.
+}
+
 /// A dispatch packet describing a kernel launch.
 table DispatchConfig {
   kernel_entry_pc: uint64;          // Byte address of kernel entry point.
@@ -200,8 +217,9 @@ table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
   num_threads: uint32;           // Number of simulation threads (partitions).
   exec_mode: string;             // Execution mode: "functional" (default) or "clocked".
-  vm: VirtualMachineConfig;      // Virtual machine hardware model.
-  topology: TopologyDef;         // Declarative topology.
+  vm: VirtualMachineConfig;      // Virtual machine hardware model. Omit for dbt_guest-only configs.
+  topology: TopologyDef;         // Declarative topology. Omit for dbt_guest-only configs.
+  dbt_guest: DbtGuestConfig;     // Optional guest-GPU DBT interposition mode.
 }
 
 root_type SimulationConfig;

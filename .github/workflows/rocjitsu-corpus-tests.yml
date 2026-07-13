@@ -147,6 +147,7 @@ jobs:
             "LoggingTest\.dispatch_logged"
             "ProfiledPluginTest\.hook_profile_output"
             "CvtNarrow\.AllTests"
+            "InterposerTest\..*"
             "RaceTest\..*"
           )
 
