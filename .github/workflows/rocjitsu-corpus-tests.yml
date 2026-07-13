@@ -232,7 +232,7 @@ jobs:
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
               --timeout 1200 \
-              --ctest-jobs 16 \
+              --ctest-jobs 1 \
               --ctest-timeout 200; then
               corpus_status=1
             fi
