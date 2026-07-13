@@ -10,26 +10,30 @@ recommended mode for anyone trying the current snapshot. The MOI flavor
 currently has a `record_replay` engine with dynamic access records,
 experimental barrier records, HSA-tool-owned report buffers, host-side
 exact-shadow replay, host-side release/acquire atomic modeling, and a narrow
-experimental DBI atomic-record patch for selected RDNA4 no-SADDR
+experimental DBI atomic-record patch for selected RDNA4 and CDNA4 no-SADDR
 `flat_atomic*` instructions. It also has a first-class `sampled` engine whose
 current implementation can publish compact sampled watchpoint entries directly
 from DBI probes, without first writing full access records. Its
 `inline_shadow` engine can also publish exact-shadow entries directly from
 decoded native LDS load/store cell ranges and emit a compact inline diagnostic
 for a prior non-empty,
-different-owner conflict. ConSan is instrumentation-only on the local RDNA4 `gfx1201`
-device; it is not meant to translate the code object to another architecture.
+different-owner conflict. ConSan emits native instrumentation for RDNA4
+`gfx1201` and CDNA4 `gfx950`; it does not translate code objects between
+architectures. gfx950 focused and selected-workload tiers are qualified, while
+its broad compatibility sweep is still in progress.
 
 ## Shortest Useful Snapshot Run
 
 For a colleague-facing smoke run, start with SuperCollider mode:
 
 ```sh
-export ROCJITSU_BUILD_DIR=/path/to/rocm-systems/emulation/rocjitsu/build
-export ROCM_DIST_DIR=/path/to/rocm
+export WORKSPACE_ROOT=/tmp/xx
+export ROCM_SYSTEMS_DIR="$WORKSPACE_ROOT/TheRock/rocm-systems"
+export ROCJITSU_BUILD_DIR="$ROCM_SYSTEMS_DIR/emulation/rocjitsu/build"
+export ROCM_DIST_DIR="$WORKSPACE_ROOT/TheRock/build/dist/rocm"
 
 export HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
-export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib"
 export RJ_CONSAN_FLAVOR=supercollider
 export RJ_CONSAN_LOG=1
 export RJ_CONSAN_DELAY_MODE=sleep
@@ -78,11 +82,37 @@ emulation/rocjitsu/build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.s
 The commands below assume these paths are set for the local checkout/builds:
 
 ```sh
-export ROCJITSU_BUILD_DIR=/path/to/rocm-systems/emulation/rocjitsu/build
-export HIP_MOI_BUILD_DIR=/path/to/hip-moi-build
-export IREE_BUILD_DIR=/path/to/iree-build
-export ROCM_DIST_DIR=/path/to/rocm
+export WORKSPACE_ROOT=/tmp/xx
+export ROCM_SYSTEMS_DIR="$WORKSPACE_ROOT/TheRock/rocm-systems"
+export ROCJITSU_SOURCE_DIR="$ROCM_SYSTEMS_DIR/emulation/rocjitsu"
+export ROCJITSU_BUILD_DIR="$ROCJITSU_SOURCE_DIR/build"
+export HIP_MOI_BUILD_DIR="$WORKSPACE_ROOT/hip-moi-build"
+export IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build"
+export ROCM_DIST_DIR="$WORKSPACE_ROOT/TheRock/build/dist/rocm"
+export RJ_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
 ```
+
+These defaults match [LOCAL_TESTING.md](LOCAL_TESTING.md). If the workspace
+uses the sibling `TheRock-build` layout, set `ROCM_DIST_DIR` to
+`$WORKSPACE_ROOT/TheRock-build/dist/rocm` instead. Runtime tests must use this
+workspace distribution; do not mix libraries from another ROCm installation.
+
+## gfx950 Architecture Notes
+
+gfx950 is wave64, so injected code preserves full 64-bit EXEC and VCC state.
+Its native LDS probes use `LGKM_CNT` waits. General FLAT publication and shadow
+atomics wait for both `VM_CNT=0` and `LGKM_CNT=0`, while FLAT_SCRATCH spill
+save/fill uses `VM_CNT=0` at each transaction boundary. The CDNA4 scratch
+encoding has a signed 13-bit byte offset, so the current address-free private
+spill contract is limited to a 4096-byte per-lane extent and fails closed if a
+layout exceeds it.
+
+CDNA4 group-FLAT instrumentation currently admits only strongly classified,
+generic-segment, zero-offset B32/B64/B128 forms. Other FLAT and DS shapes stay
+visible in inventory but are not guessed into an LDS probe. Automatic VGPR
+growth also respects a nonzero descriptor `ACCUM_OFFSET`; an inline identity
+window that would overlap the accumulator alias range selects private
+persistent state instead. AccVGPR spill is not supported.
 
 ## How The Hook Is Loaded
 
@@ -103,8 +133,8 @@ env \
   `HSA_TOOLS_LIB` in the ROCr runtime.
 - `projects/rocprofiler/doc/ROCProfiler_V1_API_spec.md` documents
   `HSA_TOOLS_LIB` as the library loaded by the HSA runtime for rocprofiler.
-- `projects/rocr-debug-agent/docs/how-to/user-guide.rst` uses
-  `HSA_TOOLS_LIB=/opt/rocm/lib/librocm-debug-agent.so.2 ./my_program`.
+- `projects/rocr-debug-agent/docs/how-to/user-guide.rst` contains another
+  example of loading a tool through this variable.
 - The HSA API surface being wrapped is documented in
   `projects/rocr-runtime/runtime/hsa-runtime/inc/hsa.h` and
   `projects/rocr-runtime/runtime/hsa-runtime/inc/hsa_api_trace.h`; the relevant
@@ -157,7 +187,7 @@ hidden defaults.
   retained either way.
   `inline_shadow` patches decoded native scalar, B64, B128, d16, and
   two-address LDS load/store sites to publish one packed exact-shadow entry per
-  rounded 4-byte cell directly from GPU code with RDNA4
+  rounded 4-byte cell directly from GPU code with target-native
   `flat_atomic_swap_b64`. It checks the returned prior
   shadow entry and emits one compact diagnostic for the first implemented
   conflict predicate: prior entry nonzero, prior owner different from the
@@ -186,12 +216,12 @@ MOI knob summary:
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_SAMPLE_OFFSET` | `sampled` | Deterministic direct-sampled candidate selection. Defaults are stride 1, offset 0. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE`, `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET` | `sampled` | Deterministic runtime wave selection without removing eligible static sites. The stride defaults to 1 and must be a power of two in 1..1024; the offset defaults to 0 and must be smaller than the stride. A wave publishes when `owner & (stride - 1) == offset`. |
 | `RJ_CONSAN_MOI_SAMPLED_CHECK` | `sampled` | Opt into immediate GPU-side checking against the preceding sampled site slot. A match increments the report header event counter, which sampled summaries expose as `sampled_immediate_conflicts` and diagnostic guards recognize. |
-| `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported RDNA4 barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
+| `RJ_CONSAN_MOI_TRACK_BARRIERS` | `record_replay`, `inline_shadow` | For `record_replay`, emit dynamic barrier records and let host replay advance epochs. For `inline_shadow`, trampoline supported target-native barrier sites so the original barrier executes and then the configured epoch VGPR increments. Accepted with `sampled` but sampled replay does not yet consume barrier records. |
 | `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS` | `record_replay` | Opt-in access-record append mode. Each active lane reserves its own access-record slot at runtime. Dynamic probes automatically preserve EXEC, VCC, and SCC and currently skip candidates immediately after `s_*_saveexec` while control-flow/liveness handling is still conservative. |
 | `RJ_CONSAN_MOI_EXEC_SAVE_SGPR` | `record_replay` dynamic access/barrier experiments, sampled runtime selection, `inline_shadow` diagnostics/atomics | Optional explicit even-base debug override. Runtime sampled probes reserve one VCC-save pair; record/barrier probes reserve five SGPRs from an even base in `0..100`: EXEC, VCC, and SCC. Inline diagnostics/atomic acquire reserve eleven SGPRs from an even base in `0..94`: four nested EXEC pairs, VCC, and SCC. Without the override, ConSan places a fresh window above all guest scalar references and grows only owning descriptors. |
-| `RJ_CONSAN_MOI_TRACK_ATOMICS` | `record_replay`, `inline_shadow` | For `record_replay`, enable the experimental atomic-record patch for a narrow RDNA4 no-SADDR `flat_atomic*` subset; host replay models supported release/acquire atomic events, and live GPU smoke coverage checks one same-address handoff. For `inline_shadow`, enable the first one-slot address-scoped release/acquire metadata patch for the same flat-atomic subset; release atomics publish owner/epoch/address into the internal slot, and acquire atomics import `release_epoch + 1` only when the address matches. |
+| `RJ_CONSAN_MOI_TRACK_ATOMICS` | `record_replay`, `inline_shadow` | For `record_replay`, enable the experimental atomic-record patch for the narrow target-proven RDNA4/CDNA4 no-SADDR `flat_atomic*` subset; host replay models supported release/acquire atomic events, and live GPU smoke coverage checks one same-address handoff. For `inline_shadow`, enable the first one-slot address-scoped release/acquire metadata patch for the same flat-atomic subset; release atomics publish owner/epoch/address into the internal slot, and acquire atomics import `release_epoch + 1` only when the address matches. |
 | `RJ_CONSAN_MOI_OWNER_VGPR`, `RJ_CONSAN_MOI_EPOCH_VGPR`, `RJ_CONSAN_MOI_INIT_OWNER_EPOCH` | `record_replay`, `inline_shadow` experiments | Optional explicit debug overrides. Inline shadow and tracked atomics normally assign persistent state above guest references or use derived-owner/private-epoch state when the VGPR file is full. |
-| `RJ_CONSAN_MOI_OWNER_SOURCE`, `RJ_CONSAN_MOI_OWNER_SGPR` | owner/epoch prologue experiments | Select owner initialization. Default `workitem_id` uses `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads RDNA4 `HW_ID1` low bits and automatically receives a fresh scalar temporary; `RJ_CONSAN_MOI_OWNER_SGPR` is an optional debug override. |
+| `RJ_CONSAN_MOI_OWNER_SOURCE`, `RJ_CONSAN_MOI_OWNER_SGPR` | owner/epoch prologue experiments | Select owner initialization. Default `workitem_id` uses target-native logical owner initialization. `hw_id` reads RDNA4 `HW_ID1` low bits and is unavailable on CDNA4; `RJ_CONSAN_MOI_OWNER_SGPR` is an optional debug override. |
 | `RJ_CONSAN_REQUIRE_PATCH` | all flavors | For MOI, currently guards supported access candidates for the selected engine. |
 
 The hook warns when MOI-only knobs are provided while `RJ_CONSAN_FLAVOR` is not
@@ -218,6 +248,8 @@ them.
 - `RJ_CONSAN_DELAY_VAR_SSRC=N`: scalar source operand encoding for
   `RJ_CONSAN_DELAY_MODE=sleep_var`. The default is `106`, the RDNA4 `vcc_lo`
   operand encoding already preserved by the injected native-DS compare path.
+  gfx950 probe paths preserve full wave64 VCC state; do not infer a CDNA4
+  `VCC_LO`-only preservation contract from this RDNA4 debug default.
 - `RJ_CONSAN_MAX_PATCHES=N`: bound how many native-DS or flat/VFLAT check/trap
   sites can be instrumented in a single code object. The default is `1`.
   Selection is file-ordered and rejects overlapping inline ranges, anchor
@@ -338,12 +370,15 @@ them.
   owner VGPR value is masked and packed into a 10-bit sampled field.
 - `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id|hw_id`: controls only the
   `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1` prologue. `workitem_id` is the default and
-  initializes owner as `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads
+  uses the target-native logical owner initialization. On RDNA4 this is
+  `workitem_id_x >> log2(wavefront_size)`. `hw_id` reads
   RDNA4 `HW_ID1` with `s_getreg_b32`, copies the low 10 bits into the owner
   VGPR, and is independent of 1D/2D/3D local invocation layout. The `hw_id`
-  path automatically chooses a scalar temporary when one is available.
+  path automatically chooses a scalar temporary when one is available. It is
+  unavailable on gfx950; CDNA4 uses its stable logical-owner entry path.
 - `RJ_CONSAN_MOI_OWNER_SGPR=N`: scalar temp used by
-  `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`. `N` must be a normal SGPR in `0..105`.
+  `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id`. `N` must be a normal SGPR (`0..105` on
+  gfx1201; gfx950 does not support the `hw_id` source).
   It is a debug override; automatic mode chooses a fresh SGPR above all guest
   scalar references and grows only the owning descriptor.
 - `RJ_CONSAN_MOI_EPOCH_VGPR=N`: experimental MOI first-light hook. When set,
@@ -356,11 +391,13 @@ them.
 - `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`: explicit experimental MOI entry-prologue
   override. Requires `RJ_CONSAN_MOI_OWNER_VGPR` and
   `RJ_CONSAN_MOI_EPOCH_VGPR`. The patch
-  appends a tiny RDNA4 stub to `.text`, redirects each kernel descriptor to it,
+  appends a target-native stub to `.text`, redirects each kernel descriptor to it,
   initializes the owner/epoch VGPRs, and branches back to the original entry.
   It grows the kernel descriptor's VGPR allocation, and for
   `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` also the SGPR allocation, when needed. It
-  validates those registers through the common resource plan.
+  validates those registers through the common resource plan. For descriptors
+  with kernarg preloading, the patch preserves the two hardware entry paths
+  256 bytes apart and returns each stub to its matching original entry.
 - `RJ_CONSAN_MOI_TRACK_BARRIERS=1`: experimental MOI barrier record patch.
   Uses the per-engine auto report buffer unless a caller buffer or explicit
   size override is supplied. Register choices are automatic for
@@ -381,7 +418,7 @@ them.
   size override is supplied. Scratch, persistent owner/epoch,
   and scalar special-state choices are automatic; their environment variables
   are optional debug overrides. The current DBI path supports only a narrow
-  RDNA4 no-SADDR `flat_atomic*` subset.
+  target-proven RDNA4/CDNA4 no-SADDR `flat_atomic*` subset.
   In `record_replay`, it writes `ConSanMoiAtomicRecord` entries that host replay
   consumes as release/acquire events; the current live GPU smoke covers one
   same-address flat-atomic handoff and a wrong-address control. In
@@ -515,8 +552,9 @@ if the two values differ. For stores, the patch reads back the stored LDS value
 after the requested delay and reports if it differs from the original stored
 value. By default, reporting is `s_trap 0`. With `RJ_CONSAN_REPORT_BUFFER`, the
 report action writes `RJ_CONSAN_REPORT_MARKER` to the supplied buffer address
-instead. The injected compares preserve `vcc_lo` by saving it to a
-liveness-selected SGPR. For native DS and likely group flat helper sites, the
+instead. RDNA4 compare paths preserve the required `VCC_LO` value; CDNA4
+wave64 paths preserve the full 64-bit VCC pair in a liveness-selected scalar
+window. For native DS and likely group flat helper sites, the
 patch may use trailing padding, redirect through conservative uncovered local
 NOP caves, or use an appended `.text` cave for native DS when that is the safe
 placement. Native DS can also grow the descriptor VGPR allocation as a fallback
@@ -621,10 +659,13 @@ uses `ctest -j8`.
 Full tiered matrix:
 
 ```sh
-export ROCJITSU_BUILD_DIR=/path/to/rocjitsu-build
-export IREE_BUILD_DIR=/path/to/iree-build
-export HIP_MOI_BUILD_DIR=/path/to/hip-moi-build
-export ROCM_DIST_DIR=/path/to/rocm
+export WORKSPACE_ROOT=/tmp/xx
+export ROCM_SYSTEMS_DIR="$WORKSPACE_ROOT/TheRock/rocm-systems"
+export ROCJITSU_SOURCE_DIR="$ROCM_SYSTEMS_DIR/emulation/rocjitsu"
+export ROCJITSU_BUILD_DIR="$ROCJITSU_SOURCE_DIR/build"
+export IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build"
+export HIP_MOI_BUILD_DIR="$WORKSPACE_ROOT/hip-moi-build"
+export ROCM_DIST_DIR="$WORKSPACE_ROOT/TheRock/build/dist/rocm"
 
 "$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" tier0
 "$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" tier1
@@ -685,7 +726,7 @@ IREE HIP/ROCm e2e patch-required inventory:
 ```sh
 env \
   HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
-  LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib" \
   RJ_CONSAN_FLAVOR=supercollider \
   RJ_CONSAN_LOG=1 \
   RJ_CONSAN_DELAY_MODE=sleep \
@@ -703,7 +744,7 @@ IREE TileAndFuse inline-shadow `hw_id` owner-source smoke:
 ```sh
 env \
   HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so" \
-  LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib" \
   RJ_CONSAN_FLAVOR=moi \
   RJ_CONSAN_MOI_ENGINE=inline_shadow \
   RJ_CONSAN_MOI_REQUIRE_RECORDS=1 \

@@ -7,13 +7,15 @@ covers both top-level flavors:
   mode to try on a normal workload.
 - `moi`: structured memory-order instrumentation with three versioned
   `standard-v1` engine profiles. On gfx1201 these profiles are qualified over
-  the same broad compatibility tier as `supercollider`; their precision and
-  diagnostic shapes intentionally differ.
+  the same broad compatibility tier as `supercollider`; gfx950 focused and
+  selected-workload qualification is complete while broad qualification is in
+  progress. Their precision and diagnostic shapes intentionally differ.
 
 ConSan runs through the HSA tools hook and patches final native RDNA4 /
-`gfx1201` GPU code objects at load time. It does not require rebuilding the
-application being tested. [SPILLING.md](SPILLING.md) explains how MOI obtains
-temporary registers without relying on globally safe register numbers.
+`gfx1201` or CDNA4 / `gfx950` GPU code objects at load time. It does not require
+rebuilding the application being tested. [SPILLING.md](SPILLING.md) explains
+how MOI obtains temporary registers without relying on globally safe register
+numbers.
 
 ## Prerequisites
 
@@ -25,6 +27,21 @@ Use existing build directories:
 - `IREE_BUILD_DIR`: optional HIP-enabled IREE build directory with CTest
   metadata.
 
+For the standard workspace layout, initialize them with:
+
+```sh
+export WORKSPACE_ROOT=/tmp/xx
+export ROCM_SYSTEMS_DIR="$WORKSPACE_ROOT/TheRock/rocm-systems"
+export ROCJITSU_SOURCE_DIR="$ROCM_SYSTEMS_DIR/emulation/rocjitsu"
+export ROCJITSU_BUILD_DIR="$ROCJITSU_SOURCE_DIR/build"
+export ROCM_DIST_DIR="$WORKSPACE_ROOT/TheRock/build/dist/rocm"
+export IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build"
+export RJ_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+```
+
+See [LOCAL_TESTING.md](LOCAL_TESTING.md) for automatic selection between the
+in-tree and sibling TheRock build layouts.
+
 Build the hook:
 
 ```sh
@@ -34,8 +51,8 @@ cmake --build "$ROCJITSU_BUILD_DIR" --target rocjitsu_dbi_hooks -j8
 Common environment:
 
 ```sh
-export HSA_TOOLS_LIB="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
-export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export HSA_TOOLS_LIB="$RJ_HOOK"
+export LD_LIBRARY_PATH="$ROCM_DIST_DIR/lib"
 export RJ_CONSAN_LOG=1
 ```
 
@@ -76,6 +93,12 @@ The MOI engine choices are:
 Selecting an engine activates its conservative `standard-v1` profile. Report
 buffers and scratch resources are automatic; ordinary runs do not require a
 buffer size or register number. Advanced composition knobs remain opt-in.
+
+On gfx950, ConSan preserves full wave64 EXEC/VCC, uses CDNA4-specific LDS,
+general-FLAT, and FLAT_SCRATCH waits, and refuses ordinary VGPR windows that
+would cross a nonzero descriptor `ACCUM_OFFSET`. Kernarg-preload kernels have
+two hardware entry paths 256 bytes apart; ConSan's identity prologues preserve
+both. These are automatic architecture contracts, not user configuration.
 
 ## Non-Vacuity Guards
 
@@ -170,9 +193,10 @@ ctest --test-dir "$IREE_BUILD_DIR" \
 ```
 
 This narrower illustrative regular expression has previously selected 152
-tests. The authoritative current broad tier is the 209-test `tier2` command in
-`tests/dbi/consan_test_matrix.sh`, which passed under SuperCollider and all
-three MOI engines.
+tests. The historical gfx1201 broad tier selected 209 tests and passed under
+SuperCollider and all three MOI engines. Use the target-aware `tier2` command
+in `tests/dbi/consan_test_matrix.sh` for the current architecture; gfx950 broad
+results are not complete yet.
 
 ```text
 100% tests passed, 0 tests failed out of 152
@@ -187,7 +211,7 @@ kind=local-cave-lds-load-check-trap anchor=0x3cc trampoline=0x810 original_size=
 What this proves:
 
 - the HSA hook loaded;
-- ConSan found supported native LDS sites in final IREE RDNA4 code;
+- ConSan found supported native LDS sites in final IREE native code;
 - at least one supported site was patched in each instrumentable code object;
 - the known-correct IREE workload still produced correct results.
 

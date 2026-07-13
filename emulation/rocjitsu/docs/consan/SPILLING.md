@@ -6,7 +6,8 @@ laid out, which kernel descriptors must change, and where the implementation
 deliberately fails closed. It is the focused companion to [DESIGN.md](DESIGN.md);
 [PLAN.md](PLAN.md) tracks later feature, operational, and qualification work.
 
-The first complete version now covers the committed R1A-R1H implementation.
+The first complete version now covers the committed R1A-R1H implementation on
+gfx1201 and the target-dispatched CDNA4 spill path on gfx950.
 Access, barrier, and atomic VGPR paths use the same policy, and the HSA log
 reports bounded per-source outcomes plus planned and emitted spill bytes.
 Later DAG nodes may extend the implementation, but they do not reopen the R1
@@ -24,10 +25,12 @@ from Kunwar's branch.
 
 Kunwar's concrete save/restore emitter targets CDNA3, so it could not be reused
 as machine code on ConSan's first live target. The following pieces were added
-for the ConSan/gfx1201 integration:
+for the ConSan/gfx1201 integration, followed by its gfx950 port:
 
 - the RDNA4 address-free `scratch_store_b32` / `scratch_load_b32` emitter and
   its wait-counter sequences;
+- the CDNA4 eight-byte address-free `scratch_store_dword` /
+  `scratch_load_dword` emitter and its `VM_CNT` waits;
 - kernel- and shared-owner CFG/liveness planning in the DBI patch path;
 - descriptor, AMDGPU metadata, and dispatch-private-segment coordination;
 - zero-private-segment dispatch support;
@@ -68,10 +71,14 @@ For each probe request, the allocator tries these outcomes in order:
 Explicit environment variables remain useful for encoding tests and debugging,
 but they do not bypass liveness or overlap checks.
 
-The current ordinary-VGPR architectural limit is 256. SGPR preservation uses
-fresh descriptor-backed scalar windows; there is intentionally no general
-SGPR spill stack. If all 106 normal SGPRs are already referenced, the current
-probe is skipped with a bounded diagnostic.
+The current ordinary-VGPR architectural limit is 256. On CDNA4, however, a
+nonzero descriptor `ACCUM_OFFSET` also marks the AccVGPR alias boundary; an
+ordinary scratch or persistent window may not cross into that range. SGPR
+preservation uses fresh descriptor-backed scalar windows; there is
+intentionally no general SGPR spill stack. gfx1201 exposes 106 normal SGPRs,
+whereas gfx950 exposes `s0-s101` before FLAT_SCRATCH and other architectural
+state. A probe that cannot obtain a complete target-valid scalar window is
+skipped with a bounded diagnostic.
 
 ## Site and owner model
 
@@ -135,12 +142,21 @@ is placed first. Ephemeral access/prologue/barrier spill leases begin in a
 separately aligned zone above it, preventing persistent and temporary state
 from overlapping.
 
-## gfx1201 save and restore sequence
+On gfx950, the address-free FLAT_SCRATCH encoding has a signed 13-bit byte
+offset. ConSan uses only non-negative, dword-aligned offsets, so the last
+encodable slot starts at 4092 and the complete per-lane private extent is
+limited to 4096 bytes. Planning rejects a larger guest-plus-DBI layout before
+emission. This tighter CDNA4 limit is part of the private scratch transaction,
+not merely an instruction-builder restriction.
 
-The current backend supports ordinary B32 VGPR windows on RDNA4/gfx1201. For
-each register it emits an address-free per-lane scratch store on save and the
-matching scratch load on restore. A zero-threshold store wait ends the save
-sequence, and a zero-threshold load wait ends the restore sequence.
+## Target-specific save and restore sequences
+
+The backends support ordinary B32 VGPR windows on RDNA4/gfx1201 and
+CDNA4/gfx950. For each register they emit an address-free per-lane scratch
+store on save and the matching scratch load on restore. gfx1201 uses its
+one-word VSCRATCH forms and separate zero-threshold store/load waits. gfx950
+uses two-word FLAT_SCRATCH forms and `s_waitcnt vmcnt(0)` after both the store
+batch and load batch.
 
 Conceptually:
 
@@ -163,6 +179,11 @@ runs under the current EXEC mask and does not itself change EXEC. Probes that
 narrow EXEC must restore the guest mask before the borrowed window is finally
 returned.
 
+These scratch waits are distinct from the other CDNA4 memory contracts. Native
+DS completion drains `LGKM_CNT`; general FLAT operations drain both `VM_CNT`
+and `LGKM_CNT`. None of the gfx12 `s_wait_storecnt`, `s_wait_loadcnt`, or
+`s_wait_dscnt` encodings is used as a gfx950 substitute.
+
 ## Descriptor, metadata, and dispatch transaction
 
 A spill is not correct merely because the load/store instructions encode. The
@@ -183,6 +204,14 @@ stages resolve the active descriptor by kernel name rather than writing
 through a stale pre-growth file offset. A failed plan or unencodable update
 does not intentionally leave a partially instrumented object for loading.
 
+Two CDNA4 descriptor details participate in the same transaction. First,
+ordinary VGPR allocation and persistent identity placement must remain below a
+nonzero `COMPUTE_PGM_RSRC3.ACCUM_OFFSET`; ConSan does not spill AccVGPRs.
+Second, kernarg preloading can expose two hardware entries exactly 256 bytes
+apart. Owner/epoch and private-state redirection emit a corresponding pair of
+entry stubs and return each to its matching original path. A single redirected
+stub is not a valid substitute for both firmware entry paths.
+
 ## Current support boundary
 
 The committed R1 boundary is:
@@ -193,14 +222,14 @@ The committed R1 boundary is:
 | Sampled access probes | Dead, fresh-growth, and spill-backed VGPR windows. |
 | Inline-shadow access probes | Dead, fresh-growth, and spill-backed VGPR windows, including private-epoch fallback. |
 | Reachable shared access helpers | One all-owner-compatible dead, fresh, or common spill plan. |
-| Private-epoch entry/barrier temporaries | Saved and restored through the gfx1201 private path. |
-| Dynamic record, barrier, diagnostic, and atomic scalar state | Automatic descriptor-backed SGPR windows with EXEC/VCC/SCC preservation. |
+| Private-epoch entry/barrier temporaries | Saved and restored through the target-dispatched gfx1201/gfx950 private path. |
+| Dynamic record, barrier, diagnostic, and atomic scalar state | Automatic descriptor-backed SGPR windows with EXEC/VCC/SCC preservation; gfx950 preserves full wave64 VCC while RDNA4 SuperCollider compare paths need `VCC_LO`. |
 | Barrier and atomic VGPR temporaries | Dead, fresh-growth, and spill-backed common plans; explicit register variables are debug overrides. |
 | SGPR spilling | Not implemented; full-file pressure fails closed. |
 | Dynamic-stack kernels | Spill growth rejected until the stack convention is proven compatible. |
 | AccVGPR spilling | Not implemented. |
 | Unresolved indirect ownership | Not instrumented. |
-| Native targets other than gfx1201 | Deferred to `A1` in the plan. |
+| Native targets | gfx1201 and gfx950 B32 spill emission; other targets remain unsupported. |
 
 This is deliberately narrower than a general compiler register allocator. R1
 provides the minimum semantically safe DBI resource path needed by current MOI
@@ -239,27 +268,29 @@ The focused CPU/synthetic suite is:
   --gtest_filter='ConSanResourcePlan.*:ConSanMoi.*:SpillManager.*:InstructionBuilder.*'
 ```
 
-The current result is 172/172. It covers allocation precedence, forbidden
-ranges, rollback, gfx1201 encodings and waits, descriptor/metadata growth,
-zero-private kernels, dynamic-stack rejection, shared-owner dead/fresh/spill
-layouts, mixed-wave rejection, persistent state, barrier/atomic rollout,
-bounded summaries, and staged text-growth descriptor updates.
+The current focused ConSan result is 225/225. It covers allocation precedence,
+forbidden ranges, rollback, gfx1201 and gfx950 encodings and waits,
+descriptor/metadata growth, zero-private kernels, dynamic-stack rejection,
+shared-owner dead/fresh/spill layouts, mixed-wave rejection, persistent state,
+barrier/atomic rollout, bounded summaries, and staged text-growth descriptor
+updates.
 
-The live gfx1201 tier includes forced-spill tests whose victim VGPRs remain
-live across instrumentation:
+The live target-aware tier includes forced-spill tests whose victim VGPRs
+remain live across instrumentation:
 
 ```sh
 ctest -j8 --output-on-failure \
   -R '^(ConSanSpillHipTest|ConSanInlineShadowTest|ConSanMoiHipTest)\.'
 ```
 
-The current resource/behavior result is 29/29. Notable controls include
-record/replay and sampled
-forced-spill preservation, zero-to-nonzero private dispatch backing,
-private-epoch barriers, inline diagnostics, and atomic handoff behavior, all
-without register-number configuration. The independent hip-moi control suite
-is 189/189, and all three engines complete the 209-test IREE gfx1201
-compatibility sweep. See
+The established gfx1201 resource/behavior result is 29/29. gfx950 focused spill
+and engine tiers also pass; its broad IREE qualification remains in progress.
+Notable controls include record/replay and sampled forced-spill preservation,
+zero-to-nonzero private dispatch backing, private-epoch barriers, inline
+diagnostics, and atomic handoff behavior, all without register-number
+configuration. The established gfx1201 independent hip-moi control suite is
+189/189, and all three engines complete its 209-test IREE compatibility sweep.
+See
 [LOCAL_TESTING.md](LOCAL_TESTING.md) for workspace paths and the broader test
 ladder.
 
@@ -268,7 +299,7 @@ ladder.
 - `lib/rocjitsu/src/rocjitsu/code/patch/consan_resource.*`: register request,
   allocation-source, and typed failure policy.
 - `lib/rocjitsu/src/rocjitsu/code/patch/spill_manager.*`: stable private slots,
-  gfx1201 save/fill sequence, descriptor growth, and metadata growth.
+  gfx1201/gfx950 save/fill sequences, descriptor growth, and metadata growth.
 - `lib/rocjitsu/src/rocjitsu/code/patch/consan_moi.cpp`: owner-scoped planning
   and probe integration.
 - `lib/rocjitsu/src/rocjitsu/code/patch/code_object_patcher.*`: transactional

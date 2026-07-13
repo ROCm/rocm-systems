@@ -5,12 +5,12 @@ instrumentation. It works by intercepting GPU code-object loads through the HSA
 tools interface, inspecting final native machine code, and loading a patched
 replacement code object when instrumentation is possible.
 
-The current implementation and tests are centered on the local RDNA4 /
-`gfx1201` GPU because that is the hardware available in this workspace. That is
-an incidental validation focus, not the intended product boundary. The intended
-native-instrumentation target set is `gfx942`, `gfx950`, `gfx1201`, and
-`gfx1250`. ConSan is not meant to translate kernels between GPU ISAs; it should
-patch the final code object for the architecture that will actually run.
+The current implementation has native paths for RDNA4 / `gfx1201` and CDNA4 /
+`gfx950`. The gfx1201 profile has completed its broad qualification; gfx950 has
+completed focused and selected-workload qualification while its broad sweep is
+still in progress. The intended native-instrumentation target set also includes
+`gfx942` and `gfx1250`. ConSan does not translate kernels between GPU ISAs; it
+patches the final code object for the architecture that will actually run.
 
 This document is present-facing. It describes what the current code does, why it
 does it, and which parts are deliberately prototype-shaped rather than the
@@ -22,16 +22,16 @@ register allocation, private-layout, ownership, and spill transaction.
 | Area | Current code | Intended direction |
 | --- | --- | --- |
 | Interception | HSA-tools hook via `HSA_TOOLS_LIB`. | Keep HSA-tools as the main path. |
-| Architecture | Native RDNA4 / `gfx1201` implementation and validation. | Generalize the native patching path for `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`; do not translate between targets. |
+| Architecture | Native RDNA4 / `gfx1201` and CDNA4 / `gfx950` implementation, with gfx950 broad qualification still in progress. | Generalize the same native patching model to `gfx942` and `gfx1250`; do not translate between targets. |
 | Public flavor switch | `RJ_CONSAN_FLAVOR=supercollider|moi`. | Keep the two top-level flavors. |
 | SuperCollider | Usable redundant LDS/likely-group-flat check/trap mode. | Keep as a simple perturbation/value-check sanitizer mode. |
 | MOI `record_replay` | DBI records plus host-side replay diagnostics. | Keep as reference/debug engine and oracle for inline work. |
 | MOI `inline_shadow` | Direct exact-shadow engine for decoded native LDS cell ranges, admitted group-flat forms, barriers, and one-slot atomic ordering controls. | Broaden proven instruction/order coverage while retaining exact supported-form semantics. |
 | MOI `sampled` | Runtime-qualified sampled entry publication, host-side conflict scan, and opt-in immediate check. | Improve sampling fidelity and overhead measurement without presenting clean samples as proof of race freedom. |
 | MOI broad operation | All three `standard-v1` engines complete the 209-test gfx1201 IREE compatibility sweep without register-number or buffer-size configuration; tier0 supplies guarded semantic evidence. | Expand instruction and architecture breadth without weakening explicit unsupported-site behavior. |
-| Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use gfx1201 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or derived-owner/private-epoch state. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
+| Registers | Owner-scoped plans select one per-site scratch assignment for record/replay, sampled, and inline-shadow access, barrier, and atomic probes, including helpers shared by multiple kernels. Live victim windows use target-native gfx1201 or gfx950 private scratch (including zero-private kernels through dispatch rewriting), with one common layout for every owner. Inline shadow automatically chooses dedicated owner/epoch VGPRs or private persistent state when required by CDNA4 register geometry. Scalar paths automatically allocate descriptor-backed SGPR windows and preserve EXEC, VCC, and SCC. | Keep explicit register variables as debug overrides and replace target-local machinery when shared rocJITsu infrastructure matures. |
 | Diagnostics | Bounded inline and sampled diagnostics plus resource, overflow, and unsupported-site summaries; compact shadow words limit prior-lane detail. | Preserve bounded output while improving precision and presentation. |
-| Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with a normalized RDNA4 group-flat address contract. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
+| Flat/generic LDS | Explicit `likely`/`strict` admission policy over `Group`/`MaybeGroup`, with target-specific RDNA4 and CDNA4 group-flat address contracts. CDNA4 emission is limited to strongly classified generic-segment, zero-offset dword/dwordx2/dwordx4 forms. | Extend proven provenance conservatively as compiler code shapes and native targets broaden. |
 
 ## Source Map
 
@@ -62,14 +62,13 @@ Primary files:
   - Direct sampled probes.
   - Inline-shadow probes and inline atomic ordering prototype.
 - `lib/rocjitsu/src/rocjitsu/code/patch/instruction_builder.*`
-  - Small instruction encoders used by injected probes. Many current ConSan
-    encoders are RDNA4-specific and need architecture-parametric equivalents
-    as the target matrix expands.
+  - Small architecture-dispatched instruction encoders used by injected
+    probes, including the current RDNA4 and CDNA4 probe primitives.
 - `lib/rocjitsu/src/rocjitsu/code/patch/trampoline_builder.*`,
   `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*`
   - Reusable patch-placement and DBT utilities used by all ConSan engines.
     `spill_manager.*` also emits transactional
-    gfx1201 B32 VGPR save/restore batches, performs kernel-local fixed-private
+    gfx1201 and gfx950 B32 VGPR save/restore batches, performs kernel-local fixed-private
     descriptor growth, and keeps the matching AMDGPU MessagePack metadata
     coherent in place.
 
@@ -81,8 +80,8 @@ Test anchors:
 - `tests/dbi/`
   - Focused live GPU controls for ConSan instrumentation modes.
 - IREE e2e tests in an external HIP-enabled IREE build directory.
-  - Compatibility and patchability coverage for real kernels, currently
-    exercised locally on RDNA4 / `gfx1201`.
+  - Compatibility and patchability coverage for real kernels on RDNA4 /
+    `gfx1201` and CDNA4 / `gfx950`.
 
 ## Public Mode Model
 
@@ -172,19 +171,21 @@ The implementation boundary is:
 - **Runtime sampling policy.** `sampled` combines deterministic runtime
   generation policy with host scanning and an opt-in immediate in-kernel
   conflict check. Static site selection still bounds patch composition.
-- **Architecture dispatch.** Local validation is on `gfx1201`, but the intended
-  target set is `gfx942`, `gfx950`, `gfx1201`, and `gfx1250`. Broad operation
-  needs ISA-specific capability checks and encoders instead of implicit RDNA4
-  assumptions.
-- **Test parity.** The fail-fast matrix covers 183 tier0 unit tests, 37 live
-  rocJITsu controls, 189 hip-moi controls, 8 selected IREE tests per profile,
-  and 209 broad IREE tests per profile. The broader rocjitsu-test-corpus has
+- **Architecture dispatch.** Native capability dispatch and focused validation
+  now cover `gfx1201` and `gfx950`. Their encodings, register geometry, waits,
+  and spill limits are selected explicitly. `gfx942` and `gfx1250` remain
+  future targets rather than inheriting assumptions from either implemented
+  architecture.
+- **Test parity.** The current focused ConSan/resource/placement filter covers
+  225 tests. The gfx950 matrix also covers 44 hip-moi controls, 10 selected
+  IREE tests per profile, and a 259-test broad IREE inventory. The broader
+  rocjitsu-test-corpus has
   separate local dependency limitations documented in `LOCAL_TESTING.md`.
 
 The intended operational target is:
 
 ```sh
-HSA_TOOLS_LIB=/path/to/librocjitsu_dbi_hooks.so \
+HSA_TOOLS_LIB="$RJ_HOOK" \
 RJ_CONSAN_FLAVOR=moi \
 RJ_CONSAN_MOI_ENGINE=record_replay|inline_shadow|sampled \
 ctest ...
@@ -276,11 +277,12 @@ Current register policy:
   Shared helpers use one representation for every reachable owner; private
   workitem-derived ownership additionally requires the owners to agree on wave
   size.
-- A standalone gfx1201 spill backend allocates stable slots through
-  `SpillManager`, emits address-free `scratch_store/load_b32` batches with
-  conservative split waits, and grows only the selected descriptor's fixed
-  private segment. Dynamic-stack kernels are detected from compiler-emitted
-  symbols and rejected by this first backend.
+- Target-dispatched spill backends allocate stable slots through
+  `SpillManager`. gfx1201 emits address-free VSCRATCH B32 operations with split
+  store/load waits. gfx950 emits eight-byte address-free FLAT_SCRATCH dword
+  operations and drains `VM_CNT` before both clobber and guest reuse. Both grow
+  only the selected descriptor's fixed private segment. Dynamic-stack kernels
+  are detected from compiler-emitted symbols and rejected.
 - Static record/replay, sampled, and descriptor-full inline-shadow access
   probes consume that backend for direct kernels and reachable shared helpers.
   A shared spill starts above the maximum original private extent and grows
@@ -292,8 +294,9 @@ Current register policy:
 Kunwar Grover's `origin/users/Groverkss/text-relocation-land` branch was the
 first reference for spilling work. Its directly reusable piece is the
 `SpillManager` slot allocator: it provides aligned, stable per-lane offsets but
-does not emit gfx1201 scratch instructions or update descriptors. ConSan reuses
-that allocator and supplies the small target-specific backend around it.
+does not emit gfx1201 or gfx950 scratch instructions or update descriptors.
+ConSan reuses that allocator and supplies the small target-specific backends
+around it.
 If ConSan needs SGPR spilling before rocJITsu has a shared implementation, the
 right near-term response is a minimal ConSan-local SGPR spill/fill path for the
 specific probe shape that needs it, not a comprehensive spill allocator.
@@ -306,6 +309,42 @@ Barrier/atomic VGPR patchers now consume the same plan, and bounded HSA logs
 report explicit, dead, descriptor-growth, spill, and unsupported outcomes plus
 planned and emitted spill bytes.
 
+## gfx950 / CDNA4 Native Contract
+
+gfx950 is wave64. Injected paths therefore treat `EXEC` and `VCC` as full
+64-bit architectural state. Scalar save windows preserve both halves of VCC;
+the RDNA4 SuperCollider path needs only `VCC_LO` for its compare shape,
+but that shortcut is not valid for CDNA4. Probe address arithmetic uses a
+VCC-neutral CDNA4 form rather than silently clobbering guest condition state.
+
+The admitted native DS set is the normalized B32/B64/B128 and supported d16 or
+two-address load/store set listed below. Other DS encodings, including atomics,
+permute/swizzle, transpose, reserved GDS forms, and forms whose operands cannot
+be normalized are inventory-only with a typed reason. The admitted CDNA4
+group-FLAT set is deliberately smaller: strongly proven generic-segment,
+zero-offset dword, dwordx2, and dwordx4 loads and stores.
+
+Waits are also target-specific. Native LDS completion drains `LGKM_CNT`.
+General FLAT loads, stores, and shadow atomics drain both `VM_CNT` and
+`LGKM_CNT`; `s_barrier` does not imply either wait. Address-free FLAT_SCRATCH
+save/fill drains `VM_CNT` at the save-before-clobber and
+restore-before-guest-use boundaries. No gfx12 `s_wait_loadcnt`,
+`s_wait_storecnt`, or `s_wait_dscnt` encoding is reused on gfx950.
+
+CDNA4 descriptor geometry has an additional ordinary-VGPR hazard:
+`COMPUTE_PGM_RSRC3.ACCUM_OFFSET` establishes the AccVGPR alias boundary.
+Fresh or persistent ordinary VGPR windows must not cross a nonzero boundary.
+When the automatic inline-shadow identity window would cross it, ConSan uses
+its private persistent-state representation instead. AccVGPR spilling itself
+is not implemented.
+
+Finally, an AMDHSA descriptor with kernarg preloading can expose two hardware
+entry paths exactly 256 bytes apart. Entry redirection preserves both paths:
+the generated owner/epoch or private-state prologue has a matched stub for each
+entry and returns each one to its corresponding original path. Treating such a
+kernel as having only the descriptor's base entry can branch into unrelated
+code and is invalid.
+
 ## SuperCollider Flavor
 
 ### Purpose
@@ -316,8 +355,8 @@ address, compares values, and reports a mismatch.
 
 The motivating paper describes the redundant-read idea as issuing "a redundant
 read to the same address" after delay. ConSan applies that shape after register
-allocation, directly to final native code. The current implementation of this
-shape is RDNA4 / `gfx1201`-centric.
+allocation, directly to final native code. The implementation emits the shape
+natively for both RDNA4 / `gfx1201` and CDNA4 / `gfx950`.
 
 ### Current Algorithm
 
@@ -381,7 +420,8 @@ Native LDS check/trap supports:
 - `ds_store_b64`
 - `ds_store_b128`
 
-Likely group/LDS flat check/trap supports RDNA4 12-byte VFLAT:
+Likely group/LDS flat check/trap supports the admitted RDNA4 12-byte VFLAT and
+CDNA4 eight-byte generic FLAT forms:
 
 - `flat_load_b32`
 - `flat_load_b64`
@@ -428,12 +468,14 @@ qualification runs that prefer precision over flat-site recall. Inventory and
 verbose site logs retain the classifications independently of this selection
 policy, and skipped-candidate warnings count strict-policy exclusions.
 
-For an admitted RDNA4 flat group pointer in `v[addr:addr+1]`, ConSan's LDS
+For an admitted flat group pointer in `v[addr:addr+1]`, ConSan's LDS
 normalization contract is: `v[addr]` is the unsigned byte offset within the LDS
-aperture and `v[addr+1]` is provenance evidence only. Static VFLAT `ioffset`
+aperture and `v[addr+1]` is provenance evidence only. Static VFLAT/FLAT offset
 bytes are added to the low word before rounding the byte interval to 4-byte
-shadow cells. The high word must never be mixed into the shadow index. Sites
-whose encoding or provenance cannot satisfy this contract remain unpatched.
+shadow cells. The high word must never be mixed into the shadow index. CDNA4
+currently admits only strongly classified, generic-segment, zero-offset B32,
+B64, and B128 forms. Sites whose encoding or provenance cannot satisfy the
+target's contract remain unpatched.
 
 ### Where Current Code Is Prototype-Shaped
 
@@ -542,9 +584,9 @@ Current implementation:
 - Supports dynamic per-lane append with
   `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=1`.
 - Records dynamic event indexes.
-- Can patch supported RDNA4 barrier sites when
+- Can patch supported RDNA4 and CDNA4 barrier sites when
   `RJ_CONSAN_MOI_TRACK_BARRIERS=1`.
-- Can record a narrow RDNA4 no-SADDR `flat_atomic*` subset when
+- Can record a narrow target-proven no-SADDR `flat_atomic*` subset when
   `RJ_CONSAN_MOI_TRACK_ATOMICS=1`.
 - Replays visible records on the host into exact-shadow diagnostics.
 - Coalesces contiguous same-workgroup barrier-arrival runs into one logical
@@ -593,7 +635,8 @@ Current implementation:
 - Can increment an epoch VGPR after supported barrier sites with
   `RJ_CONSAN_MOI_TRACK_BARRIERS=1`.
 - Can use `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` to initialize owner from RDNA4
-  `HW_ID1` low bits through a scalar temporary.
+  `HW_ID1` low bits through a scalar temporary. This source is unavailable on
+  CDNA4; gfx950 uses the logical owner initialized at entry.
 - Has a one-slot inline atomic release/acquire prototype for a narrow no-SADDR
   `flat_atomic*` subset.
 
@@ -683,8 +726,9 @@ MOI separates:
 - owner identity: the logical peer inside a workgroup used by conflict checks.
 
 Current workgroup identity is stronger than current owner identity. Access and
-barrier probes can read RDNA4 launch TTMP payload fields and record 3D
-workgroup coordinates, so host replay avoids cross-workgroup comparisons.
+barrier probes record target-native 3D workgroup coordinates, so host replay
+avoids cross-workgroup comparisons. gfx950 snapshots its enabled X/Y/Z system
+SGPR payload at entry.
 
 Current owner options:
 
@@ -694,7 +738,8 @@ Current owner options:
 - prologue initialization with `RJ_CONSAN_MOI_INIT_OWNER_EPOCH=1`;
 - `RJ_CONSAN_MOI_OWNER_SOURCE=workitem_id` default for prologue init;
 - `RJ_CONSAN_MOI_OWNER_SOURCE=hw_id` for RDNA4 `HW_ID1` low bits; an explicit
-  `RJ_CONSAN_MOI_OWNER_SGPR` is only a debug override.
+  `RJ_CONSAN_MOI_OWNER_SGPR` is only a debug override. This option is not
+  available on gfx950.
 
 The `workitem_id` estimate is adequate for current 1D two-wave controls. It is
 not a complete owner derivation for arbitrary 2D/3D local invocation layouts.
@@ -745,8 +790,8 @@ runs.
 The code intentionally contains several prototype mechanisms:
 
 - optional manual register debug overrides;
-- a gfx1201-only ordinary-VGPR spill backend rather than general register-class
-  spilling;
+- target-local gfx1201 and gfx950 ordinary-VGPR spill backends rather than
+  general register-class spilling;
 - conservative versioned engine profiles with advanced extensions kept opt-in;
 - `MaybeGroup` flat LDS provenance;
 - static per-site record and sampled slots;
@@ -761,7 +806,8 @@ These are acceptable prototype choices because they prove the core DBI
 building blocks:
 
 - HSA-level interception works.
-- Final native RDNA4 / `gfx1201` code can be decoded and patched.
+- Final native RDNA4 / `gfx1201` and CDNA4 / `gfx950` code can be decoded and
+  patched for the explicitly supported forms.
 - Native DS and likely-group-flat sites can be found.
 - Compact IREE kernels can be patched through local or appended caves.
 - HSA-tool-owned report buffers make MOI usable without application ABI
@@ -781,8 +827,8 @@ Current evidence categories:
   exact-shadow replay, sampled replay, and atomic/barrier semantics.
 - Focused rocJITsu HIP GPU tests for SuperCollider, record/replay,
   inline-shadow, sampled, barriers, atomics, and owner-source controls.
-- IREE RDNA4 / `gfx1201` TileAndFuse matmul tests under SuperCollider and MOI
-  modes.
+- IREE RDNA4 / `gfx1201` and CDNA4 / `gfx950` selected workloads under
+  SuperCollider and MOI modes.
 - Broader IREE e2e inventory under SuperCollider patch-required mode.
 - Broader 209-test IREE e2e compatibility sweeps under all three MOI engines
   without register-number configuration.
@@ -808,7 +854,7 @@ What it does not mean:
 
 ## Remaining Engineering Boundary
 
-The R1 resource path is in place: non-spill allocation, gfx1201 spill-backed
+The resource path is in place: non-spill allocation, gfx1201/gfx950 spill-backed
 access/barrier/atomic probes, zero-to-nonzero dispatch scratch,
 persistent-state fallbacks, scalar/special-state policy, compatible
 shared-function assignments, and bounded outcome summaries.
@@ -820,7 +866,7 @@ branch:
 
 That branch contributes the `SpillManager` slot allocator but no target spill
 instructions or spill/fill placement. ConSan now reuses that allocator beneath
-its gfx1201 B32 backend and the record/replay and sampled access integrations.
+its gfx1201 and gfx950 B32 backends and the MOI probe integrations.
 `origin/users/Groverkss/dbt-tooling` and
 `origin/users/Groverkss/dbt_interposer` remain useful background references;
 later work is broader shared infrastructure and target coverage rather than
@@ -832,5 +878,6 @@ isolated, and prefer deleting or replacing it when shared rocJITsu spilling
 lands.
 
 The gfx1201 profile-by-tier qualification and broad-turn-on acceptance are
-complete. The remaining major branch is native implementation and validation
-for the deferred `A1` architecture targets.
+complete. gfx950 focused and selected-workload qualification is complete and
+its broad qualification is in progress. Native work for gfx942 and gfx1250
+remains deferred.
