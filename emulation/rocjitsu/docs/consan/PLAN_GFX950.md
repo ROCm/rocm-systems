@@ -443,7 +443,14 @@ Full gfx950 support means:
   wave-uniform (owner, epoch, and workgroup x/y/z). `T3IR` now implements an
   accumulator-safe five-SGPR persistent fallback, with typed exclusion if no
   globally dead scalar window exists. Explicit force-private tests remain as
-  spill-mechanism coverage, not the automatic gfx950 acceptance path.
+  spill-mechanism coverage rather than the automatic acceptance path.
+- 2026-07-13: `T4SC` is `DONE`. The post-containment broad sweep passes
+  257/259 in 28.01 seconds. Both residuals are typed SuperCollider mismatch
+  traps: test 1838 patches a native LDS load in the large data-tiled f8
+  matmul, and test 2861 patches a native LDS store in the TOSA stream matmul;
+  both terminate through the documented `s_trap 0` checker path. There is no
+  remaining silent corruption, replacement-object loader failure, or
+  resource-induced timeout in the 259-test inventory.
 
 ## DAG Overview
 
@@ -670,7 +677,7 @@ flowchart LR
   T3IL["T3IL: Inline Semantic Regressions"]:::active
   T3G{"T3G: Selected Workloads Accepted"}:::target
   T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
-  T4SC["T4SC: SuperCollider Broad IREE"]:::active
+  T4SC["T4SC: SuperCollider Broad IREE"]:::done
   T4RR["T4RR: Record/Replay Broad IREE"]:::active
   T4SA["T4SA: Sampled Broad IREE"]:::todo
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
@@ -2118,7 +2125,7 @@ and rejects explicit overlap with typed skip evidence. Four focused boundary
 regressions pass, and the isolated gfx950 MXFP4 reproducer now passes under
 SuperCollider.
 
-### T4SC: SuperCollider Broad IREE - ACTIVE
+### T4SC: SuperCollider Broad IREE - DONE
 
 Goal: run the broad gfx950 IREE ROCm inventory under standard SuperCollider.
 
@@ -2148,6 +2155,18 @@ being rerun from clean baseline processes: dispatch-time mismatch exceptions
 can contaminate later parallel HIP processes, but a reproducible data-tiled
 replacement-object load failure is still an instrumentation defect until
 reduced.
+
+The fresh post-containment sweep passes 257/259 in 28.01 seconds. The only
+two residuals are typed sanitizer outcomes rather than compatibility defects:
+
+- test 1838 patches a native LDS load in the large data-tiled f8 matmul and
+  reaches the documented `s_trap 0` mismatch path;
+- test 2861 patches a native LDS store in the TOSA stream matmul and reaches
+  the same mismatch path.
+
+All former numerical-corruption and replacement-object loader failures pass,
+and the sweep has no timeout or hidden resource failure. This satisfies the
+broad-profile criterion that residual failures have typed ConSan outcomes.
 
 ### T4RR: Record/Replay Broad IREE - ACTIVE
 
