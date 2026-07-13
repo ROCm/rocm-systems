@@ -130,6 +130,10 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipMemGetAllocationGranularity",
     "hipMemPoolSetAccess",
     "hipMemSetAccess",
+    # hipDrv driver 3D/2D memcpy (HIP_MEMCPY3D / hip_Memcpy2D struct ptr; inline + blobs)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
 }
 
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
@@ -256,6 +260,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # Device allocation — must allocate a real buffer and record it in alloc_map
     # (with padding + zero-init parity with hipMalloc).
     "hipExtMallocWithFlags",
+    # hipDrv driver 3D/2D memcpy (reconstruct struct, translate device ptrs, blob/validate)
+    "hipDrvMemcpy3D",
+    "hipDrvMemcpy3DAsync",
+    "hipDrvMemcpy2DUnaligned",
 }
 
 # ---------------------------------------------------------------------------
@@ -575,9 +583,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # hipDrvMemDiscardAndPrefetchBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
     "hipDrvMemDiscardAndPrefetchBatchAsync",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
-    "hipDrvMemcpy3D",
-    "hipDrvMemcpy3DAsync",
-    "hipDrvMemcpy2DUnaligned",
     "hipMemcpy3DPeer",
     "hipMemcpy3DPeerAsync",
     "hipMemcpy2DArrayToArray",
@@ -745,6 +750,21 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                          ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
                          ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
     # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
+    "hipDrvMemcpy3D":      [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy3DAsync": [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
+    "hipDrvMemcpy2DUnaligned": [("uint8_t", "drv2d_bytes[136]", "hip_Memcpy2D inline copy"),
+                            ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
+                            ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
+                            ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
+                            ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
     # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
     "hipArray3DCreate": [("uint8_t", "array3d_desc_bytes[40]", "HIP_ARRAY3D_DESCRIPTOR inline copy")],
@@ -764,6 +784,8 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
 _INLINE_STRUCT_ASSERTS: Dict[str, str] = {
     "pool_props_bytes":   "hipMemPoolProps",
     "parms_bytes":        "hipMemcpy3DParms",
+    "drv3d_bytes":        "HIP_MEMCPY3D",
+    "drv2d_bytes":        "hip_Memcpy2D",
     "array_desc_bytes":   "HIP_ARRAY_DESCRIPTOR",
     "array3d_desc_bytes": "HIP_ARRAY3D_DESCRIPTOR",
     "stream_attr_bytes":  "hipStreamAttrValue",

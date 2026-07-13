@@ -1194,6 +1194,75 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
 }
 
 // ---------------------------------------------------------------------------
+// hipDrvMemcpy3D / hipDrvMemcpy3DAsync / hipDrvMemcpy2DUnaligned
+// Driver-style struct-pointer copies. Mirror the hipMemcpy3D path: inline the
+// HIP_MEMCPY3D / hip_Memcpy2D struct + snapshot the H2D source (or D2H expected)
+// blob. Keyed off srcMemoryType/dstMemoryType (no single "kind" field).
+// ---------------------------------------------------------------------------
+template <typename T>
+static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
+    const HIP_MEMCPY3D* p, hipStream_t stream, bool is_async) {
+  if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
+  std::memcpy(a.drv3d_bytes, p, sizeof(HIP_MEMCPY3D));
+  size_t byte_count = p->WidthInBytes * p->Height * p->Depth;
+  if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost && byte_count > 0) {
+    auto h = hrr_cap::writer::write_blob(p->srcHost, byte_count);
+    a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
+  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost && byte_count > 0) {
+    if (is_async && stream) {
+      hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
+      if (sync_r != hipSuccess) {
+        hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+        return;
+      }
+    }
+    auto h = hrr_cap::writer::write_blob(p->dstHost, byte_count);
+    a.d2h_hash_lo = h.lo; a.d2h_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+}
+
+template <typename T>
+static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy2D* p) {
+  if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
+  std::memcpy(a.drv2d_bytes, p, sizeof(hip_Memcpy2D));
+  size_t byte_count = p->WidthInBytes * p->Height;
+  if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost && byte_count > 0) {
+    auto h = hrr_cap::writer::write_blob(p->srcHost, byte_count);
+    a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
+  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost && byte_count > 0) {
+    auto h = hrr_cap::writer::write_blob(p->dstHost, byte_count);
+    a.d2h_hash_lo = h.lo; a.d2h_hash_hi = h.hi;
+  }
+  hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a));
+}
+
+hipError_t capture_hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
+  hipError_t r = g_real_table.hipDrvMemcpy3D_fn(pCopy);
+  hrr_args_hipDrvMemcpy3D a{};
+  a.ret = static_cast<int32_t>(r);
+  capture_drvmemcpy3d_impl(a, HRR_API_HIPDRVMEMCPY3D, pCopy, nullptr, false);
+  return r;
+}
+
+hipError_t capture_hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
+  hipError_t r = g_real_table.hipDrvMemcpy3DAsync_fn(pCopy, stream);
+  hrr_args_hipDrvMemcpy3DAsync a{};
+  a.ret    = static_cast<int32_t>(r);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  capture_drvmemcpy3d_impl(a, HRR_API_HIPDRVMEMCPY3DASYNC, pCopy, stream, true);
+  return r;
+}
+
+hipError_t capture_hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
+  hipError_t r = g_real_table.hipDrvMemcpy2DUnaligned_fn(pCopy);
+  hrr_args_hipDrvMemcpy2DUnaligned a{};
+  a.ret = static_cast<int32_t>(r);
+  capture_drvmemcpy2d_impl(a, HRR_API_HIPDRVMEMCPY2DUNALIGNED, pCopy);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
 // hipMemcpy2D / hipMemcpy2DAsync — pitched H2D blob + D2H expected blob
 //
 // The 2D copy moves `height` rows of `width` bytes, source rows spaced by

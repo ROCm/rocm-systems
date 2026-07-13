@@ -2433,6 +2433,116 @@ hipError_t playback_hipMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 // ---------------------------------------------------------------------------
+// Manual playback: hipDrvMemcpy3D / hipDrvMemcpy3DAsync / hipDrvMemcpy2DUnaligned
+// Driver-style struct copies. Mirror hipMemcpy3D: reconstruct the struct from
+// the inline bytes, translate the embedded device pointers (srcDevice/dstDevice)
+// via alloc_map, load the H2D blob into srcHost, or validate D2H against the
+// expected blob. Keyed off srcMemoryType/dstMemoryType.
+// ---------------------------------------------------------------------------
+hipError_t playback_hipDrvMemcpy3D(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3D*>(pl);
+    HIP_MEMCPY3D parms{};
+    std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+
+    if (parms.srcMemoryType == hipMemoryTypeHost && a->blob_hash_lo != 0) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob) parms.srcHost = blob;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        return hipDrvMemcpy3D(&parms);
+    }
+    if (parms.dstMemoryType == hipMemoryTypeHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] hipDrvMemcpy3D D2H validate FAIL: src 0x%llx not mapped - pointer translation bug\n",
+                    (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.WidthInBytes * parms.Height * parms.Depth;
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi, nullptr, false);
+    }
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    return hipDrvMemcpy3D(&parms);
+}
+
+hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy3DAsync*>(pl);
+    HIP_MEMCPY3D parms{};
+    std::memcpy(&parms, a->drv3d_bytes, sizeof(parms));
+    hipStream_t stream = ctx.translate_stream(a->stream);
+
+    if (parms.srcMemoryType == hipMemoryTypeHost && a->blob_hash_lo != 0) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob) parms.srcHost = blob;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        return hipDrvMemcpy3DAsync(&parms, stream);
+    }
+    if (parms.dstMemoryType == hipMemoryTypeHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] hipDrvMemcpy3DAsync D2H validate FAIL: src 0x%llx not mapped - pointer translation bug\n",
+                    (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.WidthInBytes * parms.Height * parms.Depth;
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi, stream, true);
+    }
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    return hipDrvMemcpy3DAsync(&parms, stream);
+}
+
+hipError_t playback_hipDrvMemcpy2DUnaligned(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipDrvMemcpy2DUnaligned*>(pl);
+    hip_Memcpy2D parms{};
+    std::memcpy(&parms, a->drv2d_bytes, sizeof(parms));
+
+    if (parms.srcMemoryType == hipMemoryTypeHost && a->blob_hash_lo != 0) {
+        size_t blob_sz = 0;
+        const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
+        if (blob) parms.srcHost = blob;
+        parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+            ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+        return hipDrvMemcpy2DUnaligned(&parms);
+    }
+    if (parms.dstMemoryType == hipMemoryTypeHost) {
+        uint64_t src_rec = reinterpret_cast<uint64_t>(parms.srcDevice);
+        void* src_live = ctx.translate_ptr(src_rec);
+        if (!src_live) {
+            fprintf(stderr, "[HRR] hipDrvMemcpy2DUnaligned D2H validate FAIL: src 0x%llx not mapped - pointer translation bug\n",
+                    (unsigned long long)src_rec);
+            ctx.d2h_attempted++;
+            ctx.note_d2h_fail(hrr_dispatch_seq);
+            return hipSuccess;
+        }
+        size_t byte_count = parms.WidthInBytes * parms.Height;
+        return replay_memcpy3d_d2h(ctx, src_live, byte_count,
+                                   a->d2h_hash_lo, a->d2h_hash_hi, nullptr, false);
+    }
+    parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcDevice)));
+    parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(
+        ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstDevice)));
+    return hipDrvMemcpy2DUnaligned(&parms);
+}
+
+// ---------------------------------------------------------------------------
 // Manual playback: hipMemcpy2D / hipMemcpy2DAsync
 //
 // H2D: the recorded host `src` VA is meaningless at replay; substitute the
