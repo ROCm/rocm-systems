@@ -326,7 +326,6 @@ class AieKernelSymbol final : public SymbolImpl {
                    _symbol_name, HSA_SYMBOL_LINKAGE_PROGRAM,
                    true,  // is_definition
                    _descriptor_ptr),
-        full_name(_symbol_name),
         descriptor_ptr(_descriptor_ptr),
         kernarg_size(_kernarg_size),
         num_cols(_num_cols) {}
@@ -342,11 +341,14 @@ class AieKernelSymbol final : public SymbolImpl {
   /// @brief Marks the kernel_object handle as visible (called at executable freeze).
   void SetFrozen() { frozen = true; }
 
-  std::string full_name;    ///< Kernel name.
-  uint64_t descriptor_ptr;  ///< Host pointer to the kernel's AieKernelDescriptor.
-  uint32_t kernarg_size;    ///< Kernel argument buffer size in bytes.
-  uint32_t num_cols;        ///< Number of NPU columns the kernel uses.
-  bool frozen = false;      ///< KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
+  /// @brief Host pointer to the kernel's AieKernelDescriptor.
+  uint64_t descriptor_ptr;
+  /// @brief Kernel argument buffer size in bytes.
+  uint32_t kernarg_size;
+  /// @brief Number of NPU columns the kernel uses.
+  uint32_t num_cols;
+  /// @brief KERNEL_OBJECT returns 0 until set at freeze (GPU-parity contract).
+  bool frozen = false;
 };
 
 //===----------------------------------------------------------------------===//

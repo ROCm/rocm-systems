@@ -724,15 +724,6 @@ bool VariableSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
 
 bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
   switch (symbol_info) {
-    case HSA_EXECUTABLE_SYMBOL_INFO_TYPE:
-      *static_cast<hsa_symbol_kind_t*>(value) = HSA_SYMBOL_KIND_KERNEL;
-      return true;
-    case HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH:
-      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(full_name.size());
-      return true;
-    case HSA_EXECUTABLE_SYMBOL_INFO_NAME:
-      memcpy(value, full_name.c_str(), full_name.size() + 1);
-      return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
       // Handle is only valid once the executable is frozen; 0 before, matching GPU.
       *static_cast<uint64_t*>(value) = frozen ? descriptor_ptr : 0;
@@ -748,12 +739,6 @@ bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
       return true;
     case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE:
       *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use private segment
-      return true;
-    case HSA_EXECUTABLE_SYMBOL_INFO_LINKAGE:
-      *static_cast<hsa_symbol_linkage_t*>(value) = HSA_SYMBOL_LINKAGE_PROGRAM;
-      return true;
-    case HSA_EXECUTABLE_SYMBOL_INFO_IS_DEFINITION:
-      *static_cast<bool*>(value) = true;
       return true;
     default:
       return SymbolImpl::GetInfo(symbol_info, value);
@@ -1711,6 +1696,12 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
     aie_kernel_symbols_.push_back(staged_symbols[i]);
   }
 
+  // Tracked in objects (for Destroy/teardown) but intentionally NOT in
+  // loaded_code_objects: that vector holds LoadedCodeObjectImpl (the GPU segment
+  // model), which AieLoadedCodeObjectImpl is not.
+  // AIE objects are not enumerated by hsa_ven_amd_loader_executable_iterate_loaded_code_objects
+  // and have no r_debug link-map entry.
+  // Revisit if we need to discover AIE code objects generically.
   objects.push_back(loaded_obj);
   if (loaded_code_object) {
     *loaded_code_object = LoadedCodeObject::Handle(loaded_obj.get());

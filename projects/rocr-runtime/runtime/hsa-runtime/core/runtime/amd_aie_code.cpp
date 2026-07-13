@@ -91,6 +91,9 @@ bool AieCode::Parse() {
         section_base_ + hdr->header_size + static_cast<uint64_t>(i) * hdr->kernel_entry_size);
 
     if (e->insts_size == 0) return false;
+    // Instructions are 32-bit words; the driver submits insts_size / 4 as the
+    // dword count, so a non-multiple-of-4 size would silently truncate the stream.
+    if (e->insts_size % sizeof(uint32_t) != 0) return false;
     if (!in_section(e->insts_offset, e->insts_size)) return false;
     if (e->pdi_size != 0 && !in_section(e->pdi_offset, e->pdi_size)) return false;
     if (e->pdi_size == 0 && e->pdi_offset != 0) return false;  // PDI absent iff both are 0
