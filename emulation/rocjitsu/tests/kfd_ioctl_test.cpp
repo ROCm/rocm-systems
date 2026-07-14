@@ -728,9 +728,9 @@ TEST_F(KfdIoctlTest, DbgTrapEnableOversizedRuntimeInfoPreservesTailInDaemonMode)
 // In daemon mode the debugger's dbg_fd is a number in the *client's* fd table
 // and is meaningless to the daemon. The client hands the real fd over
 // out-of-band as SCM_RIGHTS ancillary data; the daemon receives it in its own
-// fd space and the rj_vm_execute_as_ex() glue substitutes it into DBG_TRAP
+// fd space and the rj_vm_execute_as() glue substitutes it into DBG_TRAP
 // ENABLE's dbg_fd so the debug session can later signal it, releasing it on
-// DISABLE. These tests exercise the real rj_vm_execute_as_ex() dispatch path
+// DISABLE. These tests exercise the real rj_vm_execute_as() dispatch path
 // (where the substitution and adoption live), not the raw driver ioctl.
 class DbgTrapDaemonTest : public ::testing::Test {
 protected:
@@ -749,20 +749,20 @@ protected:
     }
   }
 
-  // Runs one ioctl through rj_vm_execute_as_ex() (the daemon dispatch path),
-  // with an optional out-of-band in_handle. On return, *in_handle_out (when
-  // given) carries the transferred fd, which the glue clears to -1 once the
-  // debug session has adopted it.
+  // Runs one ioctl through rj_vm_execute_as() (the daemon dispatch path), with
+  // an optional in_handle carried in cmd.in_handle. On return, *in_handle_out
+  // (when given) carries cmd.in_handle, which the glue clears to -1 once the
+  // debug session has adopted the transferred fd.
   int execute(uint32_t cmd_id, void *buf, size_t buf_size, int in_handle, int *in_handle_out) {
     rj_vm_cmd_t cmd{};
     cmd.cmd = cmd_id;
     cmd.buf = buf;
     cmd.buf_size = buf_size;
     cmd.shared_handle = -1;
-    rj_handle_t xfer = in_handle;
-    rj_vm_execute_as_ex(vm_, process_id_, &cmd, &xfer);
+    cmd.in_handle = in_handle;
+    rj_vm_execute_as(vm_, process_id_, &cmd);
     if (in_handle_out != nullptr)
-      *in_handle_out = xfer;
+      *in_handle_out = cmd.in_handle;
     return cmd.result;
   }
 
@@ -867,7 +867,7 @@ TEST_F(DbgTrapDaemonTest, EnableWithClientChosenFdNumberIsNotTrustedInDaemonName
 
 // End-to-end: the RemoteDriver client hands the debugger's notifier fd to an
 // in-process daemon over SCM_RIGHTS (mirroring tools/rocjitsu's handle_client),
-// and the daemon-side rj_vm_execute_as_ex() adopts it. Proven by having the daemon
+// and the daemon-side rj_vm_execute_as() adopts it. Proven by having the daemon
 // write a sentinel through the *transferred* descriptor and reading it back on
 // the client's own eventfd — only possible if SCM_RIGHTS delivered a working
 // alias of the same kernel object.
@@ -882,7 +882,7 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
 
   // Minimal stand-in for the daemon's RPC_IOCTL loop: capture an optional
   // SCM_RIGHTS fd on the header (rpc_recv_msg, exactly as tools/rocjitsu does),
-  // thread it through the out-of-band in_handle of rj_vm_execute_as_ex(), and
+  // thread it through cmd.in_handle into the real rj_vm_execute_as() path, and
   // reclaim it only if the session did not adopt it. jthread so an ASSERT_*
   // failure unwinds without std::terminate() on a joinable thread.
   std::jthread server([&, server_fd = sv[1]] {
@@ -936,11 +936,11 @@ TEST_F(DbgTrapDaemonTest, EnableSendsNotifierFdOverScmRights) {
       cmd.buf = payload.data() + sizeof(rocjitsu::RpcIoctlRequest);
       cmd.buf_size = ireq->args_bytes;
       cmd.shared_handle = -1;
-      rj_handle_t in_handle = in_fd;
-      rj_vm_execute_as_ex(vm_, process_id_, &cmd, &in_handle);
-      in_handle_after.store(in_handle);
-      if (in_handle >= 0)
-        ::close(in_handle);
+      cmd.in_handle = in_fd;
+      rj_vm_execute_as(vm_, process_id_, &cmd);
+      in_handle_after.store(cmd.in_handle);
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
 
       rocjitsu::RpcHeader resp{};
       resp.opcode = rocjitsu::RPC_IOCTL;

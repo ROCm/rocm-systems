@@ -205,13 +205,13 @@ void handle_client(int client_fd, rj_vm_t *vm, pid_t client_pid, std::stop_token
       cmd.buf = payload.data() + sizeof(RpcIoctlRequest);
       cmd.buf_size = ioctl_request->args_bytes;
       cmd.shared_handle = -1;
-      rj_handle_t in_handle = in_fd;
-      in_fd = -1; // ownership passes to in_handle; execute clears it on adoption
-      rj_vm_execute_as_ex(vm, process_id, &cmd, &in_handle);
+      cmd.in_handle = in_fd;
+      in_fd = -1; // ownership passes to cmd; execute clears it on adoption
+      rj_vm_execute_as(vm, process_id, &cmd);
       // The debug session adopts the notifier fd on success (in_handle cleared);
       // reclaim it otherwise.
-      if (in_handle >= 0)
-        ::close(in_handle);
+      if (cmd.in_handle >= 0)
+        ::close(cmd.in_handle);
 
       RpcHeader resp{};
       resp.opcode = RPC_IOCTL;

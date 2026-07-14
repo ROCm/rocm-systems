@@ -479,20 +479,13 @@ fn handle_client(fd: RawFd, shared: &Shared) {
                             buf_size: args_bytes as usize,
                             result: 0,
                             shared_handle: -1,
+                            in_handle: in_fd,
                         };
-                        // Transfer any notifier fd out-of-band via the
-                        // fd-carrying entry point; fall back when the loaded
-                        // library predates it (no transfer, still functional).
-                        let mut in_handle = in_fd;
-                        if unsafe { lib.vm_execute_as_ex(vm, process_id, &mut cmd, &mut in_handle) }
-                            .is_none()
-                        {
-                            unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
-                        }
+                        unsafe { lib.vm_execute_as(vm, process_id, &mut cmd) };
                         // The debug session adopts the notifier fd on success
                         // (in_handle cleared); reclaim it otherwise.
-                        if in_handle >= 0 {
-                            unsafe { libc::close(in_handle) };
+                        if cmd.in_handle >= 0 {
+                            unsafe { libc::close(cmd.in_handle) };
                         }
                         in_fd = -1;
                         // `buf_size` is updated in place; clamp the slice

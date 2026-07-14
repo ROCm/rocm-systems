@@ -53,18 +53,13 @@ typedef enum rj_vm_mode_t {
 } rj_vm_mode_t;
 
 /// @brief Device command descriptor for rj_vm_execute.
-///
-/// @note This struct is part of the runtime-loaded ABI: callers built against an
-/// older header may pass a shorter object, so its layout is frozen. A
-/// client-provided input fd (e.g. a debugger notifier) is NOT a member here — it
-/// travels out-of-band through rj_vm_execute_as_ex so extending this descriptor
-/// never grows the struct behind an older caller's back.
 typedef struct rj_vm_cmd_t {
   uint32_t cmd;              ///< Platform-specific command number.
   void *buf;                 ///< Command arguments buffer (with inlined arrays).
   size_t buf_size;           ///< Total size of the arguments buffer.
   int32_t result;            ///< [out] Return code (0 on success, negative errno on failure).
   rj_handle_t shared_handle; ///< [out] Backing handle for shareable allocations, or -1.
+  rj_handle_t in_handle;     ///< [in,out] Client-provided fd (e.g. debugger notifier), or -1.
 } rj_vm_cmd_t;
 
 /// @brief Device memory mapping descriptor.
@@ -229,31 +224,18 @@ RJ_API_EXPORT rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **v
 RJ_API_EXPORT rj_status_t rj_vm_execute(rj_vm_t *vm, rj_vm_cmd_t *cmd);
 
 /// @brief Execute a device command for a specific process (daemon mode).
+///
+/// @details In daemon mode, if @p cmd carries a client-provided input fd in
+/// cmd->in_handle (e.g. the debugger's notifier pipe for AMDKFD_IOC_DBG_TRAP
+/// ENABLE), the VM substitutes it into the command payload and, on success,
+/// adopts it — clearing cmd->in_handle to -1 so the caller does not close the
+/// descriptor. If the command does not consume the fd, cmd->in_handle is left
+/// unchanged for the caller to reclaim. Set cmd->in_handle to -1 when there is
+/// no fd to transfer.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The target process ID.
 /// @param[in,out] cmd Command descriptor.
 RJ_API_EXPORT rj_status_t rj_vm_execute_as(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd);
-
-/// @brief Execute a device command for a specific process (daemon mode),
-/// transferring an out-of-band input fd.
-///
-/// @details Extended form of rj_vm_execute_as that carries a client-provided
-/// descriptor (e.g. the debugger's notifier pipe for AMDKFD_IOC_DBG_TRAP
-/// ENABLE) alongside @p cmd instead of embedding it in the descriptor. Passing
-/// the fd through the call signature — rather than growing rj_vm_cmd_t — keeps
-/// the descriptor ABI frozen so a caller built against an older header can never
-/// have this fd read past the end of its shorter object. The symbol's presence
-/// is the capability tag: a caller that runtime-loads the library resolves it
-/// optionally and falls back to rj_vm_execute_as (no fd transfer) when absent.
-/// @param[in] vm VM handle.
-/// @param[in] process_id The target process ID.
-/// @param[in,out] cmd Command descriptor.
-/// @param[in,out] in_handle Points to the fd to transfer (or -1). On adoption
-///   the VM clears it to -1 so the caller does not close the descriptor; if the
-///   command does not consume it the value is left unchanged for the caller to
-///   reclaim. May be NULL, which is equivalent to rj_vm_execute_as.
-RJ_API_EXPORT rj_status_t rj_vm_execute_as_ex(rj_vm_t *vm, uint32_t process_id, rj_vm_cmd_t *cmd,
-                                              rj_handle_t *in_handle);
 
 /// @brief Open the VM's simulated device and create (or reuse) a KFD process.
 /// @param[in] vm VM handle.
