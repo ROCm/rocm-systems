@@ -27,11 +27,9 @@ jobs:
     name: >-
       Test ${{ fromJSON(inputs.component).job_name }}
       (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})
-      ${{ (fromJSON(inputs.component).expect_failure == true || contains(inputs.amdgpu_families, 'gfx125X')) && '(xfail)' || '' }}
+      ${{ fromJSON(inputs.component).expect_failure == true && '(xfail)' || '' }}
     runs-on: ${{ inputs.test_runs_on }}
-    # TEMPORARY: gfx125X (MI455) tests are marked as expected failures while we stabilize
-    # the test infrastructure. Remove the gfx125X condition once tests are stable.
-    continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true || contains(inputs.amdgpu_families, 'gfx125X') }}
+    continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
     container:
       # If the component has specified an alternate image, honor that option.
       # Otherwise use the default image.
