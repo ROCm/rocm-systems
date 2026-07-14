@@ -383,7 +383,7 @@ class QueuePair {
     int n = symm_count ? *symm_count : 0;
     for (int i = 0; i < n; ++i) {
       QpSymmEntry e = symm_entries[i];
-      if (addr >= e.local_base && addr < e.local_base + e.length) {
+      if ((addr - e.local_base) < e.length) {
         *rkey_out = e.rkey;
         return e.remote_base + (addr - e.local_base);
       }
@@ -413,7 +413,7 @@ class QueuePair {
     int n = symm_count ? *symm_count : 0;
     for (int i = 0; i < n; ++i) {
       QpSymmEntry e = symm_entries[i];
-      if (addr >= e.local_base && addr < e.local_base + e.length) {
+      if ((addr - e.local_base) < e.length) {
         return e.lkey;
       }
     }
