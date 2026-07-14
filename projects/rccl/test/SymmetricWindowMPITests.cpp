@@ -613,17 +613,16 @@ TEST_F(SymWin_WindowLifecycle, MultipleWindows)
 
     for (int i = 0; i < numWindows; i++) {
         void* buf = allocNcclBuf(bufSize);
-        ASSERT_MPI_NE(buf, nullptr) << "Failed to allocate buffer " << i;
+        ASSERT_MPI_NE(buf, nullptr);
 
         wins[i] = registerWindow(comm, buf, bufSize);
-        ASSERT_MPI_NE(wins[i], nullptr) << "Failed to register window " << i;
+        ASSERT_MPI_NE(wins[i], nullptr);
     }
 
     // Verify all windows are unique
     for (int i = 0; i < numWindows; i++) {
         for (int j = i + 1; j < numWindows; j++) {
-            ASSERT_MPI_NE(wins[i], wins[j])
-                << "Windows " << i << " and " << j << " are not unique";
+            ASSERT_MPI_NE(wins[i], wins[j]);
         }
     }
 
@@ -648,12 +647,10 @@ TEST_F(SymWin_WindowLifecycle, RepeatedRegisterDeregister)
     for (int i = 0; i < iterations; i++) {
         ncclWindow_t win = nullptr;
         ASSERT_MPI_EQ(ncclSuccess,
-            ncclCommWindowRegister(comm, buf, bufSize, &win, NCCL_WIN_COLL_SYMMETRIC))
-            << "Registration failed on iteration " << i;
+            ncclCommWindowRegister(comm, buf, bufSize, &win, NCCL_WIN_COLL_SYMMETRIC));
         ASSERT_MPI_NE(win, nullptr);
 
-        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(comm, win))
-            << "Deregistration failed on iteration " << i;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowDeregister(comm, win));
     }
 
     TEST_INFO("Rank %d: RepeatedRegisterDeregister passed (%d iterations)",
