@@ -2735,6 +2735,13 @@ void Runtime::Unload() {
   SharedSignalPool.clear();
   EventPool.clear();
 
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
+
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.
   system_regions_fine_.clear();
