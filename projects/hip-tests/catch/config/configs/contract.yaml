@@ -351,6 +351,9 @@ contract:
   Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported:
     <<: *level_0
     tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
   Contract_Memset_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
     tags: [memset]
@@ -1180,6 +1183,9 @@ contract:
     <<: *level_0
     tags: [vmm_handle]
   Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported:
+    <<: *level_0
+    tags: [vmm_handle]
+  Contract_VmmHandle_ExportImportShareableHandle_RoundTrips:
     <<: *level_0
     tags: [vmm_handle]
   Contract_Copy3D_Malloc3D_ReturnsPitchedPtr:

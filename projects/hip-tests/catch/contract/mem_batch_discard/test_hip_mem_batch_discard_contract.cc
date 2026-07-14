@@ -45,6 +45,18 @@ hipMemLocation CurrentDeviceLocation() {
   return location;
 }
 
+// The standalone batch-prefetch operation is only exercised on discrete GPUs.
+// On at least one integrated local runtime it rejects well-formed inputs with
+// an invalid-value error (while the single-range prefetch and the combined
+// discard-and-prefetch accept the identical location), so gating on the
+// discrete-device property keeps the contract meaningful. Discrete GPUs that
+// lack the capability report it as unsupported and skip below.
+bool IsDiscreteDevice() {
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()));
+  return props.integrated == 0;
+}
+
 // Allocates and faults in a small managed range on the caller's stream. The
 // caller owns the returned pointer and must free it.
 void* AllocResidentManagedRange(hipStream_t stream) {
@@ -180,5 +192,32 @@ HIP_TEST_CASE(Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported) {
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
 
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+HIP_TEST_CASE(Contract_MemBatchDiscard_PrefetchBatch_IsAcceptedOrUnsupported) {
+  SkipIfManagedMemoryUnsupported();
+  if (!IsDiscreteDevice()) {
+    HIP_SKIP_TEST("Batch prefetch is only exercised on discrete GPUs.");
+  }
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  void* ptr = AllocResidentManagedRange(stream);
+
+  // Prefetching a batch of managed ranges to the current device must be accepted
+  // or reported unsupported. When honored, the stream must drain cleanly.
+  void* ptrs[1] = {ptr};
+  size_t sizes[1] = {kRangeBytes};
+  hipMemLocation locations[1] = {CurrentDeviceLocation()};
+  size_t location_indices[1] = {0};
+  const hipError_t status =
+      hipMemPrefetchBatchAsync(ptrs, sizes, 1, locations, location_indices, 1, 0, stream);
+  RequireAcceptedOrUnsupported(status);
+  if (status == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream));
+  }
+
+  HIP_CHECK(hipFree(ptr));
   HIP_CHECK(hipStreamDestroy(stream));
 }

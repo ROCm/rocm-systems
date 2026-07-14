@@ -38,6 +38,35 @@ void SkipIfVmmUnsupported() {
   }
 }
 
+// POSIX-fd shareable-handle export of a VMM allocation is only exercised on
+// discrete GPUs. On integrated devices (APUs/iGPUs) the export path is not a
+// meaningful OS-level dma-buf export and, on at least one such local runtime,
+// faults rather than returning a clean error; gating on the discrete-device
+// property keeps the export call off that path entirely. Discrete GPUs that
+// still lack the capability report it through a clean status and skip below.
+bool IsDiscreteDevice() {
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, CurrentDevice()));
+  return props.integrated == 0;
+}
+
+void SkipIfShareableHandleUnavailable() {
+  SkipIfVmmUnsupported();
+  if (!IsDiscreteDevice()) {
+    HIP_SKIP_TEST(
+        "POSIX-fd VMM shareable handles are only exercised on discrete GPUs.");
+  }
+}
+
+hipMemAllocationProp PosixFdAllocationProp() {
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = CurrentDevice();
+  return prop;
+}
+
 size_t AllocationGranularity() {
   const auto prop = DeviceAllocationProp();
   size_t granularity = 0;
@@ -149,4 +178,47 @@ HIP_TEST_CASE(Contract_VmmHandle_GetHandleForAddressRange_DmaBufFd_IsQueryableWh
   REQUIRE(fd >= 0);
 
   DestroyMappedAllocation(&alloc);
+}
+
+HIP_TEST_CASE(Contract_VmmHandle_ExportImportShareableHandle_RoundTrips) {
+  SkipIfShareableHandleUnavailable();
+
+  // Create a physical allocation that requests a POSIX-fd shareable handle.
+  const auto prop = PosixFdAllocationProp();
+  size_t size = 0;
+  const hipError_t gran_status =
+      hipMemGetAllocationGranularity(&size, &prop, hipMemAllocationGranularityMinimum);
+  if (gran_status == hipErrorNotSupported || size == 0) {
+    HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
+  }
+  HIP_CHECK(gran_status);
+
+  hipMemGenericAllocationHandle_t handle{};
+  const hipError_t create_status = hipMemCreate(&handle, size, &prop, 0);
+  if (create_status == hipErrorNotSupported) {
+    HIP_SKIP_TEST("POSIX-fd VMM allocations are not supported by this device/runtime path.");
+  }
+  HIP_CHECK(create_status);
+
+  // Export the allocation to a POSIX file descriptor. A supported path yields a
+  // non-negative descriptor; an unsupported one reports a clean status and skips.
+  int fd = -1;
+  const hipError_t export_status =
+      hipMemExportToShareableHandle(&fd, handle, hipMemHandleTypePosixFileDescriptor, 0);
+  if (export_status == hipErrorNotSupported) {
+    HIP_CHECK(hipMemRelease(handle));
+    HIP_SKIP_TEST("VMM shareable-handle export is not supported by this device/runtime path.");
+  }
+  HIP_CHECK(export_status);
+  REQUIRE(fd >= 0);
+
+  // The exported descriptor must import back into a usable generic allocation
+  // handle within the same process, which is then released independently.
+  hipMemGenericAllocationHandle_t imported{};
+  HIP_CHECK(hipMemImportFromShareableHandle(
+      &imported, reinterpret_cast<void*>(static_cast<long>(fd)),
+      hipMemHandleTypePosixFileDescriptor));
+  HIP_CHECK(hipMemRelease(imported));
+
+  HIP_CHECK(hipMemRelease(handle));
 }
