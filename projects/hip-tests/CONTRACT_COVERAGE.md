@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 559
+- Contract tests: 562
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 450
-- Approximate declared API-name coverage: 91.1%
+- Declared HIP runtime APIs directly exercised by contract tests: 453
+- Approximate declared API-name coverage: 91.7%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); these are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -54,6 +54,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `kernel` | 4 |
 | `call_config` | 2 |
 | `kernel_launch` | 7 |
+| `multi_device_launch` | 3 |
 | `func_attributes` | 8 |
 | `graph` | 5 |
 | `occupancy` | 3 |
@@ -138,7 +139,7 @@ The percentages below are approximate API-name coverage against declarations par
 | Graph / capture | 100 | 100 | 100.0% |
 | Stream | 23 | 23 | 100.0% |
 | Runtime / device | 39 | 45 | 86.7% |
-| Kernel launch / function attrs | 15 | 19 | 78.9% |
+| Kernel launch / function attrs | 18 | 19 | 94.7% |
 | Memory / copy / memset | 133 | 137 | 97.1% |
 | Other runtime APIs | 25 | 56 | 44.6% |
 | Module / library loading | 29 | 29 | 100.0% |
@@ -459,6 +460,9 @@ hipGetFuncBySymbol
 hipConfigureCall
 hipSetupArgument
 hipLaunchByPtr
+hipLaunchCooperativeKernelMultiDevice
+hipExtLaunchMultiKernelMultiDevice
+hipModuleLaunchCooperativeKernelMultiDevice
 ```
 
 ### Module / library loading
@@ -690,7 +694,7 @@ hipExternalMemoryGetMappedMipmappedArray
 7. Extension and proc-address APIs beyond current basics: dynamic API-name lookup, driver-entry-point lookup, API-name-to-string mapping, per-stream device-id queries, thread-local extended error state, and the AMD extended logging controls (`hipExtEnableLogging`, `hipExtDisableLogging`, `hipExtSetLoggingParams` accepted-or-unsupported with enable/disable capability consistency) are now covered; external memory/semaphore import/export and extended kernel launch variants remain.
 8. Occupancy APIs: the occupancy API family is now at full name coverage. Beyond the earlier basics — max-active-blocks-per-multiprocessor (with the module variants and their with-flags forms), the non-module with-flags variant (`hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags`), max-potential-block-size, available-dynamic-shared-memory-per-block, and the cluster occupancy helpers (`hipOccupancyMaxActiveClusters`, `hipOccupancyMaxPotentialClusterSize`) — the non-module with-flags potential-block-size variant (`hipOccupancyMaxPotentialBlockSizeWithFlags`) and the variable-shared-memory potential-block-size helpers (`hipOccupancyMaxPotentialBlockSizeVariableSMem`, `hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags`) are now covered too, exercising the with-flags/plain equivalence and a zero-dynamic-shared-memory functor.
 9. Stream and event APIs beyond current basics: stream creation with flags and priority, flag/priority/device/id property round-trips, event timing (`hipEventElapsedTime`, `hipEventRecordWithFlags`), host-side stream callbacks (`hipStreamAddCallback`), stream attribute get/set/copy (`hipStreamGetAttribute`, `hipStreamSetAttribute`, `hipStreamCopyAttributes`), and stream memory operations (32/64-bit write-value `hipStreamWriteValue32`/`64`, 32/64-bit wait-value `hipStreamWaitValue32`/`64`, and batch memory ops `hipStreamBatchMemOp`, all gated on `hipDeviceAttributeCanUseStreamWaitValue`) are now covered, bringing the event API family to full name coverage; CU-mask stream create/query variants and memory-attach (`hipStreamAttachMemAsync`) are now covered, bringing the stream API family to full name coverage; device-resource queries (`hipStreamGetDevResource`) and the capture-to-graph/update-dependencies variants remain.
-10. Kernel launch and function-attribute APIs beyond current basics: the function-attribute family is now covered, including the struct-form attribute query (`hipFuncGetAttributes`), the scalar attribute query (`hipFuncGetAttribute`), per-function attribute and hint setters (`hipFuncSetAttribute`, `hipFuncSetCacheConfig`, `hipFuncSetSharedMemConfig`), and symbol-to-function resolution (`hipGetFuncBySymbol`); host-pointer kernel launch (`hipLaunchKernel`) and host-function launch (`hipLaunchHostFunc`) are covered too. Cooperative launch (`hipLaunchCooperativeKernel`), the AMD extended launch entry point (`hipExtLaunchKernel`), and the device-global symbol address/size queries (`hipGetSymbolAddress`, `hipGetSymbolSize`) are now covered as well. The extended-launch contract exercises the `hipLaunchKernelEx` C++ template wrapper, but that name is not declared in `hip_runtime_api.h` (the header declares the underlying `hipLaunchKernelExC` entry point), so it does not count toward name coverage under the header-parse method. The legacy call-configuration helpers (`hipConfigureCall`, `hipSetupArgument`, `hipLaunchByPtr`) are now covered too, via a configure/setup/launch-by-pointer round-trip that writes an expected value plus a repeated-staging independence check; the null-function-pointer negative is intentionally omitted because `hipLaunchByPtr(nullptr)` corrupts the runtime heap on this backend (returns an error but aborts at teardown with `free(): invalid pointer`). Remaining launch and symbol APIs include the multi-device cooperative launch (`hipLaunchCooperativeKernelMultiDevice`, `hipExtLaunchMultiKernelMultiDevice`) and the driver-style extended launch entry points (`hipLaunchKernelExC`, `hipDrvLaunchKernelEx`).
+10. Kernel launch and function-attribute APIs beyond current basics: the function-attribute family is now covered, including the struct-form attribute query (`hipFuncGetAttributes`), the scalar attribute query (`hipFuncGetAttribute`), per-function attribute and hint setters (`hipFuncSetAttribute`, `hipFuncSetCacheConfig`, `hipFuncSetSharedMemConfig`), and symbol-to-function resolution (`hipGetFuncBySymbol`); host-pointer kernel launch (`hipLaunchKernel`) and host-function launch (`hipLaunchHostFunc`) are covered too. Cooperative launch (`hipLaunchCooperativeKernel`), the AMD extended launch entry point (`hipExtLaunchKernel`), and the device-global symbol address/size queries (`hipGetSymbolAddress`, `hipGetSymbolSize`) are now covered as well. The extended-launch contract exercises the `hipLaunchKernelEx` C++ template wrapper, but that name is not declared in `hip_runtime_api.h` (the header declares the underlying `hipLaunchKernelExC` entry point), so it does not count toward name coverage under the header-parse method. The legacy call-configuration helpers (`hipConfigureCall`, `hipSetupArgument`, `hipLaunchByPtr`) are now covered too, via a configure/setup/launch-by-pointer round-trip that writes an expected value plus a repeated-staging independence check; the null-function-pointer negative is intentionally omitted because `hipLaunchByPtr(nullptr)` corrupts the runtime heap on this backend (returns an error but aborts at teardown with `free(): invalid pointer`). The cooperative multi-device launch family is now covered as well (`hipLaunchCooperativeKernelMultiDevice`, `hipExtLaunchMultiKernelMultiDevice`, `hipModuleLaunchCooperativeKernelMultiDevice`), each as a functional per-device write round-trip gated to discrete GPUs with at least two devices advertising cooperative multi-device launch; these skip on single-GPU or integrated hosts and are verified on 2x datacenter GPUs (gfx90a). Remaining launch and symbol APIs are the driver-style extended launch entry points (`hipLaunchKernelExC`, `hipDrvLaunchKernelEx`).
 11. Green context and device-resource APIs: the device and stream SM resource queries, SM resource splitting, resource-descriptor generation, green execution context creation, and the execution-context accessors and operations are now covered (`hipDeviceGetDevResource`, `hipStreamGetDevResource`, `hipDevSmResourceSplitByCount`, `hipDevResourceGenerateDesc`, `hipGreenCtxCreate`, `hipDeviceGetExecutionCtx`, `hipExecutionCtxStreamCreate`, `hipExecutionCtxGetDevice`, `hipExecutionCtxGetId`, `hipExecutionCtxGetDevResource`, `hipExecutionCtxSynchronize`, `hipExecutionCtxRecordEvent`, `hipExecutionCtxWaitEvent`, `hipExecutionCtxDestroy`), verified by an SM-count subset check on a split green context plus an observable memset launched on a green-context stream. Remaining device-resource gaps are the non-count split variant (`hipDevSmResourceSplit`) and the workqueue resource types. These entry points fall under the "Other runtime APIs" category, most of which remains uncovered (external memory/semaphore import/export, graphics interop, mipmapped arrays, and the deprecated texture-reference family), gated by host capabilities the device-only contract harness cannot portably exercise.
 
 ## Update procedure

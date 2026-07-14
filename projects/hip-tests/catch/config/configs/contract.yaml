@@ -786,6 +786,15 @@ contract:
   Contract_GraphMemcpy3DNode_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
     tags: [graph_memcpy3d_node]
+  Contract_MultiDeviceLaunch_CooperativeKernel_WritesPerDeviceValue:
+    <<: *level_0
+    tags: [multi_device_launch]
+  Contract_MultiDeviceLaunch_ExtMultiKernel_WritesPerDeviceValue:
+    <<: *level_0
+    tags: [multi_device_launch]
+  Contract_MultiDeviceLaunch_ModuleCooperativeKernel_WritesPerDeviceValue:
+    <<: *level_0
+    tags: [multi_device_launch]
   Contract_GraphBatchMemOp_AddNode_LaunchesWriteValue:
     <<: *level_0
     tags: [graph_batch_mem_op]

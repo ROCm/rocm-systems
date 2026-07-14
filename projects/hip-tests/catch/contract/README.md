@@ -37,6 +37,7 @@ The first domains are:
 - `call_config`: legacy configure/setup/launch-by-pointer call-configuration contracts
 - `func_attributes`: runtime function attribute query, symbol, and configuration contracts
 - `kernel_launch`: cooperative, extended, symbol, and AMD extension kernel launch contracts
+- `multi_device_launch`: discrete-GPU-gated cooperative, extended, and module-based multi-device kernel launch contracts
 - `symbol_copy`: device symbol copy, offset, async, and invalid-symbol contracts
 - `graph`: graph lifecycle plus simple memcpy and memset node contracts
 - `occupancy`: portable occupancy query contracts for a tiny in-source kernel
