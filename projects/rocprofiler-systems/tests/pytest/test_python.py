@@ -38,6 +38,14 @@ def python_builtin_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
     ]
 
 
+@pytest.fixture
+def python_builtin_annotated_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    rules_dir = validation_rules_dir / "python"
+    return [
+        rules_dir / "python-builtin-annotated-rules.json",
+    ]
+
+
 @pytest.fixture(scope="session")
 def get_cat_command() -> list[str]:
     """Get a command to concatenate files (like Unix cat).
@@ -117,6 +125,17 @@ class TestPython(RocprofsysTest):
         "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
     }
 
+    # Per-function debug annotations that -a/--annotate-trace attaches to every
+    # profiled python region (see libpyrocprofsys.cpp's config::annotations).
+    PYTHON_ANNOTATE_DEBUG_KEYS = [
+        "file",
+        "line",
+        "lasti",
+        "argcount",
+        "nlocals",
+        "stacksize",
+    ]
+
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated, exclude",
@@ -165,11 +184,18 @@ class TestPython(RocprofsysTest):
         "annotated",
         [
             pytest.param(False, marks=pytest.mark.rocpd("python_rocpd_env")),
-            pytest.param(True, id="annotated"),
+            pytest.param(
+                True, id="annotated", marks=pytest.mark.rocpd("python_rocpd_env")
+            ),
         ],
     )
     def test_builtin(
-        self, python_version, annotated, python_rocpd_env, python_builtin_rocpd_rules
+        self,
+        python_version,
+        annotated,
+        python_rocpd_env,
+        python_builtin_rocpd_rules,
+        python_builtin_annotated_rocpd_rules,
     ):
         result = self.run_test(
             "python",
@@ -204,6 +230,29 @@ class TestPython(RocprofsysTest):
             self.assert_rocpd(
                 result,
                 rules_files=python_builtin_rocpd_rules,
+            )
+            # regression: without -a, no per-function debug annotations should
+            # reach the trace (see test below for the annotated=True counterpart)
+            self.assert_perfetto(
+                result,
+                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
+                key_counts=[0] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+            )
+        else:
+            # regression: -a/--annotate-trace annotations were dropped by
+            # trace-cache replay (only debug.begin_ns/debug.corr_id ever reached
+            # the perfetto trace, identical with or without -a). Every profiled
+            # python region carries all six annotation fields, so each key's
+            # count must equal the total number of profiled slices.
+            total_slices = sum(self.PYTHON_BUILTIN_GENERAL["counts"])
+            self.assert_perfetto(
+                result,
+                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
+                key_counts=[total_slices] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+            )
+            self.assert_rocpd(
+                result,
+                rules_files=python_builtin_annotated_rocpd_rules,
             )
 
     @pytest.mark.timeout(120)
