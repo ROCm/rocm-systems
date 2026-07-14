@@ -1284,6 +1284,21 @@ contract:
   Contract_DriverTexture_Create_InvalidArgs_AreRejected:
     <<: *level_0
     tags: [driver_texture_object]
+  Contract_TextureReference_SetGetAddressMode_RoundTrips:
+    <<: *level_0
+    tags: [texture_reference]
+  Contract_TextureReference_SetGetFilterMode_RoundTrips:
+    <<: *level_0
+    tags: [texture_reference]
+  Contract_TextureReference_SetGetFlags_RoundTrips:
+    <<: *level_0
+    tags: [texture_reference]
+  Contract_TextureReference_SetGetFormat_RoundTrips:
+    <<: *level_0
+    tags: [texture_reference]
+  Contract_TextureReference_SetGetMaxAnisotropy_RoundTrips:
+    <<: *level_0
+    tags: [texture_reference]
   Contract_Context_DeviceGet_ReturnsHandleForOrdinalZero:
     <<: *level_0
     tags: [context]

@@ -91,6 +91,7 @@ The first domains are:
 - `array3d`: 3D array allocation and 3D copy-to/from-array contracts
 - `texture`: texture and surface object creation and descriptor-introspection contracts
 - `driver_texture_object`: driver-style texture object creation and descriptor-introspection contracts
+- `texture_reference`: image-gated deprecated texture-reference set/get and bind/unbind contracts
 - `context`: driver-style device and context query contracts
 - `context_mutation`: driver-style context create, set-current, push/pop, synchronize, and API-version contracts
 - `context_config`: driver-style context cache/shared-memory config, flags, and peer-access contracts
