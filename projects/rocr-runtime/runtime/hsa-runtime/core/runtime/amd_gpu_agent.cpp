@@ -1038,6 +1038,15 @@ void GpuAgent::ReleaseResources() {
   if (this->Enabled()) {
     this->Disable();
 
+    // Destroy the persistent GWS/cooperative queue before tearing down
+    // resources. Otherwise ~AqlQueue may run later and store to a freed
+    // queue_inactive_signal.
+    {
+      std::lock_guard<std::mutex> lock(gws_queue_.lock_);
+      gws_queue_.queue_.reset();
+      gws_queue_.ref_ct_ = 0;
+    }
+
     // Remove all shared hardware queues from pool
     queue_pool_.Cleanup();
 
