@@ -409,6 +409,13 @@ struct WslTopology
     uint32_t engine_id_major         = 0;  // HsaNodeProperties.EngineId.ui32.Major
     uint32_t engine_id_minor         = 0;
     uint32_t engine_id_stepping      = 0;
+    // Identity fields the shim also reports, so agent info needs no HSA runtime.
+    uint32_t family_id  = 0;  // HsaNodeProperties.FamilyID
+    uint32_t num_xcc    = 0;  // HsaNodeProperties.NumXcc
+    uint32_t domain     = 0;  // HsaNodeProperties.Domain
+    uint32_t fw_ucode   = 0;  // HsaNodeProperties.EngineId.ui32.uCode
+    uint32_t sdma_ucode = 0;  // HsaNodeProperties.uCodeEngineVersions.uCodeSDMA
+    bool     valid      = false;
 };
 
 // Populate the topology fields that DXCore does not expose by invoking the
@@ -434,11 +441,15 @@ struct WslTopology
 [[maybe_unused]] bool
 fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
                          [[maybe_unused]] const DxcLuid& luid,
+                         [[maybe_unused]] uint32_t       device_id,
                          [[maybe_unused]] WslTopology&   out)
 {
-    // Opt-in only.
-    const char* enable = std::getenv("ROCPROFILER_USE_LIBROCDXG");
-    if(enable == nullptr || std::string{enable} != "1") return false;
+    // Default-on when the shim is compiled in (the intended primary source of
+    // topology on WSL); set ROCPROFILER_USE_LIBROCDXG=0 to force the pre-HSA
+    // placeholder + HSA-backfill fallback path instead.
+    if(const char* enable = std::getenv("ROCPROFILER_USE_LIBROCDXG");
+       enable != nullptr && std::string{enable} == "0")
+        return false;
 
 #if !defined(ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS)
     // Shim not available in this build (e.g. WSL2 / Linux). No-op.
@@ -482,10 +493,30 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
         // CPU-only nodes carry no FCompute cores; skip them.
         if(n.NumFComputeCores == 0) continue;
 
-        // Match the KFD node to the DXCore adapter by Windows LUID. KFD reports
-        // the same LUID that D3DKMTQueryAdapterInfo returns for the adapter.
-        if(n.LuidLowPart != luid.LowPart || n.LuidHighPart != static_cast<HSAuint32>(luid.HighPart))
+        // Match the KFD node to the DXCore adapter. Prefer the Windows LUID (the
+        // multi-GPU-safe key: KFD reports the same LUID D3DKMTQueryAdapterInfo
+        // returns for the adapter). Some shim builds do not populate the node LUID
+        // yet (LuidLowPart/HighPart == 0); in that case fall back to matching by PCI
+        // DeviceId, which the shim always fills. WSL is typically single-GPU, so the
+        // DeviceId fallback is unambiguous there. Skip nodes that match neither.
+        const bool node_has_luid   = (n.LuidLowPart != 0 || n.LuidHighPart != 0);
+        const bool adapter_has_luid = (luid.LowPart != 0 || luid.HighPart != 0);
+        if(node_has_luid && adapter_has_luid)
+        {
+            if(n.LuidLowPart != luid.LowPart ||
+               n.LuidHighPart != static_cast<HSAuint32>(luid.HighPart))
+                continue;
+        }
+        else if(device_id != 0)
+        {
+            // LUID unavailable on the node or adapter: fall back to DeviceId.
+            if(static_cast<uint32_t>(n.DeviceId) != device_id) continue;
+        }
+        else
+        {
+            // Neither a usable LUID nor a DeviceId to match on.
             continue;
+        }
 
         const uint32_t simd_per_cu = (n.NumSIMDPerCU != 0) ? n.NumSIMDPerCU : 1;
 
@@ -507,9 +538,17 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
         out.engine_id_major         = n.EngineId.ui32.Major;
         out.engine_id_minor         = n.EngineId.ui32.Minor;
         out.engine_id_stepping      = n.EngineId.ui32.Stepping;
+        // Identity fields — the shim reports these too, so the agent needs no HSA
+        // runtime to be fully populated up front.
+        out.family_id  = n.FamilyID;
+        out.num_xcc    = n.NumXcc;
+        out.domain     = n.Domain;
+        out.fw_ucode   = n.EngineId.ui32.uCode;
+        out.sdma_ucode = n.uCodeEngineVersions.uCodeSDMA;
+        out.valid      = true;
 
         ROCP_INFO << fmt::format(
-            "[libhsakmt-windows] KFD node {} matched adapter LUID; topology: "
+            "[libhsakmt-windows] KFD node {} matched adapter (LUID or DeviceId); topology: "
             "gfx{}.{}.{} cu_count={} simd_count={} num_shader_banks={} array_count={} "
             "cu_per_simd_array={} simd_per_cu={} wave_front_size={} max_waves_per_simd={} "
             "max_engine_clk_fcompute={}",
@@ -530,8 +569,9 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
         return true;
     }
 
-    ROCP_INFO << "fetch_libhsakmt_topology: no KFD node matched the DXCore "
-                 "adapter LUID; falling back to documented defaults (refined from HSA at runtime)";
+    ROCP_INFO << "fetch_libhsakmt_topology: no KFD node matched the DXCore adapter "
+                 "(by LUID or DeviceId); falling back to documented defaults (refined from "
+                 "HSA at runtime)";
     return false;
 #endif
 }
@@ -837,7 +877,7 @@ enumerate()
         // them with the real per-device values once the HSA agent is known. (HSA is
         // not yet initialized here, so it cannot be queried at this point.)
         WslTopology topo{};
-        if(fetch_libhsakmt_topology(a.hAdapter, a.AdapterLuid, topo))
+        if(fetch_libhsakmt_topology(a.hAdapter, a.AdapterLuid, info.device_id, topo))
         {
             info.cu_count                = topo.cu_count;
             info.num_shader_banks        = topo.num_shader_banks;
@@ -850,6 +890,36 @@ enumerate()
             info.max_waves_per_simd      = topo.max_waves_per_simd;
             info.max_engine_clk_fcompute = topo.max_engine_clk_fcompute;
             info.max_engine_clk_ccompute = topo.max_engine_clk_ccompute;
+
+            // Identity fields from the shim too, so the agent is fully populated
+            // without the HSA runtime. The gfx target name/version come from the
+            // shim's EngineId (major.minor.stepping); an explicit, valid
+            // ROCPROFILER_FORCE_GFX (resolved into gfx_name above) still wins.
+            info.num_xcc = (topo.num_xcc != 0) ? topo.num_xcc : info.num_xcc;
+            info.domain  = topo.domain;
+            if(topo.family_id != 0) info.family_id = topo.family_id;
+            if(topo.fw_ucode != 0) info.fw_version.ui32.uCode = topo.fw_ucode;
+            if(topo.sdma_ucode != 0) info.sdma_fw_version.uCodeSDMA = topo.sdma_ucode;
+
+            const bool force_gfx =
+                (std::getenv("ROCPROFILER_FORCE_GFX") != nullptr &&
+                 *std::getenv("ROCPROFILER_FORCE_GFX") != '\0' &&
+                 ::rocprofiler::agent::parse_gfx_target_version(std::getenv("ROCPROFILER_FORCE_GFX"))
+                     .has_value());
+            if(!force_gfx && topo.engine_id_major != 0)
+            {
+                auto shim_gfx = fmt::format(
+                    "gfx{}{}{:x}", topo.engine_id_major, topo.engine_id_minor, topo.engine_id_stepping);
+                if(auto _ver = ::rocprofiler::agent::parse_gfx_target_version(shim_gfx))
+                {
+                    info.name               = common::get_string_entry(shim_gfx)->c_str();
+                    info.gfx_target_version = *_ver;
+                }
+            }
+
+            // Real topology obtained up front — no HSA dependency. Tell
+            // construct_agent_cache() to skip its WSL HSA backfill.
+            ::rocprofiler::agent::set_wsl_topology_from_shim(true);
         }
         else
         {
@@ -922,14 +992,17 @@ enumerate()
         info.grid_max_size      = std::numeric_limits<uint32_t>::max();
         info.grid_max_dim       = {2147483647u, 65535u, 65535u};
 
-        // family code and firmware versions are not exposed by DXCore and are not
-        // needed to avoid divide-by-zero. Leave them zero rather than impersonate
-        // a specific architecture (e.g. gfx1150/RDNA3.5); agent::construct_agent_cache()
-        // fills them from HSA at runtime, which is also what tests/agent.cpp
-        // compares against.
-        info.family_id                 = 0;
-        info.fw_version.ui32.uCode     = 0;
-        info.sdma_fw_version.uCodeSDMA = 0;
+        // family code and firmware versions: on the shim path these were already
+        // filled from HsaNodeProperties above, so preserve them. Only when the shim
+        // did not supply them (fallback path) leave them zero rather than impersonate
+        // a specific architecture; agent::construct_agent_cache() then fills them from
+        // HSA at runtime, which is also what tests/agent.cpp compares against.
+        if(!::rocprofiler::agent::wsl_topology_from_shim())
+        {
+            info.family_id                 = 0;
+            info.fw_version.ui32.uCode     = 0;
+            info.sdma_fw_version.uCodeSDMA = 0;
+        }
 
         auto adapter_name = wchar_to_utf8(reg.AdapterString, kMaxStr);
         if(adapter_name.empty()) adapter_name = "unknown";

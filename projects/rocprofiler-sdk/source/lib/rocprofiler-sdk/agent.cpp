@@ -50,6 +50,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <iomanip>
 #include <limits>
 #include <set>
@@ -725,7 +726,12 @@ construct_agent_cache(::HsaApiTable* table)
     // touched: its agents already carry authoritative KFD-sysfs values. Each HSA
     // query overrides only on success with a non-zero value, so a query failure
     // keeps the enumerator's safe defaults rather than zeroing a field.
-    if(is_wsl_platform_selected())
+    //
+    // Fallback-only: when wsl::enumerate() already obtained real topology up front
+    // from the libhsakmt-windows shim (wsl_topology_from_shim()), the agent info does
+    // not depend on HSA and this backfill is skipped entirely. It runs only when the
+    // shim was unavailable and the enumerator seeded divide-safe placeholders.
+    if(is_wsl_platform_selected() && !wsl_topology_from_shim())
     {
         // An explicit, valid ROCPROFILER_FORCE_GFX (applied in wsl::enumerate) is a
         // user override of the gfx target and must win over the HSA-reported name.
@@ -1066,6 +1072,24 @@ kfd_device_available()
         return true;
     }();
     return _available;
+}
+
+namespace
+{
+// Set by wsl::enumerate() when the libhsakmt-windows shim supplied real topology.
+std::atomic<bool> s_wsl_topology_from_shim{false};
+}  // namespace
+
+bool
+wsl_topology_from_shim()
+{
+    return s_wsl_topology_from_shim.load(std::memory_order_relaxed);
+}
+
+void
+set_wsl_topology_from_shim(bool value)
+{
+    s_wsl_topology_from_shim.store(value, std::memory_order_relaxed);
 }
 }  // namespace agent
 }  // namespace rocprofiler

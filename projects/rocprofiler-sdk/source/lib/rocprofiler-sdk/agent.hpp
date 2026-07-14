@@ -148,5 +148,17 @@ kfd_device_available();
 // validation) and the HSA topology backfill (to encode the HSA-reported name).
 std::optional<uint32_t>
 parse_gfx_target_version(std::string_view gfx_name);
+
+// Whether the WSL enumerator obtained real, KFD-parity topology up front from
+// the libhsakmt-windows (librocdxg) shim. When true, agent topology does NOT
+// depend on the HSA runtime and construct_agent_cache() skips its WSL HSA
+// backfill (that backfill remains only as a fallback for the shim-unavailable
+// case). Set once by wsl::enumerate(); always false on the native-Linux/KFD
+// path. Defined in agent.cpp.
+bool
+wsl_topology_from_shim();
+
+void
+set_wsl_topology_from_shim(bool value);
 }  // namespace agent
 }  // namespace rocprofiler
