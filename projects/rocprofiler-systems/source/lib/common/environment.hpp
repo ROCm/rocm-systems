@@ -419,7 +419,7 @@ discover_llvm_libdir_for_ompt()
     const auto rocm_dir  = strip(get_env<std::string>("ROCM_PATH", "/opt/rocm"));
     const auto rocmv_dir = strip(get_env<std::string>("ROCmVersion_DIR", ""));
 
-    const constexpr auto number_of_candidates = 6;
+    const constexpr auto number_of_candidates = 8;
 
     std::vector<std::string> candidates;
     candidates.reserve(number_of_candidates);
@@ -439,6 +439,14 @@ discover_llvm_libdir_for_ompt()
     }
     push_unique(rocm_dir + "/llvm/lib");
     push_unique(rocm_dir + "/lib/llvm/lib");
+
+    const auto llvm_host_triple = strip(std::string{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE });
+    if(!llvm_host_triple.empty())
+    {
+        push_unique(rocm_dir + "/lib/llvm/lib/" + llvm_host_triple);
+        push_unique("/opt/rocm/lib/llvm/lib/" + llvm_host_triple);
+    }
+
     push_unique("/opt/rocm/llvm/lib");
     push_unique("/opt/rocm/lib/llvm/lib");
 
@@ -586,13 +594,14 @@ enum class update_mode : std::uint8_t
 ///        strings pass through.
 /// @return The string representation of @p val.
 template <typename Tp>
+    requires(std::is_same_v<std::decay_t<Tp>, std::string> ||
+             std::is_same_v<std::decay_t<Tp>, const char*> ||
+             std::is_same_v<std::decay_t<Tp>, bool> ||
+             std::is_arithmetic_v<std::decay_t<Tp>>)
 inline std::string
 to_env_string(Tp&& val)
 {
     using T = std::decay_t<Tp>;
-    static_assert(std::is_same_v<T, std::string> || std::is_same_v<T, const char*> ||
-                      std::is_same_v<T, bool> || std::is_arithmetic_v<T>,
-                  "to_env_string: unsupported type. Use string, bool, or numeric types.");
 
     if constexpr(std::is_same_v<T, std::string> || std::is_same_v<T, const char*>)
         return std::string{ val };

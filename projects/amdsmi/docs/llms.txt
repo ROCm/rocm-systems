@@ -38,6 +38,7 @@ This is a curated index of the AMD SMI documentation following the [llms.txt sta
 - [GPU violations](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/gpu-violations.html): Throttling and violation status reporting.
 - [Performance levels and performance determinism](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/perf-determinism.html): Performance level control and determinism.
 - [Reliability, availability, serviceability (RAS)](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/ras.html): RAS features and error reporting.
+- [GPU reset behavior](https://rocm.docs.amd.com/projects/amdsmi/en/latest/conceptual/gpu-reset-behavior.html): GPU reset behavior details.
 
 ## Optional
 

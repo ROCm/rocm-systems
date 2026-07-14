@@ -463,7 +463,7 @@ public:
                     uint32_t token_mask =
                         (config->occupancy_mode)
                             ? Primitives::sqtt_token_mask_occupancy_value()
-                            : Primitives::sqtt_token_mask_on_value(xcc_number_ > 1);
+                            : Primitives::sqtt_token_mask_on_value(xcc_number_ <= 1);
                     if(((1 << global_se) & config->se_mask) == 0)
                         token_mask = Primitives::sqtt_token_mask_off_value();
 

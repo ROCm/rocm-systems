@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vopc.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vsample.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/vscratch.h"
 

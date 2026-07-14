@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -330,6 +330,11 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t GetInfo(hsa_agent_info_t attribute,
                                void* value) const = 0;
 
+  /// @brief Returns the nearest CPU agent to this agent.
+  ///
+  /// @retval pointer to the nearest CPU agent
+  virtual Agent* GetNearestCpuAgent() const = 0;
+
   // @brief Initialize secondary CUID for this agent.
   virtual void InitDerivedCuid() = 0;
 
@@ -428,7 +433,7 @@ protected:
   // Serial memory operations are needed to ensure, among other things, that allocation failures are
   // due to true OOM conditions and per region caching (Trim and Allocate must be serial and
   // exclusive to ensure this).
-  std::mutex agent_memory_lock_;
+  std::recursive_mutex agent_memory_lock_;
 
   // Forbid copying and moving of this object
   DISALLOW_COPY_AND_ASSIGN(Agent);

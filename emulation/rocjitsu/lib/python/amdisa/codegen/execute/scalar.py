@@ -446,11 +446,7 @@ def gen_scalar_binop(
             )
             L.append(f'  {dst[0]}.write_scalar64(wf, result);')
         else:
-            L.append('  uint32_t count = s0 & 31u;')
-            L.append('  uint32_t offset = s1 & 31u;')
-            L.append(
-                '  uint32_t result = count == 0 ? 0 : ((1u << count) - 1) << offset;'
-            )
+            L.append('  uint32_t result = ::rocjitsu::amdgpu::bfm_b32(s0, s1);')
             L.append(f'  {dst[0]}.write_scalar(wf, result);')
     elif op == 'bfe':
         return gen_scalar_bfe(dst, src, dtype)

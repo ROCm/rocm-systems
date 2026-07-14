@@ -1,0 +1,11 @@
+[package]
+name = "mirage_noop"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+inventory = { workspace = true }

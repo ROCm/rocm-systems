@@ -131,6 +131,19 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
@@ -163,17 +176,12 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   }
 }
 
-RCCL_PARAM_DECLARE(EnableProxyTrace);
 RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
 static ncclResult_t addProxyOpIfNeeded(struct ncclComm* comm, struct ncclKernelPlan* plan, struct ncclProxyOp* op) {
   bool needed = true;
-  if (rcclParamEnableProxyTrace()) {
-    op->traceKey.commHash = comm->commHash;
-    op->traceKey.opCount = comm->opCount;
-  }
   NCCLCHECK(ncclProxySaveOp(comm, op, &needed));
   if (needed) {
     struct ncclProxyOp* q = ncclMemoryPoolAlloc<struct ncclProxyOp>(&comm->memPool_ncclProxyOp, &comm->memPermanent);
@@ -380,13 +388,6 @@ bool ncclTestBudget(
   return ok;
 }
 
-// Returns whether this should be disabled at the device level.  Should be called after devWork fields have been set for what
-// it depends on.
-bool gfx9CheapFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
-    bool fenceOk = devWork.regUsed == 0 && devWork.netRegUsed == 0 && !disabledByPrecheck;
-    return !fenceOk;
-}
-
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl *task;
@@ -468,7 +469,6 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -1087,6 +1087,7 @@ RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
+  if (comm->nNodes <= 1) return 0;
   bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
@@ -1167,7 +1168,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;
@@ -1241,7 +1247,12 @@ static ncclResult_t addP2pToPlan(
     else {
       ssize_t minPartSize = comm->nNodes > 1 ? stepSize[dir]/2 : stepSize[dir]/8;
       ssize_t maxPartSize = comm->nNodes > 1 ? stepSize[dir]   : stepSize[dir]*32;
-      nChannels[dir] = std::min<int>(nChannelsMin, divUp(bytes[dir], minPartSize));
+      // Single-node asymmetric patterns (gather/scatter): use nChannelsMax to
+      // fully utilize XGMI bandwidth when only one rank is the traffic hub.
+      // Symmetric patterns (alltoall): stay at nChannelsMin to avoid contention.
+      bool asymmetric = planTotalTasks[0] == 0 || planTotalTasks[1] == 0;
+      int nChStart = (comm->nNodes <= 1 && asymmetric) ? nChannelsMax : nChannelsMin;
+      nChannels[dir] = std::min<int>(nChStart, divUp(bytes[dir], minPartSize));
       size_t partSize = std::max(minPartSize, divUp(bytes[dir], nChannels[dir]));
       while (partSize > maxPartSize && nChannels[dir] <= nChannelsMax/2) {
         nChannels[dir] *= 2;
@@ -1304,7 +1315,7 @@ static ncclResult_t addP2pToPlan(
     op->rank = comm->rank;
     op->eActivationMask = p2pTasks[dir] ? p2pTasks[dir]->eActivationMask : 0;
     op->connIndex = connIndex[dir];
-    if (rcclParamEnableProxyTrace()) {
+    if (ncclProfilerProxyDiagEnabled()) {
       op->coll =  dir ? ncclFuncSend : ncclFuncRecv;
     }
     // The following are modified per channel part in addWorkToChannels():
@@ -1338,7 +1349,7 @@ static ncclResult_t addP2pToPlan(
       int nParts = dir ? work->nSendChannels : work->nRecvChannels;
       void* addr = dir ? work->sendAddr : work->recvAddr;
       size_t bytes = dir ? work->sendBytes : work->recvBytes;
-      if (rcclParamEnableProxyTrace()) {
+      if (ncclProfilerProxyDiagEnabled()) {
         proxyOps[dir].totalBytes = bytes;
       }
       proxyOps[dir].recvbuff = nullptr;
@@ -2323,8 +2334,17 @@ static ncclResult_t updateCollCostTable(
         if (!inRange) continue;
       }
     }
+    // Cache NCCL_PROTO env once: when the user explicitly asks for LL128
+    // (e.g. NCCL_PROTO=LL128 cross-node), bypass the XGMI-only gate below.
+    static bool userProtoInputCached = false;
+    static int userProtoInput = 0;
+    if (!userProtoInputCached) {
+      const char* protoEnv = ncclGetEnv("NCCL_PROTO");
+      userProtoInput = !protoEnv ? 0 : 1;
+      userProtoInputCached = true;
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3341,14 +3361,9 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    if (comm->symmetricSupport) {
-      struct ncclWindow_vidmem* peerWinDevHost = NULL;
-      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
-    } else {
-      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
-      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
-    }
+    struct ncclWindow_vidmem* peerWinDevHost = NULL;
+    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
@@ -3359,23 +3374,21 @@ static ncclResult_t rmaTaskAppend(
       WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    if (comm->symmetricSupport) {
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
-    } else {
-      // hostRmaSupport path: source buffer must be inside a registered window so
-      // the GIN proxy can resolve its MR handle.  Look it up the same way.
-      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-      if (srcWinHost == NULL) {
-        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
-        return ncclInvalidArgument;
-      }
-      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+
+    // RCCL: Source buffer must be inside a registered window. The winFlags
+    // symmetric hint is enforced only on the sym VMM path (user contract:
+    // offsets symmetric across ranks); IPC and proxy do not require the flag.
+    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+    if (srcWinHost == NULL) {
+      WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+      return ncclInvalidArgument;
     }
+    if (comm->symmetricSupport &&
+        !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+      return ncclInvalidArgument;
+    }
+    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
 
     // Relevant for symmetric window only
     bool isMultiSegment = (comm->symmetricSupport)
@@ -3423,16 +3436,15 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
-#ifdef RCCL_RMA_CU_PATH_ENABLED
   // Check if RMA CE needs initialization
-  if (!comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
+  if (!comm->rmaState.rmaCeState.initialized &&
+      ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
     NCCLCHECK(ncclCalloc(&ceTask, 1));
     ceTask->comm = comm;
     ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
-#endif
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);

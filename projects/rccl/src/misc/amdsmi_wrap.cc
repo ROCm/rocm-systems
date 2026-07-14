@@ -43,10 +43,30 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
+// Use for calls that can silently fail to avoid spamming logs with errors for unsupported features (e.g. fabric on older hardware)
+#define RET_ON_FAIL(call) do { \
+  ncclResult_t RES = call; \
+  if (RES != ncclSuccess) { \
+    return RES; \
+  } \
+} while (0)
+
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name)arglist = nullptr;
+
+// dlopen the versioned SONAME (in every runtime tree), not the unversioned dev
+// symlink (devel packages and /opt/rocm installs only). The major comes from
+// the amdsmi header, which feeds its SOVERSION, so it tracks bumps. No header
+// (AMDSMI_DIRECT==0): fall back to the unversioned name.
+#if AMDSMI_DIRECT && defined(AMDSMI_LIB_VERSION_MAJOR)
+#define RCCL_AMDSMI_STR2(v) #v
+#define RCCL_AMDSMI_STR(v) RCCL_AMDSMI_STR2(v)
+#define RCCL_AMDSMI_LIBNAME "libamd_smi.so." RCCL_AMDSMI_STR(AMDSMI_LIB_VERSION_MAJOR)
+#else
+#define RCCL_AMDSMI_LIBNAME "libamd_smi.so"
+#endif
 
 
 namespace {
@@ -152,9 +172,11 @@ ncclResult_t amd_smi_init() {
 
   if (rcclParamUseAmdSmiLib()) {
     if (pfn_amdsmi_init == nullptr) {
-      static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
+      // RCCL_AMDSMI_LIBNAME resolves to the versioned SONAME when built against
+      // the amdsmi headers, otherwise the unversioned name (see above).
+      static void *libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
       if (libhandle == nullptr) {
-        WARN("Failed to open libamd_smi.so");
+        WARN("Failed to open %s: %s", RCCL_AMDSMI_LIBNAME, dlerror());
         amdSmiInitResult = ncclInternalError;
         return ncclInternalError;
       }
@@ -446,6 +468,7 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
       AMDSMITRY(amdsmi_topo_get_link_weight, src_processor_handle, dst_processor_handle, &amdsmi_weight);
 
       // amd-smi reports weight=0 for XGMI ??
+      // TODO: add UALoE fabric support which should have proper weight and bandwidth reporting
       if (amdsmi_type == AMDSMI_LINK_TYPE_XGMI) {
         uint64_t min_bw = 0, max_bw = 0;
         AMDSMITRY(amdsmi_get_minmax_bandwidth_between_processors, src_processor_handle, dst_processor_handle, &min_bw, &max_bw);
@@ -549,11 +572,12 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     return fabricInitResult;
   }
   if (numDevs > (uint32_t)amdsmiFabricMaxDevices) {
-    WARN("%s fabric: device count %u exceeds max %d, truncating",
+    WARN("%s fabric: device count %u exceeds internal maximum (amdsmiFabricMaxDevices=%d)",
          useSysfs ? "ARSMI" : "AMD SMI", numDevs, amdsmiFabricMaxDevices);
-    numDevs = amdsmiFabricMaxDevices;
+    fabricInitResult = ncclInternalError;
+    return fabricInitResult;
   }
-  amdsmiFabricDeviceCount = numDevs;
+  amdsmiFabricDeviceCount = (int)numDevs;
 
   for (uint32_t d = 0; d < numDevs; d++) {
     struct amdsmiFabricDeviceInfo* devInfo = &amdsmiFabricDevices[d];
@@ -628,7 +652,7 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
 }
 
 ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     *supported = false;
@@ -640,7 +664,7 @@ ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported) {
 }
 
 ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabricDeviceInfo* info) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     return ncclInvalidArgument;
@@ -651,7 +675,7 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 }
 
 ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMbps) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
+  RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
     *bandwidthMbps = 0;

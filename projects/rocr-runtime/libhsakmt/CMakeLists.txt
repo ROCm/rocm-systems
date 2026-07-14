@@ -55,6 +55,12 @@ else()
   include ( utils )
   include ( GNUInstallDirs )
 
+  ## Define default paths and packages.
+  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
+  endif()
+  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
+
   ## Setup the package version.
   get_version ( "1.0.0" )
 
@@ -273,6 +279,17 @@ else()
     if(HAVE_MEMFD_CREATE)
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
+
+    set(CMAKE_REQUIRED_INCLUDES stdlib.h)
+    check_function_exists(secure_getenv HAVE_SECURE_GETENV)
+    if(HAVE_SECURE_GETENV)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_SECURE_GETENV=1)
+    endif()
+
+    # Trusted search path for HSA_MODEL_LIB dlopen (see hsakmtmodel.c).
+    set(HSAKMT_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+    target_compile_definitions(${HSAKMT_TARGET} PRIVATE
+      "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
   else()
     ## Link Windows Kernel Mode Interface
     if (LIB_SRC_BUILD)
@@ -298,11 +315,11 @@ else()
       set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
       message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
       if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
       else()
-        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi/win/lib/wkmi.lib)
       endif()
-      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
       
       # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
       target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
@@ -311,12 +328,6 @@ else()
       set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
     endif()
   endif()
-
-  ## Define default paths and packages.
-  if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-    set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
-  endif()
-  set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
   if (NOT WIN32)
@@ -425,11 +436,18 @@ else()
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
       else()
-        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/amdgpu-windows-interop/wkmi)
         set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
       endif()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
+    if(UNIX)
+      if(HAVE_SECURE_GETENV)
+        target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE -DHAVE_SECURE_GETENV=1)
+      endif()
+      target_compile_definitions(${HSAKMT_STATIC_DRM_TARGET} PRIVATE
+        "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
+    endif()
 
     if (NOT WIN32)
       install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets

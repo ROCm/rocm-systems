@@ -41,6 +41,7 @@ set(TEST_SRC
     hipMemcpyHtoA_old.cc
     hipMemcpyAllApiNegative.cc
     hipMemcpy_MultiThread.cc
+    hipMemcpyDynamicQueueChurn.cc
     hipHostRegister.cc
     hipHostUnregister.cc
     hipHostGetFlags.cc

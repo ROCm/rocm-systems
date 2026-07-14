@@ -55,9 +55,24 @@ hipError_t ExecutionCtx::Create() {
 }
 
 ExecutionCtx::~ExecutionCtx() {
+  // Any streams still attached to this ExecutionCtx become detached. After
+  // Detach() the stream handle is still valid for hipStreamDestroy, but any
+  // work-submit / sync API returns hipErrorStreamDetached, and any active
+  // capture is invalidated. Each survivor was retained by addStream(), so
+  // release() the ctx's ref after Detach(); if the user already called
+  // hipStreamDestroy on that stream, that drops the last ref and frees it.
+  std::unordered_set<hip::Stream*> toDetach;
+  {
+    std::unique_lock lk(streamSetLock_);
+    toDetach.swap(streams_);
+  }
+  for (auto* s : toDetach) {
+    s->Detach();
+    s->release();
+  }
+
   delete resourceDesc_;
   resourceDesc_ = nullptr;
-  streams_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -65,8 +80,10 @@ ExecutionCtx::~ExecutionCtx() {
 // ---------------------------------------------------------------------------
 void ExecutionCtx::addStream(hip::Stream* stream) {
   std::unique_lock lk(streamSetLock_);
+  stream->retain();
   streams_.insert(stream);
 }
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -220,7 +237,7 @@ hipError_t ExecutionCtx::recordEvent(hipEvent_t event) {
 
   // For single stream, use the existing addMarker path directly.
   if (snapshot.size() == 1) {
-    hipError_t err = e->addMarker(snapshot[0], nullptr, true);
+    hipError_t err = e->addMarker(snapshot[0], nullptr, !hip::Event::kBatchFlush);
     snapshot[0]->release();
     return err;
   }
@@ -784,7 +801,8 @@ hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (!isValid(event)) {
+  // hip::isValid(hipEvent_t) accepts nullptr; reject it explicitly.
+  if (event == nullptr || !isValid(event)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
   HIP_RETURN(reinterpret_cast<ExecutionCtx*>(ctx)->recordEvent(event));
@@ -803,7 +821,7 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event) {
   if (ctx == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (!isValid(event)) {
+  if (event == nullptr || !isValid(event)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
   HIP_RETURN(reinterpret_cast<ExecutionCtx*>(ctx)->waitEvent(event));

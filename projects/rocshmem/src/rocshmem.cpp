@@ -32,6 +32,7 @@
  */
 
 #include "rocshmem/rocshmem.hpp"
+#include "rocshmem/api_trace.h"
 
 #include "backend_bc.hpp"
 #include "build_info.hpp"
@@ -609,6 +610,21 @@ __host__ void rocshmem_buffer_unregister_all() {
   backend->buffer_unregister_all();
 }
 
+__host__ void *rocshmem_buffer_register_symmetric(void *addr, size_t length) {
+  VERIFY_BACKEND();
+  void *registered_addr = nullptr;
+  if (backend->buffer_register_symmetric(addr, length, &registered_addr) !=
+      ROCSHMEM_SUCCESS) {
+    return nullptr;
+  }
+  return registered_addr;
+}
+
+__host__ int rocshmem_buffer_unregister_symmetric(void *addr) {
+  VERIFY_BACKEND();
+  return backend->buffer_unregister_symmetric(addr);
+}
+
 [[maybe_unused]] __host__ void rocshmem_free(void *ptr) {
   VERIFY_BACKEND();
 
@@ -637,6 +653,15 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
 
 [[maybe_unused]] __host__ void rocshmem_finalize() {
   VERIFY_BACKEND();
+
+  /*
+   * Dump backend statistics if ROCSHMEM_DEBUG_LEVEL=...:stats was requested.
+   * Must be called before destroy_remaining_ctxs() so that list_of_ctxs
+   * is still populated for host-stats accumulation.
+   */
+  if (envvar::log_flags.show_stats) {
+    backend->dump_stats();
+  }
 
   /*
    * Destroy all the ctxs that the user
@@ -807,7 +832,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
   *xaxis_team = ROCSHMEM_TEAM_INVALID;
 
   if (parent_team == ROCSHMEM_TEAM_INVALID) {
-    LOG_ERROR("Parent team is invaid");
+    LOG_ERROR("Parent team is invalid");
     return ROCSHMEM_ERROR;
   }
   if (xrange < 1) {
@@ -1270,9 +1295,7 @@ __host__ void rocshmem_barrier(rocshmem_team_t team) {
 
 
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
-  LOG_API("host::barrier_all_on_stream ()");
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
+  RocshmemGetFunctionTable()->barrier_all_on_stream_fn(stream);
 }
 
 __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
@@ -1283,15 +1306,11 @@ __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
 }
 
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
-  LOG_API("rocshmem_quiet_on_stream");
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->quiet_on_stream(stream);
+  RocshmemGetFunctionTable()->quiet_on_stream_fn(stream);
 }
 
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
-  LOG_API("rocshmem_sync_all_on_stream");
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
+  RocshmemGetFunctionTable()->sync_all_on_stream_fn(stream);
 }
 
 __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
@@ -1304,37 +1323,25 @@ __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                              const void *source, size_t size,
                                              hipStream_t stream) {
-  LOG_API("host::alltoallmem_on_stream (dest=%p, source=%p, size=%zd)", dest, source, size);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->alltoallmem_on_stream(team, dest, source, size, stream);
+  RocshmemGetFunctionTable()->alltoallmem_on_stream_fn(team, dest, source, size, stream);
 }
 
 __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
                                               const void *source, size_t nelems,
                                               int pe_root, hipStream_t stream) {
-  LOG_API("host::broadcastmem_on_stream (dest=%p, source=%p, nelems=%zd, pe_root=%d)", dest, source, nelems, pe_root);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->broadcastmem_on_stream(team, dest, source, nelems, pe_root, stream);
+  RocshmemGetFunctionTable()->broadcastmem_on_stream_fn(team, dest, source, nelems, pe_root, stream);
 }
 
 __host__ void rocshmem_getmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
                                         hipStream_t stream) {
-  LOG_API("host::getmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->getmem_on_stream(dest, source, nelems, pe, stream);
+  RocshmemGetFunctionTable()->getmem_on_stream_fn(dest, source, nelems, pe, stream);
 }
 
 __host__ void rocshmem_putmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
                                         hipStream_t stream) {
-  LOG_API("host::putmem_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->putmem_on_stream(dest, source, nelems, pe, stream);
+  RocshmemGetFunctionTable()->putmem_on_stream_fn(dest, source, nelems, pe, stream);
 }
 
 __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
@@ -1342,20 +1349,14 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                uint64_t *sig_addr,
                                                uint64_t signal, int sig_op,
                                                int pe, hipStream_t stream) {
-  LOG_API("host::putmem_signal_on_stream (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->putmem_signal_on_stream(dest, source, nelems, sig_addr, signal, sig_op,
+  RocshmemGetFunctionTable()->putmem_signal_on_stream_fn(dest, source, nelems, sig_addr, signal, sig_op,
                                 pe, stream);
 }
 
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                                    uint64_t cmp_value,
                                                    hipStream_t stream) {
-  LOG_API("host::signal_wait_until_on_stream (sig_addr=%p, cmp=%d)", sig_addr, cmp);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
+  RocshmemGetFunctionTable()->signal_wait_until_on_stream_fn(sig_addr, cmp, cmp_value, stream);
 }
 
 __host__ void rocshmem_sync_all() {
@@ -1412,6 +1413,16 @@ __host__ int rocshmem_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
 
   return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
               ->reduce<T, Op>(team, dest, source, nreduce);
+}
+
+template <typename T, ROCSHMEM_OP Op>
+__host__ int rocshmem_reduce_scatter([[maybe_unused]] rocshmem_ctx_t ctx,
+                                     rocshmem_team_t team, T *dest,
+                                     const T *source, int nreduce) {
+  LOG_API("host::reduce_scatter (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
+
+  return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
+              ->reduce_scatter<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T>
@@ -1493,6 +1504,9 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
       rocshmem_ctx_t ctx, T * dest, const T *source, int nreduce,             \
       int PE_start, int logPE_stride, int PE_size, T *pWrk, long *pSync);     \
   template __host__ int rocshmem_reduce<T, Op>(                               \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
+      int nreduce);                                                            \
+  template __host__ int rocshmem_reduce_scatter<T, Op>(                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
       int nreduce);
 
@@ -1652,6 +1666,11 @@ __host__ int rocshmem_test(T *ivars, int cmp, T val) {
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nreduce) {                                                          \
     return rocshmem_reduce<T, Op>(ctx, team, dest, source, nreduce);          \
+  }                                                                           \
+  __host__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter(              \
+      rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
+      int nreduce) {                                                          \
+    return rocshmem_reduce_scatter<T, Op>(ctx, team, dest, source, nreduce);  \
   }
 
 #define ARITH_REDUCTION_DEF_GEN(T, TNAME)                                     \
