@@ -55,6 +55,7 @@
 #include <utility>
 #include <iomanip>
 #include <cmath>
+#include <unistd.h>
 
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_blit_kernel.h"
@@ -927,9 +928,32 @@ void GpuAgent::InitDma() {
         *blits_[BlitHostToDev];
       }
 
-      // gfx94x is more efficient with reverse order of SDMA0/1 for host<->device copies
-      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4)
-        rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
+      // gfx942, gfx950 and newer (CDNA in major 9, minor >= 4; e.g.
+      // MI300/MI308/MI325 and MI350/MI355) expose two general-purpose SDMA
+      // copy engines for host<->device transfers, and the default reverses
+      // SDMA0/1 for those copies. With ROCR_SDMA_ROUND_ROBIN=1, spread queue
+      // creation across all available SDMA engines using a pid seed so
+      // concurrent processes/streams land on different engines instead of
+      // contending on a single one.
+      //
+      // The benefit depends on the partition mode. In CPX (core-partitioned)
+      // mode each partition is a single XCD that can enable only two SDMA
+      // engines -- one dedicated to H2D and one to D2H -- so there is no spare
+      // engine to round-robin onto and this flag has no effect. In SPX (single
+      // partition) mode the one device spans all XCDs and their SDMA engines,
+      // so host<->device copies can use SDMA engines on otherwise-idle XCDs,
+      // raising aggregate bandwidth. The NumSdmaEngines / NumSdmaXgmiEngines
+      // guards naturally no-op the flag when there is no spare engine.
+      if (!prefer_xgmi && supported_isas()[0]->GetMajorVersion() == 9 && supported_isas()[0]->GetMinorVersion() >= 4 &&
+          properties_.NumSdmaEngines > 0) {
+        if (core::Runtime::runtime_singleton_->flag().sdma_round_robin() == Flag::SDMA_ENABLE) {
+          rec_eng = (static_cast<uint32_t>(getpid()) + rec_eng) % properties_.NumSdmaEngines;
+          debug_print("ROCR_SDMA_ROUND_ROBIN: queue rec_eng=%u of %u SDMA engines\n",
+                      rec_eng, properties_.NumSdmaEngines);
+        } else {
+          rec_eng = (rec_eng + 1) % properties_.NumSdmaEngines;
+        }
+      }
 
       // Check support for targeted SDMA engines
       auto kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;

@@ -127,6 +127,19 @@ class Flag {
     enable_sdma_recommended_eng_ = (var == "0") ? SDMA_DISABLE :
                                    ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // Round-robin distribution of host<->device SDMA copies across all
+    // available SDMA engines. Applies to gfx942, gfx950 and newer (e.g.
+    // MI300/MI308/MI325 and MI350/MI355). Helps in SPX (single partition)
+    // mode, where the one device spans all XCDs and their SDMA engines,
+    // letting host<->device copies use engines on otherwise-idle XCDs. Has no
+    // effect in CPX (core-partitioned) mode: each partition is a single XCD
+    // that can enable only two SDMA engines (one H2D + one D2H), so there is
+    // no spare engine to round-robin onto. Opt-in via ROCR_SDMA_ROUND_ROBIN=1;
+    // default keeps the stock engine pick.
+    var = os::GetEnvVar("ROCR_SDMA_ROUND_ROBIN");
+    sdma_round_robin_ = (var == "1") ? SDMA_ENABLE :
+                        ((var == "0") ? SDMA_DISABLE : SDMA_DEFAULT);
+
     visible_gpus_ = os::GetEnvVar("ROCR_VISIBLE_DEVICES");
     filter_visible_gpus_ = os::IsEnvVarSet("ROCR_VISIBLE_DEVICES");
 
@@ -417,6 +430,8 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  SDMA_OVERRIDE sdma_round_robin() const { return sdma_round_robin_; }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -602,6 +617,7 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+  SDMA_OVERRIDE sdma_round_robin_;
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;
