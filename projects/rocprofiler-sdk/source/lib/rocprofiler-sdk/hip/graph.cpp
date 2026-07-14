@@ -52,6 +52,19 @@ namespace hip
 {
 namespace graph
 {
+// the structs below are used to improve backtrace readability for the template functions
+// graph_{instantiate,destroy,launch}. They are declared this outside of the anonymous namespace for
+// readability purposes too.
+namespace api
+{
+struct hipGraphInstantiate;
+struct hipGraphInstantiateWithFlags;
+struct hipGraphInstantiateWithParams;
+struct hipGraphExecDestroy;
+struct hipGraphLaunch;
+struct hipGraphLaunch_spt;
+}  // namespace api
+
 namespace
 {
 // Process-global hipGraphExec_t -> stable monotonic id map.
@@ -132,8 +145,8 @@ fire_hip_graph_none_callback(rocprofiler_hip_graph_operation_t op,
 
 // One static next_func slot per template instantiation (the 3 hipGraphInstantiate* signatures
 // differ).
-template <typename RetT, typename... Args>
-auto wrap_instantiate(RetT (*next)(::hipGraphExec_t*, Args...))
+template <typename ApiId, typename RetT, typename... Args>
+auto graph_instantiate(RetT (*next)(::hipGraphExec_t*, Args...))
 {
     static auto next_func = next;
     return +[](::hipGraphExec_t* out, Args... args) -> RetT {
@@ -148,8 +161,8 @@ auto wrap_instantiate(RetT (*next)(::hipGraphExec_t*, Args...))
     };
 }
 
-template <typename RetT>
-auto wrap_destroy(RetT (*next)(::hipGraphExec_t))
+template <typename ApiId, typename RetT>
+auto graph_destroy(RetT (*next)(::hipGraphExec_t))
 {
     static auto next_func = next;
     return +[](::hipGraphExec_t exec) -> RetT {
@@ -247,8 +260,8 @@ enum class LaunchApiTag
     hipGraphLaunch_spt
 };
 
-template <LaunchApiTag Tag, typename RetT>
-auto wrap_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
+template <typename ApiId, typename RetT>
+auto graph_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
 {
     static auto next_func = next;
     return +[](::hipGraphExec_t exec, ::hipStream_t stream) -> RetT {
@@ -418,21 +431,24 @@ update_table(::HipDispatchTable* table)
 {
     if(table == nullptr) return;
     if(table->hipGraphInstantiate_fn)
-        table->hipGraphInstantiate_fn = wrap_instantiate(table->hipGraphInstantiate_fn);
+        table->hipGraphInstantiate_fn =
+            graph_instantiate<api::hipGraphInstantiate>(table->hipGraphInstantiate_fn);
     if(table->hipGraphInstantiateWithFlags_fn)
         table->hipGraphInstantiateWithFlags_fn =
-            wrap_instantiate(table->hipGraphInstantiateWithFlags_fn);
+            graph_instantiate<api::hipGraphInstantiateWithFlags>(
+                table->hipGraphInstantiateWithFlags_fn);
     if(table->hipGraphInstantiateWithParams_fn)
         table->hipGraphInstantiateWithParams_fn =
-            wrap_instantiate(table->hipGraphInstantiateWithParams_fn);
+            graph_instantiate<api::hipGraphInstantiateWithParams>(
+                table->hipGraphInstantiateWithParams_fn);
     if(table->hipGraphExecDestroy_fn)
-        table->hipGraphExecDestroy_fn = wrap_destroy(table->hipGraphExecDestroy_fn);
+        table->hipGraphExecDestroy_fn =
+            graph_destroy<api::hipGraphExecDestroy>(table->hipGraphExecDestroy_fn);
     if(table->hipGraphLaunch_fn)
-        table->hipGraphLaunch_fn =
-            wrap_launch<LaunchApiTag::hipGraphLaunch>(table->hipGraphLaunch_fn);
+        table->hipGraphLaunch_fn = graph_launch<api::hipGraphLaunch>(table->hipGraphLaunch_fn);
     if(table->hipGraphLaunch_spt_fn)
         table->hipGraphLaunch_spt_fn =
-            wrap_launch<LaunchApiTag::hipGraphLaunch_spt>(table->hipGraphLaunch_spt_fn);
+            graph_launch<api::hipGraphLaunch_spt>(table->hipGraphLaunch_spt_fn);
 }
 
 }  // namespace graph
