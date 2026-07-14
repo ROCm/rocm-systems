@@ -247,7 +247,7 @@ __device__ void QueuePairMLX5::poll_cq_until(uint16_t requested_available_slots)
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ void QueuePairMLX5::quiet_single() {
+__device__ __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
 }
 

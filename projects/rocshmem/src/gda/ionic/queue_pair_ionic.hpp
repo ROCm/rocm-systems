@@ -66,26 +66,30 @@ public:
 
 public:
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                               uintptr_t raddr, uint32_t rkey, size_t size,
-                               const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__
+  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                    uintptr_t raddr, uint32_t rkey, size_t size,
+                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                                      uintptr_t raddr, uint32_t rkey, size_t size,
-                                      PostOpt<Options...> = {});
+  __device__ __noinline__
+  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                           uintptr_t raddr, uint32_t rkey, size_t size,
+                           PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t swap_add, uint64_t compare,
-                                           const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__
+  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                uint64_t swap_add, uint64_t compare,
+                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t swap_add, uint64_t compare,
-                                                  PostOpt<Options...> = {});
+  __device__ __noinline__
+  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                       uint64_t swap_add, uint64_t compare,
+                                       PostOpt<Options...> = {});
 
-  __device__ void quiet_single();
+  __device__ __noinline__ void quiet_single();
 
 private:
   /**
@@ -115,24 +119,22 @@ private:
   /**
    * @brief Helper method to poll the next completion queue entry.
    */
-  __device__ __attribute__((noinline)) void poll_wave_cqes(uint64_t activemask);
+  __device__ void poll_wave_cqes(uint64_t activemask);
 
   /**
    * @brief Helper method to drain completion queue entries.
    * @param wf_info Wavefront information.
    * @param cons wait for sq.msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void quiet_internal_ccqe(const ActiveWFInfo& wf_info,
-                                                                uint32_t cons);
-  __device__ __attribute__((noinline)) void quiet_internal_ccqe_single(uint32_t cons);
+  __device__ void quiet_internal_ccqe(const ActiveWFInfo& wf_info, uint32_t cons);
+  __device__ void quiet_internal_ccqe_single(uint32_t cons);
 
   /**
    * @brief Helper method to drain completion queue entries.
    * @param wf_info Wavefront information.
    * @param cons wait for sq.msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void quiet_internal(const ActiveWFInfo& wf_info,
-                                                           uint32_t cons);
+  __device__ void quiet_internal(const ActiveWFInfo& wf_info, uint32_t cons);
 
   ionic_device_sq sq;
   ionic_device_cq cq;
@@ -151,7 +153,7 @@ private:
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairIONIC::OpCode Op, typename... Options>
-__device__ void QueuePairIONIC::post_wqe_rma(
+__device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   //using PostOptions = PostOpt<Options...>;
@@ -217,7 +219,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, typename... Options>
-__device__ void QueuePairIONIC::post_wqe_rma_single(
+__device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
   //using PostOptions = PostOpt<Options...>;
   uint32_t num_wqes = 1;
@@ -274,7 +276,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
+__device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
@@ -345,7 +347,7 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairIONIC::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
+__device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   //using PostOptions = PostOpt<Options...>;

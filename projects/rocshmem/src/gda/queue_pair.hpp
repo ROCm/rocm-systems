@@ -1141,7 +1141,7 @@ public:
    * @return LKey for addr or std::numeric_limits<uint32_t>::max() if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ uint32_t get_lkey(uintptr_t addr);
+  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr);
 
   /**
    * @brief Retrieve RKey for address.
@@ -1151,7 +1151,7 @@ public:
    * @return RKey for addr or std::numeric_limits<uint32_t>::max() if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ uint32_t get_rkey(uintptr_t addr);
+  __device__ __forceinline__ uint32_t get_rkey(uintptr_t addr);
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -1526,7 +1526,7 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
 }
 
 template <typename Provider>
-__device__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
+__device__ __forceinline__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
   /* Check if in heap */
   if (is_ptr_in_range(base_heap, heap_size, addr)) {
     return lkey;
@@ -1544,7 +1544,7 @@ __device__ uint32_t QueuePairBase<Provider>::get_lkey(uintptr_t addr) {
 }
 
 template <typename Provider>
-__device__ uint32_t QueuePairBase<Provider>::get_rkey([[maybe_unused]] uintptr_t addr) {
+__device__ __forceinline__ uint32_t QueuePairBase<Provider>::get_rkey([[maybe_unused]] uintptr_t addr) {
   return rkey;
 }
 
