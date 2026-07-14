@@ -173,6 +173,23 @@ def clone_pytorch_test_sources(pytorch_src: Path) -> None:
     log.info("Test sources ready: %s", test_file)
 
 
+def patch_missing_torch_modules() -> None:
+    """Create stubs for internal torch modules missing from nightly wheels."""
+    import torch
+
+    torch_dir = Path(torch.__file__).parent
+    strobelight_dir = torch_dir / "_strobelight"
+    if not strobelight_dir.exists():
+        log.info("Creating stub for torch._strobelight (missing from nightly wheel)")
+        strobelight_dir.mkdir(parents=True, exist_ok=True)
+        (strobelight_dir / "__init__.py").write_text("")
+        (strobelight_dir / "compile_time_profiler.py").write_text(
+            "class StrobelightCompileTimeProfiler:\n"
+            "    def __enter__(self): return self\n"
+            "    def __exit__(self, *a): pass\n"
+        )
+
+
 def print_environment_info() -> None:
     """Print GPU and environment details for CI logs."""
     import torch
@@ -279,7 +296,8 @@ def main() -> None:
     # Step 3: Clone PyTorch test sources
     clone_pytorch_test_sources(args.pytorch_src)
 
-    # Step 4: Print environment info and run tests
+    # Step 4: Patch missing modules, print environment info, and run tests
+    patch_missing_torch_modules()
     print_environment_info()
     exit_code = run_tests(args.pytorch_src, args.results_log)
     sys.exit(exit_code)
