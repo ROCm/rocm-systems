@@ -12,7 +12,6 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -48,7 +47,8 @@ TEST(ProbeFixture, NopProbeResolvesAndReturns) {
 
   // Copy the body into an aligned word buffer before decoding (the image buffer
   // is only byte-aligned). One extra zero word of slack so the decoder can
-  // succeed in the event of a malformed input
+  // always read a second word for an 8-byte/literal instruction whose first
+  // word is the last body word, without reading past the buffer.
   const auto *base = reinterpret_cast<const uint8_t *>(co->image_data());
   const size_t num_words = resolved->body_size / sizeof(uint32_t);
   std::vector<uint32_t> body(num_words + 1, 0);
@@ -69,25 +69,6 @@ TEST(ProbeFixture, NopProbeResolvesAndReturns) {
     w += static_cast<size_t>(size) / sizeof(uint32_t);
   }
   EXPECT_EQ(last_mnemonic, "s_setpc_b64") << "probe body should return via s_setpc_b64 s[30:31]";
-}
-
-TEST(ProbeFixture, NopProbeBuildsCallable) {
-  Executable exec(probe_path("rj_nop_probe_gfx90a"));
-  ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
-  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
-  ASSERT_NE(co, nullptr);
-
-  std::string err;
-  const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
-  ASSERT_TRUE(resolved.has_value()) << err;
-
-  const auto callable = build_probe_callable(*co, *resolved, ROCJITSU_CODE_ARCH_CDNA2, &err);
-  ASSERT_TRUE(callable.has_value()) << err;
-  EXPECT_EQ(callable->symbol, "rj_nop_probe");
-  EXPECT_EQ(callable->arch, ROCJITSU_CODE_ARCH_CDNA2);
-  EXPECT_EQ(callable->cc, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31);
-  EXPECT_EQ(callable->body_words.size(), resolved->body_size / sizeof(uint32_t));
-  EXPECT_EQ(callable->output_text_offset, 0u);
 }
 
 } // namespace

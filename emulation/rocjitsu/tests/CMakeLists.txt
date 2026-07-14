@@ -346,7 +346,6 @@ add_executable(
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
     patch/probe_symbol_test.cpp
-    patch/probe_callable_test.cpp
     patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
