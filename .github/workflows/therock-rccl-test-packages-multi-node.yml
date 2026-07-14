@@ -142,4 +142,3 @@ jobs:
             --report-path "${REPORT_PATH}" \
             --log-destination "${LOG_DEST}" \
             --index-file-name "index_rccl_test_report.html"
-

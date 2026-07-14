@@ -19,7 +19,7 @@ runs:
       id: resolve-therock-ref
       shell: bash
       run: |
-        PINNED_REF="99f48ca9ecc4f3c92dadc2baef9e560e5e7d18b0" # 2026-07-07
+        PINNED_REF="d8e27dff1d165462ffa5bd50057a075b943c97c5" # 2026-07-13
         TARGET_BRANCH="${{ github.base_ref || github.ref_name }}"
         TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
 
