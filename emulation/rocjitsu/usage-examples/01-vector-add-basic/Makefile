@@ -21,13 +21,13 @@ CONFIG ?= $(CONFIG_DIR)/amdgpu_cdna4_kmd.json
 SRC = $(SRC_DIR)/vector_add.cpp
 TARGET = $(BUILD_DIR)/vector_add
 
-.PHONY: all build run run-verbose run-daemon clean help
+.PHONY: all compile run run-verbose run-daemon clean help
 
-# Default target
-all: build
+# Default target (phony name "compile" — not "build", which conflicts with BUILD_DIR)
+all: compile
 
 # Build the example
-build: $(TARGET)
+compile: $(TARGET)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -80,7 +80,8 @@ help:
 	@echo "Vector Add Example - Makefile Targets"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make build         - Compile the example (default)"
+	@echo "  make               - Compile the example (default)"
+	@echo "  make compile       - Same as make"
 	@echo "  make run           - Run with rocjitsu (basic mode)"
 	@echo "  make run-verbose   - Run with detailed logging (RJ_LOG=1)"
 	@echo "  make run-daemon    - Run in daemon mode"
