@@ -450,6 +450,7 @@ aux_source_directory(${ROCRTST_ROOT}/suites/functional functionalSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/negative negativeSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/stress stressSources)
 aux_source_directory(${ROCRTST_ROOT}/suites/test_common testCommonSources)
+list(FILTER functionalSources EXCLUDE REGEX ".*intercept_queue_metadata_test\\.cc$")
 
 # Optional: enable NUMA async copy test (memory_async_copy_numa.cc)
 # Force disabled by default to avoid building the NUMA test source.
@@ -866,6 +867,25 @@ set_tests_properties(hotswap_gfx_query PROPERTIES
   LABELS "quick;standard;pr;pre-commit;hotswap"
   TIMEOUT 60)
 
+pkg_check_modules(DRM REQUIRED libdrm)
+add_executable(intercept_queue_metadata
+  ${ROCRTST_ROOT}/suites/functional/intercept_queue_metadata_test.cc
+  ${HSA_RUNTIME_ROOT}/core/runtime/intercept_queue.cpp)
+target_include_directories(intercept_queue_metadata PRIVATE
+  ${HSA_RUNTIME_ROOT}
+  ${HSA_RUNTIME_ROOT}/inc
+  ${ROCRTST_ROOT}/../libhsakmt/include
+  ${ROCRTST_ROOT}/gtest/include)
+target_include_directories(intercept_queue_metadata SYSTEM PRIVATE ${DRM_INCLUDE_DIRS})
+target_compile_definitions(intercept_queue_metadata PRIVATE ROCR_INTERCEPT_QUEUE_TESTING)
+target_compile_options(intercept_queue_metadata PRIVATE -ffunction-sections -fdata-sections)
+set_property(TARGET intercept_queue_metadata APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--gc-sections")
+target_link_libraries(intercept_queue_metadata ${GOOGLE_TEST_FRWK_NAME} pthread)
+add_test(NAME intercept_queue_metadata COMMAND intercept_queue_metadata)
+set_tests_properties(intercept_queue_metadata PROPERTIES
+  LABELS "quick;standard;pr;pre-commit;intercept-queue"
+  TIMEOUT 60)
+
 add_executable(hotswap_rewrite
   ${HOTSWAP_TEST_ROOT}/hotswap_rewrite_test.cc
   ${HSA_RUNTIME_ROOT}/core/runtime/hotswap.cpp
@@ -911,8 +931,8 @@ install(TARGETS ${ROCRTST}
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin)
 
-install(TARGETS hotswap_gfx_query hotswap_rewrite
-        RUNTIME DESTINATION bin)
+install(TARGETS hotswap_gfx_query intercept_queue_metadata hotswap_rewrite
+         RUNTIME DESTINATION bin)
 
 # Install platform configuration file
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
@@ -966,6 +986,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         "\n"
         "add_test(hotswap_gfx_query \"../hotswap_gfx_query\")\n"
         "set_tests_properties(hotswap_gfx_query PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 60)\n\n"
+        "add_test(intercept_queue_metadata \"../intercept_queue_metadata\")\n"
+        "set_tests_properties(intercept_queue_metadata PROPERTIES LABELS \"quick;standard;pr;pre-commit;intercept-queue\" TIMEOUT 60)\n\n"
         "add_test(hotswap_rewrite \"../hotswap_rewrite\")\n"
         "set_tests_properties(hotswap_rewrite PROPERTIES LABELS \"quick;standard;pr;pre-commit;hotswap\" TIMEOUT 120)\n\n"
     )

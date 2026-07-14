@@ -44,12 +44,22 @@
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/default_signal.h"
 #include "core/util/utils.h"
+#include "inc/amd_hsa_signal.h"
 #include "inc/hsa_api_trace.h"
 
 namespace rocr {
 namespace core {
 
 namespace {
+
+using MetadataPacket = AqlMetadataPrefetchPacket;
+
+constexpr uint16_t kMutableAqlHeaderFlags = ((1u << HSA_PACKET_HEADER_WIDTH_BARRIER) - 1)
+        << HSA_PACKET_HEADER_BARRIER |
+    ((1u << HSA_PACKET_HEADER_WIDTH_ACQUIRE_FENCE_SCOPE) - 1)
+        << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE |
+    ((1u << HSA_PACKET_HEADER_WIDTH_RELEASE_FENCE_SCOPE) - 1)
+        << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
 
 // Determine if a packet is the AMD_AQL_FORMAT_INTERCEPT_MARKER packet. Loads
 // the packet header non-atomically. That is permissable if the calling thread
@@ -59,6 +69,87 @@ namespace {
 bool inline IsInterceptMarkerPacket(const AqlPacket* packet) {
   return (AqlPacket::type(packet->packet.header) == HSA_PACKET_TYPE_VENDOR_SPECIFIC) &&
       (packet->amd_vendor.format == AMD_AQL_FORMAT_INTERCEPT_MARKER);
+}
+
+void FillNoopMetadata(MetadataPacket& metadata) {
+  metadata = {};
+  metadata.packet.header0.type = HSA_PACKET_TYPE_INVALID;
+  metadata.packet.header1.type = HSA_PACKET_TYPE_INVALID;
+  metadata.packet.header2.type = HSA_PACKET_TYPE_INVALID;
+  metadata.packet.header3.type = HSA_PACKET_TYPE_INVALID;
+}
+
+void WriteMetadataSlot(void* metadata_ring, uint64_t slot_index, uint64_t mask,
+                       const MetadataPacket& metadata) {
+  reinterpret_cast<MetadataPacket*>(metadata_ring)[slot_index & mask] = metadata;
+}
+
+bool MaskedPacketMatch(const AqlPacket& a, const AqlPacket& b) {
+  return AqlPacket::type(a.packet.header) == AqlPacket::type(b.packet.header) &&
+      (a.packet.header & ~kMutableAqlHeaderFlags) == (b.packet.header & ~kMutableAqlHeaderFlags) &&
+      memcmp(reinterpret_cast<const uint8_t*>(&a) + 2, reinterpret_cast<const uint8_t*>(&b) + 2,
+             54) == 0;
+}
+
+bool CompletionSignalMatch(const AqlPacket& a, const AqlPacket& b) {
+  constexpr size_t kCompletionSignalOffset = sizeof(AqlPacket) - sizeof(hsa_signal_t);
+  return memcmp(reinterpret_cast<const uint8_t*>(&a) + kCompletionSignalOffset,
+                reinterpret_cast<const uint8_t*>(&b) + kCompletionSignalOffset,
+                sizeof(hsa_signal_t)) == 0;
+}
+
+uint32_t GetSignalEventId(hsa_signal_t signal) {
+  if (signal.handle == 0) return 0;
+  return reinterpret_cast<const amd_signal_t*>(signal.handle)->event_id;
+}
+
+void UpdateMetadataEventId(const AqlPacket& packet, MetadataPacket& metadata) {
+  switch (AqlPacket::type(packet.packet.header)) {
+    case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+      metadata.packet.event_id = GetSignalEventId(packet.dispatch.completion_signal);
+      break;
+    case HSA_PACKET_TYPE_BARRIER_AND:
+      metadata.packet.event_id = GetSignalEventId(packet.barrier_and.completion_signal);
+      break;
+    case HSA_PACKET_TYPE_BARRIER_OR:
+      metadata.packet.event_id = GetSignalEventId(packet.barrier_or.completion_signal);
+      break;
+    case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
+      if (packet.amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+        metadata.packet.event_id = GetSignalEventId(packet.ext_dispatch.completion_signal);
+      } else if (packet.amd_vendor.format == HSA_AMD_PACKET_TYPE_BARRIER_VALUE) {
+        const auto* barrier = reinterpret_cast<const hsa_amd_barrier_value_packet_t*>(&packet);
+        metadata.packet.event_id = GetSignalEventId(barrier->completion_signal);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+template <typename Overflow>
+void AppendOverflowPackets(Overflow& overflow, const AqlPacket* packets, uint64_t begin,
+                           uint64_t end, const MetadataPacket* metadata) {
+  for (uint64_t i = begin; i < end; ++i) {
+    typename Overflow::value_type packet{};
+    packet.aql = packets[i];
+    if (metadata)
+      packet.metadata = metadata[i];
+    else
+      FillNoopMetadata(packet.metadata);
+    overflow.push_back(packet);
+  }
+}
+
+template <typename Overflow>
+void CopyOverflowToScratch(const Overflow& overflow, std::vector<AqlPacket>& aql,
+                           std::vector<MetadataPacket>& metadata) {
+  aql.resize(overflow.size());
+  metadata.resize(overflow.size());
+  for (uint64_t i = 0; i < overflow.size(); ++i) {
+    aql[i] = overflow[i].aql;
+    metadata[i] = overflow[i].metadata;
+  }
 }
 
 }  // namespace
@@ -111,14 +202,7 @@ bool InterceptQueue::IsPendingRetryPoint(uint64_t wrapped_current_read_index) co
   return retry_index_ > wrapped_current_read_index;
 }
 
-InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
-    : QueueProxy(std::move(queue)),
-      LocalSignal(0, false),
-      DoorbellSignal(signal()),
-      next_packet_(0),
-      retry_index_(0),
-      quit_(false),
-      active_(true) {
+void InterceptQueue::Initialize() {
   // Initial retry_index_ value must ensure that
   // InterceptQueue::IsPendingRetryPoint will return false before the first
   // retry barrier packet is inserted.
@@ -129,6 +213,8 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
 
   // Pre-allocate staging buffer with queue size
   staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
+  aql_scratch_.resize(wrapped->amd_queue_.hsa_queue.size);
+  metadata_scratch_.resize(wrapped->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
@@ -136,7 +222,32 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
     buffer_[pkt_id].packet.header = HSA_PACKET_TYPE_INVALID;
   }
 
-  // Match the queue's signal ABI block to async_doorbell_'s
+  uint64_t metadata_ring = 0;
+  if (wrapped->GetInfo(HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER, &metadata_ring) ==
+          HSA_STATUS_SUCCESS &&
+      metadata_ring != 0) {
+    metadata_ring_buf_ = reinterpret_cast<void*>(metadata_ring);
+    proxy_metadata_buf_.resize(wrapped->amd_queue_.hsa_queue.size);
+    for (auto& metadata : proxy_metadata_buf_) FillNoopMetadata(metadata);
+  }
+
+  // Install copy submission interceptor.
+  AddInterceptor(Submit, this);
+}
+
+#ifndef ROCR_INTERCEPT_QUEUE_TESTING
+InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
+    : QueueProxy(std::move(queue)),
+      LocalSignal(0, false),
+      DoorbellSignal(signal()),
+      next_packet_(0),
+      retry_index_(0),
+      async_doorbell_(nullptr),
+      quit_(false),
+      active_(true) {
+  Initialize();
+
+  // Match the queue's signal ABI block to async_doorbell_'s.
   // This allows us to use the queue's signal ABI block from devices to trigger async_doorbell while
   // host side use jumps directly to the queue's signal implementation.
   if (!core::g_use_interrupt_wait)
@@ -154,15 +265,29 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "Doorbell handler registration failed.\n");
 
-  // Install copy submission interceptor.
-  AddInterceptor(Submit, this);
-
   sigGuard.Dismiss();
 }
+#endif
+
+#ifdef ROCR_INTERCEPT_QUEUE_TESTING
+InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue, SharedQueue* shared_queue)
+    : QueueProxy(std::move(queue), shared_queue),
+      LocalSignal(0),
+      DoorbellSignal(signal()),
+      next_packet_(0),
+      retry_index_(0),
+      async_doorbell_(nullptr),
+      quit_(false),
+      active_(true) {
+  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
+  Initialize();
+}
+#endif
 
 InterceptQueue::~InterceptQueue() {
   active_ = false;
 
+#ifndef ROCR_INTERCEPT_QUEUE_TESTING
   // Kill the async doorbell handler
   // Doorbell may not be used during or after queue destroy, however an interrupt may be in flight.
   // Ensure doorbell value is not 0, mark for exit, wake handler and wait for termination value.
@@ -172,6 +297,17 @@ InterceptQueue::~InterceptQueue() {
   if (val != 0)
     async_doorbell_->WaitRelaxed(HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_BLOCKED);
   async_doorbell_->DestroySignal();
+#endif
+}
+
+void InterceptQueue::NotifyWrappedDoorbell(uint64_t new_index) {
+#ifndef ROCR_INTERCEPT_QUEUE_TESTING
+  HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal, new_index);
+#endif
+}
+
+hsa_signal_t InterceptQueue::GetRetryCompletionSignal() {
+  return async_doorbell_ ? Signal::Convert(async_doorbell_) : hsa_signal_t{0};
 }
 
 bool InterceptQueue::HandleAsyncDoorbell(hsa_signal_value_t value, void* arg) {
@@ -200,17 +336,48 @@ void InterceptQueue::Submit(const void* pkts, uint64_t pkt_count, uint64_t user_
   InterceptQueue* queue = reinterpret_cast<InterceptQueue*>(data);
   const AqlPacket* packets = (const AqlPacket*)pkts;
 
+  const MetadataPacket* metadata = nullptr;
+  if (queue->metadata_ring_buf_) {
+    queue->metadata_scratch_.resize(pkt_count);
+    for (uint64_t i = 0; i < pkt_count; ++i) {
+      OriginalPacketInfo* match = nullptr;
+      for (auto& original : queue->originals_) {
+        if (!original.matched && MaskedPacketMatch(packets[i], original.aql) &&
+            CompletionSignalMatch(packets[i], original.aql)) {
+          match = &original;
+          break;
+        }
+      }
+      if (match == nullptr) {
+        for (auto& original : queue->originals_) {
+          if (!original.matched && MaskedPacketMatch(packets[i], original.aql)) {
+            match = &original;
+            break;
+          }
+        }
+      }
+      if (match != nullptr) {
+        queue->metadata_scratch_[i] = match->metadata;
+        match->matched = true;
+      } else {
+        FillNoopMetadata(queue->metadata_scratch_[i]);
+      }
+      UpdateMetadataEventId(packets[i], queue->metadata_scratch_[i]);
+    }
+    metadata = queue->metadata_scratch_.data();
+  }
+
   // Submit final packet transform to hardware.
-  uint64_t submitted_count = queue->Submit(packets, pkt_count);
+  uint64_t submitted_count = queue->Submit(packets, pkt_count, metadata);
   if (submitted_count == pkt_count) return;
 
   // Could not submit all the final packets, stash unsubmitted ones for later.
   assert(queue->overflow_.empty() && "Packet intercept error: overflow buffer not empty.\n");
-  for (uint64_t i = submitted_count; i < pkt_count; i++)
-    queue->overflow_.push_back(packets[i]);
+  AppendOverflowPackets(queue->overflow_, packets, submitted_count, pkt_count, metadata);
 }
 
-uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
+uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count,
+                                const AqlMetadataPrefetchPacket* metadata) {
   if (count == 0) return 0;
 
   uint64_t marker_count = 0;
@@ -268,7 +435,12 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
 
       // Submit barrier which will wake async queue processing.
       ring[barrier & mask].packet.body = {};
-      ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
+      if (metadata_ring_buf_) {
+        MetadataPacket noop;
+        FillNoopMetadata(noop);
+        WriteMetadataSlot(metadata_ring_buf_, barrier, mask, noop);
+      }
+      ring[barrier & mask].barrier_and.completion_signal = GetRetryCompletionSignal();
       if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
@@ -276,7 +448,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
                     std::memory_order_release);
       // Update the wrapped queue's doorbell so it knows there is a new packet in the queue.
-      HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal, barrier);
+      NotifyWrappedDoorbell(barrier);
 
       // Record the retry point
       retry_index_ = barrier;
@@ -291,7 +463,10 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       uint64_t packets_index = 0;
       uint64_t write_index = 0;
       uint64_t first_written_packet_index;
-      while (submitted_count > 0 || (packets_index < count && IsInterceptMarkerPacket(&packets[packets_index]))) {
+      MetadataPacket noop;
+      FillNoopMetadata(noop);
+      while (submitted_count > 0 ||
+             (packets_index < count && IsInterceptMarkerPacket(&packets[packets_index]))) {
         // Ensure the marker packet callback is invoked before following
         // packets are made available for the packet processor.
         if (IsInterceptMarkerPacket(&packets[packets_index])) {
@@ -306,8 +481,14 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
             // been written and the first packet header atomically store
             // released.
             ring[(write + write_index) & mask].packet.body = packets[packets_index].packet.body;
+            if (metadata_ring_buf_)
+              WriteMetadataSlot(metadata_ring_buf_, write + write_index, mask,
+                                metadata ? metadata[packets_index] : noop);
             first_written_packet_index = packets_index;
           } else {
+            if (metadata_ring_buf_)
+              WriteMetadataSlot(metadata_ring_buf_, write + write_index, mask,
+                                metadata ? metadata[packets_index] : noop);
             ring[(write + write_index) & mask] = packets[packets_index];
           }
           ++write_index;
@@ -320,10 +501,9 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
           _mm_sfence();
         }
-        atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
-                      std::memory_order_release);
-        HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal,
-                                        write + write_index - 1);
+        atomic::Store(&ring[write & mask].packet.header,
+                      packets[first_written_packet_index].packet.header, std::memory_order_release);
+        NotifyWrappedDoorbell(write + write_index - 1);
       }
       return packets_index;
     }
@@ -344,7 +524,9 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 
   // Submit overflow packets.
   if (!overflow_.empty()) {
-    uint64_t submitted_count = Submit(&overflow_[0], overflow_.size());
+    CopyOverflowToScratch(overflow_, aql_scratch_, metadata_scratch_);
+    uint64_t submitted_count = Submit(aql_scratch_.data(), overflow_.size(),
+                                      metadata_ring_buf_ ? metadata_scratch_.data() : nullptr);
 
     if (submitted_count < overflow_.size()) {
       overflow_.erase(overflow_.begin(), overflow_.begin() + submitted_count);
@@ -404,18 +586,28 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 
     // Check if packets wrap around the ring buffer boundary using unmasked indices.
     // The interceptor callback expects packets to be contiguous in memory.
+    const AqlPacket* interceptor_input;
     if ((next_packet_ + packet_count) > ((next_packet_ & ~mask) + amd_queue_.hsa_queue.size)) {
       // Packets wrap around - use pre-allocated staging buffer
       for (uint64_t j = 0; j < packet_count; ++j) {
         staging_buffer_[j] = ring[(next_packet_ + j) & mask];
       }
-      handler.first(staging_buffer_.data(), packet_count, next_packet_,
-                    handler.second, PacketWriter);
+      interceptor_input = staging_buffer_.data();
     } else {
       // Packets are contiguous in the ring buffer
-      handler.first(&ring[next_packet_ & mask], packet_count, next_packet_,
-                                                 handler.second, PacketWriter);
+      interceptor_input = &ring[next_packet_ & mask];
     }
+
+    if (metadata_ring_buf_) {
+      originals_.resize(packet_count);
+      for (uint64_t j = 0; j < packet_count; ++j) {
+        originals_[j].aql = interceptor_input[j];
+        originals_[j].metadata = proxy_metadata_buf_[(next_packet_ + j) & mask];
+        originals_[j].matched = false;
+      }
+    }
+
+    handler.first(interceptor_input, packet_count, next_packet_, handler.second, PacketWriter);
 
     if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
@@ -425,6 +617,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
   i = next_packet_;
   while (i < std::min(end, invalid_header_i)) {
     // Invalidate consumed packets.
+    if (metadata_ring_buf_) FillNoopMetadata(proxy_metadata_buf_[i & mask]);
     atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
     // Packet has now been processed so advance the read index.
     ++i;
@@ -437,8 +630,18 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER:
+      if (metadata_ring_buf_ == nullptr) return wrapped->GetInfo(attribute, value);
+      *reinterpret_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(proxy_metadata_buf_.data());
+      return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR:
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR:
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MAJOR:
+    case HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_BARRIER_PKT_VERSION_MINOR:
+    case HSA_AMD_QUEUE_INFO_PROPERTIES:
+      return wrapped->GetInfo(attribute, value);
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
     case HSA_QUEUE_INFO_USE_COUNT:
     case HSA_QUEUE_INFO_HW_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
@@ -446,6 +649,8 @@ hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void*
       AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());
       return aqlQueue->GetInfo(attribute, value);
     }
+    default:
+      break;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
