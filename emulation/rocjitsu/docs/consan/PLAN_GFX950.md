@@ -635,6 +635,17 @@ Full gfx950 support means:
   `f5c4bb4908` corrects the matrix to keep those unsupported-site compatibility
   rows out of the guarded non-vacuity selection and validates exact 5/3/10
   architecture-specific counts. Broad profiles now run serially.
+- 2026-07-14: the first `X1BSC` broad run passes 203/209. All six residuals
+  reproduce with the ConSan hook removed, so none is accepted as a sanitizer
+  regression or hidden as a skip. Five multidimensional kernels expose a
+  gfx12 Rocjitsu launch defect: packed workitem IDs were initialized as packed
+  only when `TIDIG_COMP_CNT` was nonzero, although zero still enables `v0` and
+  gfx12 kernels extract Y/Z from that packed register. The sixth exposes an
+  FP8 E4M3FN special-code execution defect. In parallel, the final `X1H`
+  failure is reduced to Rocjitsu treating ordinary gfx12 `s102:s103` as the
+  pre-gfx12 flat-scratch aliases; LLVM selects that pair for an outlined return
+  only under the test's high spill pressure. Focused emulator regressions and
+  generator-owned fixes are active before either broad gate resumes.
 
 ## DAG Overview
 
