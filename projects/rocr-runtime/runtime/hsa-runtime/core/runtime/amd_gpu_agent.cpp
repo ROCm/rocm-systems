@@ -928,9 +928,9 @@ void GpuAgent::InitDma() {
         *blits_[BlitHostToDev];
       }
 
-      // gfx942, gfx950 and newer (CDNA in major 9, minor >= 4; e.g.
-      // MI300/MI308/MI325 and MI350/MI355) expose two general-purpose SDMA
-      // copy engines for host<->device transfers, and the default reverses
+      // gfx942, gfx950 and newer (CDNA in major 9, minor >= 4) expose two
+      // general-purpose SDMA copy engines for host<->device transfers, and
+      // the default reverses
       // SDMA0/1 for those copies. With ROCR_SDMA_ROUND_ROBIN=1, spread queue
       // creation across all available SDMA engines using a pid seed so
       // concurrent processes/streams land on different engines instead of

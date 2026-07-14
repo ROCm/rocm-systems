@@ -128,8 +128,8 @@ class Flag {
                                    ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
     // Round-robin distribution of host<->device SDMA copies across all
-    // available SDMA engines. Applies to gfx942, gfx950 and newer (e.g.
-    // MI300/MI308/MI325 and MI350/MI355). Helps in SPX (single partition)
+    // available SDMA engines. Applies to gfx942, gfx950 and newer. Helps in
+    // SPX (single partition)
     // mode, where the one device spans all XCDs and their SDMA engines,
     // letting host<->device copies use engines on otherwise-idle XCDs. Has no
     // effect in CPX (core-partitioned) mode: each partition is a single XCD
