@@ -15,7 +15,7 @@ namespace rocprofsys::inline common
 {
 // Join args into one string separated by `delim`. Bools render as true/false.
 template <typename... Args>
-inline std::string
+[[nodiscard]] inline std::string
 join(std::string_view delim, Args&&... args)
 {
     std::ostringstream oss;
@@ -29,7 +29,7 @@ join(std::string_view delim, Args&&... args)
 
 // Like join(), but string-type args are wrapped in double quotes.
 template <typename... Args>
-inline std::string
+[[nodiscard]] inline std::string
 join_with_strings_quoted(std::string_view delim, Args&&... args)
 {
     auto quote_if_string = [](auto&& arg) -> decltype(auto) {
