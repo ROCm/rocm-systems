@@ -86,7 +86,8 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
   // Bind the memory region based on whether it is
   // coarse or fine grain or extended scope fine grain.
   mem_flag_.ui32.CoarseGrain = (fine_grain || extended_scope_fine_grain) ? 0 : 1;
-
+  map_flag_.ui32.CachePolicy =
+      (fine_grain || extended_scope_fine_grain) ? HSA_CACHING_NONCACHED : HSA_CACHING_CACHED;
   // Extended scope fine-grained memory: Device scope atomics are promoted
   // to system scope atomics. Non-compliant systems may require the
   // application to perform device-specific actions, like HDP flushes,

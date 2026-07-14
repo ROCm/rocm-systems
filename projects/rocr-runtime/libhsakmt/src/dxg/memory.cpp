@@ -899,7 +899,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   create_info.domain = Wkmi::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
-
+  // create_info.mem_flags = 0 means coarse grain by default
+  if (MemMapFlags.ui32.CachePolicy == HSA_CACHING_NONCACHED) {
+    create_info.mem_flags = Wkmi::kFineGrain;
+  }
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
     addr = gpu_mem->GpuAddress();
