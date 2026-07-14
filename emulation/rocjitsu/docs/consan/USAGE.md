@@ -705,6 +705,13 @@ independent semantic controls and selected LDS-heavy IREE workloads under all
 four profiles. Tier2 is broad compatibility/non-corruption evidence; it is not
 a claim that every loaded code object contained a supported patched site.
 
+The same matrix can qualify gfx1201 guest binaries on a gfx950 host. Set
+`CONSAN_GPU_ARCH=gfx1201`, `CONSAN_CTEST_EMULATOR` to the Rocjitsu executable,
+and `CONSAN_CTEST_EMULATOR_CONFIG` to `configs/gfx1201_r9700.json`, then point
+the three build variables at their gfx1201 guest builds. The exact
+workspace-relative setup, independent no-hook baseline, and evidence handling
+are in [LOCAL_TESTING.md](LOCAL_TESTING.md#repeatable-tier-matrix).
+
 Selected hip-moi smoke:
 
 ```sh
