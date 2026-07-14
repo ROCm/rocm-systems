@@ -799,6 +799,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return self.wave_size
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        """Whether COMPUTE_PGM_RSRC1.WGP_MODE exists."""
+        return False
+
+    @property
     def has_acc_vgpr(self) -> bool:
         """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
         return False
@@ -1185,6 +1190,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return 64  # RDNA supports Wave32 and Wave64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1297,6 +1306,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def wave_size_max(self) -> int:
         return 64
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return True
 
     @property
     def waitcnt_family(self) -> str:
@@ -1432,6 +1445,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return 64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx12'
 
@@ -1556,6 +1573,10 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return False
 
     @property
     def has_vopd3(self) -> bool:
