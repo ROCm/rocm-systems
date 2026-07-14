@@ -36,26 +36,22 @@ struct TraceMemoryPool;
 
 namespace thread_trace
 {
-// Process-global manager of per-agent SQTT (thread trace) output buffers. Only
-// one trace can be active per agent at a time, so all contexts on an agent
-// share the same device buffer(s), sized to the largest requested buffer_size.
-// Triple buffering uses several ring slots, one buffer each.
+// Process-global manager of per-agent SQTT output buffers: one trace is active per
+// agent at a time, so all contexts on an agent share the same buffer(s), sized to the
+// largest requested buffer_size. Triple buffering uses one ring slot per buffer.
 
-/// Record the max buffer size for @p agent; call for every context before any
-/// buffer is built so the shared buffers fit all contexts.
+/// Record the max buffer size for @p agent; call for every context before the first
+/// acquire so the shared buffer fits all contexts.
 void
 register_shared_buffer_size(hsa_agent_t agent, uint64_t buffer_size);
 
-/// Whether a shared buffer (a registered max size) exists for @p agent.
-bool
-has_shared_buffer(hsa_agent_t agent);
-
-/// Return the @p index -th shared device buffer for @p pool's agent, allocating
-/// it (sized to the registered max) on first use. nullptr if unavailable.
+/// Return @p pool's agent's @p index -th shared buffer, allocating it (sized to the
+/// agent max, at least @p size) on first use and reusing it after. nullptr on failure.
 void*
-acquire_shared_buffer(const hsa::TraceMemoryPool& pool, size_t index);
+acquire_shared_buffer(const hsa::TraceMemoryPool& pool, size_t index, uint64_t size);
 
-/// Whether @p ptr is a shared buffer (callers skip the real free).
+/// Whether @p ptr is a manager-owned shared buffer; TraceMemoryPool::Free uses this to
+/// skip it (freed once in free_shared_buffers()).
 bool
 is_shared_buffer(void* ptr);
 
