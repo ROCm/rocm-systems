@@ -405,7 +405,7 @@ struct ncclIbGinProxyMrHandle {
 };
 
 ncclResult_t ncclGinIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  return ncclGinIbInitType(ctx, commId, logFunction, NCCL_GIN_TYPE_PROXY, NULL);
+  return ncclGinIbInitType(ctx, commId, logFunction, ncclParamGinType(), NULL);
 }
 
 ncclResult_t ncclGinIbProxyGetProperties(int dev, ncclNetProperties_t* props) {

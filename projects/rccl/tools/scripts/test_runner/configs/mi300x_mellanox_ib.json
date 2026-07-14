@@ -831,6 +831,34 @@
           "name": "CommMPITests_TrafficClass",
           "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
           "test_filter": "TrafficClassMPITest.*"
+        },
+        {
+          "name": "CommMPITests_CtaConfigOverride",
+          "description": "ncclConfig_t minCTAs/maxCTAs override accepted and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs"
+        },
+        {
+          "name": "CommMPITests_CtaDefaultNoClamp",
+          "description": "Default config (no min/maxCTAs): the maxCTAs cap in connect.cc is a no-op and does not reduce nChannels",
+          "test_filter": "CtaConfigMPITest.DefaultConfigDoesNotClampChannels"
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobs",
+          "description": "NCCL_MIN_CTAS/NCCL_MAX_CTAS env knobs override config and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "2",
+            "NCCL_MAX_CTAS": "4"
+          }
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobsNegative",
+          "description": "Non-positive NCCL_MIN_CTAS/NCCL_MAX_CTAS are rejected and left at default",
+          "test_filter": "CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "0",
+            "NCCL_MAX_CTAS": "0"
+          }
         }
       ]
     },
