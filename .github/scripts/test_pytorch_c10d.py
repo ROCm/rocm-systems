@@ -51,9 +51,9 @@ def find_rocm_lib_dir(artifact_dir: Path) -> Path | None:
 
 def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
     """Prepend RCCL and ROCm lib dirs to LD_LIBRARY_PATH."""
-    parts = [str(rccl_lib_dir)]
+    parts = [str(rccl_lib_dir.resolve())]
     if rocm_lib_dir:
-        parts.append(str(rocm_lib_dir))
+        parts.append(str(rocm_lib_dir.resolve()))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
