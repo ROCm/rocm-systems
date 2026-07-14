@@ -1251,6 +1251,17 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_FROZEN_EXECUTABLE;
   }
 
+  if (code_object_size == 0) {
+    const void* elf_data = reinterpret_cast<const void*>(code_object.handle);
+    if (!elf_data) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+    code_object_size = amd::elf::ElfSize(elf_data, 0);
+    if (code_object_size == 0) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    }
+  }
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1297,7 +1308,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
   std::vector<char> buffer;
   if (substituteFileName.empty()) {
-   if (!code->InitAsHandle(code_object)) {
+    if (!code->InitAsBuffer(reinterpret_cast<const void*>(code_object.handle),
+                            code_object_size)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
   } else {

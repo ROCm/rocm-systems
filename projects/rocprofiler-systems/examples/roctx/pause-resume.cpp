@@ -13,12 +13,12 @@
 //   CodeBlock_D          (profiled)
 //
 // Run with profiling:
-//   rocprof-sys -- ./pause_resume
+//   rocprof-sys -- ./pause-resume
 //
 // Expected: profiling data recorded for {CodeBlock_Z, CodeBlock_A, CodeBlock_C,
 // CodeBlock_D}
 
-#include "roctx_example_kernels.hpp"
+#include "roctx-example-kernels.hpp"
 
 DEFINE_KERNEL(CodeBlock_Z, 10)
 DEFINE_KERNEL(CodeBlock_A, 20)
