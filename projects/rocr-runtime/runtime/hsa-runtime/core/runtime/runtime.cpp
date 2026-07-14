@@ -2856,9 +2856,13 @@ void Runtime::CheckVirtualMemApiSupport() {
 void Runtime::InitIPCDmaBufSupport() {
   bool dmabuf_supported = false;
 
+  // dma-buf IPC passes the FD via SCM_RIGHTS, which Valgrind can't reproduce.
+  // Force legacy IPC (no FD passing) under Valgrind, no effect otherwise.
+  const bool force_legacy_ipc = flag().running_valgrind();
+
   // Early exit so we don't double load lib DRM
   if (virtual_mem_api_supported_) {
-    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy();
+    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy() && !force_legacy_ipc;
     return;
   }
 
@@ -2872,7 +2876,7 @@ void Runtime::InitIPCDmaBufSupport() {
     debug_warning("amdgpu_device_get_fd not available. Please update version of libdrm");
     fn_amdgpu_device_get_fd = &fn_amdgpu_device_get_fd_nosupport;
   } else {
-    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy();
+    ipc_dmabuf_supported_ = !flag().enable_ipc_mode_legacy() && !force_legacy_ipc;
   }
 #else
   ipc_dmabuf_supported_ = false;
