@@ -192,8 +192,9 @@ struct TraceMemoryPool
 
     aqlprofile_handle_t handle;
 
-    // Ring-slot counter so shared buffers are handed out one per output buffer.
-    mutable uint32_t output_buffer_index = 0;
+    // Ring-slot counter: each device Alloc hands out the next shared buffer slot
+    // (0 = primary, 1.. = double/triple-buffer slots).
+    uint32_t output_buffer_index = 0;
 
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 

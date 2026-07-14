@@ -178,21 +178,22 @@ TEST(thread_trace, shared_buffer_reuse)
     // Two contexts with different sizes; shared buffer is sized to the max.
     thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x1000000);
     thread_trace::register_shared_buffer_size(agent.get_hsa_agent(), 0x2000000);
-    ASSERT_TRUE(thread_trace::has_shared_buffer(agent.get_hsa_agent()));
 
     auto pool_a = make_pool();
     auto pool_b = make_pool();
 
+    constexpr uint64_t kSize = 0x2000000;
+
     // First context requests two ring slots (e.g. triple buffering).
-    void* a0 = thread_trace::acquire_shared_buffer(pool_a, 0);
-    void* a1 = thread_trace::acquire_shared_buffer(pool_a, 1);
+    void* a0 = thread_trace::acquire_shared_buffer(pool_a, 0, kSize);
+    void* a1 = thread_trace::acquire_shared_buffer(pool_a, 1, kSize);
     ASSERT_NE(a0, nullptr);
     ASSERT_NE(a1, nullptr);
     EXPECT_NE(a0, a1) << "distinct ring slots must be distinct buffers";
 
     // Second context reuses the same physical buffers per slot.
-    void* b0 = thread_trace::acquire_shared_buffer(pool_b, 0);
-    void* b1 = thread_trace::acquire_shared_buffer(pool_b, 1);
+    void* b0 = thread_trace::acquire_shared_buffer(pool_b, 0, kSize);
+    void* b1 = thread_trace::acquire_shared_buffer(pool_b, 1, kSize);
     EXPECT_EQ(a0, b0) << "same ring slot must be shared across contexts";
     EXPECT_EQ(a1, b1) << "same ring slot must be shared across contexts";
 
@@ -202,7 +203,6 @@ TEST(thread_trace, shared_buffer_reuse)
 
     thread_trace::free_shared_buffers();
     EXPECT_FALSE(thread_trace::is_shared_buffer(a0));
-    EXPECT_FALSE(thread_trace::has_shared_buffer(agent.get_hsa_agent()));
 }
 
 TEST(thread_trace, configure_test)

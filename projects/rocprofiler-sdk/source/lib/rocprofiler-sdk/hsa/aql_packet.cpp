@@ -157,43 +157,31 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
-    hsa_status_t status = HSA_STATUS_ERROR;
     if(flags.host_access)
     {
-        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
+        auto status =
+            pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
         if(status == HSA_STATUS_SUCCESS)
             status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+        return status;
     }
-    else
-    {
-        // Device (SQTT output) buffer: reuse the per-agent shared buffer across
-        // contexts (one per ring slot via output_buffer_index), falling back to
-        // a private allocation if unavailable.
-        if(thread_trace::has_shared_buffer(pool.gpu_agent))
-        {
-            const size_t index  = pool.output_buffer_index++;
-            void*        shared = thread_trace::acquire_shared_buffer(pool, index);
-            if(shared != nullptr)
-            {
-                *ptr = shared;
-                return HSA_STATUS_SUCCESS;
-            }
-        }
 
-        // Return page aligned data to avoid cache flush overlap
-        status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
-    }
-    return status;
+    // Device (SQTT output) buffer: the shared manager is the single source, handing out
+    // one buffer per ring slot (output_buffer_index), reused across contexts.
+    const size_t index  = pool.output_buffer_index++;
+    void*        shared = thread_trace::acquire_shared_buffer(pool, index, size);
+    if(shared == nullptr) return HSA_STATUS_ERROR;
+
+    *ptr = shared;
+    return HSA_STATUS_SUCCESS;
 }
 
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
-    // Shared buffers are owned by the manager and freed once at finalize(); skip
-    // them here to avoid a double-free across the contexts that reuse them.
+    // Shared device buffers are owned by the manager (freed once in free_shared_buffers());
+    // skip them here to avoid a double free. Only per-call host buffers are freed.
     if(thread_trace::is_shared_buffer(ptr)) return;
 
     assert(data);
