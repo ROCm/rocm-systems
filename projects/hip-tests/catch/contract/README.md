@@ -75,6 +75,7 @@ The first domains are:
 - `array_copy`: legacy and async HIP array copy contracts
 - `array_copy_ext`: remaining driver-style and async HIP array copy contracts
 - `driver_array`: driver-style HIP array creation, destruction, and descriptor contracts
+- `mipmapped_array`: image-gated mipmapped array allocation, level retrieval, and memory-requirement query contracts
 - `managed_memory`: managed allocation, visibility, free, and prefetch contracts
 - `mem_advise`: managed-memory advice and range-attribute contracts
 - `mem_advise_v2`: location-based managed-memory advise and prefetch contracts

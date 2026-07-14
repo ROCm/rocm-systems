@@ -1029,6 +1029,18 @@ contract:
   Contract_DriverArray_Array3DGetDescriptor_RoundTripsDepthAndFlags:
     <<: *level_0
     tags: [driver_array]
+  Contract_MipmappedArray_MallocAndGetLevel_ReturnsLevelArray:
+    <<: *level_0
+    tags: [mipmapped_array]
+  Contract_MipmappedArray_DriverCreateGetLevelDestroy:
+    <<: *level_0
+    tags: [mipmapped_array]
+  Contract_MipmappedArray_GetLevel_OutOfRange_IsRejected:
+    <<: *level_0
+    tags: [mipmapped_array]
+  Contract_MipmappedArray_GetMemoryRequirements_IsQueryable:
+    <<: *level_0
+    tags: [mipmapped_array]
   Contract_ManagedMemory_MallocManaged_ReturnsUsablePointer:
     <<: *level_0
     tags: [managed_memory]
