@@ -35,6 +35,12 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMadI16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMadI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_mad_i16_vop3p(*this, wf);
 }
@@ -50,6 +56,12 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkMulLoU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -69,6 +81,12 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkAddI16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkAddI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_add_i16_vop3p(*this, wf);
 }
@@ -84,6 +102,12 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkSubI16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkSubI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -154,6 +178,12 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMaxI16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMaxI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_max_i16_vop3p(*this, wf);
 }
@@ -169,6 +199,12 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkMinI16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkMinI16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -190,6 +226,12 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMadU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMadU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_mad_u16_vop3p(*this, wf);
 }
@@ -205,6 +247,12 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkAddU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkAddU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -224,6 +272,12 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkSubU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkSubU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_sub_u16_vop3p(*this, wf);
 }
@@ -241,6 +295,12 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMaxU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMaxU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_max_u16_vop3p(*this, wf);
 }
@@ -256,6 +316,12 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkMinU16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkMinU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -277,6 +343,12 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkFmaF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkFmaF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_fma_f16_vop3p(*this, wf);
 }
@@ -292,6 +364,12 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkAddF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkAddF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -311,6 +389,12 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMulF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMulF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_mul_f16_vop3p(*this, wf);
 }
@@ -328,6 +412,12 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VPkMinF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VPkMinF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_pk_min_f16_vop3p(*this, wf);
 }
@@ -343,6 +433,12 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+}
+
+void VPkMaxF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -384,6 +480,12 @@ VMadMixloF16Vop3p::VMadMixloF16Vop3p(const MachineInst *inst)
   num_dst_ = 1;
 }
 
+void VMadMixloF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 void VMadMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_mad_mixlo_f16_vop3p(*this, wf);
 }
@@ -402,6 +504,12 @@ VMadMixhiF16Vop3p::VMadMixhiF16Vop3p(const MachineInst *inst)
   src_operands_[3] = &src2;
   num_src_ = 4;
   num_dst_ = 1;
+}
+
+void VMadMixhiF16Vop3p::implicit_uses(RegisterSet &uses) const {
+  Vop3p::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
 }
 
 void VMadMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
