@@ -34,6 +34,7 @@ target_link_libraries(
         rocjitsu_vm_amdgpu
         rocjitsu_vm_risc_v
         rocjitsu_config
+        rocjitsu_dbt_config
         util
         flatbuffers
         Threads::Threads
