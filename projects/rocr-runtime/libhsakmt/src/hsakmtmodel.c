@@ -296,7 +296,7 @@ int hsakmt_drm_open_render(int minor)
 		return dup(hsakmt_primary_kfd_ctx.fd);
 	}
 	char path[128];
-	sprintf(path, "/dev/dri/renderD%d", minor);
+	snprintf(path, sizeof(path), "/dev/dri/renderD%d", minor);
 	return open(path, O_RDWR | O_CLOEXEC);
 }
 
