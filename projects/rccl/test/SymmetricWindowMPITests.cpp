@@ -32,7 +32,6 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include <cstdlib>
-#include <memory>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -63,15 +62,12 @@ protected:
         ncclComm_t comm = nullptr;
     };
 
-    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
     std::vector<NcclBufInfo> allocatedBufs_;
     std::vector<WinInfo> registeredWins_;
 
     void SetUp() override
     {
         MPITestBase::SetUp();
-        cuMemGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>(
-            "NCCL_CUMEM_ENABLE", "1");
     }
 
     void TearDown() override
@@ -90,7 +86,6 @@ protected:
         }
         allocatedBufs_.clear();
 
-        cuMemGuard_.reset();
         MPITestBase::TearDown();
     }
 
@@ -115,6 +110,9 @@ protected:
 
     bool setupForSymmetric(int minRanks = MIN_RANKS)
     {
+        const char* cuMemEnv = std::getenv("NCCL_CUMEM_ENABLE");
+        if (!cuMemEnv || std::string(cuMemEnv) != "1") return false;
+
         if (!validateTestPrerequisites(minRanks)) return false;
         if (createTestCommunicator() != ncclSuccess) return false;
 
