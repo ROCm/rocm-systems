@@ -97,13 +97,13 @@ struct reader_t::impl
     [[nodiscard]] reader_types::flow_list_t get_flows(
         const reader_types::event_filter_t& filter);
 
-    // Scalar / pmc detail queries (by opaque id)
+    // Scalar / pmc detail queries (by event handle)
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_scalar_details(
-        size_t opaque_id);
+        const reader_types::event_id_t& id);
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
-        size_t opaque_id);
+        const reader_types::event_id_t& id);
     [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
-        size_t opaque_id);
+        const reader_types::event_id_t& id);
 
     // Event detail queries
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
@@ -118,18 +118,18 @@ struct reader_t::impl
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::timeline_event_t& event);
 
-    // Event detail queries (by opaque id)
+    // Event detail queries (by event handle)
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
-        size_t opaque_id);
+        const reader_types::event_id_t& id);
 
     [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
-    get_kernel_dispatch_details(size_t opaque_id);
+    get_kernel_dispatch_details(const reader_types::event_id_t& id);
 
     [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
-        size_t opaque_id);
+        const reader_types::event_id_t& id);
 
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
-    get_memory_alloc_details(size_t opaque_id);
+    get_memory_alloc_details(const reader_types::event_id_t& id);
 
     // Event property queries
     [[nodiscard]] reader_types::call_stack_t get_call_stack(

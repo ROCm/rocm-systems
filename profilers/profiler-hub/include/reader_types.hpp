@@ -4,10 +4,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -274,7 +277,7 @@ using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
  *
  * Determines which identity shared_ptrs in track_info_t are populated, whether
  * the caller calls get_interval_track() or get_scalar_track(), and which
- * get_*_details() method applies to opaque_ids drawn from that track.
+ * get_*_details() method applies to event handles drawn from that track.
  */
 enum class track_type_t
 {
@@ -291,8 +294,9 @@ enum class track_type_t
     stream,   ///< stream_info populated. Interval track that AGGREGATES three event
              ///< tables — kernel_dispatch + memory_copy + memory_allocate — that share a
              ///< stream, keyed (nid, pid, stream_id). Unlike dma (memory-copy only), a
-             ///< stream track's events span multiple per-type tables, so each returned
-             ///< interval_event_t carries op_kind to select the get_*_details() overload.
+             ///< stream track's events span multiple per-type tables; each returned
+             ///< interval_event_t::id encodes its event type so the reader routes it to
+             ///< the correct get_*_details() overload with no companion tag.
     memory,  ///< agent_info + queue_info populated. Interval track of memory-allocate
              ///< events (rocpd_memory_allocate), keyed (nid, agent_id, queue_id, pid) to
              ///< match Optiq's GetRocprofMemoryAllocTrackQuery GROUP BY exactly. Both
@@ -592,29 +596,85 @@ struct counter_timeline_event_t
 
 using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
 
+// --------------------- Opaque event handle -------------------------------
+
+namespace detail
+{
+struct event_id_access;
+}
+
+/**
+ * @brief Opaque, ProfilerHub-minted event handle.
+ *
+ * Uniquely identifies one event within a reader session across every track type
+ * and every source table -- no two distinct events ever share a handle. Treat it
+ * as opaque: the only supported operations are equality, ordering, and hashing
+ * (so it can key a std::map / std::unordered_map). The internal encoding is
+ * private and may change; consumers must never depend on it and never need a
+ * companion type tag to interpret it. Pass a handle straight back to the
+ * get_*_details() accessor of interest; the reader recovers internally which
+ * source table and row it names.
+ */
+class event_id_t
+{
+public:
+    event_id_t() = default;
+
+    bool operator==(const event_id_t& o) const noexcept
+    {
+        return m_source_db == o.m_source_db && m_type == o.m_type &&
+               m_row_id == o.m_row_id;
+    }
+    bool operator!=(const event_id_t& o) const noexcept { return !(*this == o); }
+    bool operator<(const event_id_t& o) const noexcept
+    {
+        return std::tie(m_source_db, m_type, m_row_id) <
+               std::tie(o.m_source_db, o.m_type, o.m_row_id);
+    }
+
+private:
+    friend struct detail::event_id_access;
+
+    uint32_t m_source_db{};   ///< Source-database discriminator; 0 until multi-DB reads.
+    event_type_t m_type{};    ///< Which per-type table m_row_id indexes (routing key).
+    size_t       m_row_id{};  ///< Per-type-table row id. Never exposed publicly.
+};
+
+namespace detail
+{
+/// Reader-internal minting/decoding of event_id_t. NOT part of the consumer
+/// contract -- the reader implementation uses it to build handles and route
+/// detail queries; consumers must treat event_id_t as opaque.
+struct event_id_access
+{
+    static event_id_t make(event_type_t type, size_t row_id, uint32_t source_db = 0)
+    {
+        event_id_t h;
+        h.m_source_db = source_db;
+        h.m_type      = type;
+        h.m_row_id    = row_id;
+        return h;
+    }
+    static event_type_t type(const event_id_t& h) { return h.m_type; }
+    static size_t       row_id(const event_id_t& h) { return h.m_row_id; }
+    static uint32_t     source_db(const event_id_t& h) { return h.m_source_db; }
+};
+}  // namespace detail
+
 // --------------------- Track event types (track-scoped queries) ----------
 
 struct interval_event_t
 {
-    size_t opaque_id{};  ///< SQLite row id of the event in its per-type table
-                         ///< (region / kernel_dispatch / memory_copy / memory_allocate /
-                         ///< rocpd_pmc_event for kernel_dispatch_pmc). Pass to the
-                         ///< get_*_details() method selected by the track's type, or by
-                         ///< op_kind below for stream tracks.
+    event_id_t id{};  ///< Opaque handle for this event. Pass to the get_*_details()
+                      ///< accessor of interest; a mismatched accessor returns nullopt.
     timestamp_ns_t start{};       ///< Event start (nanoseconds).
     timestamp_ns_t end{};         ///< Event end (nanoseconds).
     std::string    display_name;  ///< Human-readable label for the bar.
     std::string    category;      ///< Event category display string (e.g. "rocm_hip_api",
                            ///< "timer_sampling"); empty when the event carries none.
-    std::optional<event_type_t>
-        op_kind{};  ///< Which per-type table this event's opaque_id
-                    ///< belongs to, and thus which get_*_details() overload
-                    ///< applies. nullopt for single-table tracks (use the track's
-                    ///< type); populated for stream tracks, whose events span
-                    ///< kernel_dispatch / memory_copy / memory_allocate.
-    int level{};    ///< Nesting depth; 0 = outermost. Computed in-reader.
+    int level{};  ///< Nesting depth; 0 = outermost. Computed in-reader.
     std::optional<size_t>
-        parent_id{};  ///< opaque_id of the enclosing event when truly nested;
+        parent_id{};  ///< Row id of the enclosing event when truly nested;
                       ///< nullopt when overlapping-but-not-nested.
 };
 
@@ -622,7 +682,7 @@ using interval_event_list_t = std::vector<interval_event_t>;
 
 struct scalar_event_t
 {
-    size_t         opaque_id{};  ///< rocpd_sample.id; pass to get_scalar_details().
+    event_id_t     id{};         ///< Opaque handle; pass to get_scalar_details().
     timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds).
     double         value{};      ///< Counter value (REAL).
 };
@@ -631,18 +691,9 @@ using scalar_event_list_t = std::vector<scalar_event_t>;
 
 struct flow_t
 {
-    size_t source_opaque_id{};  ///< opaque_id of the originating event (e.g. CPU region).
-    event_type_t source_type{
-        event_type_t::region
-    };  ///< Type of the source endpoint. Required to disambiguate
-        ///< source_opaque_id, which is a per-type-table row id and
-        ///< therefore collides across event types.
-    size_t dest_opaque_id{};  ///< opaque_id of the destination event (e.g. GPU kernel
-                              ///< dispatch).
-    event_type_t dest_type{
-        event_type_t::kernel_dispatch
-    };  ///< Type of the destination endpoint. Required to
-        ///< disambiguate dest_opaque_id (see above).
+    event_id_t source{};  ///< Opaque handle of the originating event (e.g. CPU region).
+    event_id_t dest{};    ///< Opaque handle of the destination event (e.g. GPU kernel
+                          ///< dispatch).
 };
 
 using flow_list_t = std::vector<flow_t>;
@@ -657,3 +708,22 @@ struct track_stats_t
 };
 
 }  // namespace profiler_hub::reader_types
+
+namespace std
+{
+template <>
+struct hash<profiler_hub::reader_types::event_id_t>
+{
+    size_t operator()(const profiler_hub::reader_types::event_id_t& h) const noexcept
+    {
+        namespace rt = profiler_hub::reader_types;
+        size_t seed  = std::hash<uint32_t>{}(rt::detail::event_id_access::source_db(h));
+        auto   mix   = [&seed](size_t v) {
+            seed ^= v + 0x9e3779b9U + (seed << 6) + (seed >> 2);
+        };
+        mix(std::hash<int>{}(static_cast<int>(rt::detail::event_id_access::type(h))));
+        mix(std::hash<size_t>{}(rt::detail::event_id_access::row_id(h)));
+        return seed;
+    }
+};
+}  // namespace std

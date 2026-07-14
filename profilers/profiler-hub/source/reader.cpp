@@ -129,9 +129,9 @@ reader_t::get_region_details(const reader_types::timeline_event_t& event) const
 }
 
 std::optional<reader_types::region_data_t>
-reader_t::get_region_details(size_t opaque_id) const
+reader_t::get_region_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_region_details(opaque_id);
+    return m_impl->get_region_details(id);
 }
 
 std::optional<reader_types::kernel_dispatch_data_t>
@@ -141,9 +141,9 @@ reader_t::get_kernel_dispatch_details(const reader_types::timeline_event_t& even
 }
 
 std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::get_kernel_dispatch_details(size_t opaque_id) const
+reader_t::get_kernel_dispatch_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_kernel_dispatch_details(opaque_id);
+    return m_impl->get_kernel_dispatch_details(id);
 }
 
 std::optional<reader_types::memory_copy_data_t>
@@ -153,9 +153,9 @@ reader_t::get_memory_copy_details(const reader_types::timeline_event_t& event) c
 }
 
 std::optional<reader_types::memory_copy_data_t>
-reader_t::get_memory_copy_details(size_t opaque_id) const
+reader_t::get_memory_copy_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_memory_copy_details(opaque_id);
+    return m_impl->get_memory_copy_details(id);
 }
 
 std::optional<reader_types::memory_alloc_data_t>
@@ -165,9 +165,9 @@ reader_t::get_memory_alloc_details(const reader_types::timeline_event_t& event) 
 }
 
 std::optional<reader_types::memory_alloc_data_t>
-reader_t::get_memory_alloc_details(size_t opaque_id) const
+reader_t::get_memory_alloc_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_memory_alloc_details(opaque_id);
+    return m_impl->get_memory_alloc_details(id);
 }
 
 std::optional<reader_types::sample_data_t>
@@ -178,9 +178,9 @@ reader_t::get_sample_details(const reader_types::timeline_event_t& event) const
 }
 
 std::optional<reader_types::sample_data_t>
-reader_t::get_sample_details(size_t opaque_id) const
+reader_t::get_sample_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_sample_details(opaque_id);
+    return m_impl->get_sample_details(id);
 }
 
 std::optional<reader_types::pmc_event_data_t>
@@ -191,15 +191,15 @@ reader_t::get_pmc_event_details(const reader_types::timeline_event_t& event) con
 }
 
 std::optional<reader_types::pmc_event_data_t>
-reader_t::get_pmc_event_details(size_t opaque_id) const
+reader_t::get_pmc_event_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_pmc_event_details(opaque_id);
+    return m_impl->get_pmc_event_details(id);
 }
 
 std::optional<reader_types::pmc_event_data_t>
-reader_t::get_scalar_details(size_t opaque_id) const
+reader_t::get_scalar_details(const reader_types::event_id_t& id) const
 {
-    return m_impl->get_scalar_details(opaque_id);
+    return m_impl->get_scalar_details(id);
 }
 
 reader_types::call_stack_t

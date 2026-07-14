@@ -2083,8 +2083,9 @@ compute_interval_nesting(reader_types::interval_event_list_t& events)
         }
         if(!stack.empty() && events[stack.back()].end >= events[i].end)
         {
-            events[i].level     = events[stack.back()].level + 1;
-            events[i].parent_id = events[stack.back()].opaque_id;
+            events[i].level = events[stack.back()].level + 1;
+            events[i].parent_id =
+                reader_types::detail::event_id_access::row_id(events[stack.back()].id);
         }
         else
         {
@@ -2092,6 +2093,26 @@ compute_interval_nesting(reader_types::interval_event_list_t& events)
             events[i].parent_id = std::nullopt;
         }
         stack.push_back(i);
+    }
+}
+
+// Event type of a homogeneous interval track, i.e. which per-type table its row ids
+// index. Stream tracks are heterogeneous and resolve type per row from op_kind instead.
+reader_types::event_type_t
+interval_event_type_for(reader_types::track_type_t t)
+{
+    switch(t)
+    {
+        case reader_types::track_type_t::gpu_queue:
+            return reader_types::event_type_t::kernel_dispatch;
+        case reader_types::track_type_t::dma:
+            return reader_types::event_type_t::memory_copy;
+        case reader_types::track_type_t::memory:
+            return reader_types::event_type_t::memory_allocate;
+        case reader_types::track_type_t::kernel_dispatch_pmc:
+            return reader_types::event_type_t::pmc_event;
+        case reader_types::track_type_t::cpu_thread:
+        default: return reader_types::event_type_t::region;
     }
 }
 
@@ -2297,21 +2318,23 @@ reader_t::impl::get_interval_track(size_t                              track_id,
     for(const auto& r : rows)
     {
         reader_types::interval_event_t ev;
-        ev.opaque_id = r.id;
-        ev.start     = r.start;
-        ev.end       = r.end;
+        ev.start = r.start;
+        ev.end   = r.end;
 
         // Category is resolved to its display string in each backend's SQL (v3 via
         // rocpd_string, v4 via rocpd_info_category), so just carry it through.
         if(r.category.has_value()) ev.category = r.category.value();
 
-        // Stream tracks mix ops; op_kind (kernel_dispatch=1, memory_copy=2,
-        // memory_allocate=3) both selects the per-event get_*_details() overload the
-        // consumer must call and picks the name table for this row.
-        if(r.op_kind.has_value())
-        {
-            ev.op_kind = static_cast<reader_types::event_type_t>(r.op_kind.value());
-        }
+        // Stream tracks are heterogeneous: the per-row op_kind (kernel_dispatch=1,
+        // memory_copy=2, memory_allocate=3) both picks the event type encoded in the
+        // handle -- so the reader routes the right get_*_details() -- and selects the
+        // name table for this row. Homogeneous tracks take their type from the track.
+        const reader_types::event_type_t etype =
+            (is_stream && r.op_kind.has_value())
+                ? static_cast<reader_types::event_type_t>(r.op_kind.value())
+                : interval_event_type_for(qi.type);
+        ev.id = reader_types::detail::event_id_access::make(etype, r.id);
+
         const bool use_kernel_symbol =
             is_stream ? (r.op_kind ==
                          static_cast<size_t>(reader_types::event_type_t::kernel_dispatch))
@@ -2413,7 +2436,8 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
                        r.start > filter.time_window.end.value())
                         continue;
                     reader_types::scalar_event_t ev;
-                    ev.opaque_id = r.id;
+                    ev.id = reader_types::detail::event_id_access::make(
+                        reader_types::event_type_t::memory_allocate, r.id);
                     ev.timestamp = r.start;
                     ev.value     = static_cast<double>(running[ak]);
                     events.push_back(ev);
@@ -2445,7 +2469,8 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
                        r.start > filter.time_window.end.value())
                         continue;
                     reader_types::scalar_event_t ev;
-                    ev.opaque_id = r.id;
+                    ev.id = reader_types::detail::event_id_access::make(
+                        reader_types::event_type_t::memory_allocate, r.id);
                     ev.timestamp = r.start;
                     ev.value     = static_cast<double>(running[ak]);
                     events.push_back(ev);
@@ -2474,7 +2499,8 @@ reader_t::impl::get_scalar_track(size_t                              track_id,
             continue;
 
         reader_types::scalar_event_t ev;
-        ev.opaque_id = r.id;
+        ev.id = reader_types::detail::event_id_access::make(
+            reader_types::event_type_t::sample, r.id);
         ev.timestamp = r.timestamp;
         ev.value     = r.value;
         events.push_back(ev);
@@ -2688,8 +2714,9 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
         flows.reserve(flows.size() + rows.size());
         for(const auto& r : rows)
         {
-            flows.push_back(
-                reader_types::flow_t{ r.source_id, source_type, r.dest_id, dest_type });
+            flows.push_back(reader_types::flow_t{
+                reader_types::detail::event_id_access::make(source_type, r.source_id),
+                reader_types::detail::event_id_access::make(dest_type, r.dest_id) });
         }
     };
 
@@ -2714,7 +2741,7 @@ reader_t::impl::get_flows(const reader_types::event_filter_t& filter)
 }
 
 // ============================================================================
-// Detail methods by opaque id
+// Detail methods by event handle
 // ============================================================================
 
 reader_types::pmc_event_data_t
@@ -2733,25 +2760,41 @@ reader_t::impl::build_pmc_event_data(const data_storage::scalar_detail_result& r
 }
 
 std::optional<reader_types::pmc_event_data_t>
-reader_t::impl::get_scalar_details(size_t opaque_id)
+reader_t::impl::get_scalar_details(const reader_types::event_id_t& id)
 {
-    auto rows = m_read_statements->scalar_detail()(opaque_id).to_vector();
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::sample)
+        return std::nullopt;
+    auto rows = m_read_statements
+                    ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))
+                    .to_vector();
     if(rows.empty()) return std::nullopt;
     return build_pmc_event_data(rows.front());
 }
 
 std::optional<reader_types::pmc_event_data_t>
-reader_t::impl::get_pmc_event_details(size_t opaque_id)
+reader_t::impl::get_pmc_event_details(const reader_types::event_id_t& id)
 {
-    auto rows = m_read_statements->pmc_event_detail()(opaque_id).to_vector();
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::pmc_event)
+        return std::nullopt;
+    auto rows =
+        m_read_statements
+            ->pmc_event_detail()(reader_types::detail::event_id_access::row_id(id))
+            .to_vector();
     if(rows.empty()) return std::nullopt;
     return build_pmc_event_data(rows.front());
 }
 
 std::optional<reader_types::sample_data_t>
-reader_t::impl::get_sample_details(size_t opaque_id)
+reader_t::impl::get_sample_details(const reader_types::event_id_t& id)
 {
-    auto rows = m_read_statements->scalar_detail()(opaque_id).to_vector();
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::sample)
+        return std::nullopt;
+    auto rows = m_read_statements
+                    ->scalar_detail()(reader_types::detail::event_id_access::row_id(id))
+                    .to_vector();
     if(rows.empty()) return std::nullopt;
 
     const auto&                 r = rows.front();
@@ -2764,34 +2807,50 @@ reader_t::impl::get_sample_details(size_t opaque_id)
 }
 
 std::optional<reader_types::region_data_t>
-reader_t::impl::get_region_details(size_t opaque_id)
+reader_t::impl::get_region_details(const reader_types::event_id_t& id)
 {
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::region)
+        return std::nullopt;
     reader_types::timeline_event_t event{};
-    event.unique_identifier = { opaque_id, reader_types::event_type_t::region };
+    event.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                reader_types::event_type_t::region };
     return get_region_details(event);
 }
 
 std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::impl::get_kernel_dispatch_details(size_t opaque_id)
+reader_t::impl::get_kernel_dispatch_details(const reader_types::event_id_t& id)
 {
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::kernel_dispatch)
+        return std::nullopt;
     reader_types::timeline_event_t event{};
-    event.unique_identifier = { opaque_id, reader_types::event_type_t::kernel_dispatch };
+    event.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                reader_types::event_type_t::kernel_dispatch };
     return get_kernel_dispatch_details(event);
 }
 
 std::optional<reader_types::memory_copy_data_t>
-reader_t::impl::get_memory_copy_details(size_t opaque_id)
+reader_t::impl::get_memory_copy_details(const reader_types::event_id_t& id)
 {
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::memory_copy)
+        return std::nullopt;
     reader_types::timeline_event_t event{};
-    event.unique_identifier = { opaque_id, reader_types::event_type_t::memory_copy };
+    event.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                reader_types::event_type_t::memory_copy };
     return get_memory_copy_details(event);
 }
 
 std::optional<reader_types::memory_alloc_data_t>
-reader_t::impl::get_memory_alloc_details(size_t opaque_id)
+reader_t::impl::get_memory_alloc_details(const reader_types::event_id_t& id)
 {
+    if(reader_types::detail::event_id_access::type(id) !=
+       reader_types::event_type_t::memory_allocate)
+        return std::nullopt;
     reader_types::timeline_event_t event{};
-    event.unique_identifier = { opaque_id, reader_types::event_type_t::memory_allocate };
+    event.unique_identifier = { reader_types::detail::event_id_access::row_id(id),
+                                reader_types::event_type_t::memory_allocate };
     return get_memory_alloc_details(event);
 }
 

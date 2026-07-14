@@ -195,9 +195,10 @@ struct reader_t
      * @param filter Optional time-window filter applied to the SOURCE event's start.
      *               pagination/sort/types are ignored.
      * @return Every (source -> dest) pair derivable from a shared non-zero stack_id,
-     *         forming the full stack-clique. Each endpoint carries its event_type
-     *         (source_type/dest_type) because the opaque ids are per-type-table row ids
-     *         and collide across types. Emitted edge categories: region->region,
+     *         forming the full stack-clique. Each endpoint is an opaque event handle
+     *         that internally encodes its event type, so no companion type tag is needed
+     *         to disambiguate colliding per-type-table row ids. Emitted edge categories:
+     *         region->region,
      *         region->{kernel_dispatch, memory_copy, memory_allocate}, and same-type
      *         siblings (kernel_dispatch->kernel_dispatch, memory_copy->memory_copy,
      *         memory_allocate->memory_allocate). May be one-to-many.
@@ -220,12 +221,12 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get full region details by opaque id (from get_interval_track)
-     * @param opaque_id rocpd_region row id
-     * @return Region data, or nullopt if not found
+     * @brief Get full region details by event handle (from get_interval_track)
+     * @param id Opaque event handle
+     * @return Region data, or nullopt if the handle is not a region event or not found
      */
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
-        size_t opaque_id) const;
+        const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get full kernel dispatch details for a timeline event
@@ -236,12 +237,13 @@ struct reader_t
     get_kernel_dispatch_details(const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get full kernel dispatch details by opaque id (from get_interval_track)
-     * @param opaque_id rocpd_kernel_dispatch row id
-     * @return Kernel dispatch data, or nullopt if not found
+     * @brief Get full kernel dispatch details by event handle (from get_interval_track)
+     * @param id Opaque event handle
+     * @return Kernel dispatch data, or nullopt if the handle is not a kernel dispatch
+     *         event or not found
      */
     [[nodiscard]] std::optional<reader_types::kernel_dispatch_data_t>
-    get_kernel_dispatch_details(size_t opaque_id) const;
+    get_kernel_dispatch_details(const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get full memory copy details for a timeline event
@@ -252,12 +254,13 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get full memory copy details by opaque id (from get_interval_track)
-     * @param opaque_id rocpd_memory_copy row id
-     * @return Memory copy data, or nullopt if not found
+     * @brief Get full memory copy details by event handle (from get_interval_track)
+     * @param id Opaque event handle
+     * @return Memory copy data, or nullopt if the handle is not a memory copy event or
+     *         not found
      */
     [[nodiscard]] std::optional<reader_types::memory_copy_data_t> get_memory_copy_details(
-        size_t opaque_id) const;
+        const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get full memory alloc details for a timeline event
@@ -268,12 +271,13 @@ struct reader_t
     get_memory_alloc_details(const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get full memory alloc details by opaque id
-     * @param opaque_id rocpd_memory_allocate row id
-     * @return Memory alloc data, or nullopt if not found
+     * @brief Get full memory alloc details by event handle
+     * @param id Opaque event handle
+     * @return Memory alloc data, or nullopt if the handle is not a memory allocate event
+     *         or not found
      */
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
-    get_memory_alloc_details(size_t opaque_id) const;
+    get_memory_alloc_details(const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get full sample details for a timeline event
@@ -284,12 +288,12 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get sample details by opaque id
-     * @param opaque_id rocpd_sample row id
-     * @return Sample data, or nullopt if not found
+     * @brief Get sample details by event handle
+     * @param id Opaque event handle
+     * @return Sample data, or nullopt if the handle is not a sample event or not found
      */
     [[nodiscard]] std::optional<reader_types::sample_data_t> get_sample_details(
-        size_t opaque_id) const;
+        const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get full PMC event details for a timeline event
@@ -300,20 +304,21 @@ struct reader_t
         const reader_types::timeline_event_t& event) const;
 
     /**
-     * @brief Get PMC event details by opaque id
-     * @param opaque_id rocpd_pmc_event row id
-     * @return PMC event data, or nullopt if not found
+     * @brief Get PMC event details by event handle
+     * @param id Opaque event handle
+     * @return PMC event data, or nullopt if the handle is not a PMC event or not found
      */
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_pmc_event_details(
-        size_t opaque_id) const;
+        const reader_types::event_id_t& id) const;
 
     /**
      * @brief Get combined scalar details (timestamp + value + names) for a counter sample
-     * @param opaque_id rocpd_sample row id (from scalar_event_t::opaque_id)
-     * @return Combined PMC event data, or nullopt if not found
+     * @param id Opaque event handle (from scalar_event_t::id)
+     * @return Combined PMC event data, or nullopt if the handle is not a sample event or
+     *         not found
      */
     [[nodiscard]] std::optional<reader_types::pmc_event_data_t> get_scalar_details(
-        size_t opaque_id) const;
+        const reader_types::event_id_t& id) const;
 
     /**
      *@section Event Property Accessors (On-Demand, Related Data)
