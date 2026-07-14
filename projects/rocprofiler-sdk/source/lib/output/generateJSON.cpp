@@ -248,7 +248,7 @@ write_json(
         json_ar(cereal::make_nvp("rocjpeg_api", rocjpeg_api_gen));
         json_ar(cereal::make_nvp("pc_sample_host_trap", pc_sampling_host_trap_gen));
         json_ar(cereal::make_nvp("pc_sample_stochastic", pc_sampling_stochastic_gen));
-        json_ar(cereal::make_nvp("graph_launch", graph_launch_gen));
+        json_ar(cereal::make_nvp("hip_graph", graph_launch_gen));
         json_ar.finishNode();
     }
 }

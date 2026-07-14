@@ -630,9 +630,9 @@ write_perfetto(
             for(auto itr : graph_launch_gen.get(ditr))
             {
                 auto& track = thread_tracks.at(itr.tid);
-                auto  name  = std::string{"hipGraphLaunch"};
+                // use "[...]" syntax for name to convey this is a metadata region
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_api>::name,
-                                  ::perfetto::DynamicString{name},
+                                  ::perfetto::StaticString{"[Graph Execution]"},
                                   track,
                                   itr.start,
                                   ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
@@ -647,7 +647,7 @@ write_perfetto(
                                   "kind",
                                   "HIP_GRAPH",
                                   "operation",
-                                  name,
+                                  "hipGraphLaunch",
                                   "corr_id",
                                   itr.stack_id,
                                   "ancestor_id",

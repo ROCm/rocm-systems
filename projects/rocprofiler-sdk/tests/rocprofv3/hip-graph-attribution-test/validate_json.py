@@ -78,9 +78,9 @@ def test_graph_launch_records_present(
     buffer_records.graph_launch array. One per *successful* hipGraphLaunch."""
     buffer_records = _buffer_records(json_input_data)
     assert (
-        "graph_launch" in buffer_records
-    ), f"buffer_records missing 'graph_launch' key; got {list(buffer_records.keys())}"
-    graph_launch = buffer_records["graph_launch"]
+        "hip_graph" in buffer_records
+    ), f"buffer_records missing 'hip_graph' key; got {list(buffer_records.keys())}"
+    graph_launch = buffer_records["hip_graph"]
     expected_launches = expected_iterations * expected_execs + 1
     assert (
         len(graph_launch) == expected_launches
@@ -89,7 +89,7 @@ def test_graph_launch_records_present(
 
 def test_graph_launch_record_shape(json_input_data, expected_nodes_per_launch):
     """Each HIP_GRAPH record carries the expected field set with sane values."""
-    graph_launch = _buffer_records(json_input_data)["graph_launch"]
+    graph_launch = _buffer_records(json_input_data)["hip_graph"]
     required_fields = (
         "size",
         "kind",
@@ -126,9 +126,7 @@ def test_graph_launch_exec_ids_match_kernel_dispatch_records(json_input_data):
     buffer_records = _buffer_records(json_input_data)
     # HIP_GRAPH carries graph_exec_id as a typed handle; kernel_dispatch ext records
     # carry it as a raw uint64.
-    launch_ids = {
-        int(r["graph_exec_id"]["handle"]) for r in buffer_records["graph_launch"]
-    }
+    launch_ids = {int(r["graph_exec_id"]["handle"]) for r in buffer_records["hip_graph"]}
     kernel_ids = {
         int(r["graph_exec_id"])
         for r in buffer_records["kernel_dispatch"]

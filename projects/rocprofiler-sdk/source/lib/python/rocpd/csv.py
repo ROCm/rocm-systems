@@ -298,7 +298,7 @@ def write_graph_launch_csv(importData, config) -> None:
     query = f"""
         SELECT
             guid,
-            'HIP_GRAPH' AS Kind,
+            'Graph Launch' AS Kind,
             {agent_id} AS Agent_Id,
             queue_id,
             tid AS Thread_Id,

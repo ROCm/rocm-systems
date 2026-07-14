@@ -445,8 +445,9 @@ def write_otf2(importData, config):
                                     graph_exec_id,
                                     kernel_dispatch_count,
                                 ) in data:
+                                    # use [...] syntax to convey this is a metadata region
                                     region = archive.definitions.region(
-                                        name="hipGraphLaunch",
+                                        name="[Graph Execution]",
                                         region_role=RegionRole.FUNCTION,
                                         paradigm=Paradigm.HIP,
                                     )

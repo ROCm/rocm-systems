@@ -502,7 +502,8 @@ generate_stats(const output_config& /*cfg*/,
     {
         for(auto record : data.get(ditr))
         {
-            graph_launch_stats["hipGraphLaunch"] += (record.end_timestamp - record.start_timestamp);
+            graph_launch_stats["Graph Execution"] +=
+                (record.end_timestamp - record.start_timestamp);
         }
     }
 
