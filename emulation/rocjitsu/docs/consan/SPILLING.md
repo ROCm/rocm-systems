@@ -286,6 +286,13 @@ mixed-wave rejection, persistent state and workgroup partitioning,
 barrier/atomic rollout, bounded summaries, and staged text-growth descriptor
 updates.
 
+On the final gfx950 qualification revision, this same broad focused filter is
+266/266. The narrower allocation/MOI/spill/emitter filter printed in
+`LOCAL_TESTING.md` is independently 256/256; the different totals reflect
+different test selections, not missing tests. The full `rocjitsu_tests` run is
+1542/1542, including the local gfx1201 synthetic encoding and target-object
+regressions.
+
 The live target-aware tier includes forced-spill tests whose victim VGPRs
 remain live across instrumentation:
 

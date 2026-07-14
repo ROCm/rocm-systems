@@ -103,6 +103,18 @@ Known gfx950 checkpoint result at commit `bd297cdbfc`:
   `SPILLING.md`: 263/263. The commit-qualified count makes later additions easy
   to distinguish from this accepted checkpoint.
 
+Final gfx950 qualification result on the current branch:
+
+- Full `rocjitsu_tests`, including registered benchmark-style and hardware
+  tests: 1542/1542 in 56.75 seconds.
+- The broad focused filter printed in `SPILLING.md`: 266/266.
+- The allocation/MOI/spill/emitter subset printed immediately above: 256/256.
+  These totals describe different filters and are intentionally reported
+  separately.
+- The explicit local gfx1201 encoding and target-object subset
+  (`--gtest_filter=*Gfx1201*:*gfx1201*`): 3/3. Physical gfx1201 live tests
+  still require the gfx1201 workspace.
+
 gfx950 environment and spill baseline:
 
 ```sh
@@ -392,7 +404,7 @@ Recorded architecture evidence across the development workspaces:
 | Target | Workspace hardware | Tier evidence | Status |
 | --- | --- | --- | --- |
 | gfx942 | no current workspace | no current native ConSan tier | deferred |
-| gfx950 | available in the gfx950 workspace | native spill/identity/compact-engine tiers and guarded selected profiles pass; broad SuperCollider classified 257/259 plus two typed traps | broad MOI profiles tracked in `PLAN_GFX950.md` |
+| gfx950 | available in the gfx950 workspace | native spill/identity/compact-engine tiers and guarded selected profiles pass; all four broad profiles completed | accepted locally, subject to the cross-workspace gfx1201 live rerun tracked in `PLAN_GFX950.md` |
 | gfx1201 | available in the gfx1201 workspace | tier0 183 unit + 37 live; tier1/tier2 recorded below | accepted baseline |
 | gfx1250 | no current workspace | decoder/encoder sources and synthetic dispatch coverage only | deferred |
 
@@ -414,13 +426,13 @@ where appropriate and cover spill, overflow, ordering, and unsupported-site
 reporting. Tier1 and tier2 establish output compatibility and absence of
 resource-induced hangs; they do not imply every loaded object was patchable.
 
-Current gfx950 snapshot (2026-07-13, checkpoint `bd297cdbfc`):
+Final gfx950 snapshot (2026-07-14):
 
 | Tier | SuperCollider | MOI record/replay | MOI sampled | MOI inline shadow |
 | --- | ---: | ---: | ---: | ---: |
-| tier0 focused | 263/263 shared unit/synthetic filter | passed guarded live controls | passed guarded live controls | passed guarded live controls |
+| tier0 focused | 266/266 broad focused unit/synthetic filter; 256/256 allocation/MOI/spill/emitter subset | passed guarded live controls | passed guarded live controls | passed guarded live controls |
 | tier1 selected IREE | 10/10 | 10/10 | 10/10 | 10/10 |
-| tier2 broad IREE (259 selected) | 257 ordinary passes + 2 typed `s_trap 0` mismatch outcomes | in progress | pending | pending |
+| tier2 broad IREE (259 selected) | 257 ordinary passes + 2 typed `s_trap 0` mismatch outcomes | 259/259 | 259/259 | 259/259 serialized |
 
 The complete raw/record-replay/sampled/inline omitted-coordinate live matrix is
 14/14. The inline selected row includes the former high-SGPR and load
@@ -432,6 +444,24 @@ tier0's patch/record/diagnostic/overflow guards and the independent semantic
 controls are the evidence that instrumentation executed and that intentional
 races/order controls behaved as expected; a green known-correct IREE result
 alone is only compatibility evidence.
+
+The final inline-shadow sweep was serialized because the IREE build tree has a
+shared `test_tmpdir`; it passed 259/259 in 137.65 seconds. A separate
+parallel-8 stress run passed 258/259, with IREE 1833 failing numerically once
+and then passing 20/20 immediate serial repetitions. This stress observation
+is not folded into the clean serialized compatibility result.
+
+Final typed exclusions are part of the supported boundary, rather than hidden
+test skips:
+
+- MOI excludes decoder-error owners from candidate and CFG planning while
+  retaining valid owners in the same object.
+- The standard record/sampled path fails open when a kernel-lifetime scalar
+  identity assignment cannot be proven for every selected owner.
+- gfx950 non-MFMA live-VGPR spilling is hardware-tested. A CDNA4 MFMA owner
+  that itself requires a live spill receives typed `NoLegalWindow` containment
+  for the complete code-object transaction until injected scratch operations
+  have an explicit MFMA pipeline-hazard schedule.
 
 ## rocjitsu-test-corpus
 

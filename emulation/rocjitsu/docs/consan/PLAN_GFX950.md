@@ -567,6 +567,16 @@ Full gfx950 support means:
   zero matrices; object-level containment makes all four isolated rows green.
   The synthetic regression also passes; `T4IS` remains active pending the
   clean broad rerun.
+- 2026-07-14: `T4IS` is `DONE` and `T4G` is reached. The complete inline-shadow
+  inventory passes 259/259 in 137.65 seconds when serialized. A parallel-8
+  stress run passed 258/259 with one numerical failure in IREE 1833, while the
+  same row passed 20/20 immediate serial repetitions; this concurrency-pressure
+  observation is retained separately from the clean compatibility result.
+- 2026-07-14: `D2B` and `X1A` are `DONE`. The broad focused filter passes
+  266/266, its narrower allocation/MOI/spill/emitter subset passes 256/256,
+  the explicit gfx1201 synthetic subset passes 3/3, and the full Rocjitsu suite
+  passes 1542/1542. `M0` is blocked only on `X1B`, the physical gfx1201 live
+  regression that cannot be produced on this gfx950 host.
 
 ## DAG Overview
 
@@ -804,13 +814,13 @@ flowchart LR
   T4RRC["T4RRC: Clean Record/Replay Rerun"]:::done
   T4RR{"T4RR: Record/Replay Broad IREE"}:::done
   T4SA["T4SA: Sampled Broad IREE"]:::done
-  T4IS["T4IS: Inline-Shadow Broad IREE"]:::active
-  T4G{"T4G: Broad Compatibility Accepted"}:::target
+  T4IS["T4IS: Inline-Shadow Broad IREE"]:::done
+  T4G{"T4G: Broad Compatibility Accepted"}:::done
   D2A["D2A: Capability And Runbook Content"]:::done
-  D2B["D2B: Final Result Tables"]:::todo
-  X1A["X1A: Local gfx1201 Synthetic Regression"]:::todo
+  D2B["D2B: Final Result Tables"]:::done
+  X1A["X1A: Local gfx1201 Synthetic Regression"]:::done
   X1B["X1B: gfx1201 Live Regression Evidence"]:::blocked
-  M0{"M0: gfx950 Fully Supported"}:::target
+  M0{"M0: gfx950 Fully Supported"}:::blocked
 
   T1A --> T1B
   SP --> T2R
@@ -2436,13 +2446,14 @@ Goal: run the same inventory under standard sampled MOI.
 
 Result: 259/259 pass with the workspace TheRock runtime.
 
-### T4IS: Inline-Shadow Broad IREE - ACTIVE
+### T4IS: Inline-Shadow Broad IREE - DONE
 
 Goal: run the same inventory under standard inline shadow.
 
-Current result: the initial sweep passed 257/259. Both isolated failures are
-green after typed containment of unscheduled live spills in CDNA4 MFMA owners.
-A clean 259-test rerun is pending.
+Result: the serialized workspace-runtime sweep passes 259/259 in 137.65
+seconds. A parallel-8 stress run passed 258/259; its sole numerical failure,
+IREE 1833, passed 20/20 immediate serialized repetitions. The deterministic
+MFMA-spill failures and their candidate-substitution follow-ons all pass.
 
 For each T4 profile node:
 
@@ -2481,7 +2492,7 @@ state preservation, accumulator alias hazard, paired entry paths, and
 workspace-only runtime commands. Final qualification numbers remain isolated
 in `D2B`.
 
-### D2B: Final Result Tables - TODO
+### D2B: Final Result Tables - DONE
 
 Goal: record the completed qualification without blocking architecture content
 on long-running sweeps.
@@ -2497,7 +2508,14 @@ Done criteria:
 - Documentation distinguishes unsupported coverage, compatibility passes, and
   clean sanitizer evidence.
 
-### X1A: Local gfx1201 Synthetic Regression - TODO
+Result: `LOCAL_TESTING.md` now records the final 266/266 broad focused filter,
+the distinct 256/256 allocation/MOI/spill/emitter subset, full 1542/1542
+Rocjitsu suite, all four broad gfx950 profiles, the serialized inline-shadow
+result and separate parallel stress observation, and the decoder, scalar
+identity, and CDNA4 MFMA-spill typed exclusions. Historical checkpoint totals
+remain labeled by revision rather than being overwritten.
+
+### X1A: Local gfx1201 Synthetic Regression - DONE
 
 Goal: protect shared gfx1201 encodings and policy without requiring gfx1201
 hardware on this machine.
@@ -2510,6 +2528,14 @@ Work:
 Done criteria:
 
 - All locally runnable gfx1201 and shared regressions are green.
+
+Result: the complete Rocjitsu suite passes 1542/1542 with the workspace
+TheRock runtime. The explicit `*Gfx1201*:*gfx1201*` subset passes 3/3, covering
+the gfx1201 scratch save/restore encoding and code-object target recognition;
+the full run also covers the architecture-neutral shared paths. The exact live
+tier commands remain in `LOCAL_TESTING.md` and
+`tests/dbi/consan_test_matrix.sh`. No physical gfx1201 result is inferred from
+this gfx950 host.
 
 ### X1B: gfx1201 Live Regression Evidence - BLOCKED
 
@@ -2526,7 +2552,7 @@ Done criteria:
 - Local synthetic regression is green and the other workspace records green
   focused and broad hardware results at the accepted revision.
 
-## Final Acceptance Checklist
+## Final Acceptance Checklist - BLOCKED ON X1B
 
 `M0: gfx950 Fully Supported` is reached only when:
 
