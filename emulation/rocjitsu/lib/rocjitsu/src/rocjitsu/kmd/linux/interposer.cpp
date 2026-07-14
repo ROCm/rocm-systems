@@ -905,7 +905,11 @@ public:
 
   void start_local_vm() {
     assert(rj_vm_ != nullptr);
-    std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
+    rj_vm_retain(rj_vm_);
+    local_vm_thread_ = std::thread([vm = rj_vm_]() {
+      rj_vm_run(vm, nullptr);
+      rj_vm_release(vm);
+    });
   }
 
   /// @brief A GEM buffer object synthesized from a prime (dmabuf) fd.
@@ -1281,8 +1285,18 @@ public:
     }
   }
 
+  void shutdown_local_vm() {
+    rj_vm_t *vm = rj_vm_;
+    if (!vm)
+      return;
+    rj_vm_request_exit(vm, "interposer shutdown");
+    if (local_vm_thread_.joinable())
+      local_vm_thread_.join();
+  }
+
 private:
   rj_vm_t *rj_vm_ = nullptr;
+  std::thread local_vm_thread_;
   std::unique_ptr<GuestKfd> guest_driver_;
   std::atomic<LinuxKfd *> active_driver_{nullptr};
   /// @brief Active daemon-mode remote driver, or nullptr in local mode.
@@ -1684,7 +1698,9 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   return static_cast<int>(InterposerContext::real().close(fd));
 }
 
-__attribute__((destructor(101))) void rj_interposer_shutdown() {}
+__attribute__((destructor(101))) void rj_interposer_shutdown() {
+  InterposerContext::ctx.shutdown_local_vm();
+}
 
 RJ_INTERPOSER_EXPORT int ioctl(int fd, unsigned long request, ...) {
   assert(InterposerContext::real().ready());
