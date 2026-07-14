@@ -232,7 +232,7 @@ jobs:
             echo "::endgroup::"
           }
           SHORT_TIMEOUT=15
-          LONG_TIMEOUT=60
+          LONG_TIMEOUT=30
           MAX_TIMEOUT_FAILURES=5
           for target in "${targets[@]}"; do
             read -r name rocjitsu_config skip_tests_config <<< "${target}"
