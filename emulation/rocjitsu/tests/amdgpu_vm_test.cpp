@@ -32,6 +32,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -47,7 +48,7 @@ struct VmFixture {
   SoC *soc_ptr = nullptr;
   amdgpu::GpuMemory *gpu_mem = nullptr;
 
-  VmFixture(const std::string &arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
+  VmFixture(std::string_view arch = "cdna3", uint32_t num_cus = 1, uint32_t num_wf_slots = 10,
             uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
@@ -60,7 +61,7 @@ struct VmFixture {
                std::to_string(i) + R"(","latency":1,"weight":10})";
     }
 
-    std::string json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":")" + arch +
+    std::string json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":")" + std::string(arch) +
                        R"("},)"
                        R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
                        R"({"name":"vram","type":"gpu_memory"},)"
@@ -438,10 +439,9 @@ TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
 TEST(CdnaDispatchTest, Wave64PackedTidHonorsRequestedComponents) {
   const uint32_t code[] = {SOPP_S_ENDPGM};
 
-  for (const std::string &arch :
-       {std::string("cdna2"), std::string("cdna3"), std::string("cdna4")}) {
+  for (std::string_view arch : {"cdna2", "cdna3", "cdna4"}) {
     for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
-      SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
+      SCOPED_TRACE(::testing::Message() << arch << " component_count=" << component_count);
       VmFixture f(arch);
       ASSERT_TRUE(f.cp()->packed_tid());
       uint64_t ko =
