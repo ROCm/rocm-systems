@@ -179,11 +179,12 @@ def patch_missing_torch_modules() -> None:
 
     torch_dir = Path(torch.__file__).parent
     strobelight_dir = torch_dir / "_strobelight"
-    if not strobelight_dir.exists():
+    profiler_file = strobelight_dir / "compile_time_profiler.py"
+    if not profiler_file.exists():
         log.info("Creating stub for torch._strobelight (missing from nightly wheel)")
         strobelight_dir.mkdir(parents=True, exist_ok=True)
         (strobelight_dir / "__init__.py").write_text("")
-        (strobelight_dir / "compile_time_profiler.py").write_text(
+        profiler_file.write_text(
             "class StrobelightCompileTimeProfiler:\n"
             "    def __enter__(self): return self\n"
             "    def __exit__(self, *a): pass\n"
