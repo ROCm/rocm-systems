@@ -31,7 +31,7 @@ __global__ void cube(double *input, double *output,int offset, int elements_per_
 
 void usage()
 {
-  printf("Usage: ./compute_comm_overlap <nstreams> <blockSize (optional, default=64)>\n");
+  printf("Usage: ./compute-comm-overlap <nstreams> <blockSize (optional, default=64)>\n");
   exit(1);
   return;
 }
