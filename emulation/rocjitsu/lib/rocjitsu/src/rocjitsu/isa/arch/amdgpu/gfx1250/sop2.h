@@ -571,6 +571,7 @@ class SAddF16Sop2 : public Sop2 {
 public:
   SAddF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -580,6 +581,7 @@ class SSubF16Sop2 : public Sop2 {
 public:
   SSubF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -589,6 +591,7 @@ class SMinNumF16Sop2 : public Sop2 {
 public:
   SMinNumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -598,6 +601,7 @@ class SMaxNumF16Sop2 : public Sop2 {
 public:
   SMaxNumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -607,6 +611,7 @@ class SMulF16Sop2 : public Sop2 {
 public:
   SMulF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -616,6 +621,7 @@ class SFmacF16Sop2 : public Sop2 {
 public:
   SFmacF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -643,6 +649,7 @@ class SMinimumF16Sop2 : public Sop2 {
 public:
   SMinimumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;
@@ -652,6 +659,7 @@ class SMaximumF16Sop2 : public Sop2 {
 public:
   SMaximumF16Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_uses(RegisterSet &uses) const override;
   Operand sdst;
   Operand ssrc0;
   Operand ssrc1;

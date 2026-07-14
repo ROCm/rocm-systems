@@ -19,7 +19,6 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 DEFAULT_HASH_DB = "src/utils/.config_hashes.json"
 
@@ -36,25 +35,17 @@ def compute_file_hash(filepath: Path) -> str:
 def compute_arch_hashes(arch_dir: Path) -> dict:
     """
     Compute hashes for all YAML files in an arch directory.
-    Returns dict: {"files": {filename: hash}, "delta_hash": <md5 or None>}
+    Returns dict: {"files": {filename: hash}}
     """
     arch_path = Path(arch_dir)
     if not arch_path.is_dir():
-        return {"files": {}, "delta_hash": None}
+        return {"files": {}}
 
     file_hashes: dict[str, str] = {}
     for yaml_file in sorted(arch_path.glob("*.yaml")):
         file_hashes[yaml_file.name] = compute_file_hash(yaml_file)
 
-    # Check for delta file (assume exactly one *_diff.yaml)
-    delta_dir = arch_path / "config_delta"
-    delta_hash: Optional[str] = None
-    if delta_dir.is_dir():
-        delta_files = list(delta_dir.glob("*_diff.yaml"))
-        if delta_files:
-            delta_hash = compute_file_hash(delta_files[0])
-
-    return {"files": file_hashes, "delta_hash": delta_hash}
+    return {"files": file_hashes}
 
 
 def load_hash_db(hash_file: Path) -> dict:
@@ -81,7 +72,6 @@ def detect_changes(configs_dir: Path, hash_file: Path) -> dict:
     Returns dict with keys:
         - new_archs: list[str]
         - modified_archs: dict[str, list[str]]
-        - delta_files: dict[str, str]   # arch -> delta file path
         - deleted_archs: list[str]
     """
     configs_path = Path(configs_dir)
@@ -97,46 +87,31 @@ def detect_changes(configs_dir: Path, hash_file: Path) -> dict:
     changes = {
         "new_archs": sorted(current_archs - stored_archs),
         "modified_archs": {},
-        "delta_files": {},
         "deleted_archs": sorted(stored_archs - current_archs),
     }
 
-    # Compare existing archs
     for arch in sorted(current_archs & stored_archs):
         arch_dir = configs_path / arch
         current_hashes = compute_arch_hashes(arch_dir)
-        stored_hashes = hash_db["archs"].get(arch, {"files": {}, "delta_hash": None})
+        stored_hashes = hash_db["archs"].get(arch, {"files": {}})
 
         modified_files: list[str] = []
 
         current_files = set(current_hashes["files"].keys())
         stored_files = set(stored_hashes.get("files", {}).keys())
 
-        # New files
         for f in sorted(current_files - stored_files):
             modified_files.append(f)
 
-        # Modified files
         for f in sorted(current_files & stored_files):
             if current_hashes["files"][f] != stored_hashes["files"][f]:
                 modified_files.append(f)
 
-        # Deleted files (mark as "[DELETED] <name>")
         for f in sorted(stored_files - current_files):
             modified_files.append(f"[DELETED] {f}")
 
         if modified_files:
             changes["modified_archs"][arch] = modified_files
-
-        # Delta changes
-        delta_dir = arch_dir / "config_delta"
-        if delta_dir.is_dir():
-            delta_files = list(delta_dir.glob("*_diff.yaml"))
-            if delta_files:
-                current_delta_hash = compute_file_hash(delta_files[0])
-                stored_delta_hash = stored_hashes.get("delta_hash")
-                if current_delta_hash != stored_delta_hash:
-                    changes["delta_files"][arch] = str(delta_files[0])
 
     return changes
 
@@ -191,11 +166,6 @@ def _print_change_summary(changes: dict) -> None:
             for f in files:
                 print(f"      - {f}")
 
-    if changes["delta_files"]:
-        print("\nDelta Files Detected")
-        for arch, delta_file in changes["delta_files"].items():
-            print(f"   • {arch}: {delta_file}")
-
     if changes["deleted_archs"]:
         print("\nDeleted Architectures")
         for arch in changes["deleted_archs"]:
@@ -204,7 +174,6 @@ def _print_change_summary(changes: dict) -> None:
     if not any([
         changes["new_archs"],
         changes["modified_archs"],
-        changes["delta_files"],
         changes["deleted_archs"],
     ]):
         print("\nNo changes detected")

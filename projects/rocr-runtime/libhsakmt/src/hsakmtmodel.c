@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,8 +43,59 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
+#ifndef HSAKMT_INSTALL_LIBDIR
+#define HSAKMT_INSTALL_LIBDIR "/opt/rocm/lib"
+#endif
+
 bool hsakmt_use_model;
 char *hsakmt_model_topology;
+
+static char *hsakmt_secure_getenv(const char *name)
+{
+#ifdef HAVE_SECURE_GETENV
+	return secure_getenv(name);
+#else
+	return getenv(name);
+#endif
+}
+
+static bool path_contains_dotdot(const char *path)
+{
+	const char *p = path;
+
+	while (*p) {
+		if (p[0] == '.' && p[1] == '.' &&
+		    (p[2] == '\0' || p[2] == '/'))
+			return true;
+		p = strchr(p, '/');
+		if (!p)
+			break;
+		p++;
+	}
+	return false;
+}
+
+static bool model_lib_path_allowed(const char *libname, char *resolved,
+				   size_t resolved_size)
+{
+	const char *prefix = HSAKMT_INSTALL_LIBDIR;
+	size_t prefix_len = strlen(prefix);
+
+	if (!libname || !*libname || path_contains_dotdot(libname))
+		return false;
+
+	if (libname[0] == '/') {
+		if (strncmp(libname, prefix, prefix_len) != 0)
+			return false;
+		if (libname[prefix_len] != '\0' && libname[prefix_len] != '/')
+			return false;
+		return snprintf(resolved, resolved_size, "%s", libname) <
+		       (int)resolved_size;
+	}
+
+	return snprintf(resolved, resolved_size, "%s/%s", prefix, libname) <
+	       (int)resolved_size;
+}
 
 static pthread_mutex_t model_call_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void *model_library;
@@ -58,20 +110,31 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtModelEnabled(bool* enable)
 
 void model_init_env_vars(void)
 {
+	char resolved_lib[PATH_MAX];
+
 	/* Check whether to use a model instead of real hardware */
-	hsakmt_model_topology = getenv("HSA_MODEL_TOPOLOGY");
+	hsakmt_model_topology = hsakmt_secure_getenv("HSA_MODEL_TOPOLOGY");
 	if (hsakmt_model_topology)
 		hsakmt_use_model = true;
 	if (hsakmt_use_model)
 	{
-		/* Load model library first to get interface functions */
-		const char *libname = getenv("HSA_MODEL_LIB");
+		/* Load model library first to get interface functions.
+		 * HSA_MODEL_LIB is read via secure_getenv() and restricted to
+		 * HSAKMT_INSTALL_LIBDIR to prevent arbitrary dlopen() under
+		 * elevated privileges (AT_SECURE). */
+		const char *libname = hsakmt_secure_getenv("HSA_MODEL_LIB");
 		if (!libname)
 		{
 			fprintf(stderr, "model: HSA_MODEL_LIB environment variable must be set to FFM .so\n");
 			abort();
 		}
-		// model_library = dlmopen(LM_ID_NEWLM, libname, RTLD_NOW);
+		if (!model_lib_path_allowed(libname, resolved_lib, sizeof(resolved_lib)))
+		{
+			fprintf(stderr, "model: HSA_MODEL_LIB must be under %s (got %s)\n",
+				HSAKMT_INSTALL_LIBDIR, libname);
+			abort();
+		}
+		libname = resolved_lib;
 		model_library = dlopen(libname, RTLD_NOW | RTLD_LOCAL);
 		if (!model_library)
 		{
@@ -296,7 +359,7 @@ int hsakmt_drm_open_render(int minor)
 		return dup(hsakmt_primary_kfd_ctx.fd);
 	}
 	char path[128];
-	sprintf(path, "/dev/dri/renderD%d", minor);
+	snprintf(path, sizeof(path), "/dev/dri/renderD%d", minor);
 	return open(path, O_RDWR | O_CLOEXEC);
 }
 

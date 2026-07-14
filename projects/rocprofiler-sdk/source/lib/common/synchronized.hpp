@@ -33,7 +33,7 @@ namespace rocprofiler
 namespace common
 {
 /**
- * Sychronized is a wrapper that adds lock based write/read
+ * Synchronized is a wrapper that adds lock based write/read
  * protection around a datatype. The protected data is accessed
  * only by rlock/wlock. rlock(lambda) gets a reader lock of the
  * protected value, passing the protected value to the lambda as a

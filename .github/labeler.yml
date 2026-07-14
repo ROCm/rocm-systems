@@ -10,6 +10,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/clr/**/*'
 
+"project: cuid":
+- changed-files:
+  - any-glob-to-any-file: 'projects/cuid/**/*'
+
 "project: hip":
 - changed-files:
   - any-glob-to-any-file: 'projects/hip/**/*'
@@ -43,6 +47,10 @@
 "project: rocm-core":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocm-core/**/*'
+
+"project: rocjitsu":
+- changed-files:
+  - any-glob-to-any-file: 'emulation/rocjitsu/**/*'
 
 "project: rocminfo":
 - changed-files:

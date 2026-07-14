@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include "gfx12/gfx12parser.h"
 #include "gfx12/gfx12token.h"
@@ -72,7 +74,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     ws.simd = 1;
     ws.wgp = 8;
     ws.wid = 10;
-    ws.dispatcher = 0b10101; // 5 bits: pipe=01, me=1, upper bits ignored
+    ws.pipe = 0b01;
+    ws.me = 1;
     ws.count = 50;
 
     wstart_type_common common = ws.get();
@@ -81,8 +84,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     EXPECT_EQ(common.simd, 1);
     EXPECT_EQ(common.wgp, 8);
     EXPECT_EQ(common.wid, 10);
-    EXPECT_EQ(common.pipe, 0b01);             // dispatcher & 0x3
-    EXPECT_EQ(common.me, (0b10101 >> 2) & 1); // (dispatcher >> 2) & 1
+    EXPECT_EQ(common.pipe, 0b01);
+    EXPECT_EQ(common.me, 1);
     EXPECT_EQ(common.count, 50);
 }
 
@@ -296,17 +299,38 @@ TEST(Gfx12TokenGeneratorTest, LargeBufferProcessesWithoutOob)
     EXPECT_GT(tokenCount, 0);
 }
 
+TEST(Gfx12TokenGeneratorTest, SafeReaderRecordsRealtimeTimestamp)
+{
+    gfx12::timestamp_type ts{};
+    ts.header = 0b0000001;
+    ts.rt = 1;
+    ts.pl = 0;
+    ts.time = 0x23456789ull;
+
+    std::array<uint8_t, sizeof(uint64_t)> buffer{};
+    std::memcpy(buffer.data(), &ts.raw, sizeof(ts.raw));
+
+    gfx12::TokenGenerator gen(buffer.data(), buffer.size(), 0, 0);
+    auto token = gen.next();
+
+    EXPECT_EQ(token.type, RdnaType::TIMESTAMP);
+    ASSERT_EQ(gen.realtime.size(), 1u);
+    EXPECT_EQ(gen.realtime.front().shader_clock, 0);
+    EXPECT_EQ(gen.realtime.front().realtime_clock, ts.time);
+}
+
 // Edge case tests for field boundaries
 TEST(Gfx12WaveStartEdgeCaseTest, MaxFieldValues)
 {
     gfx12::wstart_type ws{};
     ws.raw = 0;
-    ws.sa = 1;          // Max for 1-bit
-    ws.simd = 3;        // Max for 2-bit
-    ws.wgp = 15;        // Max for 4-bit
-    ws.wid = 31;        // Max for 5-bit
-    ws.dispatcher = 31; // Max for 5-bit
-    ws.count = 127;     // Max for 7-bit
+    ws.sa = 1;      // Max for 1-bit
+    ws.simd = 3;    // Max for 2-bit
+    ws.wgp = 15;    // Max for 4-bit
+    ws.wid = 31;    // Max for 5-bit
+    ws.pipe = 3;    // Max for 2-bit
+    ws.me = 1;      // Max for 1-bit
+    ws.count = 127; // Max for 7-bit
 
     wstart_type_common common = ws.get();
 

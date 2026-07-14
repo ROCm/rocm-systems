@@ -125,7 +125,8 @@ TEST_P(LibMountHelperFilesystemTypeParam, GetMountInfoHandlesFilesystemType)
 INSTANTIATE_TEST_SUITE_P(
     LibMountHelperFilesystemType, LibMountHelperFilesystemTypeParam,
     Values(
-        std::make_tuple("autofs", FilesystemType::other), std::make_tuple("beegfs", FilesystemType::other),
+        std::make_tuple(nullptr, FilesystemType::other), std::make_tuple("autofs", FilesystemType::other),
+        std::make_tuple("beegfs", FilesystemType::other),
         std::make_tuple("binfmt_misc", FilesystemType::other), std::make_tuple("bpf", FilesystemType::other),
         std::make_tuple("btrfs", FilesystemType::other), std::make_tuple("cgroup2", FilesystemType::other),
         std::make_tuple("configfs", FilesystemType::other), std::make_tuple("debugfs", FilesystemType::other),
@@ -179,6 +180,7 @@ TEST_P(LibMountHelperExt4FilesystemTypeParam, GetMountInfoHandlesExt4FilesystemT
 
 INSTANTIATE_TEST_SUITE_P(LibMountHelperExt4FilesystemType, LibMountHelperExt4FilesystemTypeParam,
                          Values(std::make_tuple(1, nullptr, ExtJournalingMode::ordered),
+                                std::make_tuple(0, nullptr, ExtJournalingMode::unknown),
                                 std::make_tuple(0, "ordered", ExtJournalingMode::ordered),
                                 std::make_tuple(0, "journal", ExtJournalingMode::journal),
                                 std::make_tuple(0, "writeback", ExtJournalingMode::writeback),

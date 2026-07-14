@@ -3,6 +3,8 @@ multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
     <<: *level_2
     tags: [memory]
+    # AIRUNTIME-2291: temporarily disabled (hangs in CI 942)
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_2
     tags: [device_mgmt]

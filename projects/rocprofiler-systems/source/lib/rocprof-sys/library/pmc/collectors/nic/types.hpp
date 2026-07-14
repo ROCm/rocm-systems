@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "backends/amd_smi/nic_types.hpp"
+
 #include <cstdint>
-#include <string>
-#include <vector>
 
 namespace rocprofsys
 {
@@ -16,39 +16,14 @@ namespace collectors
 namespace nic
 {
 
-/**
- * @brief NIC ASIC identification info.
- */
-struct asic_info
-{
-    std::string product_name;
-    std::string vendor_name;
-};
+// Data types are owned by the backend layer (the producer); re-exported here so
+// pmc consumers keep their existing pmc::collectors::nic::* spellings.
+namespace backend = ::rocprofsys::backends::amd_smi::nic;
 
-/**
- * @brief NIC port identification info.
- */
-struct port_info
-{
-    std::string device_name;
-};
-
-/**
- * @brief NIC RDMA device info.
- */
-struct rdma_info
-{
-    std::uint8_t port_count = 0;
-};
-
-/**
- * @brief Single RDMA port statistic entry.
- */
-struct stat_entry
-{
-    std::string   name;
-    std::uint64_t value = 0;
-};
+using backend::asic_info;
+using backend::port_info;
+using backend::rdma_info;
+using backend::stat_entry;
 
 /**
  * @brief Bitfield union for selecting which NIC RDMA metrics to collect.

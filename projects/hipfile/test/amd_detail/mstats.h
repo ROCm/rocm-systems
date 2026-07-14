@@ -28,7 +28,8 @@ public:
     MStatsCollection() : co{this}
     {
     }
-    MOCK_METHOD(void, addIo, (IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs),
+    MOCK_METHOD(void, addIo,
+                (IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs, bool aligned),
                 (const, noexcept, override));
     MOCK_METHOD(void, error, (IoType ioType, StatsBackend backend, uint64_t bytes),
                 (const, noexcept, override));

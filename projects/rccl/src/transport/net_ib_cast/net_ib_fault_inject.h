@@ -65,6 +65,31 @@ ncclResult_t ncclIbCastFaultDriveRecvQpToError(void* recvComm, int qpIdx);
  * unrecoverable (not eligible for failover). */
 ncclResult_t ncclIbCastFaultCheckErrorFatal(void* sendComm, int wcStatus, bool* isFatal);
 
+/* ── CAST ops-overload path (src/transport/net_ib_cast/net_ib_ops_fault.cc) ──
+ *
+ * These arm faults on the shimmed ibv_context ops table installed at
+ * wrap_ibv_open_device time, so the fault is applied at the REAL libibverbs
+ * call boundary (post_send/post_recv/poll_cq) rather than the pre-call
+ * intercept in p2p.cc. qpIdx must be in [0, nqps). */
+
+/* Make the real ibv_post_send on the QP at qpIdx return errnoVal (e.g. EAGAIN,
+ * ENOMEM). errnoVal=0 disarms. */
+ncclResult_t ncclIbCastFaultOpsSetPostSendError(void* sendComm, int qpIdx, int errnoVal);
+
+/* Make the real ibv_post_recv on the QP at qpIdx return errnoVal. 0 disarms. */
+ncclResult_t ncclIbCastFaultOpsSetPostRecvError(void* recvComm, int qpIdx, int errnoVal);
+
+/* Inject an error completion for the QP at qpIdx.
+ *  wcStatus      : ibv_wc_status to apply (0 disarms).
+ *  injectCount   : completions to corrupt; <0 = unlimited.
+ *  injectWhenIdle: if true, synthesize an error WC when poll_cq is idle;
+ *                  if false, only rewrite the status of real matching completions. */
+ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatus,
+                                              int injectCount, bool injectWhenIdle);
+
+/* Clear all ops-overload fault config on the connection (shims stay installed). */
+ncclResult_t ncclIbCastFaultOpsClear(void* comm);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

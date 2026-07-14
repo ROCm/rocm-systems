@@ -106,6 +106,14 @@ ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp* op);
 bool ncclProfilerNeedsProxy(struct ncclComm* comm, struct ncclProxyOp* op);
 bool ncclProfilerPluginLoaded(void);
 
+// RCCL proxy-trace-as-profiler-plugin
+bool ncclProfilerProxyDiagEnabled(void);
+#define NCCL_PROXY_DIAG_FLAG_TIMESTAMP 1u
+#define NCCL_PROXY_DIAG_FLAG_COUNTER_SKIP 2u
+ncclResult_t ncclProfilerRecordProxyDiagState(int sub, struct ncclProxyArgs* args, uint8_t counterKind, int64_t value,
+                                              int64_t value2, uint16_t flags);
+void ncclProfilerProxyTraceDumpIfAny(void* profilerContext);
+
 // Profiler callback for network plugin
 ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64_t pluginId, void* extData);
 

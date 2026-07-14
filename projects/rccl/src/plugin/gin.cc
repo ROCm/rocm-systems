@@ -10,12 +10,14 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_host_rocshmem_gda.h"
+#endif
 
 #include <string.h>
 #include <errno.h>
 #include <mutex>
 //Temporary stubs
-#include "nccl_merge_stubs.h"
 
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
@@ -32,7 +34,11 @@ getNcclGin_t* getNcclRma[NCCL_GIN_VERSION_COUNT] = {getNcclRma_v13, getNcclGin_v
 
 extern ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12);
 
+#ifdef ENABLE_ROCSHMEM_GIN
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 2
+#else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
+#endif
 
 typedef enum ncclGinPluginState {
   ncclGinPluginStateDisabled        = -2,       // Plugin library failed to initialize
@@ -117,6 +123,12 @@ static ncclResult_t ncclGinPluginInit(struct ncclComm* comm, ginPluginLib_t* plu
     if (pluginLib->ncclGin->init(&comm->ginContext, comm->commHash, ncclDebugLog) != ncclSuccess) {
       pluginLib->ncclGinPluginState = ncclGinPluginStateDisabled;
     }
+#ifdef ENABLE_ROCSHMEM_GIN
+    else if (comm->ginContext &&
+             pluginLib->ncclGin == &ncclGinRocshmemGdaPlugin) {
+      ncclGinRocshmemSetInitContext(comm->ginContext, comm);
+    }
+#endif
   }
   if (pluginLib->ncclGinPluginState == ncclGinPluginStateInitReady && pluginLib->ncclGin) {
     if (pluginLib->ncclGin->devices(&ndev) != ncclSuccess || ndev <= 0) {
@@ -241,7 +253,9 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-  ginPluginLibs[pluginCounter].ncclGin = getNcclGin_v12_internal(&ncclGinIbProxy);
+  // ncclGinIbProxy is an ncclGin_t (v13) instance, so register it directly
+  // instead of adapting through getNcclGin_v12_internal.
+  ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
   ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
   ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
@@ -250,6 +264,15 @@ static void initPluginLibsOnceFunc() {
 
   pluginCounter++;
 
+#ifdef ENABLE_ROCSHMEM_GIN
+  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=4)
+  {
+    extern ncclGin_t ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+    pluginCounter++;
+  }
+#endif
 
   pluginCount = pluginCounter;
 }

@@ -311,9 +311,12 @@ static constexpr auto ROWS{8};
 static constexpr auto CHUNK_LOOP{100};
 
 
-template <typename T> __global__ void copy_var(T* A, T* B, size_t ROWS, size_t pitch_A) {
-  for (uint64_t i = 0; i < ROWS * pitch_A; i = i + pitch_A) {
-    A[i] = B[i];
+template <typename T> __global__ void copy_var(T* A, T* B, size_t ROWS, size_t pitch_A, size_t pitch_B) {
+  const size_t pitcha = pitch_A / sizeof(T), pitchb = pitch_B / sizeof(T);
+  const size_t sizea = ROWS * pitcha, sizeb = ROWS * pitchb;
+
+  for (size_t ia = 0, ib = 0; ia < sizea && ib < sizeb; ia += pitcha, ib += sizeb) {
+    B[ib] = A[ia];
   }
 }
 template <typename T> static bool validateResult(T* A, T* B, size_t pitch_A) {
@@ -476,9 +479,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
   HIP_CHECK(hipMemcpy2D(A_d, pitch_A, A_h, COLUMNS * sizeof(TestType), COLUMNS * sizeof(TestType),
                         ROWS, hipMemcpyHostToDevice));
 
-
   hipLaunchKernelGGL(copy_var<TestType>, dim3(1), dim3(1), 0, 0, static_cast<TestType*>(A_d),
-                     static_cast<TestType*>(B_d), ROWS, pitch_A);
+                     static_cast<TestType*>(B_d), ROWS, pitch_A, pitch_B);
   HIP_CHECK(hipGetLastError());
 
 

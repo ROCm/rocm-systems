@@ -22,7 +22,7 @@
 use std::process::{Command, Stdio};
 
 use mirage_core::container::{ContainerState, NodeContainer};
-use mirage_core::profile::{ContainerizedDef, FileMount};
+use mirage_core::profile::{ContainerizedDef, FileMount, PortMapping};
 
 /// Errors raised while driving a container provider.
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +61,38 @@ pub enum ContainerError {
 /// Result alias for container operations.
 pub type Result<T> = std::result::Result<T, ContainerError>;
 
+/// Whether `provider` resolves to podman (by binary name or path
+/// basename). podman supports `--group-add keep-groups`, which docker
+/// does not, so callers branch their GPU group passthrough on this.
+fn provider_is_podman(provider: &str) -> bool {
+    std::path::Path::new(provider)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(provider)
+        .contains("podman")
+}
+
+/// Host AMD GPU device nodes to expose to a node container (`--device`)
+/// when host GPU access is requested: the KFD compute device
+/// (`/dev/kfd`) and the DRM render nodes (`/dev/dri`). Only paths that
+/// actually exist on the host are returned, so a host missing one simply
+/// omits it.
+fn host_gpu_devices() -> Vec<String> {
+    ["/dev/kfd", "/dev/dri"]
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+/// Supplementary groups that own the host GPU device nodes
+/// (`--group-add`). `video` and `render` are the conventional owners of
+/// `/dev/kfd` and the `/dev/dri/render*` nodes on ROCm hosts; docker is
+/// given these explicitly (podman inherits them via `keep-groups`).
+fn host_gpu_groups() -> Vec<String> {
+    vec!["video".to_string(), "render".to_string()]
+}
+
 /// A phase of container bring-up, reported to the `progress` callback of
 /// [`Engine::bring_up`] so the host can surface detailed, live status to
 /// clients as a session starts.
@@ -69,6 +101,11 @@ pub type Result<T> = std::result::Result<T, ContainerError>;
 /// keeping the full set of bring-up conditions described in one place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BringUpPhase {
+    /// The derived image already exists locally, so the build is skipped.
+    ImageBuilt { image: String },
+    /// Building a derived image (applying profile hacks); can take a
+    /// while as it runs package-manager commands inside the build.
+    BuildingImage { base: String, image: String },
     /// The image is already present locally, so the pull is skipped.
     ImagePresent { image: String },
     /// Pulling the image from its registry (can take a while).
@@ -91,6 +128,7 @@ impl BringUpPhase {
     /// off while [`message`](Self::message) carries the human detail.
     pub fn state(&self) -> &'static str {
         match self {
+            BringUpPhase::ImageBuilt { .. } | BringUpPhase::BuildingImage { .. } => "building",
             BringUpPhase::ImagePresent { .. }
             | BringUpPhase::Pulling { .. }
             | BringUpPhase::Pulled { .. } => "pulling",
@@ -105,6 +143,12 @@ impl BringUpPhase {
     /// surfacing directly to the user as the session's status message.
     pub fn message(&self) -> String {
         match self {
+            BringUpPhase::ImageBuilt { image } => {
+                format!("derived image {image} already built; skipping build")
+            }
+            BringUpPhase::BuildingImage { base, image } => {
+                format!("building derived image {image} from {base} (this can take a while)…")
+            }
             BringUpPhase::ImagePresent { image } => {
                 format!("image {image} already present locally; skipping pull")
             }
@@ -169,12 +213,6 @@ impl Engine {
     // ---- argv builders (pure) -------------------------------------
 
     /// Build the argv (after the provider binary) for launching a
-    /// detached node container that idles on `sleep infinity` so execs
-    /// can be injected into it later.
-    ///
-    /// The container is named and given a matching hostname so peers can
-    /// resolve it by name on the shared network.
-    /// Build the argv (after the provider binary) for launching a
     /// detached node container.
     ///
     /// `command` is the container's foreground process (PID 1). Mirage
@@ -182,13 +220,33 @@ impl Engine {
     /// so the container hosts its node directly; an empty `command`
     /// leaves the image's default entrypoint in place.
     ///
+    /// The first element of `command` is passed as `--entrypoint` so it
+    /// *replaces* the image's default `ENTRYPOINT` rather than being
+    /// appended to it (the remaining elements become the entrypoint's
+    /// arguments after the image). Without this, images that ship their
+    /// own entrypoint (e.g. `vllm/vllm-openai`) would run that entrypoint
+    /// with `mirage host …` tacked on as arguments instead of running
+    /// mirage.
+    ///
+    /// When `host_gpus` is set, the container is launched with the
+    /// supplementary groups needed to open the passed-through GPU device
+    /// nodes. The mechanism depends on `provider`: podman inherits the
+    /// launching user's groups via `--group-add keep-groups`, while
+    /// docker (which has no `keep-groups`) is given the named `groups`
+    /// explicitly. When `host_gpus` is unset no group passthrough is
+    /// emitted, which keeps plain (non-GPU) containers working on docker
+    /// — `keep-groups` is a podman-only feature and docker rejects it.
+    ///
     /// The container is named and given a matching hostname so peers can
     /// resolve it by name on the shared network.
     pub fn run_argv(
+        provider: &str,
         name: &str,
         image: &str,
         network: Option<&str>,
+        host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
@@ -201,15 +259,29 @@ impl Engine {
             name.to_string(),
             "--hostname".to_string(),
             name.to_string(),
-            // Run the GPU device nodes unconfined and keep the launching
-            // user's supplementary groups inside the container so the
-            // workload can open `/dev/kfd` and `/dev/dri/*` (podman drops
-            // them by default, which breaks ROCm device access).
-            "--security-opt".to_string(),
-            "seccomp=unconfined".to_string(),
-            "--group-add".to_string(),
-            "keep-groups".to_string(),
         ];
+        if host_gpus {
+            // Run the GPU device nodes unconfined and grant the container
+            // the supplementary groups that own `/dev/kfd` and
+            // `/dev/dri/*`, so the workload can open them.
+            argv.push("--security-opt".to_string());
+            argv.push("seccomp=unconfined".to_string());
+            if provider_is_podman(provider) {
+                // podman inherits the launching user's supplementary
+                // groups (including `video`/`render`) rather than naming
+                // them. It also rejects combining `keep-groups` with any
+                // other `--group-add`, so the named groups are dropped.
+                argv.push("--group-add".to_string());
+                argv.push("keep-groups".to_string());
+            } else {
+                // docker has no `keep-groups`; add the named GPU groups
+                // explicitly so the workload can open the device nodes.
+                for g in groups {
+                    argv.push("--group-add".to_string());
+                    argv.push(g.clone());
+                }
+            }
+        }
         if let Some(net) = network {
             argv.push("--network".to_string());
             argv.push(net.to_string());
@@ -222,21 +294,28 @@ impl Engine {
             argv.push("-v".to_string());
             argv.push(m.to_volume_arg());
         }
+        for p in ports {
+            argv.push("-p".to_string());
+            argv.push(p.to_publish_arg());
+        }
         for d in devices {
             argv.push("--device".to_string());
             argv.push(d.clone());
         }
-        // We always pass `--group-add keep-groups` above, which inherits
-        // the launching user's supplementary groups (including `video`/
-        // `render`) into the container. podman rejects combining
-        // `keep-groups` with any other `--group-add`, so the named groups
-        // are intentionally dropped here: keep-groups already covers them,
-        // and adding them would fail with exit 125.
-        let _ = groups;
-        argv.push(image.to_string());
         // The container's foreground process. Mirage hosts the node from
         // inside the container, so this is normally `mirage host ...`.
-        argv.extend(command.iter().cloned());
+        // The first element overrides the image ENTRYPOINT (so it runs
+        // mirage rather than the image's own entrypoint); the rest become
+        // its arguments after the image. An empty `command` leaves the
+        // image's default entrypoint in place.
+        if let Some((entrypoint, args)) = command.split_first() {
+            argv.push("--entrypoint".to_string());
+            argv.push(entrypoint.clone());
+            argv.push(image.to_string());
+            argv.extend(args.iter().cloned());
+        } else {
+            argv.push(image.to_string());
+        }
         argv
     }
 
@@ -291,6 +370,105 @@ impl Engine {
         self.checked(&["pull".to_string(), image.to_string()])
     }
 
+    /// Build an image tagged `tag` from the given `dockerfile` contents,
+    /// streamed to the provider's `build` over stdin (`build -t <tag> -`,
+    /// which both podman and docker accept for a context-less build).
+    ///
+    /// Used to realise profile [hacks](mirage_core::profile::Hack): a
+    /// derivative image is built once from the base image and then run in
+    /// place of it. The provider's build output (which can take a while —
+    /// apt updates, package installs, …) is streamed line by line to the
+    /// log at INFO so progress is visible live; the captured lines are
+    /// also retained and, on failure, surfaced in the error so a broken
+    /// `RUN` step is actionable.
+    pub fn build_image(&self, tag: &str, dockerfile: &str) -> Result<()> {
+        let args = vec![
+            "build".to_string(),
+            "-t".to_string(),
+            tag.to_string(),
+            "-".to_string(),
+        ];
+        let mut child = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(&args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        // Stream the Dockerfile to the build's stdin, then close it so the
+        // provider proceeds.
+        use std::io::{BufRead, BufReader, Write};
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(dockerfile.as_bytes())
+                .map_err(|source| ContainerError::Spawn {
+                    provider: self.provider.clone(),
+                    args: args.clone(),
+                    source,
+                })?;
+        }
+
+        // Drain stdout and stderr concurrently, logging each line at INFO
+        // as it arrives and retaining it so a failing build's output can
+        // be surfaced in the error. Build providers write most progress
+        // to stderr, so both streams are followed.
+        fn log_stream<R: std::io::Read + Send + 'static>(
+            reader: Option<R>,
+            tag: String,
+        ) -> (
+            std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+            Option<std::thread::JoinHandle<()>>,
+        ) {
+            let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+            let lines_for_thread = lines.clone();
+            let handle = reader.map(|r| {
+                std::thread::spawn(move || {
+                    for line in BufReader::new(r).lines().map_while(std::result::Result::ok) {
+                        tracing::info!(image = %tag, "{line}");
+                        lines_for_thread.lock().unwrap().push(line);
+                    }
+                })
+            });
+            (lines, handle)
+        }
+        let (out_lines, out_handle) = log_stream(child.stdout.take(), tag.to_string());
+        let (err_lines, err_handle) = log_stream(child.stderr.take(), tag.to_string());
+
+        let status = child.wait().map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.clone(),
+            source,
+        })?;
+        if let Some(h) = out_handle {
+            let _ = h.join();
+        }
+        if let Some(h) = err_handle {
+            let _ = h.join();
+        }
+
+        if status.success() {
+            Ok(())
+        } else {
+            // Prefer stderr (where build errors land); fall back to stdout.
+            let mut captured = err_lines.lock().unwrap().join("\n");
+            if captured.trim().is_empty() {
+                captured = out_lines.lock().unwrap().join("\n");
+            }
+            Err(ContainerError::Command {
+                provider: self.provider.clone(),
+                args,
+                code: status.code().unwrap_or(-1),
+                stderr: captured.trim().to_string(),
+            })
+        }
+    }
+
     /// Whether `image` is already present locally.
     pub fn image_present(&self, image: &str) -> bool {
         self.status(&[
@@ -325,18 +503,37 @@ impl Engine {
 
     /// Launch a detached node container and return its id (the trimmed
     /// stdout of `run -d`).
+    ///
+    /// `host_gpus` requests host GPU access for the container; the
+    /// group passthrough it implies is provider-specific (see
+    /// [`Self::run_argv`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn launch_node(
         &self,
         name: &str,
         image: &str,
         network: Option<&str>,
+        host_gpus: bool,
         mounts: &[FileMount],
+        ports: &[PortMapping],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String> {
-        let argv = Self::run_argv(name, image, network, mounts, devices, groups, env, command);
+        let argv = Self::run_argv(
+            &self.provider,
+            name,
+            image,
+            network,
+            host_gpus,
+            mounts,
+            ports,
+            devices,
+            groups,
+            env,
+            command,
+        );
         let out = self.output(&argv)?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
@@ -368,6 +565,11 @@ impl Engine {
     /// rank, returning the [`ContainerState`] the host should persist
     /// plus the per-rank container ids (the trimmed stdout of `run -d`).
     ///
+    /// `host_gpus` requests host GPU access for every node container
+    /// (the provider-specific group passthrough described on
+    /// [`Self::run_argv`]); the emulator decides whether its workload
+    /// needs it.
+    ///
     /// `node_env(rank)` yields the environment for the node of that rank
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
     /// there). `node_command(rank)` yields the container's foreground
@@ -377,10 +579,12 @@ impl Engine {
     /// On any failure the partially-created containers and network are
     /// torn down before returning the error, so a failed bring-up never
     /// leaks resources.
+    #[allow(clippy::too_many_arguments)]
     pub fn bring_up<F, G, P>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
+        host_gpus: bool,
         node_count: u32,
         head_port: u16,
         mut node_env: F,
@@ -438,6 +642,21 @@ impl Engine {
             self.ensure_network(&network)?;
         }
 
+        // When the emulator requested host GPU access, expose the host's
+        // GPU device nodes and the groups that own them on top of any
+        // devices/groups the profile already configured. The group
+        // passthrough mechanism itself is provider-specific and handled
+        // in `run_argv`.
+        let (devices, groups) = if host_gpus {
+            let mut devices = def.devices.clone();
+            devices.extend(host_gpu_devices());
+            let mut groups = def.groups.clone();
+            groups.extend(host_gpu_groups());
+            (devices, groups)
+        } else {
+            (def.devices.clone(), def.groups.clone())
+        };
+
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             progress(BringUpPhase::LaunchingNode {
@@ -451,9 +670,11 @@ impl Engine {
                 &name,
                 &def.image,
                 Some(&network),
+                host_gpus,
                 &def.mounts,
-                &def.devices,
-                &def.groups,
+                &def.ports,
+                &devices,
+                &groups,
                 &env,
                 &command,
             ) {
@@ -480,15 +701,17 @@ impl Engine {
 
     /// Run the provider with `args`, succeeding only on a zero exit.
     fn checked(&self, args: &[String]) -> Result<()> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(())
         } else {
@@ -503,32 +726,36 @@ impl Engine {
 
     /// Run the provider with `args` and return whether it exited zero.
     fn status(&self, args: &[String]) -> Result<bool> {
-        let status = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let status = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         Ok(status.success())
     }
 
     /// Run the provider with `args`, returning captured stdout on a zero
     /// exit.
     fn output(&self, args: &[String]) -> Result<Vec<u8>> {
-        let output = Command::new(&self.provider)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|source| ContainerError::Spawn {
-                provider: self.provider.clone(),
-                args: args.to_vec(),
-                source,
-            })?;
+        let output = spawn_retrying_etxtbsy(|| {
+            Command::new(&self.provider)
+                .args(args)
+                .stdin(Stdio::null())
+                .output()
+        })
+        .map_err(|source| ContainerError::Spawn {
+            provider: self.provider.clone(),
+            args: args.to_vec(),
+            source,
+        })?;
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -542,6 +769,31 @@ impl Engine {
     }
 }
 
+/// Spawn a command, transparently retrying on `ETXTBSY`.
+///
+/// In a multithreaded process a concurrent `fork` momentarily
+/// duplicates every open file descriptor — including a writable handle
+/// to a just-written executable — into the forked child. Until that
+/// child `exec`s (closing the descriptor via `O_CLOEXEC`), attempting to
+/// execute the file fails with `ETXTBSY` ("Text file busy"). The
+/// condition is transient, so retry a bounded number of times with a
+/// short backoff before surfacing the error. Real container providers
+/// (podman/docker) are stable binaries that never hit this, but the
+/// guard makes provider spawning robust regardless of how the binary
+/// came to exist.
+fn spawn_retrying_etxtbsy<T>(mut run: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut attempts = 0;
+    loop {
+        match run() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            other => return other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,6 +802,10 @@ mod tests {
 
     fn mount(spec: &str) -> FileMount {
         FileMount::parse(spec).unwrap()
+    }
+
+    fn port(spec: &str) -> PortMapping {
+        PortMapping::parse(spec).unwrap()
     }
 
     /// Mock provider: logs every invocation to `log`, exits non-zero for
@@ -577,6 +833,7 @@ mod tests {
             ("MIRAGE_HEAD_PORT".to_string(), "5000".to_string()),
         ];
         let mounts = vec![mount("/data:/data:ro"), mount("/h:/c")];
+        let ports = vec![port("8080:8000"), port("53:53/udp")];
         let devices = vec!["/dev/kfd".to_string(), "/dev/dri".to_string()];
         let groups = vec!["video".to_string(), "render".to_string()];
         let command = vec![
@@ -588,10 +845,13 @@ mod tests {
             "0".to_string(),
         ];
         let argv = Engine::run_argv(
+            "podman",
             "mirage-s-node-0",
             "img:latest",
             Some("mirage-s"),
+            true,
             &mounts,
+            &ports,
             &devices,
             &groups,
             &env,
@@ -607,22 +867,92 @@ mod tests {
         assert!(joined.contains("-e MIRAGE_HEAD_PORT=5000"));
         assert!(joined.contains("-v /data:/data:ro"));
         assert!(joined.contains("-v /h:/c"));
+        assert!(joined.contains("-p 8080:8000"));
+        assert!(joined.contains("-p 53:53/udp"));
         assert!(joined.contains("--device /dev/kfd"));
         assert!(joined.contains("--device /dev/dri"));
-        // Named groups are intentionally dropped: `--group-add
-        // keep-groups` (always emitted) cannot be combined with other
-        // `--group-add` options, and already inherits them from the host.
+        // On podman the named groups are dropped: `--group-add
+        // keep-groups` cannot be combined with other `--group-add`
+        // options, and already inherits them from the host.
         assert!(!joined.contains("--group-add video"));
         assert!(!joined.contains("--group-add render"));
-        assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
+        // The first command element overrides the image ENTRYPOINT; the
+        // rest are its arguments after the image.
+        assert!(joined.contains("--entrypoint /mnt/mirage/bin/mirage"));
+        assert!(joined.ends_with("img:latest host --session s --rank 0"));
+    }
+
+    #[test]
+    fn run_argv_docker_host_gpus_adds_named_groups() {
+        // docker has no `keep-groups`; the named GPU groups are added
+        // explicitly so the workload can open the device nodes.
+        let groups = vec!["video".to_string(), "render".to_string()];
+        let argv = Engine::run_argv(
+            "docker",
+            "n",
+            "img",
+            None,
+            true,
+            &[],
+            &[],
+            &[],
+            &groups,
+            &[],
+            &[],
+        );
+        let joined = argv.join(" ");
+        assert!(joined.contains("--security-opt seccomp=unconfined"));
+        assert!(!joined.contains("keep-groups"));
+        assert!(joined.contains("--group-add video"));
+        assert!(joined.contains("--group-add render"));
+    }
+
+    #[test]
+    fn run_argv_without_host_gpus_omits_group_passthrough() {
+        // Plain (non-GPU) containers emit no group passthrough at all, so
+        // docker — which rejects `keep-groups` — keeps working.
+        let groups = vec!["video".to_string()];
+        let argv = Engine::run_argv(
+            "docker",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &[],
+            &groups,
+            &[],
+            &[],
+        );
+        let joined = argv.join(" ");
+        assert!(!joined.contains("--group-add"));
+        assert!(!joined.contains("keep-groups"));
+        assert!(!joined.contains("seccomp=unconfined"));
     }
 
     #[test]
     fn run_argv_omits_network_when_none() {
         let command = vec!["sleep".to_string(), "infinity".to_string()];
-        let argv = Engine::run_argv("n", "img", None, &[], &[], &[], &[], &command);
+        let argv = Engine::run_argv(
+            "podman",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &command,
+        );
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
+        // `sleep` overrides the entrypoint; `infinity` is its argument.
+        assert!(argv.iter().any(|a| a == "--entrypoint"));
+        let ep = argv.iter().position(|a| a == "--entrypoint").unwrap();
+        assert_eq!(argv[ep + 1], "sleep");
     }
 
     #[test]
@@ -665,8 +995,10 @@ mod tests {
             provider: Some("docker".to_string()),
             image: "img".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
         let engine = Engine::resolve(&def).unwrap();
         assert_eq!(engine.provider(), "docker");
@@ -721,6 +1053,8 @@ mod tests {
                 "mirage-s-node-0",
                 "img",
                 Some("mirage-s"),
+                false,
+                &[],
                 &[],
                 &[],
                 &[],
@@ -748,8 +1082,10 @@ mod tests {
             provider: Some(provider.to_string_lossy().to_string()),
             image: "img:latest".to_string(),
             mounts: vec![],
+            ports: vec![],
             devices: vec![],
             groups: vec![],
+            hacks: vec![],
         };
 
         let mut phases: Vec<BringUpPhase> = Vec::new();
@@ -757,6 +1093,7 @@ mod tests {
             .bring_up(
                 &session,
                 &def,
+                false,
                 2,
                 6000,
                 |rank| vec![("MIRAGE_RANK".to_string(), rank.to_string())],

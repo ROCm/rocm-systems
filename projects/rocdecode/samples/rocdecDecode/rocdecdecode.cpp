@@ -686,15 +686,26 @@ std::string getLastPart(const std::string& str, char delimiter) {
 
 // helper function for sort
 int extractNumber(const std::string& filename) {
+    // Operate on basename only to avoid picking up digits from directory path
+    auto sep = filename.find_last_of("/\\");
+    std::string base = (sep == std::string::npos) ? filename : filename.substr(sep + 1);
+    // Strip extension so digits in ".265" are not picked up.
+    // Only treat a dot as an extension separator if it is not the leading character
+    // (a leading dot marks a hidden file, not an extension).
+    auto dot = base.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) base = base.substr(0, dot);
+    // Find the last contiguous digit sequence in the stem
     std::string numStr;
-    for (char c : filename) {
-        if (std::isdigit(c)) {
-            numStr += c;
+    for (auto it = base.rbegin(); it != base.rend(); ++it) {
+        if (std::isdigit(static_cast<unsigned char>(*it))) {
+            numStr += *it;
         } else if (!numStr.empty()) {
-            break; // Stop at first non-digit after a digit sequence
+            break;
         }
     }
-    return numStr.empty() ? 0 : std::stoi(numStr);
+    if (numStr.empty()) return 0;
+    std::reverse(numStr.begin(), numStr.end());
+    return std::stoi(numStr);
 }
 
 // helper function for sort

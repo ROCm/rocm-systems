@@ -134,7 +134,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 MemoryRegion::~MemoryRegion() {}
 
 hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   return AllocateImpl(size, alloc_flags, mem, agent_node_id);
 }
 
@@ -148,10 +148,13 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  // Alocation requests for system memory considers aggregate
-  // memory available on all CPU devices
-  if (size > ((IsSystem() ?
-                max_sysmem_alloc_size_ : max_single_alloc_size_))) {
+  // Skip the per-region cap on Windows/DXG so over-commit requests can
+  // reach WDDM; system memory still enforces the cap.
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+  if (IsSystem() && (size > max_sysmem_alloc_size_)) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
@@ -161,7 +164,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   return FreeImpl(address, size);
 }
 
@@ -173,7 +176,7 @@ hsa_status_t MemoryRegion::FreeImpl(void* address, size_t size) const {
 
 // TODO:  Look into a better name and/or making this process transparent to exporting.
 hsa_status_t MemoryRegion::IPCFragmentExport(void* address) const {
-  std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
+  std::lock_guard<std::recursive_mutex> lock(owner()->agent_memory_lock_);
   if (!fragment_allocator_.discardBlock(address)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return HSA_STATUS_SUCCESS;
 }

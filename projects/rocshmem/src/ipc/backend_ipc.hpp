@@ -25,6 +25,9 @@
 #ifndef LIBRARY_SRC_IPC_BACKEND_HPP_
 #define LIBRARY_SRC_IPC_BACKEND_HPP_
 
+#include <map>
+#include <vector>
+
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp"
@@ -109,6 +112,21 @@ class IPCBackend : public Backend {
   void team_destroy(rocshmem_team_t team) override;
 
   /**
+   * @copydoc Backend::buffer_register_symmetric
+   *
+   * Collective. Restricted to VMM allocations.
+   */
+  int buffer_register_symmetric(void *addr, size_t length,
+                                void **registered_addr) override;
+
+  /**
+   * @copydoc Backend::buffer_unregister_symmetric
+   *
+   * Collective.
+   */
+  int buffer_unregister_symmetric(void *addr) override;
+
+  /**
    * @brief Accessor for work/sync bases
    *
    * @return Vector containing the addresses of the work/sync bases
@@ -168,14 +186,19 @@ class IPCBackend : public Backend {
 
  protected:
    /**
-   * @copydoc Backend::dump_backend_stats()
+   * @copydoc Backend::accumulate_ctx_device_stats()
    */
-  void dump_backend_stats() override;
-
+  void accumulate_ctx_device_stats() override;
+  /**
+   * @copydoc Backend::accumulate_default_host_ctx_stats()
+   */
+  void accumulate_default_host_ctx_stats() override;
   /**
    * @copydoc Backend::reset_backend_stats()
    */
   void reset_backend_stats() override;
+
+
 
   /**
    * @brief Allocates uncacheable host memory for the hdp policy.
@@ -303,6 +326,35 @@ class IPCBackend : public Backend {
    * work/sync buffer.
   */
   void cleanup_wrk_sync_buffer();
+
+  /**
+   * @brief Allocate the device-visible symmetric-registration table.
+   */
+  void setup_symm_registration();
+
+  /**
+   * @brief Unregister all symmetric buffers and free the registration table.
+   */
+  void cleanup_symm_registration();
+
+  /**
+   * @brief IPC-specific per-registration state.
+   *
+   * The common base/length bookkeeping lives in Backend::symm_buffer_regions;
+   * this map holds the transport-specific state needed to tear a registration
+   * down, keyed by the registered buffer's base address.
+   */
+  struct IpcSymmRecord {
+    int slot{-1};                       // index into the device symm_table
+    char** dev_peer_bases{nullptr};     // device array[num_pes] (published to table)
+    std::vector<char*> peer_bases{};    // host copy[num_pes] (for CloseIpcHandle)
+    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
+  };
+
+  /**
+   * @brief Host-side map of IPC-specific symmetric registration state.
+   */
+  std::map<uintptr_t, IpcSymmRecord> ipc_symm_records_{};
 
   /**
    * @brief
