@@ -253,12 +253,24 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   // fd travels through rj_vm_execute_as_ex, so in_handle is NULL for the plain
   // rj_vm_execute/rj_vm_execute_as paths; local mode passes the debugger's own
   // fd through the interposer and never transfers one here.
+  //
+  // The client-supplied dbg_fd is a number in the *client's* fd table and is
+  // never trusted in the daemon's namespace. Overwrite it unconditionally for
+  // ENABLE: with the transferred fd when one arrived via SCM_RIGHTS, otherwise
+  // with KFD_INVALID_FD so the handler's fcntl() check rejects it. Leaving the
+  // client's integer in place would let a client that omits the ancillary fd
+  // point the session at an arbitrary daemon-owned descriptor (a confused-deputy
+  // fd substitution).
   bool adopting_notifier = false;
-  if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_DBG_TRAP && in_handle && *in_handle >= 0) {
+  if (driver->daemon_mode() && cmd->cmd == AMDKFD_IOC_DBG_TRAP) {
     auto *dbg = static_cast<kfd_ioctl_dbg_trap_args *>(cmd->buf);
     if (dbg->op == KFD_IOC_DBG_TRAP_ENABLE) {
-      dbg->enable.dbg_fd = static_cast<uint32_t>(*in_handle);
-      adopting_notifier = true;
+      if (in_handle && *in_handle >= 0) {
+        dbg->enable.dbg_fd = static_cast<uint32_t>(*in_handle);
+        adopting_notifier = true;
+      } else {
+        dbg->enable.dbg_fd = KFD_INVALID_FD;
+      }
     }
   }
 

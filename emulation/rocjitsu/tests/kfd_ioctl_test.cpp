@@ -865,6 +865,33 @@ TEST_F(DbgTrapDaemonTest, EnableWithoutTransferredFdReturnsEbadf) {
   EXPECT_EQ(in_handle_out, -1); // nothing adopted
 }
 
+// Security: a client can name a small, plausible integer in dbg_fd that happens
+// to be a *live descriptor in the daemon* while attaching nothing over
+// SCM_RIGHTS. The daemon must never interpret that number in its own fd
+// namespace (confused deputy): with no transferred fd the dbg_fd is scrubbed to
+// KFD_INVALID_FD, so ENABLE is rejected with -EBADF and the daemon's own
+// descriptor is neither adopted nor closed.
+TEST_F(DbgTrapDaemonTest, EnableWithClientChosenFdNumberIsNotTrustedInDaemonNamespace) {
+  // A real, live fd in *this* (daemon) process. The client names exactly this
+  // number in dbg_fd; without the scrub the handler's fcntl() would validate it
+  // against the daemon's fd table and adopt it.
+  const int daemon_fd = eventfd(0, EFD_CLOEXEC);
+  ASSERT_GE(daemon_fd, 0);
+
+  kfd_ioctl_dbg_trap_args en{};
+  en.pid = static_cast<uint32_t>(kClientPid);
+  en.op = KFD_IOC_DBG_TRAP_ENABLE;
+  en.enable.dbg_fd = static_cast<uint32_t>(daemon_fd); // live in the daemon, not the client
+
+  int in_handle_out = -2;
+  EXPECT_EQ(execute(AMDKFD_IOC_DBG_TRAP, &en, sizeof(en), -1, &in_handle_out), -EBADF);
+  EXPECT_EQ(in_handle_out, -1); // nothing adopted
+
+  // The daemon's own descriptor was left untouched: not adopted, not closed.
+  EXPECT_NE(fcntl(daemon_fd, F_GETFD), -1);
+  ::close(daemon_fd);
+}
+
 // End-to-end: the RemoteDriver client hands the debugger's notifier fd to an
 // in-process daemon over SCM_RIGHTS (mirroring tools/rocjitsu's handle_client),
 // and the daemon-side rj_vm_execute_as_ex() adopts it. Proven by having the daemon
