@@ -235,7 +235,9 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   fi
 
   # Build baseline
-  if [[ $SKIP_BASELINE -eq 0 && -z "$BASELINE_DIR" ]]; then
+  if [[ $SKIP_BASELINE -eq 1 ]]; then
+    echo "--- Skipping baseline build ---"
+  elif [[ -z "$BASELINE_DIR" ]]; then
     echo "--- Building baseline ---"
     WORKTREE="/tmp/rocshmem-baseline-$$"
 
@@ -259,7 +261,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     (cd "$BUILD_BASELINE" && "$BASELINE_CONFIG" $CMAKE_ARGS)
     git -C "$ROCSHMEM_DIR" worktree remove "$WORKTREE" 2>/dev/null || true
   else
-    echo "--- Skipping baseline build ---"
+    echo "--- Using pre-built baseline dir: $BASELINE_DIR ---"
   fi
 
   # Build branch
@@ -286,7 +288,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
       (cd "$BUILD_BRANCH" && "$BUILD_CONFIG_SCRIPT" $CMAKE_ARGS $BRANCH_ARGS)
     fi
   else
-    echo "--- Using pre-built branch dir: $BRANCH_DIR ---"
+    echo "--- Using pre-built branch dir:   $BRANCH_DIR ---"
   fi
 
   # Build additional variants
