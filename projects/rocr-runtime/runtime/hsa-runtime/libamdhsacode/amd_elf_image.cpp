@@ -716,6 +716,11 @@ namespace elf {
 
       const char* data() override { assert(buffer); return buffer; }
       uint64_t size() override;
+      // Size in bytes of the raw backing buffer this image was initialized
+      // from, or 0 if the image is not buffer-backed. Unlike size(), this is
+      // not derived from attacker-controlled ELF header fields and is therefore
+      // safe to use for bounds checks.
+      size_t getBufferSize() const { return bufferSize; }
 
       bool push();
 
