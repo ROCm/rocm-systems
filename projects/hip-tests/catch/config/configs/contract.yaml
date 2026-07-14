@@ -336,6 +336,21 @@ contract:
   Contract_MemBatchCopy_NullDestination_IsRejected:
     <<: *level_0
     tags: [mem_batch_copy]
+  Contract_MemBatchDiscard_DiscardBatch_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_DiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_DrvDiscardBatch_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_DrvDiscardAndPrefetchBatch_IsAcceptedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
+  Contract_MemBatchDiscard_NullPointer_IsRejectedOrUnsupported:
+    <<: *level_0
+    tags: [mem_batch_discard]
   Contract_Memset_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
     tags: [memset]
