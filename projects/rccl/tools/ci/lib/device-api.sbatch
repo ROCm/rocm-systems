@@ -139,7 +139,8 @@ echo "==> [4/5] build rccl-tests (ENABLE_DEVICE_API=1)"
 rccl_tests_dir="${workdir}/projects/rccl-tests"
 ( cd "${rccl_tests_dir}" \
   && ENABLE_DEVICE_API=1 ./install.sh \
-       --mpi --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" )
+       --mpi --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" \
+       --gpu_targets="${amdgpu_targets}" )
 } > "${build_out}" 2> "${build_err}"
 echo "==> build phase logs: ${build_out} / ${build_err}"
 

@@ -218,5 +218,9 @@ echo "==> [6/6] run GIN tests"
 echo "==> test phase logs: ${test_out} / ${test_err}"
 if [[ "${test_rc}" -ne 0 ]]; then
   echo "GIN tests failed (rc=${test_rc}); non-gating (sentinel written)." >&2
-  : > "${logs_dir}/tests-failed"
+  # Capture the "FAILED / SKIPPED RUNS" summary into the sentinel so the workflow
+  # can show exactly which tests failed, not just a red check.
+  sed -n '/=== FAILED \/ SKIPPED RUNS/,$p' "${test_out}" > "${logs_dir}/tests-failed" 2>/dev/null || true
+  [[ -s "${logs_dir}/tests-failed" ]] \
+    || echo "GIN tests failed (rc=${test_rc}); see the test log group." > "${logs_dir}/tests-failed"
 fi
