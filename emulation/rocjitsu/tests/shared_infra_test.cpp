@@ -1098,7 +1098,8 @@ TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1106,13 +1107,15 @@ TEST(L1VectorCacheTest, UcReadInvalidatesResidentLine) {
   mem.write32(kAddr, kNewValue);
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1197,13 +1200,14 @@ TEST(L1VectorCacheTest, UcDwordx4RoundTripPreservesVectorTransaction) {
   std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
 
   l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
-           amdgpu::Mtype::UC, /*non_temporal=*/false);
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
   EXPECT_EQ(l1.store_l2_writes(), 2u);
   EXPECT_EQ(l2.backing_write_transactions(), 2u);
 
   std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
   l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
-          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   EXPECT_EQ(l2.backing_read_transactions(), 2u);
   EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
@@ -1226,13 +1230,14 @@ TEST(L1VectorCacheTest, UcDwordx4CoalescesAdjacentLanes) {
   std::memcpy(store_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1));
 
   l1.store(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, store_bytes.data(),
-           amdgpu::Mtype::UC, /*non_temporal=*/false);
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
   EXPECT_EQ(l1.store_l2_writes(), 1u);
   EXPECT_EQ(l2.backing_write_transactions(), 1u);
 
   std::array<uint8_t, 64 * sizeof(kLane0)> load_bytes{};
   l1.load(addrs, /*lane_mask=*/0x3, /*elem_size=*/4, /*num_elems=*/4, load_bytes.data(),
-          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::UC, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   EXPECT_EQ(l2.backing_read_transactions(), 1u);
   EXPECT_EQ(std::memcmp(load_bytes.data(), kLane0.data(), sizeof(kLane0)), 0);
   EXPECT_EQ(std::memcmp(load_bytes.data() + sizeof(kLane0), kLane1.data(), sizeof(kLane1)), 0);
@@ -1254,7 +1259,8 @@ TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1262,11 +1268,12 @@ TEST(L1VectorCacheTest, UcWriteInvalidatesResidentLine) {
   std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
   std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
-           amdgpu::Mtype::UC, /*non_temporal=*/false);
+           amdgpu::Mtype::UC, /*non_temporal=*/false, cdna3::Isa::WF_SIZE);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1287,7 +1294,8 @@ TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1297,13 +1305,15 @@ TEST(L1VectorCacheTest, NonTemporalReadInvalidatesResidentLine) {
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/true, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1324,7 +1334,8 @@ TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1334,13 +1345,15 @@ TEST(L1VectorCacheTest, L1BypassReadInvalidatesResidentLine) {
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/true,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kNewValue);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }
@@ -1361,7 +1374,8 @@ TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
 
   mem.write32(kAddr, kOldValue);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   uint32_t value = 0;
   std::memcpy(&value, bytes.data(), sizeof(value));
   ASSERT_EQ(value, kOldValue);
@@ -1369,11 +1383,12 @@ TEST(L1VectorCacheTest, NonTemporalWriteInvalidatesResidentLine) {
   std::array<uint8_t, 64 * sizeof(uint32_t)> store_bytes{};
   std::memcpy(store_bytes.data(), &kNewValue, sizeof(kNewValue));
   l1.store(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, store_bytes.data(),
-           amdgpu::Mtype::RW, /*non_temporal=*/true);
+           amdgpu::Mtype::RW, /*non_temporal=*/true, cdna3::Isa::WF_SIZE);
 
   bytes.fill(0);
   l1.load(addrs, /*lane_mask=*/0x1, /*elem_size=*/4, /*num_elems=*/1, bytes.data(),
-          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false);
+          amdgpu::Mtype::RW, /*non_temporal=*/false, /*request_l1_bypass=*/false,
+          cdna3::Isa::WF_SIZE);
   std::memcpy(&value, bytes.data(), sizeof(value));
   EXPECT_EQ(value, kNewValue);
 }

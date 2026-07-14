@@ -18,8 +18,8 @@ namespace amdgpu {
 namespace {
 
 template <typename F>
-uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t stride,
-                                     F &&fn) {
+uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                                     uint32_t stride, F &&fn) {
   uint32_t run_count = 0;
   uint64_t remaining = lane_mask;
   while (remaining) {
@@ -27,7 +27,7 @@ uint32_t for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, 
     remaining &= ~(uint64_t{1} << first_lane);
 
     uint32_t last_lane = first_lane;
-    while (last_lane < 63) {
+    while (last_lane + 1 < wf_size) {
       const uint32_t next_lane = last_lane + 1;
       const uint64_t next_bit = uint64_t{1} << next_lane;
       if (!(remaining & next_bit) || addrs[next_lane] != addrs[last_lane] + stride)
@@ -175,10 +175,10 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
-                         bool request_l1_bypass, uint32_t vmid) {
+                         bool request_l1_bypass, uint32_t wf_size, uint32_t vmid) {
   uint32_t stride = num_elems * elem_size;
   for_each_coalesced_lane_run(
-      addrs, lane_mask, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
         read_bytes(addrs[first_lane], dst + first_lane * stride, run_lanes * stride, mtype,
                    non_temporal, request_l1_bypass, vmid);
       });
@@ -186,14 +186,14 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
 
 void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
-                          uint32_t vmid) {
+                          uint32_t wf_size, uint32_t vmid) {
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
   if (active_lanes > 0)
     ++store_active_count_;
   store_l2_writes_ += for_each_coalesced_lane_run(
-      addrs, lane_mask, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
+      addrs, lane_mask, wf_size, stride, [&](uint32_t first_lane, uint32_t run_lanes) {
         write_bytes(addrs[first_lane], src + first_lane * stride, run_lanes * stride, mtype,
                     non_temporal, vmid);
       });
