@@ -41,6 +41,7 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -50,6 +51,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -84,6 +86,7 @@ constexpr uint32_t kGfx1250SimdsPerCu = 4;
 constexpr uint32_t kGfx1250MaxWavesPerSimd = 20;
 constexpr uint32_t kGfx1250WaveSlotsPerCu = kGfx1250SimdsPerCu * kGfx1250MaxWavesPerSimd;
 constexpr uint32_t kGfx1250LdsSizeKb = 160;
+constexpr uint32_t kSdmaOpNop = 0;
 constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
@@ -239,6 +242,11 @@ public:
     std::atomic_ref<uint64_t>(write_idx_).store(write_idx, std::memory_order_release);
     std::atomic_ref<uint64_t>(doorbells_[0]).store(write_idx, std::memory_order_release);
     sim_.engine->schedule_event_now(sim_.cp()->doorbell_event());
+  }
+
+  void publish_without_doorbell(uint32_t dwords) {
+    uint64_t write_idx = static_cast<uint64_t>(dwords) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(write_idx_).store(write_idx, std::memory_order_release);
   }
 
   uint64_t read_idx() const {
@@ -618,9 +626,27 @@ TEST(Gfx1250SdmaTest, PollMem64WaitsForFull64BitCondition) {
   EXPECT_EQ(queue.read_idx(), 0u);
 
   std::atomic_ref<uint64_t>(value).store(0, std::memory_order_release);
-  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  // No new doorbell is written. The level-triggered SDMA poll must observe the
+  // still-pending packet and retry it after the condition becomes true.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   ASSERT_TRUE(sim.engine->step());
   EXPECT_EQ(queue.read_idx(), 8u * sizeof(uint32_t));
+}
+
+TEST(Gfx1250SdmaTest, PendingRingRunsWhenDoorbellValueIsUnchanged) {
+  Gfx1250Sim sim;
+  HostSdmaQueueForTest queue(sim);
+
+  // The queue and CommandProcessor both start with doorbell value zero. Publish
+  // a one-dword NOP without changing that value or injecting an event. An
+  // edge-triggered poller misses this work permanently; a level-triggered SDMA
+  // poller observes read_ptr != write_ptr and schedules it.
+  queue.ring()[0] = kSdmaOpNop;
+  queue.publish_without_doorbell(1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), sizeof(uint32_t));
 }
 
 TEST(Gfx1250SdmaTest, Fence64WritesFull64BitValue) {

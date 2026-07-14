@@ -319,6 +319,9 @@ private:
   /// @brief Read a uint64 from GPU virtual address space via GpuMemory translation.
   uint64_t read_gpu_u64(uint64_t va, uint32_t vmid) const;
 
+  /// @brief Acquire-load a concurrently published queue read/write index.
+  uint64_t read_queue_index(uint64_t va, uint32_t vmid) const;
+
   /// @brief Read a uint32 from GPU virtual address space via GpuMemory translation.
   uint32_t read_gpu_u32(uint64_t va, uint32_t vmid) const;
 

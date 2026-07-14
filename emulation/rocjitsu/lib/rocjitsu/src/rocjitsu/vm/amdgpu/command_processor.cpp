@@ -527,6 +527,18 @@ uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
   return val;
 }
 
+uint64_t CommandProcessor::read_queue_index(uint64_t va, uint32_t vmid) const {
+  assert((va & (alignof(uint64_t) - 1)) == 0 && "queue pointer must be 64-bit aligned");
+  if (memory_ && (va & GpuMemory::PAGE_MASK) + sizeof(uint64_t) <= GpuMemory::PAGE_SIZE) {
+    if (auto *page = memory_->resolve_host_ptr(va, vmid)) {
+      auto *ptr = reinterpret_cast<uint64_t *>(page + (va & GpuMemory::PAGE_MASK));
+      if (reinterpret_cast<uintptr_t>(ptr) % alignof(uint64_t) == 0)
+        return std::atomic_ref<uint64_t>(*ptr).load(std::memory_order_acquire);
+    }
+  }
+  return read_gpu_u64(va, vmid);
+}
+
 uint32_t CommandProcessor::read_gpu_u32(uint64_t va, uint32_t vmid) const {
   uint32_t val = 0;
   auto *dst = reinterpret_cast<uint8_t *>(&val);
@@ -547,25 +559,31 @@ void CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size
     memory_->write8(va + i, p[i], vmid);
 }
 
-/// @brief Scan all HW queues for doorbell changes; return true if any changed.
+/// @brief Scan HW queues for doorbell changes or pending SDMA work.
+/// @details Compute queues remain edge-triggered by their doorbells. SDMA
+/// queues are also level-triggered by their published read/write pointers so a
+/// missed or aliased doorbell value cannot leave a non-empty ring asleep.
 /// Caller must NOT hold hw_queue_mutex_.
 bool CommandProcessor::scan_doorbells() {
-  bool found = false;
+  bool work_pending = false;
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  for (auto &q : hw_queues_) {
-    uint64_t val;
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    auto &q = hw_queues_[i];
+    bool has_doorbell = false;
+    uint64_t val = q.last_doorbell;
     if (q.host_accessible) {
-      if (!q.doorbell_base)
-        continue;
-      val = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(
+      if (q.doorbell_base) {
+        val =
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(
                                           static_cast<char *>(q.doorbell_base) + q.doorbell_offset))
                 .load(std::memory_order_acquire);
-    } else {
-      if (q.doorbell_va == 0)
-        continue;
+        has_doorbell = true;
+      }
+    } else if (q.doorbell_va != 0) {
       val = read_gpu_u64(q.doorbell_va, q.process_id);
+      has_doorbell = true;
     }
-    if (val != q.last_doorbell) {
+    if (has_doorbell && val != q.last_doorbell) {
       util::Logger::cp([&](auto &os) {
         os << std::format("{}: DOORBELL_CHANGE pid={} qid={} sdma={} old={:#x} new={:#x} "
                           "db_base={} db_off={}",
@@ -573,10 +591,17 @@ bool CommandProcessor::scan_doorbells() {
                           reinterpret_cast<uintptr_t>(q.doorbell_base), q.doorbell_offset);
       });
       q.last_doorbell = val;
-      found = true;
+      work_pending = true;
+    }
+
+    if (q.is_sdma && new_queue_states_[i].status != HwQueueState::Status::BLOCKED && memory_ &&
+        q.read_ptr_va != 0 && q.write_ptr_va != 0) {
+      uint64_t read_idx = read_queue_index(q.read_ptr_va, q.process_id);
+      uint64_t write_idx = read_queue_index(q.write_ptr_va, q.process_id);
+      work_pending |= read_idx != write_idx;
     }
   }
-  return found;
+  return work_pending;
 }
 
 void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
@@ -585,8 +610,10 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
   while (!stop.stop_requested()) {
     if (scan_doorbells())
       engine()->schedule_event_now(&doorbell_event_);
-    else
-      std::this_thread::sleep_for(100us);
+    // Keep both ordinary doorbell polling and level-triggered SDMA retries
+    // bounded. In particular, an unsatisfied SDMA wait packet must not turn
+    // into an unbounded event-production loop.
+    std::this_thread::sleep_for(100us);
     ++poll_count;
 
     // HQD idle monitoring: periodically fire HQD_IDLE for queues that are
@@ -616,10 +643,17 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
                                                   q.doorbell_offset))
                     .load(std::memory_order_acquire);
         }
+        uint64_t read_idx = 0;
+        uint64_t write_idx = 0;
+        if (q.is_sdma && memory_ && q.read_ptr_va != 0 && q.write_ptr_va != 0) {
+          read_idx = read_queue_index(q.read_ptr_va, q.process_id);
+          write_idx = read_queue_index(q.write_ptr_va, q.process_id);
+        }
         util::Logger::cp([&](auto &os) {
-          os << std::format("{}: DOORBELL_POLL pid={} qid={} val={:#x} last={:#x} db_base={} "
-                            "db_off={} polls={}",
-                            name(), q.process_id, q.queue_id, val, q.last_doorbell,
+          os << std::format("{}: DOORBELL_POLL pid={} qid={} sdma={} val={:#x} last={:#x} read={} "
+                            "write={} pending={} db_base={} db_off={} polls={}",
+                            name(), q.process_id, q.queue_id, q.is_sdma, val, q.last_doorbell,
+                            read_idx, write_idx, q.is_sdma && read_idx != write_idx,
                             reinterpret_cast<uintptr_t>(q.doorbell_base), q.doorbell_offset,
                             poll_count);
         });
@@ -1300,8 +1334,8 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
 
   // Read write and read indices. For KFD queues, pointers are in host memory
   // and can be read directly. For internal test queues, they're in GpuMemory.
-  uint64_t write_idx = read_gpu_u64(queue.write_ptr_va, queue.process_id);
-  uint64_t read_idx = read_gpu_u64(queue.read_ptr_va, queue.process_id);
+  uint64_t write_idx = read_queue_index(queue.write_ptr_va, queue.process_id);
+  uint64_t read_idx = read_queue_index(queue.read_ptr_va, queue.process_id);
   util::Logger::vm([&](auto &os) {
     static uint64_t fetch_count = 0;
     if (write_idx != read_idx && ++fetch_count <= 50)
@@ -1850,15 +1884,14 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     // writable host pointer in this process.
     write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id);
   };
-  // Publish the unchanged read pointer before retrying a wait/poll packet or an
-  // SDMA packet whose translated VA is not ready yet. This helper must be used
-  // as `return stop_and_retry_current_packet();`: the queue owner still sees the
-  // packet as pending, and continuing this scan would allow the final read-pointer
-  // write below to incorrectly advance past the pending packet.
-  auto stop_and_retry_current_packet = [&] {
-    write_read_ptr();
-    engine()->schedule_event_now(&doorbell_event_);
-  };
+  // Publish the unchanged read pointer before stopping at a wait/poll packet or
+  // an SDMA packet whose translated VA is not ready yet. The level-triggered
+  // doorbell poller observes read_ptr != write_ptr and retries at a bounded
+  // cadence. This helper must be used as
+  // `return stop_at_current_packet();`: continuing this scan would allow the
+  // final read-pointer write below to incorrectly advance past the pending
+  // packet.
+  auto stop_at_current_packet = [&] { write_read_ptr(); };
 
   while (rpos < wpos) {
     uint32_t header = dw(0);
@@ -1894,12 +1927,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           if (wait_addr > 0x1000) {
             auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr));
             if (!wait_ptr) {
-              return stop_and_retry_current_packet();
+              return stop_at_current_packet();
             }
             uint64_t wait_value =
                 std::atomic_ref<uint64_t>(*wait_ptr).load(std::memory_order_acquire);
             if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
-              return stop_and_retry_current_packet();
+              return stop_at_current_packet();
             }
           }
         }
@@ -1918,7 +1951,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           if (signal_addr > 0x1000 && signal_op == 0x70) {
             signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
             if (!signal_ptr) {
-              return stop_and_retry_current_packet();
+              return stop_at_current_packet();
             }
             signal_decrement = true;
           }
@@ -1932,7 +1965,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         auto *src_ptr = resolve(src_va);
         auto *dst_ptr = resolve(dst_va);
         if (!src_ptr || !dst_ptr) {
-          return stop_and_retry_current_packet();
+          return stop_at_current_packet();
         }
 
         // Emulated SDMA writes straight to the backing store, bypassing the GPU
@@ -1968,7 +2001,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       auto *src_ptr = resolve(src_va);
       auto *dst_ptr = resolve(dst_va);
       if (!src_ptr || !dst_ptr) {
-        return stop_and_retry_current_packet();
+        return stop_at_current_packet();
       }
       // GFX11+ COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
       // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
@@ -1979,7 +2012,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
         auto *dst2_ptr = resolve(dst2_va);
         if (!dst2_ptr) {
-          return stop_and_retry_current_packet();
+          return stop_at_current_packet();
         }
         // Flush before the direct write (see COPY_LINEAR_WAITSIGNAL above): a
         // destination-overlapping dirty L2 line must be written back first so
@@ -2047,11 +2080,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (addr > 0x1000) {
           auto *ptr = static_cast<uint64_t *>(resolve(addr));
           if (!ptr) {
-            return stop_and_retry_current_packet();
+            return stop_at_current_packet();
           }
           uint64_t val = std::atomic_ref<uint64_t>(*ptr).load(std::memory_order_acquire);
           if (!sdma_compare_u64(func, val & mask, ref)) {
-            return stop_and_retry_current_packet();
+            return stop_at_current_packet();
           }
         }
         pkt_dwords = sdma::POLL_MEM_64B_GFX11_PLUS_SIZE;
@@ -2069,7 +2102,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       } else if (addr_va > 0x1000) {
         auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
         if (!ptr) {
-          return stop_and_retry_current_packet();
+          return stop_at_current_packet();
         }
         auto compare = [func](uint32_t val, uint32_t reference) -> bool {
           switch (func) {
@@ -2093,7 +2126,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         };
         uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
         if (!compare(val & mask, ref)) {
-          return stop_and_retry_current_packet();
+          return stop_at_current_packet();
         }
       }
       (void)hdp_flush;
