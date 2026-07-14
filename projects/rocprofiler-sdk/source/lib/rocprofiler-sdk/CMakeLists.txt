@@ -117,6 +117,12 @@ if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
                                PRIVATE ROCPROFILER_HAVE_LIBHSAKMT_WINDOWS=1)
     target_include_directories(rocprofiler-sdk-object-library
                                PRIVATE ${ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT}/include)
+    # The shim calls (hsaKmtOpenKFD / ...) are compiled into the object library, so every
+    # consumer of it (shared library, static library, and the unit-test executables that
+    # link the static library) must resolve those symbols. Attach librocdxg PUBLIC so the
+    # dependency propagates to all of them, not just the shared library.
+    target_link_libraries(rocprofiler-sdk-object-library
+                          PUBLIC ${ROCPROFILER_LIBROCDXG_LIBRARY})
     message(
         STATUS
             "[rocprofiler-sdk] libhsakmt-windows shim: ${ROCPROFILER_LIBROCDXG_LIBRARY}")
@@ -192,6 +198,13 @@ target_link_libraries(
 set_target_properties(
     rocprofiler-sdk-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk
                                               DEFINE_SYMBOL rocprofiler_EXPORTS)
+
+if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
+    # Re-export librocdxg to consumers of the static library (unit-test executables) so
+    # they resolve the shim symbols compiled into the object files.
+    target_link_libraries(rocprofiler-sdk-static-library
+                          PUBLIC ${ROCPROFILER_LIBROCDXG_LIBRARY})
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
