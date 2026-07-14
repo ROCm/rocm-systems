@@ -17,19 +17,48 @@ import os
 import sys
 import unittest
 
-from common.common import amdsmi, amdsmi_path
+from common.common import amdsmi, amdsmi_path, find_cli_dir
 
-# The amd-smi CLI ships beside the amdsmi package: ``amdsmi_path`` resolves to
-# ``<rocm>/share/amd_smi`` and the CLI installs to the sibling
-# ``<rocm>/libexec/amdsmi_cli``. Add it to sys.path so the CLI modules under
-# test import without the compiled driver package.
-_ROCM_ROOT = os.path.dirname(os.path.dirname(amdsmi_path))
-_CLI_DIR = os.path.join(_ROCM_ROOT, "libexec", "amdsmi_cli")
-if _CLI_DIR not in sys.path:
+
+# Locate the CLI dir and add it to sys.path (amdsmi_path first so an AMDSMI_PATH
+# override selects the matching install; see common.find_cli_dir). None ->
+# setUpModule() skips.
+_CLI_DIR = find_cli_dir(amdsmi_path, os.path.dirname(os.path.abspath(__file__)))
+if _CLI_DIR and _CLI_DIR not in sys.path:
     sys.path.append(_CLI_DIR)
 
-import amdsmi_cli_exceptions as cli_exc  # noqa: E402
+# Required for when the amdgpu driver is not loaded. We are required to
+# fake the initialization module so the set/reset gpu CLI commands can be ran.
+if "amdsmi_init" not in sys.modules:
+    import types as _types
+
+    from amdsmi import amdsmi_exception as _amdsmi_exception
+    from amdsmi import amdsmi_interface as _amdsmi_interface
+
+    _stub_amdsmi_init = _types.ModuleType("amdsmi_init")
+    _stub_amdsmi_init.AMDSMI_INIT_FLAG = 0
+    _stub_amdsmi_init.AMDSMI_INITIALIZED = True
+    _stub_amdsmi_init.amdsmi_interface = _amdsmi_interface
+    _stub_amdsmi_init.amdsmi_exception = _amdsmi_exception
+    sys.modules["amdsmi_init"] = _stub_amdsmi_init
+
+# CLI absent (rare package-only layout) -> record the error and skip in setUpModule()
+# instead of failing collection with a hard ImportError.
+try:
+    import amdsmi_cli_exceptions as cli_exc  # noqa: E402
+
+    _CLI_IMPORT_ERROR = None
+except ImportError as _cli_import_error:
+    cli_exc = None
+    _CLI_IMPORT_ERROR = _cli_import_error
+
 from amdsmi import amdsmi_wrapper  # noqa: E402
+
+
+def setUpModule():
+    """Skip the suite if the amd-smi CLI couldn't be imported (CLI not installed)."""
+    if _CLI_IMPORT_ERROR is not None:
+        raise unittest.SkipTest(f"amd-smi CLI not found ({_CLI_DIR}): {_CLI_IMPORT_ERROR}")
 
 
 class TestAmdSmiCliExitCodes(unittest.TestCase):
@@ -42,8 +71,8 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
     reserved 192-255 CLI-only code band.
     """
 
-    ExitCode = cli_exc.AmdSmiExitCode
-    Severity = cli_exc.AmdSmiErrorSeverity
+    ExitCode = cli_exc.AmdSmiExitCode if cli_exc is not None else None
+    Severity = cli_exc.AmdSmiErrorSeverity if cli_exc is not None else None
 
     # ---- AmdSmiErrorCollector / finalize ----
     def test_no_failures_resolve_to_success(self):
@@ -544,3 +573,681 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
 
         # NO_PERM aborts the command; it must NOT be recorded as a device error.
         self.assertFalse(cmd.helpers.error_collector.has_errors)
+
+
+# ---------------------------------------------------------------------------
+# Generic "-g all" set-failure guards
+#
+# Lock in the record-then-finalize contract for the per-device GPU `set`
+# handlers: a per-device library failure must be RECORDED and the command must
+# keep going -- never an unhandled crash. This is the class of bug that broke
+# `amd-smi set -M/-C ... -g all` (a handler raising instead of recording). The
+# completeness test forces every GPU `set` option to have a guard here.
+# ---------------------------------------------------------------------------
+
+
+class _DriverlessLibErr(amdsmi.AmdSmiLibraryException):
+    """AmdSmiLibraryException stand-in needing no driver.
+
+    Subclasses the real type so a handler's ``except
+    amdsmi_exception.AmdSmiLibraryException`` catches it, but skips the C-backed
+    __init__.
+    """
+
+    def __init__(self, code):
+        self._code = code
+
+    def get_error_code(self):
+        return self._code
+
+    def get_error_info(self, detailed=True):
+        return f"status {self._code}"
+
+
+class _FakeGpuLogger:
+    """Minimal logger covering the calls set_gpu makes on a failure path."""
+
+    format = "human"
+
+    def __init__(self):
+        self.stored = []
+
+    def store_output(self, device, key, value):
+        self.stored.append((device, key, value))
+
+    def print_output(self, multiple_device_enabled=False):
+        pass
+
+    def clear_multiple_devices_output(self):
+        pass
+
+    def store_multiple_device_output(self):
+        pass
+
+
+def _load_set_value():
+    sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
+    if sub_dir not in sys.path:
+        sys.path.append(sub_dir)
+    import set_value
+
+    return set_value
+
+
+def _patch_amdsmi_interface(set_value, **overrides):
+    """Context manager patching one or more amdsmi_interface functions.
+
+    The driverless tests feed a fake (str) device handle, so every real
+    amdsmi_interface call that dereferences it as a ``c_void_p`` must be
+    stubbed -- including the handle-consuming reads set_gpu runs before the
+    handler (e.g. ``amdsmi_get_gpu_device_bdf``).
+    """
+    import contextlib
+    from unittest import mock
+
+    stack = contextlib.ExitStack()
+    for name, fn in overrides.items():
+        stack.enter_context(mock.patch.object(set_value.amdsmi_interface, name, fn))
+    return stack
+
+
+def _raise_not_supported(*args, **kwargs):
+    raise _DriverlessLibErr(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
+
+def _fake_bdf(handle):
+    return "0000:00:00.0"
+
+
+def _noop(*args, **kwargs):
+    """Success-path stand-in: a patched amdsmi call that returns cleanly."""
+    return None
+
+
+def _gpu_set_options(set_value):
+    """Authoritative GPU ``set`` option dests, sourced from set_gpu's own
+    required-arg check (the ``getattr(args, "X")`` list). Auto-updates when a
+    new option is added -- that is what makes the completeness test a real
+    forcing function.
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(set_value.SetValueCommands.set_gpu)
+    return set(re.findall(r'getattr\(args,\s*"(\w+)"', src))
+
+
+def _make_set_gpu_cmd(set_value):
+    from amdsmi_helpers import AMDSMIHelpers
+
+    cmd = set_value.SetValueCommands()
+    cmd.helpers = AMDSMIHelpers()
+    cmd.logger = _FakeGpuLogger()
+    cmd.device_handles = []
+    cmd.group_check_printed = True
+    cmd.helpers.is_baremetal = lambda: True
+    cmd.helpers.get_gpu_id_from_device_handle = lambda handle: 0
+    return cmd
+
+
+def _gpu_set_args(set_value, **option):
+    """Namespace with every arg set_gpu references defaulted to None, plus a
+    single-device gpu handle and the one option under test."""
+    import argparse
+    import inspect
+    import re
+
+    src = inspect.getsource(set_value.SetValueCommands.set_gpu)
+    names = set(re.findall(r"args\.(\w+)", src))
+    ns = argparse.Namespace(**{n: None for n in names})
+    ns.gpu = "fake-gpu-handle"  # non-list, non-None -> single-device path
+    for key, value in option.items():
+        setattr(ns, key, value)
+    return ns
+
+
+def _build_set_specs(set_value):
+    """Per-option drivers for the generic GPU ``set`` exercisers.
+
+    Each entry is ``name -> configure(cmd, mode)`` where ``mode`` is ``"fail"``
+    or ``"success"``. ``configure`` installs any helper stubs the handler needs
+    on a driverless box and returns ``(arg_value, amdsmi_patches)``:
+
+      * ``arg_value``      -- value placed on ``args.<name>`` to enter the handler.
+      * ``amdsmi_patches`` -- ``{amdsmi_interface_fn: replacement}``:
+          - mode="fail":    the earliest handle-consuming call raises
+            NOT_SUPPORTED (must be *recorded*, not raised past the handler).
+          - mode="success": every call returns a valid value, so the handler
+            finishes clean -- nothing recorded, exit 0.
+
+    ``amdsmi_get_gpu_device_bdf`` is patched by the caller for every option
+    (set_gpu reads it up front to build the error string).
+
+    The registry keys are the single source of truth for the completeness test,
+    so adding a new GPU ``set`` option without a spec here fails the suite --
+    that is the forcing function that blocks a future ``-g all`` regression.
+    """
+    import collections
+
+    ai = set_value.amdsmi_interface
+
+    def first_member(enum):
+        return next(n for n in enum.__members__ if n != "INVALID")
+
+    ClkLevel = collections.namedtuple("ClkLevel", "clk_type perf_levels")
+    ClkLimit = collections.namedtuple("ClkLimit", "clk_type lim_type val")
+    PowerCap = collections.namedtuple("PowerCap", "pwr_type watts")
+
+    class _Fmt:  # PTL format element: only .name is read on the failure path.
+        def __init__(self, name):
+            self.name = name
+
+    def fan(cmd, mode):
+        cmd.helpers.detect_gpu_od = lambda bdf: (False, None)  # legacy hwmon path
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return (50, True), {"amdsmi_set_gpu_fan_speed": setfn}
+
+    def perf_level(cmd, mode):
+        if mode == "fail":
+            cmd.helpers.get_perf_levels = lambda: (["AUTO", "LOW"],)
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return first_member(ai.AmdSmiDevPerfLevel), {"amdsmi_set_gpu_perf_level": setfn}
+
+    def profile(cmd, mode):
+        cmd.helpers.get_power_profile_name_mapping = lambda: {"CUSTOM": 1}
+        if mode == "fail":
+            return "CUSTOM", {
+                "amdsmi_set_gpu_power_profile": _raise_not_supported,
+                "amdsmi_get_gpu_power_profile_presets": _raise_not_supported,
+            }
+        return "CUSTOM", {"amdsmi_set_gpu_power_profile": _noop}
+
+    def perf_determinism(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 800, {"amdsmi_set_gpu_perf_determinism_mode": setfn}
+
+    def compute_partition(cmd, mode):
+        name = first_member(ai.AmdSmiComputePartitionType)
+        # Force the "profiles not enumerable" fallback so a valid TYPE name is
+        # attempted and the driver's status is what surfaces.
+        cmd.helpers.get_accelerator_choices_types_indices = lambda: (
+            [name],
+            {"profile_types": [], "profile_indices": []},
+        )
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return name, {"amdsmi_set_gpu_compute_partition": setfn}
+
+    def memory_partition(cmd, mode):
+        cmd.helpers.confirm_changing_memory_partition_gpu_reload_warning = lambda *a, **k: None
+        arg = first_member(ai.AmdSmiMemoryPartitionType)
+        if mode == "fail":
+            return arg, {
+                "amdsmi_get_gpu_memory_partition_config": _raise_not_supported,
+                "amdsmi_set_gpu_memory_partition": _raise_not_supported,
+            }
+        return arg, {
+            "amdsmi_get_gpu_memory_partition_config": lambda *a, **k: {
+                "partition_caps": [arg],
+                "mp_mode": arg,
+            },
+            "amdsmi_set_gpu_memory_partition": _noop,
+        }
+
+    def soc_pstate(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 0, {"amdsmi_set_soc_pstate": setfn}
+
+    def xgmi_plpd(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 0, {"amdsmi_set_xgmi_plpd": setfn}
+
+    def clk_level(cmd, mode):
+        if mode == "fail":
+            # Fails at the first step (set perf level -> MANUAL), which is recorded.
+            return ClkLevel("sclk", [0]), {"amdsmi_set_gpu_perf_level": _raise_not_supported}
+        return ClkLevel("sclk", [0]), {
+            "amdsmi_set_gpu_perf_level": _noop,
+            "amdsmi_get_clk_freq": lambda *a, **k: {"num_supported": 8},
+            "amdsmi_set_clk_freq": _noop,
+        }
+
+    def ptl_status(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return 1, {"amdsmi_set_gpu_ptl_state": setfn}
+
+    def ptl_format(cmd, mode):
+        arg = (_Fmt("NC"), _Fmt("NC"))
+        if mode == "fail":
+            return arg, {"amdsmi_get_gpu_ptl_formats": _raise_not_supported}
+        ptl_val = list(ai.AmdSmiPtlData)[0].value
+        return arg, {
+            "amdsmi_get_gpu_ptl_formats": lambda *a, **k: (ptl_val, ptl_val),
+            "amdsmi_set_gpu_ptl_formats": _noop,
+        }
+
+    def power_cap(cmd, mode):
+        # Delegates to a helper that owns its own error recording; emulate that
+        # helper's per-mode behavior so the handler wiring is exercised without a
+        # real power-cap validation flow.
+        if mode == "fail":
+
+            def _delegate(*a, **k):
+                cmd.helpers.error_collector.record_library_error(
+                    amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                return "[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set power cap"
+
+        else:
+
+            def _delegate(*a, **k):
+                return "Successfully set power cap"
+
+        cmd.helpers.validate_and_set_power_cap = _delegate
+        return PowerCap("ppt0", 100), {}
+
+    def clk_limit(cmd, mode):
+        if mode == "fail":
+            return ClkLimit("sclk", "min", 100), {"amdsmi_get_clock_info": _raise_not_supported}
+        return ClkLimit("sclk", "min", 1000), {
+            "amdsmi_get_clock_info": lambda *a, **k: {"max_clk": 2000, "min_clk": 500},
+            "amdsmi_set_gpu_clk_limit": _noop,
+        }
+
+    def process_isolation(cmd, mode):
+        if mode == "fail":
+            return 1, {"amdsmi_get_gpu_process_isolation": _raise_not_supported}
+        return 1, {
+            "amdsmi_get_gpu_process_isolation": lambda *a, **k: 0,
+            "amdsmi_set_gpu_process_isolation": _noop,
+        }
+
+    def mem_carveout(cmd, mode):
+        cmd.helpers.prompt_reboot = lambda *a, **k: None
+        if mode == "fail":
+            return 0, {"amdsmi_get_gpu_uma_carveout_info": _raise_not_supported}
+        return 0, {
+            "amdsmi_get_gpu_uma_carveout_info": lambda *a, **k: {
+                "options": [{"description": "default"}],
+                "current_index": -1,
+            },
+            "amdsmi_set_gpu_uma_carveout": _noop,
+        }
+
+    def compute_partition_mem_alloc_mode(cmd, mode):
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return first_member(ai.AmdSmiComputePartitionMemAllocModeType), {
+            "amdsmi_set_gpu_compute_partition_mem_alloc_mode": setfn
+        }
+
+    return {
+        "fan": fan,
+        "perf_level": perf_level,
+        "profile": profile,
+        "perf_determinism": perf_determinism,
+        "compute_partition": compute_partition,
+        "memory_partition": memory_partition,
+        "soc_pstate": soc_pstate,
+        "xgmi_plpd": xgmi_plpd,
+        "clk_level": clk_level,
+        "ptl_status": ptl_status,
+        "ptl_format": ptl_format,
+        "power_cap": power_cap,
+        "clk_limit": clk_limit,
+        "process_isolation": process_isolation,
+        "mem_carveout": mem_carveout,
+        "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
+    }
+
+
+class TestSetGpuGAllFailureGuards(unittest.TestCase):
+    """A per-device GPU `set` failure must be recorded and must NOT crash."""
+
+    def test_every_gpu_set_option_is_driven(self):
+        """Forcing function: every GPU `set` option must have a driver in
+        _build_set_specs. Adding a new option without a spec fails here, which
+        is what blocks a future `-g all` regression from shipping untested."""
+        set_value = _load_set_value()
+        options = _gpu_set_options(set_value)
+        specced = set(_build_set_specs(set_value))
+        self.assertEqual(
+            options,
+            specced,
+            "GPU set options and their -g all failure drivers are out of sync.\n"
+            f"  unspecced (add a _build_set_specs entry): {sorted(options - specced)}\n"
+            f"  stale (spec exists but no longer an option): {sorted(specced - options)}",
+        )
+
+    def test_every_gpu_set_option_records_on_failure_not_crashes(self):
+        """Generic exerciser: drive each GPU `set` option through set_gpu with a
+        per-device library failure injected, and assert the record-then-finalize
+        contract holds -- the failure is recorded (exit != 0) and the handler
+        returns instead of raising. This is the class of bug that broke
+        `amd-smi set ... -g all` for -M/-C in #862."""
+        set_value = _load_set_value()
+        specs = _build_set_specs(set_value)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_set_gpu_cmd(set_value)
+                arg_value, patches = specs[name](cmd, "fail")
+                args = _gpu_set_args(set_value, **{name: arg_value})
+                with _patch_amdsmi_interface(
+                    set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, **patches
+                ):
+                    cmd.set_gpu(args)  # must NOT raise
+                self.assertTrue(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: per-device failure was not recorded (would exit 0)",
+                )
+                self.assertNotEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: exit code resolved to 0 despite a recorded failure",
+                )
+
+    def test_every_gpu_set_option_succeeds_cleanly(self):
+        """Mirror contract: a successful per-device `set` records NOTHING and
+        finalizes to exit 0. Guards the opposite regression from #862 -- a
+        success path that wrongly records an error, crashes, or resolves to a
+        non-zero exit code."""
+        set_value = _load_set_value()
+        specs = _build_set_specs(set_value)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_set_gpu_cmd(set_value)
+                arg_value, patches = specs[name](cmd, "success")
+                args = _gpu_set_args(set_value, **{name: arg_value})
+                with _patch_amdsmi_interface(
+                    set_value, amdsmi_get_gpu_device_bdf=_fake_bdf, **patches
+                ):
+                    cmd.set_gpu(args)  # must NOT raise
+                self.assertFalse(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: success path wrongly recorded an error",
+                )
+                self.assertEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: success path did not resolve to exit 0",
+                )
+
+    def test_g_all_memory_partition_failure_records_not_crashes(self):
+        """`set -M ... -g all`: a per-device NOT_SUPPORTED is recorded and the
+        handler returns (must not raise/crash)."""
+        set_value = _load_set_value()
+        cmd = _make_set_gpu_cmd(set_value)
+        # memory_partition prompts a reload confirmation on the first set.
+        cmd.helpers.confirm_changing_memory_partition_gpu_reload_warning = lambda *a, **k: None
+        mp_name = next(
+            n
+            for n in set_value.amdsmi_interface.AmdSmiMemoryPartitionType.__members__
+            if n != "INVALID"
+        )
+        args = _gpu_set_args(set_value, memory_partition=mp_name)
+
+        with _patch_amdsmi_interface(
+            set_value,
+            amdsmi_get_gpu_device_bdf=_fake_bdf,
+            amdsmi_get_gpu_memory_partition_config=_raise_not_supported,
+            amdsmi_set_gpu_memory_partition=_raise_not_supported,
+        ):
+            cmd.set_gpu(args)  # must NOT raise
+
+        self.assertTrue(
+            cmd.helpers.error_collector.has_errors,
+            "memory_partition per-device failure was not recorded (would exit 0)",
+        )
+        self.assertEqual(
+            cmd.helpers.error_collector.resolve_exit_code(),
+            int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+            "memory_partition failure did not finalize to the library exit code",
+        )
+        messages = [v for (_d, key, v) in cmd.logger.stored if key == "memory_partition"]
+        self.assertTrue(
+            messages and "memory partition" in messages[-1].lower(),
+            f"memory_partition error message not surfaced to the user: {messages}",
+        )
+
+    def test_g_all_compute_partition_failure_records_not_crashes(self):
+        """`set -C ... -g all`: a per-device NOT_SUPPORTED is recorded and the
+        handler returns (must not raise/crash)."""
+        set_value = _load_set_value()
+        cmd = _make_set_gpu_cmd(set_value)
+        cp_name = next(
+            n
+            for n in set_value.amdsmi_interface.AmdSmiComputePartitionType.__members__
+            if n != "INVALID"
+        )
+        # Force the "profiles not enumerable" fallback so a valid TYPE name is
+        # attempted and the driver's status is what surfaces.
+        cmd.helpers.get_accelerator_choices_types_indices = lambda: (
+            [cp_name],
+            {"profile_types": [], "profile_indices": []},
+        )
+        args = _gpu_set_args(set_value, compute_partition=cp_name)
+
+        with _patch_amdsmi_interface(
+            set_value,
+            amdsmi_get_gpu_device_bdf=_fake_bdf,
+            amdsmi_set_gpu_compute_partition=_raise_not_supported,
+        ):
+            cmd.set_gpu(args)  # must NOT raise
+
+        self.assertTrue(
+            cmd.helpers.error_collector.has_errors,
+            "compute_partition per-device failure was not recorded (would exit 0)",
+        )
+        self.assertEqual(
+            cmd.helpers.error_collector.resolve_exit_code(),
+            int(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED),
+            "compute_partition failure did not finalize to the library exit code",
+        )
+        messages = [v for (_d, key, v) in cmd.logger.stored if key == "accelerator_partition"]
+        self.assertTrue(
+            messages and "accelerator partition" in messages[-1].lower(),
+            f"compute_partition error message not surfaced to the user: {messages}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Generic "-g all" reset-failure guards
+#
+# Same record-then-finalize contract as the set guards above, applied to the
+# per-device GPU `reset` handlers: a per-device library failure must be
+# RECORDED and the command must keep going -- never an unhandled crash. `gtt`
+# is intentionally excluded (it is a system-wide reset, rejected with --gpu and
+# dispatched before the per-device loop).
+# ---------------------------------------------------------------------------
+
+
+def _load_reset():
+    sub_dir = os.path.join(os.path.dirname(cli_exc.__file__), "subcommands")
+    if sub_dir not in sys.path:
+        sys.path.append(sub_dir)
+    import reset
+
+    return reset
+
+
+def _reset_gpu_options(reset):
+    """Authoritative per-device GPU ``reset`` option dests, sourced from
+    reset_gpu's own required-arg ``any([...])`` gate. Auto-updates when a new
+    option is added -- that is what makes the completeness test a forcing
+    function. ``gtt``/``mem_carveout`` are not in the gate (system-wide / no
+    per-device handler) and are correctly excluded.
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(reset.ResetCommands.reset)
+    names = set()
+    for group in re.findall(r"if not any\(\s*\[(.*?)\]\s*\)", src, re.DOTALL):
+        names |= set(re.findall(r"args\.(\w+)", group))
+    return names
+
+
+def _make_reset_cmd(reset):
+    from amdsmi_helpers import AMDSMIHelpers
+
+    cmd = reset.ResetCommands()
+    cmd.helpers = AMDSMIHelpers()
+    cmd.logger = _FakeGpuLogger()
+    cmd.device_handles = []
+    cmd.group_check_printed = True
+    cmd.helpers.is_baremetal = lambda: True
+    cmd.helpers.get_gpu_id_from_device_handle = lambda handle: 0
+    return cmd
+
+
+def _reset_args(reset, **option):
+    """Namespace with every arg reset references defaulted to None, plus a
+    single-device gpu handle and the one option under test set truthy."""
+    import argparse
+    import inspect
+    import re
+
+    src = inspect.getsource(reset.ResetCommands.reset)
+    names = set(re.findall(r"args\.(\w+)", src))
+    ns = argparse.Namespace(**{n: None for n in names})
+    ns.gpu = "fake-gpu-handle"  # non-list, non-None -> single-device path
+    for key, value in option.items():
+        setattr(ns, key, value)
+    return ns
+
+
+def _build_reset_specs(reset):
+    """Per-option drivers for the generic GPU ``reset`` exercisers.
+
+    Each entry is ``name -> configure(cmd, mode)`` where ``mode`` is ``"fail"``
+    or ``"success"``. ``configure`` installs any helper stubs the handler needs
+    and returns the ``{amdsmi_interface_fn: replacement}`` map:
+
+      * mode="fail":    the failure path raises NOT_SUPPORTED (must be recorded).
+      * mode="success": every call returns cleanly (nothing recorded, exit 0).
+
+    Every reset option is a boolean flag, so the exerciser sets
+    ``args.<name> = True``; there is no per-option value to build.
+
+    The registry keys are the single source of truth for the completeness test,
+    so adding a new per-device ``reset`` option without a spec here fails the
+    suite -- the forcing function that blocks a future ``-g all`` regression.
+    """
+
+    def gpureset(cmd, mode):
+        cmd.helpers.is_amd_device = lambda gpu: True
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu": fn}
+
+    def clocks(cmd, mode):
+        # Overdrive is reset first, then perf level (twice) with the same
+        # handle; both must be stubbed so a fake handle never reaches hardware.
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn}
+
+    def fans(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu_fan": fn}
+
+    def profile(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_power_profile": fn}
+
+    def xgmierr(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_reset_gpu_xgmi_error": fn}
+
+    def perf_determinism(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_set_gpu_perf_level": fn}
+
+    def power_cap(cmd, mode):
+        if mode == "fail":
+            return {"amdsmi_get_supported_power_cap": _raise_not_supported}
+        # An empty sensor list makes the per-sensor loop a no-op: nothing is set
+        # and nothing is recorded, so the command finishes clean.
+        return {
+            "amdsmi_get_supported_power_cap": lambda *a, **k: {
+                "sensor_inds": [],
+                "sensor_types": {},
+            }
+        }
+
+    def clean_local_data(cmd, mode):
+        fn = _raise_not_supported if mode == "fail" else _noop
+        return {"amdsmi_clean_gpu_local_data": fn}
+
+    return {
+        "gpureset": gpureset,
+        "clocks": clocks,
+        "fans": fans,
+        "profile": profile,
+        "xgmierr": xgmierr,
+        "perf_determinism": perf_determinism,
+        "power_cap": power_cap,
+        "clean_local_data": clean_local_data,
+    }
+
+
+class TestResetGpuGAllFailureGuards(unittest.TestCase):
+    """A per-device GPU `reset` failure must be recorded and must NOT crash."""
+
+    def test_every_reset_option_is_driven(self):
+        """Forcing function: every per-device GPU `reset` option must have a
+        driver in _build_reset_specs. Adding a new option without a spec fails
+        here, blocking a future `-g all` reset regression from shipping."""
+        reset = _load_reset()
+        options = _reset_gpu_options(reset)
+        specced = set(_build_reset_specs(reset))
+        self.assertEqual(
+            options,
+            specced,
+            "GPU reset options and their -g all failure drivers are out of sync.\n"
+            f"  unspecced (add a _build_reset_specs entry): {sorted(options - specced)}\n"
+            f"  stale (spec exists but no longer an option): {sorted(specced - options)}",
+        )
+
+    def test_every_reset_option_records_on_failure_not_crashes(self):
+        """Generic exerciser: drive each GPU `reset` option through reset with a
+        per-device library failure injected, and assert the record-then-finalize
+        contract holds -- the failure is recorded (exit != 0) and the handler
+        returns instead of raising."""
+        reset = _load_reset()
+        specs = _build_reset_specs(reset)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_reset_cmd(reset)
+                patches = specs[name](cmd, "fail")
+                args = _reset_args(reset, **{name: True})
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(args)  # must NOT raise
+                self.assertTrue(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: per-device failure was not recorded (would exit 0)",
+                )
+                self.assertNotEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: exit code resolved to 0 despite a recorded failure",
+                )
+
+    def test_every_reset_option_succeeds_cleanly(self):
+        """Mirror contract: a successful per-device `reset` records NOTHING and
+        finalizes to exit 0. Guards against a success path that wrongly records
+        an error, crashes, or resolves to a non-zero exit code."""
+        reset = _load_reset()
+        specs = _build_reset_specs(reset)
+        for name in sorted(specs):
+            with self.subTest(option=name):
+                cmd = _make_reset_cmd(reset)
+                patches = specs[name](cmd, "success")
+                args = _reset_args(reset, **{name: True})
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(args)  # must NOT raise
+                self.assertFalse(
+                    cmd.helpers.error_collector.has_errors,
+                    f"{name}: success path wrongly recorded an error",
+                )
+                self.assertEqual(
+                    cmd.helpers.error_collector.resolve_exit_code(),
+                    0,
+                    f"{name}: success path did not resolve to exit 0",
+                )
