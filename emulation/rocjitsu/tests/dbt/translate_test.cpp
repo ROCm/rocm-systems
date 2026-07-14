@@ -2239,7 +2239,8 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   const uint32_t shstrtab_name = add_elf_name(shstrtab, ".shstrtab");
 
   constexpr uint64_t note_offset = 0x100;
-  const uint64_t text_offset = note_offset + note.size();
+  constexpr uint64_t text_alignment = 256;
+  const uint64_t text_offset = align_up_for_test(note_offset + note.size(), text_alignment);
   constexpr std::array<uint32_t, 2> text_words = {0x11111111u, 0x22222222u};
   constexpr uint64_t text_size = text_words.size() * sizeof(uint32_t);
   const uint64_t shstrtab_offset = text_offset + text_size;
@@ -2252,16 +2253,33 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   std::memcpy(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
   ehdr.e_ident[EI_CLASS] = ELFCLASS64;
   ehdr.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
-  ehdr.e_type = ET_REL;
+  ehdr.e_type = ET_DYN;
   ehdr.e_machine = EM_AMDGPU;
   ehdr.e_version = 1;
+  ehdr.e_phoff = sizeof(Elf64_Ehdr);
   ehdr.e_shoff = shoff;
   ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
+  ehdr.e_phentsize = sizeof(Elf64_Phdr);
+  ehdr.e_phnum = 2;
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
   ehdr.e_shstrndx = 3;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  std::array<Elf64_Phdr, 2> phdrs{};
+  phdrs[0].p_type = PT_LOAD;
+  phdrs[0].p_filesz = image.size();
+  phdrs[0].p_memsz = image.size();
+  phdrs[0].p_align = 0x1000;
+  phdrs[1].p_type = PT_NOTE;
+  phdrs[1].p_offset = note_offset;
+  phdrs[1].p_vaddr = note_offset;
+  phdrs[1].p_paddr = note_offset;
+  phdrs[1].p_filesz = note.size();
+  phdrs[1].p_memsz = note.size();
+  phdrs[1].p_align = 4;
+  std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), sizeof(phdrs));
 
   std::memcpy(image.data() + note_offset, note.data(), note.size());
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
@@ -2271,6 +2289,7 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   shdrs[1].sh_name = note_name;
   shdrs[1].sh_type = SHT_NOTE;
   shdrs[1].sh_flags = SHF_ALLOC;
+  shdrs[1].sh_addr = note_offset;
   shdrs[1].sh_offset = note_offset;
   shdrs[1].sh_size = note.size();
   shdrs[1].sh_addralign = 4;
@@ -2278,9 +2297,10 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   shdrs[2].sh_name = text_name;
   shdrs[2].sh_type = SHT_PROGBITS;
   shdrs[2].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+  shdrs[2].sh_addr = text_offset;
   shdrs[2].sh_offset = text_offset;
   shdrs[2].sh_size = text_size;
-  shdrs[2].sh_addralign = sizeof(uint32_t);
+  shdrs[2].sh_addralign = text_alignment;
 
   shdrs[3].sh_name = shstrtab_name;
   shdrs[3].sh_type = SHT_STRTAB;
@@ -2302,8 +2322,9 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   translation.target_private_size = 600;
 
   ASSERT_TRUE(patcher.patch_metadata_private_segment_fixed_sizes({&translation, 1}));
-  EXPECT_EQ(patcher.text_offset(), text_offset + 4)
-      << "resizable note growth before .text must refresh the cached text offset";
+  EXPECT_EQ(patcher.text_offset(), text_offset + text_alignment)
+      << "resizable note growth must preserve later allocated-section alignment and refresh the "
+         "cached text offset";
 
   constexpr std::array<uint32_t, 2> new_text_words = {0xAAAAAAAAu, 0xBBBBBBBBu};
   patcher.overwrite_text({reinterpret_cast<const uint8_t *>(new_text_words.data()), text_size});
@@ -2315,9 +2336,18 @@ TEST(CodeObjectPatcher, MetadataPrivateSegmentResizeRefreshesTextOffset) {
   const Section *text = patched.text_sections()[0];
   ASSERT_NE(text, nullptr);
   ASSERT_EQ(text->size(), text_size);
-  EXPECT_EQ(text->sectionOffset(), text_offset + 4);
+  EXPECT_EQ(text->sectionOffset(), text_offset + text_alignment);
+  EXPECT_EQ(text->sectionOffset() % text_alignment, 0u);
+  EXPECT_EQ(text->vaddr() % text_alignment, 0u);
   EXPECT_EQ(std::memcmp(text->data(), new_text_words.data(), text_size), 0)
       << "overwrite_text must target the shifted .text section, not the old file offset";
+
+  const auto *patched_ehdr = reinterpret_cast<const Elf64_Ehdr *>(patched_bytes.data());
+  const auto *patched_phdrs =
+      reinterpret_cast<const Elf64_Phdr *>(patched_bytes.data() + patched_ehdr->e_phoff);
+  EXPECT_EQ(patched_phdrs[1].p_type, PT_NOTE);
+  EXPECT_EQ(patched_phdrs[1].p_filesz, note.size() + text_alignment);
+  EXPECT_EQ(patched_phdrs[1].p_memsz, note.size() + text_alignment);
 }
 
 TEST(CodeObjectPatcher, MetadataTargetIsaPatchRewritesSameLengthTarget) {

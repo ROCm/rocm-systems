@@ -127,8 +127,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   const uint64_t gcd = std::gcd(lhs, rhs);
   if (gcd == 0)
     return 0;
-  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs &&
-         "ELF load alignment LCM overflow");
+  assert(lhs / gcd <= std::numeric_limits<uint64_t>::max() / rhs && "ELF alignment LCM overflow");
   return std::lcm(lhs, rhs);
 }
 
@@ -149,6 +148,24 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
       continue;
     if (phdr.p_offset >= file_offset)
       alignment = checked_lcm_u64(alignment, phdr.p_align);
+  }
+  return alignment;
+}
+
+[[nodiscard]] uint64_t shifted_alloc_section_delta_alignment(std::span<const Elf64_Shdr> shdrs,
+                                                             uint64_t file_offset,
+                                                             size_t grown_section_index) {
+  // Metadata-note growth shifts both the file offset and virtual address of
+  // every later allocated section. Keep that delta divisible by all declared
+  // section alignments so the rewritten ELF remains loader-valid.
+  uint64_t alignment = 1;
+  for (size_t i = 0; i < shdrs.size(); ++i) {
+    const Elf64_Shdr &section = shdrs[i];
+    if (i == grown_section_index || section.sh_type == SHT_NULL ||
+        (section.sh_flags & SHF_ALLOC) == 0 || section.sh_offset < file_offset ||
+        section.sh_addralign <= 1)
+      continue;
+    alignment = checked_lcm_u64(alignment, section.sh_addralign);
   }
   return alignment;
 }
@@ -598,7 +615,12 @@ void insert_file_bytes_shifting_alloc_vaddrs(std::vector<uint8_t> &image, Elf64_
       phdr.p_paddr += delta;
       continue;
     }
-    if (file_offset < old_end && (phdr.p_type == PT_LOAD || phdr.p_type == PT_NOTE)) {
+    const bool insertion_inside = file_offset < old_end;
+    // The metadata note commonly ends with PT_NOTE itself, so insertion at
+    // that exact boundary extends the segment instead of moving it.
+    const bool grows_note_at_end = phdr.p_type == PT_NOTE && file_offset == old_end;
+    if ((insertion_inside && (phdr.p_type == PT_LOAD || phdr.p_type == PT_NOTE)) ||
+        grows_note_at_end) {
       phdr.p_filesz += delta;
       phdr.p_memsz += delta;
     }
@@ -679,8 +701,26 @@ bool patch_msgpack_uint_resizable(std::vector<uint8_t> &image, size_t offset, ui
   const uint64_t new_desc_aligned_size = align_up(new_desc_size, 4);
   const uint64_t note_delta = new_desc_aligned_size - note->desc_aligned_size;
   if (note_delta != 0) {
-    std::vector<uint8_t> padding(note_delta, 0);
-    insert_file_bytes_shifting_alloc_vaddrs(image, header, shdrs, phdrs, old_aligned_end, padding,
+    const uint64_t delta_alignment =
+        shifted_alloc_section_delta_alignment(shdrs, old_aligned_end, note->section_index);
+    uint64_t insertion_size = align_up(note_delta, delta_alignment);
+    uint64_t filler_size = insertion_size - note_delta;
+    while (filler_size != 0 &&
+           (filler_size < sizeof(Elf64_Nhdr) || (filler_size - sizeof(Elf64_Nhdr)) % 4 != 0)) {
+      insertion_size += delta_alignment;
+      filler_size = insertion_size - note_delta;
+    }
+
+    // Consume alignment padding as one complete filler note. Leaving raw
+    // bytes after the resized metadata descriptor would make the SHT_NOTE
+    // contents ambiguous to ELF note readers.
+    std::vector<uint8_t> insertion(insertion_size, 0);
+    if (filler_size != 0) {
+      Elf64_Nhdr filler{};
+      filler.n_descsz = static_cast<uint32_t>(filler_size - sizeof(Elf64_Nhdr));
+      std::memcpy(insertion.data() + note_delta, &filler, sizeof(filler));
+    }
+    insert_file_bytes_shifting_alloc_vaddrs(image, header, shdrs, phdrs, old_aligned_end, insertion,
                                             note->section_index);
   }
 
