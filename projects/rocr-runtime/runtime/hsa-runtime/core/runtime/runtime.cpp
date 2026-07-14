@@ -987,12 +987,22 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
   auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    if (allocation_map_.find(ptr) == allocation_map_.end())
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   hsa_status_t err = driver.MakeMemoryUnresident(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   err = driver.DeregisterMemory(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    allocation_map_.erase(ptr);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4460,8 +4470,15 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
 
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
+  /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
+   * caller is free to close their fd as soon as this function returns. Duplicate the fd so the
+   * MemoryHandle owns a copy that stays valid until the deferred import. The MemoryHandle destructor
+   * closes this owned fd. */
+  int owned_fd = os::DmaBufDup(dmabuf_fd);
+  if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandle = std::make_unique<MemoryHandle>(dmabuf_fd);
+  auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;

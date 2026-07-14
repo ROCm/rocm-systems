@@ -92,5 +92,5 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
 1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair under `vm/plugins/`.
 2. Add the source to `CMakeLists.txt`.
-3. Register the plugin in `simulated_driver.cpp` (gated by an environment variable).
+3. Register the plugin in `simulated_kfd.cpp` (gated by an environment variable).
 4. Use `sink().write()` for all output — never write to stderr directly.

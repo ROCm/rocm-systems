@@ -36,7 +36,9 @@ namespace D3D11Interop {
  */
 bool associateD3D11Device(
     const Device* device,
-    ID3D11Device* d3d11Device
+    ID3D11Device* d3d11Device,
+    void* gfxContext,
+    bool validateOnly
 );
 
 /**
@@ -46,7 +48,7 @@ bool associateD3D11Device(
  *
  * @param device ROCr device
  */
-void dissociateD3D11Device(const Device* device);
+void dissociateD3D11Device(const Device* device, void* const gfxDevice[], void* gfxContext);
 
 /**
  * @brief Export D3D11 resource to HSA handle for interop
@@ -55,16 +57,14 @@ void dissociateD3D11Device(const Device* device);
  * as HSA handle for memory mapping
  *
  * @param memory ROCr memory object
- * @param d3d11Resource D3D11 resource to export
- * @param subresource Subresource index (for textures with mips)
+ * @param d3d11Obj D3D11 object to export
  * @param handle Output HSA handle
  * @param offset Output offset into resource
  * @return true if export succeeded, false otherwise
  */
 bool Export(
     const Memory* memory,
-    ID3D11Resource* d3d11Resource,
-    UINT subresource,
+    D3D11Object* d3d11Obj,
     hsa_handle_t* handle,
     int* offset,
     void* srd,
