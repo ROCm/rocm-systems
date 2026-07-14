@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
@@ -341,7 +342,7 @@ void append_wait_valu_vgpr(std::vector<uint32_t> &words);
 void append_scratch_store_b32(std::vector<uint32_t> &words, uint8_t vdata, uint32_t offset);
 void append_scratch_load_b32(std::vector<uint32_t> &words, uint8_t vdst, uint32_t offset);
 void append_merge_b16_result(std::vector<uint32_t> &words, uint8_t vdst, uint8_t result,
-                             bool dst_high);
+                             bool dst_high, bool wait_dependencies = false);
 void append_f32_to_bf16_rne(std::vector<uint32_t> &words, uint8_t result, uint8_t tmp,
                             uint8_t src_vgpr);
 
@@ -9267,6 +9268,387 @@ ExpandResult expand_v_bitop3_b32_vop3(const Instruction &inst, uint32_t, uint64_
   return true;
 }
 
+enum class TranscendentalFormat : uint8_t { F32, F16, Bf16 };
+
+[[nodiscard]] std::optional<uint8_t> rdna4_f32_transcendental_vop1(uint16_t gfx1250_op) {
+  switch (gfx1250_op) {
+  case gfx1250::kVRcpBf16Vop1:
+  case gfx1250::kVRcpBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVRcpF32Vop1);
+  case gfx1250::kVSqrtBf16Vop1:
+  case gfx1250::kVSqrtBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVSqrtF32Vop1);
+  case gfx1250::kVRsqBf16Vop1:
+  case gfx1250::kVRsqBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVRsqF32Vop1);
+  case gfx1250::kVLogBf16Vop1:
+  case gfx1250::kVLogBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVLogF32Vop1);
+  case gfx1250::kVExpBf16Vop1:
+  case gfx1250::kVExpBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVExpF32Vop1);
+  case gfx1250::kVSinBf16Vop1:
+  case gfx1250::kVSinBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVSinF32Vop1);
+  case gfx1250::kVCosBf16Vop1:
+  case gfx1250::kVCosBf16Vop3:
+    return static_cast<uint8_t>(rdna4::kVCosF32Vop1);
+  default:
+    return std::nullopt;
+  }
+}
+
+[[nodiscard]] std::optional<TranscendentalFormat> gfx1250_tanh_format(uint16_t gfx1250_op) {
+  switch (gfx1250_op) {
+  case gfx1250::kVTanhF32Vop1:
+  case gfx1250::kVTanhF32Vop3:
+    return TranscendentalFormat::F32;
+  case gfx1250::kVTanhF16Vop1:
+  case gfx1250::kVTanhF16Vop3:
+    return TranscendentalFormat::F16;
+  case gfx1250::kVTanhBf16Vop1:
+  case gfx1250::kVTanhBf16Vop3:
+    return TranscendentalFormat::Bf16;
+  default:
+    return std::nullopt;
+  }
+}
+
+void append_apply_f32_source_modifiers(std::vector<uint32_t> &words, uint8_t value, bool abs,
+                                       bool neg) {
+  constexpr uint8_t kOpAndB32 = 27;
+  constexpr uint8_t kOpXorB32 = 29;
+  if (abs) {
+    append_vop2(words, kOpAndB32, value, 255, value, 0x7FFFFFFFu);
+    append_wait_valu_vgpr(words);
+  }
+  if (neg) {
+    append_vop2(words, kOpXorB32, value, 255, value, 0x80000000u);
+    append_wait_valu_vgpr(words);
+  }
+}
+
+void append_apply_f32_result_modifiers(std::vector<uint32_t> &words, uint8_t value, uint8_t omod,
+                                       bool clamp) {
+  if (omod == 0 && !clamp)
+    return;
+  const auto [w0, w1] =
+      build_vop3_mod(rdna4::kVMulF32Vop3, value, vgpr_src(value), 242, 0, 0, 0, clamp, omod);
+  words.push_back(w0);
+  words.push_back(w1);
+  append_wait_valu_vgpr(words);
+}
+
+[[nodiscard]] bool append_materialize_transcendental_f32_source(
+    std::vector<uint32_t> &words, uint8_t value, uint16_t src, bool high_half,
+    std::optional<uint32_t> literal_word, TranscendentalFormat format) {
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpLshlrevB32 = 24;
+
+  if (format == TranscendentalFormat::F32) {
+    append_vop1(words, kOpMovB32, value, src, src == 255 ? literal_word : std::nullopt);
+    append_wait_valu_vgpr(words);
+    return true;
+  }
+
+  if (format == TranscendentalFormat::F16) {
+    if (const auto inline_bits = fma_mix_f16_inline_bits(src)) {
+      std::optional<uint32_t> literal;
+      append_vop1(words, kOpMovB32, value, literal_or_inline_u32(*inline_bits, literal), literal);
+    } else if (!append_materialize_b16_half(words, value, src, high_half, literal_word)) {
+      return false;
+    }
+    append_wait_valu_vgpr(words);
+    append_vop1(words, static_cast<uint8_t>(rdna4::kVCvtF32F16Vop1), value, vgpr_src(value));
+    append_wait_valu_vgpr(words);
+    return true;
+  }
+
+  if (const auto inline_bits = fma_mix_bf16_inline_f32_bits(src)) {
+    std::optional<uint32_t> literal;
+    append_vop1(words, kOpMovB32, value, literal_or_inline_u32(*inline_bits, literal), literal);
+  } else {
+    if (!append_materialize_b16_half(words, value, src, high_half, literal_word))
+      return false;
+    append_wait_valu_vgpr(words);
+    append_vop2(words, kOpLshlrevB32, value, scalar_positive_inline_u32(16), value);
+  }
+  append_wait_valu_vgpr(words);
+  return true;
+}
+
+/// Append a bit-accurate f32 tanh implementation for the gfx1250 instruction.
+///
+/// The small-input polynomial and the range-reduced exponential path mirror
+/// OCML's tanhf implementation. RDNA4 has the required f32 primitives but no
+/// native tanh instruction. Keeping the approximation here makes the lowering
+/// work on both real RDNA4 hardware and the RDNA4 executable model.
+void append_gfx1250_tanh_f32(std::vector<uint32_t> &words, uint8_t input, uint8_t scratch_base,
+                             uint8_t predicate) {
+  const uint8_t abs_value = static_cast<uint8_t>(scratch_base + 1u);
+  const uint8_t work = static_cast<uint8_t>(scratch_base + 2u);
+  const uint8_t polynomial = static_cast<uint8_t>(scratch_base + 3u);
+  const uint8_t tmp = static_cast<uint8_t>(scratch_base + 4u);
+  const uint8_t residual = static_cast<uint8_t>(scratch_base + 5u);
+  const uint8_t exponent = static_cast<uint8_t>(scratch_base + 6u);
+  const uint8_t result = static_cast<uint8_t>(scratch_base + 7u);
+
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpRndneF32 = 35;
+  constexpr uint8_t kOpExpF32 = 37;
+  constexpr uint8_t kOpCvtI32F32 = 8;
+  constexpr uint8_t kOpRcpF32 = 42;
+  constexpr uint8_t kOpAddF32 = 3;
+  constexpr uint8_t kOpSubF32 = 4;
+  constexpr uint8_t kOpMulF32 = 8;
+  constexpr uint8_t kOpAndB32 = 27;
+  constexpr uint8_t kOpOrB32 = 28;
+  constexpr uint8_t kOpXorB32 = 29;
+  constexpr uint16_t kOpCmpLtF32 = 17;
+  constexpr uint16_t kOpCmpGtF32 = 20;
+  constexpr uint16_t kOpCmpGtU32 = 76;
+  constexpr uint16_t kOpCndmaskB32 = 257;
+  constexpr uint16_t kOpFmaF32 = 531;
+  constexpr uint16_t kOpLdexpF32 = 796;
+  constexpr uint8_t kSoppWaitAlu = 8;
+
+  append_vop2(words, kOpAndB32, abs_value, 255, input, 0x7FFFFFFFu);
+  append_wait_valu_vgpr(words);
+
+  // |x| < 0.625: x + x^3 * P(x^2), with OCML's minimax coefficients.
+  append_vop2(words, kOpMulF32, work, vgpr_src(abs_value), abs_value);
+  append_vop1(words, kOpMovB32, tmp, 255, 0xBBBAC73Du);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, polynomial, vgpr_src(work), vgpr_src(tmp), 255, 0x3CA908C9u);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, polynomial, vgpr_src(work), vgpr_src(polynomial), 255, 0xBD5C1C4Eu);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, polynomial, vgpr_src(work), vgpr_src(polynomial), 255, 0x3E088382u);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, polynomial, vgpr_src(work), vgpr_src(polynomial), 255, 0xBEAAAA99u);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpMulF32, tmp, vgpr_src(abs_value), polynomial);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, polynomial, vgpr_src(work), vgpr_src(tmp), vgpr_src(abs_value));
+  append_wait_valu_vgpr(words);
+
+  // |x| >= 0.625: 1 - 2 / (exp(2*|x|) + 1). The compensation terms
+  // make the natural-exp argument accurate before the native exp2 operation.
+  append_vop2(words, kOpMulF32, work, 244, abs_value); // 2 * |x|
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpMulF32, tmp, 255, work, 0x3FB8AA3Bu); // log2(e)
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpXorB32, residual, 255, tmp, 0x80000000u);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, residual, vgpr_src(work), 255, vgpr_src(residual), 0x3FB8AA3Bu);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, residual, vgpr_src(work), 255, vgpr_src(residual), 0x32A5705Fu);
+  append_wait_valu_vgpr(words);
+  append_vop1(words, kOpRndneF32, exponent, vgpr_src(tmp));
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpSubF32, tmp, vgpr_src(tmp), exponent);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpAddF32, tmp, vgpr_src(tmp), residual);
+  append_wait_valu_vgpr(words);
+  append_vop1(words, kOpExpF32, result, vgpr_src(tmp));
+  append_vop1(words, kOpCvtI32F32, exponent, vgpr_src(exponent));
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpLdexpF32, result, vgpr_src(result), vgpr_src(exponent));
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpCmpGtF32, predicate, vgpr_src(work), 255, 0, 0x42B17218u);
+  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
+  append_vop3(words, kOpCndmaskB32, result, vgpr_src(result), 255, predicate, 0x7F800000u);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpAddF32, tmp, 242, result); // exp + 1
+  append_wait_valu_vgpr(words);
+  append_vop1(words, kOpRcpF32, tmp, vgpr_src(tmp));
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpFmaF32, result, 245, vgpr_src(tmp), 242); // 1 - 2*rcp
+  append_wait_valu_vgpr(words);
+
+  append_vop3(words, kOpCmpLtF32, predicate, vgpr_src(abs_value), 255, 0, 0x3F200000u);
+  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
+  append_vop3(words, kOpCndmaskB32, result, vgpr_src(result), vgpr_src(polynomial), predicate);
+  append_wait_valu_vgpr(words);
+
+  // Restore the original sign bit and preserve NaN payloads exactly.
+  append_vop2(words, kOpAndB32, tmp, 255, input, 0x80000000u);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpOrB32, result, vgpr_src(tmp), result);
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpCmpGtU32, predicate, vgpr_src(abs_value), 255, 0, 0x7F800000u);
+  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
+  append_vop3(words, kOpCndmaskB32, result, vgpr_src(result), vgpr_src(input), predicate);
+  append_wait_valu_vgpr(words);
+}
+
+ExpandResult expand_gfx1250_transcendental(const Instruction &inst,
+                                           const LivenessAnalysis &liveness,
+                                           TranslationContext &context, uint8_t vdst, uint16_t src0,
+                                           std::optional<uint32_t> literal_word,
+                                           TranscendentalFormat format, bool src_high,
+                                           bool dst_high, bool src_abs, bool src_neg, uint8_t omod,
+                                           bool clamp, std::optional<uint8_t> native_f32_op) {
+  std::vector<uint8_t> avoid{vdst};
+  add_avoid_src_vgpr(avoid, src0);
+  const bool correct_sin_argument = native_f32_op && *native_f32_op == rdna4::kVSinF32Vop1;
+  const uint16_t scratch_count = native_f32_op ? (correct_sin_argument ? 3u : 1u) : 8u;
+  const auto scratch = find_free_vgpr_run_avoiding(inst, liveness, scratch_count, avoid);
+  if (!scratch || *scratch + scratch_count > 256u) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot allocate transcendental scratch VGPRs");
+  }
+  const uint8_t input = static_cast<uint8_t>(*scratch);
+
+  std::optional<uint16_t> predicate;
+  if (!native_f32_op) {
+    predicate = liveness.find_free_sgpr(&inst);
+    if (!predicate || *predicate > 105u) {
+      return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                  " cannot allocate a tanh predicate SGPR");
+    }
+  }
+
+  std::vector<uint32_t> words;
+  words.reserve(native_f32_op ? 20u : 110u);
+  if (!append_materialize_transcendental_f32_source(words, input, src0, src_high, literal_word,
+                                                    format)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot materialize its source operand");
+  }
+  append_apply_f32_source_modifiers(words, input, src_abs, src_neg);
+
+  uint8_t result = input;
+  if (native_f32_op) {
+    if (correct_sin_argument) {
+      result = static_cast<uint8_t>(input + 1u);
+      const uint8_t angle_error = static_cast<uint8_t>(input + 2u);
+      constexpr uint8_t kOpMulF32 = 8;
+      constexpr uint16_t kOpFmaF32 = 531;
+      // gfx1250 behaves like sinf(x * float(2*pi)), while RDNA4 returns
+      // exact zeros at integral and half-integral turns. Restore the first
+      // order argument-reduction term cos(2*pi*x) * x * delta(2*pi).
+      append_vop1(words, *native_f32_op, result, vgpr_src(input));
+      append_vop2(words, kOpMulF32, angle_error, 255, input, 0x343BBD2Eu);
+      append_wait_valu_vgpr(words);
+      append_vop1(words, static_cast<uint8_t>(rdna4::kVCosF32Vop1), input, vgpr_src(input));
+      append_wait_valu_vgpr(words);
+      append_vop3(words, kOpFmaF32, result, vgpr_src(input), vgpr_src(angle_error),
+                  vgpr_src(result));
+      append_wait_valu_vgpr(words);
+    } else {
+      append_vop1(words, *native_f32_op, result, vgpr_src(input));
+      append_wait_valu_vgpr(words);
+    }
+  } else {
+    append_gfx1250_tanh_f32(words, input, input, static_cast<uint8_t>(*predicate));
+    result = static_cast<uint8_t>(input + 7u);
+  }
+  append_apply_f32_result_modifiers(words, result, omod, clamp);
+
+  if (format == TranscendentalFormat::Bf16) {
+    constexpr uint8_t kOpLshrrevB32 = 25;
+    // gfx1250 V_*_BF16 truncates the f32 result rather than using RNE.
+    append_vop2(words, kOpLshrrevB32, result, scalar_positive_inline_u32(16), result);
+    append_wait_valu_vgpr(words);
+    append_merge_b16_result(words, vdst, result, dst_high, true);
+  } else if (format == TranscendentalFormat::F16) {
+    append_vop1(words, static_cast<uint8_t>(rdna4::kVCvtF16F32Vop1), result, vgpr_src(result));
+    append_wait_valu_vgpr(words);
+    append_merge_b16_result(words, vdst, result, dst_high, true);
+  } else {
+    constexpr uint8_t kOpMovB32 = 1;
+    append_vop1(words, kOpMovB32, vdst, vgpr_src(result));
+  }
+
+  context.require_vgprs(static_cast<uint32_t>(*scratch) + scratch_count);
+  if (predicate)
+    context.require_sgprs(static_cast<uint32_t>(*predicate) + 1u);
+  return ExpandResult::success(std::move(words));
+}
+
+ExpandResult expand_gfx1250_transcendental_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
+                                                const LivenessAnalysis &liveness,
+                                                TranslationContext &context, const LaneLayout *,
+                                                const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop1MachineInst))
+    return ExpandResult::not_handled();
+  gfx1250::Vop1MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  const auto native_f32_op = rdna4_f32_transcendental_vop1(src.op);
+  const auto tanh_format = gfx1250_tanh_format(src.op);
+  if (!native_f32_op && !tanh_format)
+    return ExpandResult::not_handled();
+  if (src.src0 == 254)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
+  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(src.src0)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support SDWA or DPP modifiers");
+  }
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  }
+
+  const TranscendentalFormat format = native_f32_op ? TranscendentalFormat::Bf16 : *tanh_format;
+  const bool is_narrow = format != TranscendentalFormat::F32;
+  const uint8_t vdst =
+      is_narrow ? static_cast<uint8_t>(src.vdst & 0x7Fu) : static_cast<uint8_t>(src.vdst);
+  return expand_gfx1250_transcendental(
+      inst, liveness, context, vdst, static_cast<uint16_t>(src.src0), literal_word, format,
+      /*src_high=*/false, /*dst_high=*/is_narrow && (src.vdst & 0x80u) != 0,
+      /*src_abs=*/false, /*src_neg=*/false, /*omod=*/0, /*clamp=*/false, native_f32_op);
+}
+
+ExpandResult expand_gfx1250_transcendental_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                std::span<const uint8_t>,
+                                                const LivenessAnalysis &liveness,
+                                                TranslationContext &context, const LaneLayout *,
+                                                const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
+    return ExpandResult::not_handled();
+  gfx1250::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+
+  const auto native_f32_op = rdna4_f32_transcendental_vop1(src.op);
+  const auto tanh_format = gfx1250_tanh_format(src.op);
+  if (!native_f32_op && !tanh_format)
+    return ExpandResult::not_handled();
+  const TranscendentalFormat format = native_f32_op ? TranscendentalFormat::Bf16 : *tanh_format;
+  const uint8_t allowed_opsel = format == TranscendentalFormat::F32 ? 0u : 0x9u;
+  if ((src.abs & ~0x1u) != 0 || (src.neg & ~0x1u) != 0 || (src.opsel & ~allowed_opsel) != 0) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " uses unsupported unary source selectors");
+  }
+  if (src.src0 == 254)
+    return ExpandResult::failed(std::string(inst.mnemonic()) + " does not support literal64");
+  if (src.src0 == amdgpu::SRC_SDWA || src.src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(src.src0)) {
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " does not yet support SDWA or DPP modifiers");
+  }
+
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return ExpandResult::failed(std::string(inst.mnemonic()) + " is missing its literal32");
+  }
+
+  return expand_gfx1250_transcendental(
+      inst, liveness, context, static_cast<uint8_t>(src.vdst), static_cast<uint16_t>(src.src0),
+      literal_word, format, (src.opsel & 0x1u) != 0, (src.opsel & 0x8u) != 0, (src.abs & 0x1u) != 0,
+      (src.neg & 0x1u) != 0, static_cast<uint8_t>(src.omod), src.clamp != 0, native_f32_op);
+}
+
 std::vector<uint32_t> lower_v_cvt_f32_bf16_to_shift(uint8_t vdst, uint16_t src0, bool high_half,
                                                     std::optional<uint32_t> literal_word) {
   if (vdst == 255 || src0 == 254)
@@ -10479,18 +10861,24 @@ std::vector<uint32_t> expand_v_fma_mixlo_bf16_vop3p(const Instruction &inst, uin
 }
 
 void append_merge_b16_result(std::vector<uint32_t> &words, uint8_t vdst, uint8_t result,
-                             bool dst_high) {
+                             bool dst_high, bool wait_dependencies) {
   constexpr uint8_t kOpLshlrevB32 = 24;
   constexpr uint8_t kOpAndB32 = 27;
   constexpr uint8_t kOpOrB32 = 28;
 
   append_vop2(words, kOpAndB32, result, 255, result, 0x0000FFFFu);
+  if (wait_dependencies)
+    append_wait_valu_vgpr(words);
   if (dst_high) {
     append_vop2(words, kOpLshlrevB32, result, scalar_positive_inline_u32(16), result);
+    if (wait_dependencies)
+      append_wait_valu_vgpr(words);
     append_vop2(words, kOpAndB32, vdst, 255, vdst, 0x0000FFFFu);
   } else {
     append_vop2(words, kOpAndB32, vdst, 255, vdst, 0xFFFF0000u);
   }
+  if (wait_dependencies)
+    append_wait_valu_vgpr(words);
   append_vop2(words, kOpOrB32, vdst, vgpr_src(result), vdst);
 }
 
@@ -12409,6 +12797,174 @@ constexpr uint16_t kOpDsLoadTr8B64 = 0xFD;
 
 #define RJ_VOP3_INTEGER_ALU_RULES(ENC) RJ_VOP3_ADD_MINMAX_RULES(ENC), RJ_VOP3_ASHR_PK_I8_RULES(ENC)
 
+#define RJ_VOP1_TANH_RULES(ENC)                                                                    \
+  {ENC,                                                                                            \
+   gfx1250::kVTanhF32Vop1,                                                                         \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_gfx1250_transcendental_vop1,                                                             \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+      {ENC,                                                                                        \
+       gfx1250::kVTanhF16Vop1,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVTanhBf16Vop1, RuleAction::Expand, 0, 0, nullptr,                               \
+        expand_gfx1250_transcendental_vop1, nullptr, nullptr                                       \
+  }
+
+#define RJ_VOP1_BF16_TRANSCENDENTAL_RULES(ENC)                                                     \
+  {ENC,                                                                                            \
+   gfx1250::kVRcpBf16Vop1,                                                                         \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_gfx1250_transcendental_vop1,                                                             \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+      {ENC,                                                                                        \
+       gfx1250::kVSqrtBf16Vop1,                                                                    \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVRsqBf16Vop1,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVLogBf16Vop1,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVExpBf16Vop1,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVSinBf16Vop1,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop1,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVCosBf16Vop1, RuleAction::Expand, 0, 0, nullptr,                                \
+        expand_gfx1250_transcendental_vop1, nullptr, nullptr                                       \
+  }
+
+#define RJ_VOP3_TANH_RULES(ENC)                                                                    \
+  {ENC,                                                                                            \
+   gfx1250::kVTanhF32Vop3,                                                                         \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_gfx1250_transcendental_vop3,                                                             \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+      {ENC,                                                                                        \
+       gfx1250::kVTanhF16Vop3,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVTanhBf16Vop3, RuleAction::Expand, 0, 0, nullptr,                               \
+        expand_gfx1250_transcendental_vop3, nullptr, nullptr                                       \
+  }
+
+#define RJ_VOP3_BF16_TRANSCENDENTAL_RULES(ENC)                                                     \
+  {ENC,                                                                                            \
+   gfx1250::kVRcpBf16Vop3,                                                                         \
+   RuleAction::Expand,                                                                             \
+   0,                                                                                              \
+   0,                                                                                              \
+   nullptr,                                                                                        \
+   expand_gfx1250_transcendental_vop3,                                                             \
+   nullptr,                                                                                        \
+   nullptr},                                                                                       \
+      {ENC,                                                                                        \
+       gfx1250::kVSqrtBf16Vop3,                                                                    \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVRsqBf16Vop3,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVLogBf16Vop3,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVExpBf16Vop3,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+      {ENC,                                                                                        \
+       gfx1250::kVSinBf16Vop3,                                                                     \
+       RuleAction::Expand,                                                                         \
+       0,                                                                                          \
+       0,                                                                                          \
+       nullptr,                                                                                    \
+       expand_gfx1250_transcendental_vop3,                                                         \
+       nullptr,                                                                                    \
+       nullptr},                                                                                   \
+  {                                                                                                \
+    ENC, gfx1250::kVCosBf16Vop3, RuleAction::Expand, 0, 0, nullptr,                                \
+        expand_gfx1250_transcendental_vop3, nullptr, nullptr                                       \
+  }
+
 #define RJ_VOP1_CVT_NORM_F16_RULES(ENC)                                                            \
   {ENC,                                                                                            \
    kOpVCvtNormI16F16Vop1,                                                                          \
@@ -12645,6 +13201,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_0, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_TANH_RULES(kEncVop1_0),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_0),
     {kEncVop1_0, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -12660,12 +13217,14 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_fp8_vop1), nullptr, nullptr},
     {kEncVop1_0, kOpVCvtF16Bf8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_bf8_vop1), nullptr, nullptr},
+    RJ_VOP1_BF16_TRANSCENDENTAL_RULES(kEncVop1_0),
     {kEncVop1_1, kOpVCvtF32F16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_f16_e32_high_src), nullptr, nullptr},
     {kEncVop1_1, kOpVMovB16Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_1, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_TANH_RULES(kEncVop1_1),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_1),
     {kEncVop1_1, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -12681,12 +13240,14 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_fp8_vop1), nullptr, nullptr},
     {kEncVop1_1, kOpVCvtF16Bf8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_bf8_vop1), nullptr, nullptr},
+    RJ_VOP1_BF16_TRANSCENDENTAL_RULES(kEncVop1_1),
     {kEncVop1_2, kOpVCvtF32F16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_f16_e32_high_src), nullptr, nullptr},
     {kEncVop1_2, kOpVMovB16Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_2, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_TANH_RULES(kEncVop1_2),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_2),
     {kEncVop1_2, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -12702,12 +13263,14 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_fp8_vop1), nullptr, nullptr},
     {kEncVop1_2, kOpVCvtF16Bf8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_bf8_vop1), nullptr, nullptr},
+    RJ_VOP1_BF16_TRANSCENDENTAL_RULES(kEncVop1_2),
     {kEncVop1_3, kOpVCvtF32F16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_f16_e32_high_src), nullptr, nullptr},
     {kEncVop1_3, kOpVMovB16Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_3, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    RJ_VOP1_TANH_RULES(kEncVop1_3),
     RJ_VOP1_CVT_NORM_F16_RULES(kEncVop1_3),
     {kEncVop1_3, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
@@ -12723,6 +13286,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_fp8_vop1), nullptr, nullptr},
     {kEncVop1_3, kOpVCvtF16Bf8E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f16_bf8_vop1), nullptr, nullptr},
+    RJ_VOP1_BF16_TRANSCENDENTAL_RULES(kEncVop1_3),
     {kEncSop2SAndB64, kOpSAndB64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_and_b64_literal64), nullptr, nullptr},
     {kEncSop2SOrB64, kOpSOrB64, RuleAction::Expand, 0, 0, nullptr,
@@ -12873,10 +13437,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_0, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_0),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_0),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_0),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_0),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_0),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_0),
     {kEncVop3_0, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_0, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12910,10 +13476,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_1, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_1),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_1),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_1),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_1),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_1),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_1),
     {kEncVop3_1, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_1, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12947,10 +13515,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_2, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_2),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_2),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_2),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_2),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_2),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_2),
     {kEncVop3_2, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_2, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -12984,10 +13554,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_3, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_3),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_3),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_3),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_3),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_3),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_3),
     {kEncVop3_3, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_3, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -13021,10 +13593,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_4, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_4),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_4),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_4),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_4),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_4),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_4),
     {kEncVop3_4, kOpVBitop3B16Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_bitop3_b16_vop3), nullptr, nullptr},
     {kEncVop3_4, kOpVBitop3B32Vop3, RuleAction::Expand, 0, 0, nullptr, expand_v_bitop3_b32_vop3,
@@ -13064,10 +13638,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_5, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_5),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_5),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_5),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_5),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_5),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_5),
     {kEncVop3_5, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_5, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -13102,10 +13678,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_6, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_6),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_6),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_6),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_6),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_6),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_6),
     {kEncVop3_6, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_6, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -13153,10 +13731,12 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_sub_nc_u64_vop3), nullptr, nullptr},
     {kEncVop3_7, kOpVMovB64Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64_vop3), nullptr, nullptr},
+    RJ_VOP3_TANH_RULES(kEncVop3_7),
     RJ_VOP3_CVT_NORM_F16_RULES(kEncVop3_7),
     RJ_VOP3_CVT_F32_FP8_RULE(kEncVop3_7),
     RJ_VOP3_CVT_F32_BF16_RULE(kEncVop3_7),
     RJ_VOP3_CVT_F16_F8_DECODE_RULES(kEncVop3_7),
+    RJ_VOP3_BF16_TRANSCENDENTAL_RULES(kEncVop3_7),
     {kEncVop3_7, kOpVMadU32Vop3, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mad_u32_vop3), nullptr, nullptr},
     {kEncVop3_7, kOpVLshlAddU32Vop3, RuleAction::Expand, 0, 0, nullptr,
@@ -13234,7 +13814,11 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
 
 #undef RJ_VOPD3_RULE
 #undef RJ_VOPD_RULE
+#undef RJ_VOP1_TANH_RULES
+#undef RJ_VOP1_BF16_TRANSCENDENTAL_RULES
 #undef RJ_VOP1_CVT_NORM_F16_RULES
+#undef RJ_VOP3_TANH_RULES
+#undef RJ_VOP3_BF16_TRANSCENDENTAL_RULES
 #undef RJ_VOP3_CVT_NORM_F16_RULES
 #undef RJ_VOP3_SINGLE_SRC_RULE
 #undef RJ_VOP3_EXPAND_RULE

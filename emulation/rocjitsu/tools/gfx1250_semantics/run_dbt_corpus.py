@@ -19,9 +19,7 @@ REFERENCE_OUTPUT_DIRS = (
 )
 
 EXPECTED_XFAILS = {
-    "bf16_tanh_transcendental_ops": "EXPAND not yet implemented for v_rcp_bf16_e32",
     "cluster_global_async_memory_ops": "EXPAND not yet implemented for cluster_load_b64",
-    "cos_bf16_ops": "EXPAND not yet implemented for v_cos_bf16_e32",
     "ds_special_ops": "EXPAND not yet implemented for ds_atomic_async_barrier_arrive_b64",
     "monitor_load_ops": "EXPAND not yet implemented for global_load_monitor_b32",
     "pk_bf16_ops": "EXPAND not yet implemented for v_pk_mul_bf16",
