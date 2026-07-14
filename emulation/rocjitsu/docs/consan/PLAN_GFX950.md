@@ -684,6 +684,33 @@ Full gfx950 support means:
   timeout, unexpected guest fault, or post-failure continuation. `X1B` now
   awaits only accepted-revision focused/non-vacuity reruns from the rebuilt
   external emulator tree.
+- 2026-07-14: native tier0 at implementation revision `e75d265ad7` exposed an
+  over-broad gfx950 scalar-identity containment check: 268/268 focused tests
+  passed, but 27 of 58 live controls were rejected before patch emission.
+  Fresh descriptor-safe SGPR windows are now attempted before the conservative
+  in-allocation fallback, and the strengthened forced-spill fixtures reserve a
+  legal victim window. The accepted rerun passes 268/268 focused and 58/58
+  live controls.
+- 2026-07-14: commit `7fab090280` repairs the gfx950 guarded IREE selector
+  after the later CDNA4 MFMA-spill safety boundary made the saturated
+  TileAndFuse objects intentionally unpatchable. The replacement keeps the
+  same 10-row size and matrix-family coverage using eight safely patchable
+  VecDistMFMA rows plus configured scan and softmax. Native tier1 passes the
+  44-test hip-moi baseline, all 44 hooked hip-moi controls, and 10/10 guarded
+  IREE rows under each of the four profiles.
+- 2026-07-14: final native evidence at `7fab090280` is complete. Tier0 passes
+  268/268 focused plus 58/58 live tests. The broad SuperCollider run has 257
+  ordinary passes plus the two already classified typed mismatch terminations
+  (#1838 and #2861); record/replay and sampled each pass 259/259, and the
+  serialized inline-shadow run passes 259/259. The complete C++ suite passes
+  1549/1549 and the Python suite passes 850 tests with 45 skips.
+- 2026-07-14: `X1B` and `M0` are `DONE`. At exact implementation revision
+  `7fab090280`, the gfx1201 emulator tier0 passes 268/268 focused tests and
+  37/37 live controls; tier1 passes 46/46 hip-moi baseline, 46/46 hooked
+  hip-moi, 20/20 guarded IREE profile executions, and 12/12 compatibility
+  executions. Together with the already green 209/209 no-hook baseline and
+  each of four broad profiles, this reaches the final cross-architecture gate
+  without requiring physical gfx1201 hardware.
 
 ## DAG Overview
 
@@ -725,7 +752,7 @@ flowchart LR
   R1A["R1A: Limits And Descriptor Geometry"]:::done
   R1B["R1B: Scalar And Special State"]:::done
   R1C["R1C: Owners And Transaction Tests"]:::done
-  F0{"F0: gfx950 Foundation Ready"}:::target
+  F0{"F0: gfx950 Foundation Ready"}:::done
 
   B0 --> A1A
   E0 --> A3A
@@ -749,7 +776,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  F0{"F0: Foundation Ready"}:::target
+  F0{"F0: Foundation Ready"}:::done
   S1["S1: CDNA4 Scratch ISA Contract"]:::done
   S2["S2: Scratch Encoders And Decode Tests"]:::done
   S3["S3: Private-Segment Transaction Audit"]:::done
@@ -766,7 +793,7 @@ flowchart LR
   S7B["S7B: Inline Access Spill Parity"]:::done
   S7C["S7C: Barrier And Atomic Spill Parity"]:::done
   S7D["S7D: Shared-Helper Spill Layout"]:::done
-  SP{"SP: gfx950 Spill Accepted"}:::target
+  SP{"SP: gfx950 Spill Accepted"}:::done
 
   F0 --> S1
   F0 --> S3
@@ -799,7 +826,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  F0{"F0: Foundation Ready"}:::target
+  F0{"F0: Foundation Ready"}:::done
   D1A["D1A: Basic LDS Decode"]:::done
   D1B["D1B: Extended LDS Forms"]:::done
   D1C["D1C: Unsupported DS Inventory"]:::done
@@ -824,10 +851,10 @@ flowchart LR
   FL1A["FL1A: Group-Flat Inventory"]:::done
   FL1B["FL1B: Group-Flat Emission"]:::done
   FL1X["FL1X: Typed No-Forms Result"]:::notselected
-  FLC{"FLC: Group-Flat Capability Closed"}:::target
+  FLC{"FLC: Group-Flat Capability Closed"}:::done
   AT1A["AT1A: Atomic Decode And Records"]:::done
   AT1B["AT1B: Inline Atomic Handoff"]:::done
-  NP{"NP: Native Probe Parity"}:::target
+  NP{"NP: Native Probe Parity"}:::done
 
   F0 --> D1A
   F0 --> P1A
@@ -889,8 +916,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  SP{"SP: Spill Accepted"}:::target
-  NP{"NP: Native Probe Parity"}:::target
+  SP{"SP: Spill Accepted"}:::done
+  NP{"NP: Native Probe Parity"}:::done
   T1A["T1A: Target-Aware Test Registration"]:::done
   T1B["T1B: Workload And Tier Selection"]:::done
   T2SC["T2SC: SuperCollider Focused Tier"]:::done
@@ -898,7 +925,7 @@ flowchart LR
   T2SA["T2SA: Sampled Focused Tier"]:::done
   T2IS["T2IS: Inline-Shadow Focused Tier"]:::done
   T2R["T2R: Resource And Spill Tier"]:::done
-  T2G{"T2G: Focused gfx950 Accepted"}:::target
+  T2G{"T2G: Focused gfx950 Accepted"}:::done
   T3A["T3A: Workload Inventory"]:::done
   T3SC["T3SC: SuperCollider Selected Workloads"]:::done
   T3RR["T3RR: Record/Replay Selected Workloads"]:::done
@@ -913,7 +940,7 @@ flowchart LR
   T3IW{"T3IW: Workgroup Identity Accepted"}:::done
   T3IA["T3IA: Private-State Atomic Ordering"]:::done
   T3IL["T3IL: Inline Semantic Regressions"]:::done
-  T3G{"T3G: Selected Workloads Accepted"}:::target
+  T3G{"T3G: Selected Workloads Accepted"}:::done
   T4SV["T4SV: SuperCollider Accumulator-Safe Scratch"]:::done
   T4SC["T4SC: SuperCollider Broad IREE"]:::done
   T4RRA["T4RRA: Record/Replay Failure Inventory"]:::done
@@ -938,8 +965,8 @@ flowchart LR
   X1BSA["X1BSA: Sampled Broad IREE"]:::done
   X1BIS["X1BIS: Inline-Shadow Broad IREE"]:::done
   X1BG{"X1BG: Broad Emulator Gate"}:::done
-  X1B{"X1B: gfx1201 Emulator Regression Evidence"}:::target
-  M0{"M0: gfx950 Fully Supported"}:::target
+  X1B{"X1B: gfx1201 Emulator Regression Evidence"}:::done
+  M0{"M0: gfx950 Fully Supported"}:::done
 
   T1A --> T1B
   SP --> T2R
@@ -2646,12 +2673,12 @@ Done criteria:
 - Documentation distinguishes unsupported coverage, compatibility passes, and
   clean sanitizer evidence.
 
-Result: `LOCAL_TESTING.md` now records the final 266/266 broad focused filter,
-the distinct 256/256 allocation/MOI/spill/emitter subset, full 1542/1542
-Rocjitsu suite, all four broad gfx950 profiles, the serialized inline-shadow
-result and separate parallel stress observation, and the decoder, scalar
-identity, and CDNA4 MFMA-spill typed exclusions. Historical checkpoint totals
-remain labeled by revision rather than being overwritten.
+Result: `LOCAL_TESTING.md` now records the final 268/268 broad focused filter,
+58/58 native gfx950 live controls, the full 1549/1549 Rocjitsu suite, and all
+four broad gfx950 profiles. It distinguishes the serialized inline-shadow
+result from the separate parallel stress observation and records the decoder,
+scalar-identity, and CDNA4 MFMA-spill typed exclusions. Historical checkpoint
+totals remain labeled by revision rather than being overwritten.
 
 ### X1A: Local gfx1201 Synthetic Regression - DONE
 
@@ -2667,7 +2694,7 @@ Done criteria:
 
 - All locally runnable gfx1201 and shared regressions are green.
 
-Result: the complete Rocjitsu suite passes 1542/1542 with the workspace
+Result: the complete Rocjitsu suite passes 1549/1549 with the workspace
 TheRock runtime. The explicit `*Gfx1201*:*gfx1201*` subset passes 3/3, covering
 the gfx1201 scratch save/restore encoding and code-object target recognition;
 the full run also covers the architecture-neutral shared paths. The exact live
@@ -2675,7 +2702,7 @@ tier commands remain in `LOCAL_TESTING.md` and
 `tests/dbi/consan_test_matrix.sh`. No physical gfx1201 result is inferred from
 this gfx950 host.
 
-### X1B: gfx1201 Emulator Regression Evidence - ACTIVE
+### X1B: gfx1201 Emulator Regression Evidence - DONE
 
 Goal: retain the accepted gfx1201 behavior while changing shared ConSan policy
 and emitters. Rocjitsu runs actual gfx1201 binaries through the same HSA-tools
@@ -2712,7 +2739,18 @@ Done criteria:
 - A later physical gfx1201 rerun is retained as corroboration, not as an
   external prerequisite for local progress.
 
-## Final Acceptance Checklist - ACTIVE: X1B EMULATOR QUALIFICATION
+Result: the rebuilt emulator at `e75d265ad7` and exact accepted-revision reruns
+at `7fab090280` close the gate. Tier0 passes 268/268 focused unit/planner tests
+and 37/37 live guest controls, including forced-spill preservation, positive
+diagnostics, and trap propagation. Tier1 passes 46/46 hip-moi baseline and
+46/46 hooked entries, 5/5 guarded selected IREE tests under each profile, and
+3/3 unguarded compatibility tests under each profile (124/124 executions in
+aggregate). The previously completed no-hook baseline and all four broad
+profiles each pass 209/209. Retained exact-revision logs are
+`$WORKSPACE_ROOT/7fab090280_consan-gfx1201-emulator-tier0.log` and
+`$WORKSPACE_ROOT/7fab090280_consan-gfx1201-emulator-tier1.log`.
+
+## Final Acceptance Checklist - DONE
 
 `M0: gfx950 Fully Supported` is reached only when:
 
@@ -2725,3 +2763,10 @@ Done criteria:
 - `X1A` records green local synthetic regressions and `X1B` records green
   gfx1201 focused and broad emulator tiers at the accepted revision.
 - The architecture capability and spilling documentation matches the code.
+
+Result: every prerequisite above is satisfied at implementation revision
+`7fab090280`. The aggregate foundation, spill, native-probe, focused,
+selected-workload, broad-compatibility, documentation, and gfx1201 regression
+gates are complete, so `M0: gfx950 Fully Supported` is reached within the
+documented support boundary. Physical gfx1201 execution remains useful future
+corroboration, not an open DAG dependency.
