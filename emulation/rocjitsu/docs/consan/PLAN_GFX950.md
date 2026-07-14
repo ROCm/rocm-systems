@@ -549,7 +549,8 @@ Full gfx950 support means:
   decoder-error kernels/functions from candidates and CFG resource planning
   while retaining valid owners in the same object. A synthetic mixed-owner
   regression passes, and test 1833 passes under the record/replay hook with
-  `/tmp/xx/TheRock/build/dist/rocm`. The clean broad rerun remains in progress.
+  `/tmp/xx/TheRock/build/dist/rocm`. The clean broad rerun then passes 259/259,
+  completing `T4RRC` and aggregate `T4RR`; `T4SA` is now active.
 
 ## DAG Overview
 
@@ -784,9 +785,9 @@ flowchart LR
   T4SC["T4SC: SuperCollider Broad IREE"]:::done
   T4RRA["T4RRA: Record/Replay Failure Inventory"]:::done
   T4RRB["T4RRB: Persistent Identity Containment"]:::done
-  T4RRC["T4RRC: Clean Record/Replay Rerun"]:::active
-  T4RR{"T4RR: Record/Replay Broad IREE"}:::target
-  T4SA["T4SA: Sampled Broad IREE"]:::todo
+  T4RRC["T4RRC: Clean Record/Replay Rerun"]:::done
+  T4RR{"T4RR: Record/Replay Broad IREE"}:::done
+  T4SA["T4SA: Sampled Broad IREE"]:::active
   T4IS["T4IS: Inline-Shadow Broad IREE"]:::todo
   T4G{"T4G: Broad Compatibility Accepted"}:::target
   D2A["D2A: Capability And Runbook Content"]:::done
@@ -2373,11 +2374,11 @@ All former numerical-corruption and replacement-object loader failures pass,
 and the sweep has no timeout or hidden resource failure. This satisfies the
 broad-profile criterion that residual failures have typed ConSan outcomes.
 
-### T4RR: Record/Replay Broad IREE - ACTIVE
+### T4RR: Record/Replay Broad IREE - DONE
 
 Goal: run the same inventory under standard record/replay.
 
-Current status: `ACTIVE`. The first parallel sweep exposed failures in large
+Current status: `DONE`. The first parallel sweep exposed failures in large
 data-tiled/MXFP4 and dot workloads, including memory-aperture exceptions; a
 simultaneous GPU exception can contaminate other subprocesses, so these are
 being rerun individually before attribution. The remaining reproducible loader
@@ -2385,7 +2386,7 @@ failure was traced to an unsupported gfx950 VOP3P word in a decoder-error
 kernel entering MOI CFG resource planning; decoder-error owners are now
 excluded while valid owners in the same object remain eligible, and isolated
 test 1833 passes. This broad profile deliberately does not require a patch or
-record from every object.
+record from every object. The final clean sweep passes 259/259.
 
 This aggregate now has three bounded subnodes:
 
@@ -2409,11 +2410,11 @@ This aggregate now has three bounded subnodes:
   selected patch budget before automatic scalar identity is allowed; otherwise
   patching stops with the typed global-proof error. Explicit diagnostic modes
   and the single-site scalar proof remain available.
-- `T4RRC: Clean Record/Replay Rerun - ACTIVE`. Run the full inventory from a
-  clean process after `T4RRB`, then isolate every residual and record exact
-  pass/typed-outcome counts. No sampled or inline IREE CTest may overlap it.
+- `T4RRC: Clean Record/Replay Rerun - DONE`. The isolated decoder-error fix
+  restored test 1833, and the clean workspace-runtime sweep passes 259/259,
+  including all prior scalar-containment and numerical-mismatch rows.
 
-### T4SA: Sampled Broad IREE - TODO
+### T4SA: Sampled Broad IREE - ACTIVE
 
 Goal: run the same inventory under standard sampled MOI.
 
