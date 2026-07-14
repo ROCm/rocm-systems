@@ -7,6 +7,7 @@
 #include "core/trace_cache/cacheable.hpp"
 
 #include "common/defines.h"
+#include "common/self_suppressing_mutex.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -244,7 +245,7 @@ private:
 
     std::shared_ptr<typename WorkerFactory::worker_t> m_worker;
 
-    std::mutex                      m_mutex;
+    self_suppressing_mutex          m_mutex;
     size_t                          m_head{ 0 };
     size_t                          m_tail{ 0 };
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };

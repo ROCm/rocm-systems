@@ -8,6 +8,8 @@ add_library(
     test_environment.cpp
     test_path.cpp
     test_remove_env.cpp
+    test_self_suppressing_mutex.cpp
+    test_trace_suppression.cpp
     test_update_env.cpp
 )
 

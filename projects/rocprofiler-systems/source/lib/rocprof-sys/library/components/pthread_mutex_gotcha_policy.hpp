@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/trace_suppression.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -50,9 +51,9 @@ struct default_pthread_mutex_policy
     static bool is_disabled_check()
     {
         static thread_local const auto& t_info = thread_info::get();
-        return (!t_info || t_info->is_offset ||
-                get_state() != ::rocprofsys::State::Active ||
-                get_thread_state() != ThreadState::Enabled);
+        return (
+            !t_info || t_info->is_offset || get_state() != ::rocprofsys::State::Active ||
+            get_thread_state() != ThreadState::Enabled || trace_suppression::is_active());
     }
 
     static uintptr_t get_thread_id() { return threading::get_id(); }
