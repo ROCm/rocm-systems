@@ -384,29 +384,6 @@ TEST(TrampolineBuilderPlan, NoSccTempFails) {
   EXPECT_NE(err.find("SCC"), std::string::npos);
 }
 
-// Mirror of NoSccTempFails with SCC preservation disabled: no SCC temp is
-// needed, so the same register-starved kernel that fails closed above now plans
-// successfully and reserves only the link + target pairs. Guards the regression
-// where the SCC temp was searched/reserved even when preserve_scc was false.
-TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
-  TrampolinePlan plan;
-  plan.preserve_scc = false;
-  std::string err;
-  // Same dead set as NoSccTempFails: only the link pair s[30:31] and the target
-  // pair s[0:1] are dead; nothing remains for an SCC temp.
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc,
-                                                 all_sgprs_live_except({0, 1, 30, 31}),
-                                                 /*probe_body_clobbers=*/{}, &err))
-      << err;
-  EXPECT_TRUE(plan.is_probe_call);
-  // builder_clobbers = {link pair} | {target pair} only -- no SCC temp reserved
-  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 30));
-  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, 31));
-  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base));
-  EXPECT_TRUE(has_sgpr(plan.builder_clobbers, plan.target_pair_base + 1));
-  EXPECT_EQ(plan.builder_clobbers.size(), 4u);
-}
-
 // Happy path: dead resources selected, distinct, and reported as builder clobbers.
 TEST(TrampolineBuilderPlan, SelectsDeadResourcesAndReportsClobbers) {
   TrampolinePlan plan;

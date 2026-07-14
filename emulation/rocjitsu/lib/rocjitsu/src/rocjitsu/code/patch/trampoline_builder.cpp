@@ -47,8 +47,7 @@ namespace {
 // First even-aligned SGPR pair with both lanes free of @p unavailable, within the
 // conservative cross-family allocatable bound. nullopt if none.
 [[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const RegisterSet &unavailable) {
-  for (uint16_t base = 0; static_cast<size_t>(base) + 1 < REGISTER_SET_ALLOCATABLE_SGPRS;
-       base += 2) {
+  for (uint16_t base = 0; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
     if (!any_sgpr_in_range(unavailable, base, 2))
       return base;
   }
@@ -144,14 +143,8 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   RegisterSet link_pair;
   link_pair.expand(RegisterRef{RegClass::SGPR, kLinkPairBase, 2});
 
-  // NOTE: target/scc selection scans the conservative cross-ISA allocatable
-  // bound (REGISTER_SET_ALLOCATABLE_SGPRS), not the patched kernel's actual
-  // .sgpr_count. This is safe today only because the scan returns the lowest
-  // dead registers, and we currently require the s30/31 regs. Handling this
-  // is deferred.
-  // Target-address pair: dead, even-aligned, and not the link pair. It is
-  // read by s_swappc before the probe body runs, so it may overlap
-  // probe_body_clobbers.
+  // Target-address pair: dead, even-aligned, and not the link pair. It is read by
+  // s_swappc before the probe body runs, so it may overlap probe_body_clobbers.
   const RegisterSet target_unavail = live_at_anchor | link_pair;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail);
   if (!target_pair) {
@@ -163,20 +156,16 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   RegisterSet target_pair_set;
   target_pair_set.expand(RegisterRef{RegClass::SGPR, *target_pair, 2});
 
-  // SCC temp: only needed when we preserve SCC across the call. It lives across
-  // the call (saved before materialization, restored after), so it must avoid
-  // the live set, the link/target pairs, AND the probe body clobbers. When SCC
-  // is not preserved we reserve nothing
+  // SCC temp: lives across the call (saved before materialization, restored
+  // after), so it must avoid the live set, the link/target pairs, AND the probe
+  // body clobbers.
   // TODO: allow for reuse of target_pair if unavailable
-  std::optional<uint16_t> scc_temp;
-  if (plan.preserve_scc) {
-    const RegisterSet scc_unavail = target_unavail | target_pair_set | probe_body_clobbers;
-    scc_temp = find_free_sgpr(scc_unavail);
-    if (!scc_temp) {
-      report(error_out, "probe-call resource planning: no dead SGPR available for the SCC "
-                        "preservation temp");
-      return false;
-    }
+  const RegisterSet scc_unavail = target_unavail | target_pair_set | probe_body_clobbers;
+  const std::optional<uint16_t> scc_temp = find_free_sgpr(scc_unavail);
+  if (!scc_temp) {
+    report(error_out, "probe-call resource planning: no dead SGPR available for the SCC "
+                      "preservation temp");
+    return false;
   }
 
   // Word count is derived from the resource decisions, not a fixed envelope size.
@@ -192,13 +181,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConven
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
   plan.target_pair_base = *target_pair;
-  if (scc_temp)
-    plan.scc_temp = *scc_temp;
+  plan.scc_temp = *scc_temp;
   plan.before_word_count = before_words;
 
   plan.builder_clobbers = link_pair | target_pair_set;
-  if (scc_temp)
-    plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
+  plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   return true;
 }
 

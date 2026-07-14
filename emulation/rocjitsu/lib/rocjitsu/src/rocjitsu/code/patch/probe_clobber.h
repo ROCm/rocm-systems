@@ -14,6 +14,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -34,6 +35,7 @@ struct ProbeClobberSummary {
   bool touches_m0 = false;
   bool touches_flat_scratch = false;
   bool uses_private_segment = false;
+  std::vector<std::string> diagnostics;
 };
 
 /// @brief Decode @p callable's copied body and summarize what it clobbers.
