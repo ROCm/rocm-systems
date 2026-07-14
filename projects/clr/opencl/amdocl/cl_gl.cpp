@@ -764,7 +764,7 @@ RUNTIME_EXIT
  */
 
 /*! \brief This f-n is defined in CL extension cl_khr_gl_sharing and serves
- *  the purpose of quering current device and all devices that support
+ *  the purpose of querying current device and all devices that support
  *  CL-GL interoperability.
  *
  *  \param properties points to an <attribute list>, which is a array of
