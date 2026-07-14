@@ -6288,35 +6288,194 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
  *  @{
  *  This section describes execution context management functions of HIP runtime API.
  */
+/**
+ * @brief Gets device resource of a given type for a device.
+ *
+ * @param [out] resource - Output device resource pointer
+ * @param [in]  device - Device to get resource for
+ * @param [in]  type - Type of resource to retrieve
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceType,
+ * #hipErrorInvalidDevice
+ */
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);
+
+ /**
+ * @brief Splits SM resources into groups containing the specified number of SMs.
+ *
+ * @param [out] result - Output device resource pointer
+ * @param [in]  nbGroups - The poiter specifying the number of groups
+ * @param [in]  input - Valid input SM resource to be split
+ * @param [in]  remainder - If the input resource cannot be evenly split among nbGroups,
+ * the remaining resourced are returned through this parameter.
+ * @param [in]  flags - Flags specifying partition usage and constraints to apply when splitting
+ * the inout resource.
+ * @param [in]  minCount - Specifies the minimum number of SMs required
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceType,
+ * #hipErrorInvalidDevice, #hipErrorNotSupported
+ */
 hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
                                         const hipDevResource* input, hipDevResource* remainder,
                                         unsigned int flags, unsigned int minCount);
+
+/**
+ * @brief Splits SM resources into structured groups.
+ *
+ * @param [out] result - Output device resource pointer
+ * @param [in]  nbGroups - The poiter specifying the number of groups
+ * @param [in]  input - Valid input SM resource to be split
+ * @param [in]  remainder - If the input resource cannot be evenly split among nbGroups,
+ * the remaining resourced are returned through this parameter.
+ * @param [in]  flags - Flags specifying partition usage and constraints to apply when splitting
+ * the inout resource.
+ * @param [in]  groupParams - Describes how the SM resources should be partitioned and assigned
+ * to the corresponding result entries.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceType,
+ * #hipErrorInvalidResourceConfiguration, #hipErrorInvalidDevice
+ */
 hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
                                  const hipDevResource* input, hipDevResource* remainder,
                                  unsigned int flags,
                                  hipDevSmResourceGroupParams* groupParams);
+
+/**
+ * @brief Generates a resource descriptor from one or more device resources.
+ *
+ * @param [out] phDesc - Output parameter that receives the generated resource descriptor
+ * @param [in]  resources - Pointer of device resources to be included in the descriptor
+ * @param [in]  nbResources - Number of resources specified
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceType,
+ * #hipErrorInvalidDevice
+ */
 hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
                                        unsigned int nbResources);
+
+/**
+ * @brief Creates a green context from a resource descriptor.
+ *
+ * @param [out] ctx - Output parameter that receives the handle to the created green context
+ * @param [in]  desc - Resource descriptor generated via hipDevResourceGenerateDesc that specifies
+ * the set of resources to be used
+ * @param [in]  device - Device on which the green context is created
+ * @param [in]  flags - Flags controlling green context creation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
+ */
 hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
+
+/**
+ * @brief Destroys an execution context.
+ *
+ * @param [in]  ctx - Execution context to destroy
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
 hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+
+/**
+ * @brief Returns the default execution context for a device.
+ *
+ * @param [out]  ctx - Output pointer for execution context
+ * @param [in]  device - The device on which to receive the execution context
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorOutOfMemory
+ */
 hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+
+/**
+ * @brief Creates a stream on an execution context with specified flags and priority
+ *
+ * @param [out]  stream - Output pointer of the created stream
+ * @param [in]   greenctx - Execution context used to create and initialize the stream
+ * @param [in]   flags - Flags for stream creation
+ * @param [in]   priority - Stream priority
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOutOfMemory
+ */
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
+
+/**
+ * @brief Returns the device resource of a given type for an execution context
+ *
+ * @param [out] resource - Output pointer that receives the structured device resource
+ * @param [in]  ctx - Execution context to get resource for
+ * @param [in]  type - Type of device resource
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
 hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
+
+/**
+ * @brief Returns the device associated with an execution context
+ *
+ * @param [out] device - Returns device handle for the specified execution context
+ * @param [in]  ctx - Execution context to obtain the device
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
 hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+
+/**
+ * @brief Returns a unique identifier for an execution context
+ *
+ * @param [out] ctxId - Pointer to the context ID
+ * @param [in]  ctx - Execution context to obtain the ID
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
 hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+
+/**
+ * @brief Returns the device resource of a given type for a stream
+ *
+ * @param [out] resource - Pointer to the structured device resource
+ * @param [in]  hStream - Stream to get resource for
+ * @param [in]  type - Type of resource
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceType, #hipErrorInvalidHandle
+ */
 hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
+
+/**
+ * @brief Records an event on an execution context
+ *
+ * @param [out] event - Event to record
+ * @param [in]  ctx - Execution context to record event for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle
+ */
 hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+
+/**
+ * @brief Blocks until all work on an execution context has completed
+ *
+ * @param [in]  ctx - Execution context to synchronize
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle
+ */
 hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+
+/**
+ * @brief Makes an execution context wait on an event
+ *
+ * @param [in]  event - Event to wait on
+ * @param [in]  ctx - Execution context to wait for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle
+ */
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
  */
+
 /**
  *-------------------------------------------------------------------------------------------------
  *-------------------------------------------------------------------------------------------------

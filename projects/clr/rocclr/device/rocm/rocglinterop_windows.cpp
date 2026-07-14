@@ -183,12 +183,8 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
   *resHandle = reinterpret_cast<hsa_handle_t>(glResourceData.mbResHandle);
   *offset = static_cast<int>(glResourceData.offset);
-  if (image_srd_size >= glResourceData.textureSRDSize) {
+  if (image_srd && image_srd_size >= glResourceData.textureSRDSize) {
     std::memcpy(image_srd, glResourceData.textureSRD, glResourceData.textureSRDSize);
-  } else {
-    LogPrintfError("image_srd_size %u < glResourceData.textureSRDSize %u", image_srd_size,
-                   glResourceData.textureSRDSize);
-    return false;
   }
   return true;
 }

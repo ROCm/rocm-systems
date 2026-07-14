@@ -386,7 +386,7 @@ static size_t get_extension_table_length(uint16_t extension, uint16_t major, uin
   }
 
   char buff[6];
-  sprintf(buff, "%02u", minor);
+  snprintf(buff, sizeof(buff), "%02u", minor);
   name += std::to_string(major) + "_" + buff + "_pfn_t";
 
   for (size_t i = 0; i < num_tables; i++) {
@@ -2300,9 +2300,18 @@ hsa_status_t hsa_executable_load_code_object(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
   CodeObjectReaderImpl reader;
-  reader.SetMemory(code_object_p, amd::elf::ElfSize(code_object_p));
+  // buffer_size == 0 means unbounded size discovery for in-memory ELF images.
+  size_t code_object_size = amd::elf::ElfSize(code_object_p, 0);
+  if (code_object_size == 0) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  hsa_status_t status = reader.SetMemory(code_object_p, code_object_size);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
 
-  return exec->LoadCodeObject(agent, code_object, options, reader.GetUri());
+  return exec->LoadCodeObject(agent, code_object, code_object_size, options,
+                              reader.GetUri());
   CATCH;
 }
 
@@ -2328,7 +2337,8 @@ hsa_status_t hsa_executable_load_program_code_object(
   hsa_code_object_t code_object =
       {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
   return exec->LoadCodeObject(
-      {0}, code_object, options, reader->GetUri(), loaded_code_object);
+      {0}, code_object, reader->GetCodeObjectSize(), options,
+      reader->GetUri(), loaded_code_object);
   CATCH;
 }
 
