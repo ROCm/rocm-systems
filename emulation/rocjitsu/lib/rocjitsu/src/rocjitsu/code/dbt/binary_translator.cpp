@@ -369,6 +369,11 @@ struct StaticPcRelativeCallEdge {
   uint64_t return_offset = 0;
 };
 
+struct StaticAddPcEdge {
+  uint64_t source_offset = 0;
+  uint64_t target_offset = 0;
+};
+
 [[nodiscard]] std::optional<uint64_t> aligned_text_target(int64_t target, uint64_t text_size) {
   if (target < 0 || target % static_cast<int64_t>(sizeof(uint32_t)) != 0)
     return std::nullopt;
@@ -376,6 +381,51 @@ struct StaticPcRelativeCallEdge {
   if (offset >= text_size)
     return std::nullopt;
   return offset;
+}
+
+[[nodiscard]] std::vector<StaticAddPcEdge> static_s_add_pc_edges(std::span<const uint8_t> text) {
+  std::vector<StaticAddPcEdge> edges;
+  constexpr uint32_t kOpSAddPcI64 = 75;
+  for (uint64_t offset = 0; offset + sizeof(uint32_t) <= text.size(); offset += sizeof(uint32_t)) {
+    const auto raw = std::bit_cast<gfx1250::Sop1MachineInst>(read_u32(text, offset));
+    if (raw.encoding != 0x17Du || raw.op != kOpSAddPcI64 || raw.sdst != 0)
+      continue;
+
+    int64_t delta = 0;
+    uint64_t instruction_size = sizeof(uint32_t);
+    if (raw.ssrc0 >= 128 && raw.ssrc0 <= 192) {
+      delta = static_cast<int64_t>(raw.ssrc0 - 128u);
+    } else if (raw.ssrc0 >= 193 && raw.ssrc0 <= 208) {
+      delta = -static_cast<int64_t>(raw.ssrc0 - 192u);
+    } else if (raw.ssrc0 == 255) {
+      instruction_size = 2 * sizeof(uint32_t);
+      if (offset + instruction_size > text.size())
+        continue;
+      delta = static_cast<int32_t>(read_u32(text, offset + sizeof(uint32_t)));
+    } else if (raw.ssrc0 == 254) {
+      instruction_size = 3 * sizeof(uint32_t);
+      if (offset + instruction_size > text.size())
+        continue;
+      const uint64_t bits =
+          static_cast<uint64_t>(read_u32(text, offset + sizeof(uint32_t))) |
+          (static_cast<uint64_t>(read_u32(text, offset + 2 * sizeof(uint32_t))) << 32u);
+      delta = std::bit_cast<int64_t>(bits);
+    } else {
+      continue;
+    }
+
+    if (offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - instruction_size)
+      continue;
+    const int64_t next_pc = static_cast<int64_t>(offset + instruction_size);
+    if ((delta > 0 && next_pc > std::numeric_limits<int64_t>::max() - delta) ||
+        (delta < 0 && next_pc < std::numeric_limits<int64_t>::min() - delta)) {
+      continue;
+    }
+    const int64_t target = next_pc + delta;
+    if (auto aligned = aligned_text_target(target, text.size()))
+      edges.push_back({offset, *aligned});
+  }
+  return edges;
 }
 
 [[nodiscard]] std::vector<StaticPcRelativeSetpcEdge>
@@ -1525,6 +1575,106 @@ raw_buffer_resource_base_for_descriptor_base_high(uint8_t sgpr) {
 
 [[nodiscard]] bool is_gfx1250_flat_address_alignment_high_mask(uint32_t mask) {
   return mask == 0x7FFF'FFFFu || mask == 0x1FFF'FFFFu;
+}
+
+[[nodiscard]] std::optional<uint32_t> static_gfx1250_m0_write(const Instruction &inst,
+                                                              std::span<const uint8_t> source_text,
+                                                              uint64_t offset) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < static_cast<int>(sizeof(uint32_t)))
+    return std::nullopt;
+  const auto mov = std::bit_cast<gfx1250::Sop1MachineInst>(raw[0]);
+  if (mov.encoding != 0x17Du || mov.op != 0 || mov.sdst != 125)
+    return std::nullopt;
+  if (mov.ssrc0 >= 128 && mov.ssrc0 <= 192)
+    return mov.ssrc0 - 128u;
+  if (mov.ssrc0 >= 193 && mov.ssrc0 <= 208)
+    return static_cast<uint32_t>(-static_cast<int32_t>(mov.ssrc0 - 192u));
+  if (mov.ssrc0 == 255 && inst.size() >= 2 * static_cast<int>(sizeof(uint32_t)) &&
+      offset + 2 * sizeof(uint32_t) <= source_text.size()) {
+    return read_u32(source_text, offset + sizeof(uint32_t));
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] bool explicitly_writes_m0(const Instruction &inst) {
+  for (int operand = 0; operand < inst.num_dst_operands(); ++operand) {
+    const Operand *dst = inst.dst_operand(operand);
+    if (!dst)
+      continue;
+    const auto ref = dst->to_register_ref();
+    if (ref && ref->cls == RegClass::M0)
+      return true;
+  }
+  return false;
+}
+
+[[nodiscard]] std::optional<uint32_t> find_static_gfx1250_m0(InstructionList::Iterator block_begin,
+                                                             InstructionList::Iterator inst_it,
+                                                             std::span<const uint8_t> source_text) {
+  while (inst_it != block_begin) {
+    --inst_it;
+    const Instruction &candidate = *inst_it;
+    if (auto value = static_gfx1250_m0_write(candidate, source_text, candidate.src_loc()))
+      return value;
+    if (explicitly_writes_m0(candidate))
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] std::vector<uint32_t>
+lower_gfx1250_static_scalar_movrel(InstructionList::Iterator block_begin,
+                                   InstructionList::Iterator inst_it,
+                                   std::span<const uint8_t> source_text) {
+  const Instruction &inst = *inst_it;
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return {};
+  const auto current = std::bit_cast<gfx1250::Sop1MachineInst>(raw[0]);
+  if (current.encoding != 0x17Du || current.op < 64 || current.op > 68)
+    return {};
+
+  const auto m0 = find_static_gfx1250_m0(block_begin, inst_it, source_text);
+  if (!m0)
+    return {};
+
+  // RDNA4's hardware indexing differs from the gfx1250 contract for these
+  // forms. Resolve a statically known M0 into an ordinary move so source and
+  // destination widths are explicit and no target-specific index behavior
+  // leaks into the translated program.
+  uint32_t destination = current.sdst;
+  uint32_t source = current.ssrc0;
+  bool is_b64 = false;
+  switch (current.op) {
+  case 64: // s_movrels_b32
+    source += *m0 & 0xFFu;
+    break;
+  case 65: // s_movrels_b64
+    source += 2u * (*m0 & 0xFFu);
+    is_b64 = true;
+    break;
+  case 66: // s_movreld_b32
+    destination += *m0 & 0xFFu;
+    break;
+  case 67: // s_movreld_b64
+    destination += 2u * (*m0 & 0xFFu);
+    is_b64 = true;
+    break;
+  case 68: // s_movrelsd_2_b32
+    source += *m0 & 0xFFu;
+    destination += (*m0 >> 8u) & 0xFFu;
+    break;
+  default:
+    return {};
+  }
+
+  const uint32_t width = is_b64 ? 2u : 1u;
+  if (source + width > kRdna4MaxSgprsPerWave || destination + width > kRdna4MaxSgprsPerWave) {
+    return {};
+  }
+  return {pack_sop1(is_b64 ? 1u : 0u, static_cast<uint16_t>(destination),
+                    static_cast<uint16_t>(source))};
 }
 
 [[nodiscard]] std::vector<uint32_t>
@@ -6612,6 +6762,26 @@ void add_static_pc_relative_setpc_successors(
   }
 }
 
+void add_static_s_add_pc_successors(std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                    std::span<const StaticAddPcEdge> addpc_edges) {
+  if (addpc_edges.empty())
+    return;
+
+  std::unordered_map<uint64_t, BasicBlock *> block_by_offset;
+  block_by_offset.reserve(blocks.size());
+  for (const auto &block : blocks) {
+    if (block)
+      block_by_offset.emplace(block->start_offset(), block.get());
+  }
+
+  for (const StaticAddPcEdge &edge : addpc_edges) {
+    BasicBlock *source = block_for_offset(blocks, edge.source_offset);
+    const auto target = block_by_offset.find(edge.target_offset);
+    if (source != nullptr && target != block_by_offset.end())
+      source->add_cfg_successor(*target->second);
+  }
+}
+
 void add_static_pc_relative_address_successors(
     std::vector<std::unique_ptr<BasicBlock>> &blocks,
     std::span<const StaticPcRelativeAddress> pc_relative_addresses) {
@@ -6971,6 +7141,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto static_pc_relative_calls = guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250
                                             ? static_pc_relative_call_edges(text)
                                             : std::vector<StaticPcRelativeCallEdge>{};
+  const auto static_addpc_edges = guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250
+                                      ? static_s_add_pc_edges(text)
+                                      : std::vector<StaticAddPcEdge>{};
   std::vector<ExpandedTextPcRelativeFixup> static_pc_relative_fixups;
   static_pc_relative_fixups.reserve(static_setpc_edges.size() +
                                     static_pc_relative_addresses.size());
@@ -6993,7 +7166,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   std::vector<uint64_t> block_leaders(entry_offsets.begin(), entry_offsets.end());
   block_leaders.reserve(block_leaders.size() + static_setpc_edges.size() +
                         2 * static_pc_relative_addresses.size() +
-                        2 * static_pc_relative_calls.size());
+                        2 * static_pc_relative_calls.size() + static_addpc_edges.size());
   for (const StaticPcRelativeSetpcEdge &edge : static_setpc_edges)
     block_leaders.push_back(edge.target_offset);
   for (const StaticPcRelativeAddress &address : static_pc_relative_addresses) {
@@ -7003,8 +7176,11 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   }
   for (const StaticPcRelativeCallEdge &edge : static_pc_relative_calls)
     block_leaders.push_back(edge.return_offset);
+  for (const StaticAddPcEdge &edge : static_addpc_edges)
+    block_leaders.push_back(edge.target_offset);
   auto blocks = BasicBlock::build(obj, *decoder, guest_arch_, block_leaders);
   add_static_pc_relative_setpc_successors(blocks, static_setpc_edges);
+  add_static_s_add_pc_successors(blocks, static_addpc_edges);
   add_static_pc_relative_address_successors(blocks, static_pc_relative_addresses);
   add_static_pc_relative_call_successors(blocks, static_pc_relative_addresses,
                                          static_pc_relative_calls);
@@ -7376,6 +7552,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
               words = lower_gfx1250_contextual_s_and_b32_address_mask_high(instructions.begin(),
                                                                            inst_it, host_arch_);
             if (words.empty())
+              words = lower_gfx1250_static_scalar_movrel(instructions.begin(), inst_it, text);
+            if (words.empty())
               words = lower_raw_gfx1250_v_mul_u64_vop3(text, offset, inst, liveness, source_size);
             if (words.empty())
               words = lower_raw_gfx1250_v_mul_u64_e32(text, offset, inst, liveness, source_size);
@@ -7417,6 +7595,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           }
 
           if (source_size == inst_size) {
+            const auto addpc_edge =
+                std::ranges::find_if(static_addpc_edges, [&](const StaticAddPcEdge &edge) {
+                  return edge.source_offset == offset;
+                });
             if (direct_branch_delta) {
               if (words.size() != 1 || inst_size != sizeof(uint32_t)) {
                 fail_expanded_copy("expanded text copy cannot relocate non-SOPP direct branch " +
@@ -7437,6 +7619,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                 break;
               }
               direct_branches.push_back({scope_words.size(), static_cast<uint64_t>(target),
+                                         std::string(inst.mnemonic()),
+                                         liveness.find_free_sgpr_pair(&inst)});
+            } else if (addpc_edge != static_addpc_edges.end()) {
+              if (words.size() != 1) {
+                fail_expanded_copy(
+                    "expanded text copy cannot relocate lowered s_add_pc_i64 branch");
+                break;
+              }
+              direct_branches.push_back({scope_words.size(), addpc_edge->target_offset,
                                          std::string(inst.mnemonic()),
                                          liveness.find_free_sgpr_pair(&inst)});
             }
@@ -8213,6 +8404,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             continue;
           }
           contextual = lower_gfx1250_smem_nv_to_rdna4(inst, host_arch_);
+          if (!contextual.empty()) {
+            SemanticReplacement repl{offset, offset + inst_size, std::string(inst.mnemonic()),
+                                     std::move(contextual)};
+            if (!apply_semantic_for_inst(repl))
+              return leave_unchanged();
+            offset += inst_size;
+            continue;
+          }
+          contextual = lower_gfx1250_static_scalar_movrel(instructions.begin(), it, text);
           if (!contextual.empty()) {
             SemanticReplacement repl{offset, offset + inst_size, std::string(inst.mnemonic()),
                                      std::move(contextual)};

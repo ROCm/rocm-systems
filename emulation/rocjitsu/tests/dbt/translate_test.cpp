@@ -1196,6 +1196,19 @@ std::vector<uint32_t> section_words_for_test(const Section &section) {
   return words;
 }
 
+std::vector<uint32_t> translated_executable_words_for_test(const CodeObject &translated) {
+  std::vector<uint32_t> words;
+  for (const Section *text : translated.text_sections()) {
+    const auto section_words = section_words_for_test(*text);
+    words.insert(words.end(), section_words.begin(), section_words.end());
+  }
+  if (const Section *translations = find_section(translated, ".rj_translations")) {
+    const auto section_words = section_words_for_test(*translations);
+    words.insert(words.end(), section_words.begin(), section_words.end());
+  }
+  return words;
+}
+
 class SyntheticSectionForTest final : public Section {
 public:
   SyntheticSectionForTest(std::string name, std::unique_ptr<char[]> data, size_t size,
@@ -5720,6 +5733,175 @@ TEST(BinaryTranslator, Gfx1250PcSop1OpsPreserveRdna4Encodings) {
   EXPECT_EQ(patched_text[1], text_words[1]);
   EXPECT_EQ(patched_text[2], text_words[2]);
   EXPECT_EQ(patched_text[3], kGfx1250SEndpgm);
+}
+
+TEST(BinaryTranslator, Gfx1250ScalarCallRelocatesInExpandedText) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop0 = 0xBF800000u;
+  constexpr uint16_t kReturnPair = 8;
+  constexpr size_t kHelperWord = 4;
+
+  gfx1250::SopkMachineInst call{};
+  call.encoding = 0xB;
+  call.op = 20;
+  call.sdst = kReturnPair;
+  call.simm16 = kHelperWord - 1u;
+
+  std::array<uint32_t, 6> text_words{};
+  text_words.fill(kGfx1250SNop0);
+  text_words[0] = std::bit_cast<uint32_t>(call);
+  text_words[1] = kGfx1250SEndpgm;
+  text_words[kHelperWord] = pack_sop1(72, 0, kReturnPair);
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto translated_words = translated_executable_words_for_test(translated);
+
+  std::optional<size_t> call_word;
+  for (size_t i = 0; i < translated_words.size(); ++i) {
+    const auto candidate = std::bit_cast<rdna4::SopkMachineInst>(translated_words[i]);
+    if (candidate.encoding != 0xBu || candidate.op != 20u || candidate.sdst != kReturnPair)
+      continue;
+    const int64_t target_word =
+        static_cast<int64_t>(i + 1u) + static_cast<int16_t>(candidate.simm16);
+    if (target_word >= 0 && static_cast<size_t>(target_word) < translated_words.size() &&
+        translated_words[static_cast<size_t>(target_word)] == pack_sop1(72, 0, kReturnPair)) {
+      call_word = i;
+      break;
+    }
+  }
+  ASSERT_TRUE(call_word.has_value());
+  const auto relocated_call = std::bit_cast<rdna4::SopkMachineInst>(translated_words[*call_word]);
+  const int64_t target_word =
+      static_cast<int64_t>(*call_word + 1u) + static_cast<int16_t>(relocated_call.simm16);
+  ASSERT_GE(target_word, 0);
+  ASSERT_LT(static_cast<size_t>(target_word), translated_words.size());
+  EXPECT_EQ(translated_words[static_cast<size_t>(target_word)], pack_sop1(72, 0, kReturnPair));
+}
+
+TEST(BinaryTranslator, Gfx1250StaticAddPcInlineLowersToDirectBranch) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop0 = 0xBF800000u;
+  constexpr size_t kTargetWord = 3;
+
+  gfx1250::Sop1MachineInst add_pc{};
+  add_pc.encoding = 0x17D;
+  add_pc.op = 75;
+  add_pc.ssrc0 = scalar_positive_inline_u32(8);
+
+  std::array<uint32_t, 5> text_words{};
+  text_words.fill(kGfx1250SNop0);
+  text_words[0] = std::bit_cast<uint32_t>(add_pc);
+  text_words[kTargetWord] = pack_sop1(0, 2, scalar_positive_inline_u32(1));
+  text_words[kTargetWord + 1u] = kGfx1250SEndpgm;
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto translated_words = translated_executable_words_for_test(translated);
+  std::optional<size_t> relocated_branch;
+  for (size_t i = 0; i < translated_words.size(); ++i) {
+    const auto branch = std::bit_cast<rdna4::SoppMachineInst>(translated_words[i]);
+    if (branch.op != sopp_op_branch(ROCJITSU_CODE_ARCH_RDNA4))
+      continue;
+    const int64_t target_word = static_cast<int64_t>(i + 1u) + static_cast<int16_t>(branch.simm16);
+    if (target_word >= 0 && static_cast<size_t>(target_word) < translated_words.size() &&
+        translated_words[static_cast<size_t>(target_word)] == text_words[kTargetWord]) {
+      relocated_branch = i;
+      break;
+    }
+  }
+  EXPECT_TRUE(relocated_branch.has_value()) << testing::PrintToString(translated_words);
+}
+
+TEST(BinaryTranslator, Gfx1250ScalarClockAndBarrierOpsLowerToRdna4) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kGfx1250SNop0 = 0xBF800000u;
+  const std::array<uint32_t, 4> text_words = {
+      pack_sop1(6, 4, 0),
+      pack_sop1(80, 6, 0),
+      pack_sop1(87, 0, 125),
+      kGfx1250SEndpgm,
+  };
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto translated_words = translated_executable_words_for_test(translated);
+  const std::array<uint32_t, 2> realtime = {pack_sop1(77, 4, 0x83), pack_sopp(0x47, 0)};
+  EXPECT_TRUE(find_word_sequence_for_test(translated_words, realtime).has_value());
+  EXPECT_NE(std::ranges::find(translated_words, pack_sop1(0, 6, scalar_positive_inline_u32(0))),
+            translated_words.end());
+  EXPECT_NE(std::ranges::find(translated_words, kGfx1250SNop0), translated_words.end());
+}
+
+TEST(BinaryTranslator, Gfx1250StaticScalarMovrelUsesGfx1250Indices) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  const std::array<uint32_t, 8> text_words = {
+      pack_sop1(0, 125, scalar_positive_inline_u32(1)),
+      pack_sop1(67, 10, 2),
+      pack_sop1(65, 2, 10),
+      pack_sop1(0, 125, 255),
+      0x100u,
+      pack_sop1(68, 8, 13),
+      pack_sop1(0, 125, scalar_positive_inline_u32(1)),
+      pack_sop1(64, 14, 8),
+  };
+  std::array<uint32_t, text_words.size() + 1u> kernel_words{};
+  std::copy(text_words.begin(), text_words.end(), kernel_words.begin());
+  kernel_words.back() = kGfx1250SEndpgm;
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(kernel_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const auto translated_words = translated_executable_words_for_test(translated);
+
+  EXPECT_NE(std::ranges::find(translated_words, pack_sop1(1, 12, 2)), translated_words.end());
+  EXPECT_NE(std::ranges::find(translated_words, pack_sop1(1, 2, 12)), translated_words.end());
+  EXPECT_NE(std::ranges::find(translated_words, pack_sop1(0, 9, 13)), translated_words.end());
+  EXPECT_NE(std::ranges::find(translated_words, pack_sop1(0, 14, 9)), translated_words.end());
+  EXPECT_EQ(std::ranges::find(translated_words, text_words[5]), translated_words.end());
 }
 
 TEST(BinaryTranslator, Gfx1250StaticSwappcTargetPreservesCallerLiveVgprs) {

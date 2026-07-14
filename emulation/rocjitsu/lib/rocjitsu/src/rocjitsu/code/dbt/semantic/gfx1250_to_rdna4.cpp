@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -3384,6 +3385,119 @@ std::vector<uint32_t> preserve_same_sop1_encoding(const Instruction &inst, uint3
   if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
     return {};
   return {raw[0]};
+}
+
+std::vector<uint32_t> preserve_same_sopk_encoding(const Instruction &inst, uint32_t, uint64_t,
+                                                  std::span<const uint8_t>,
+                                                  const LivenessAnalysis &, const LaneLayout *,
+                                                  const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return {};
+  return {raw[0]};
+}
+
+std::optional<int64_t> static_s_add_pc_delta(const Instruction &inst) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() < static_cast<int>(sizeof(uint32_t)))
+    return std::nullopt;
+  const auto src = std::bit_cast<gfx1250::Sop1MachineInst>(raw[0]);
+  if (src.ssrc0 >= 128 && src.ssrc0 <= 192)
+    return static_cast<int64_t>(src.ssrc0 - 128u);
+  if (src.ssrc0 >= 193 && src.ssrc0 <= 208)
+    return -static_cast<int64_t>(src.ssrc0 - 192u);
+  if (src.ssrc0 == 255 && inst.size() >= 2 * static_cast<int>(sizeof(uint32_t)))
+    return static_cast<int64_t>(static_cast<int32_t>(raw[1]));
+  if (src.ssrc0 == 254 && inst.size() >= 3 * static_cast<int>(sizeof(uint32_t))) {
+    const uint64_t bits = static_cast<uint64_t>(raw[1]) | (static_cast<uint64_t>(raw[2]) << 32u);
+    return std::bit_cast<int64_t>(bits);
+  }
+  return std::nullopt;
+}
+
+ExpandResult lower_s_add_pc_to_rdna4(const Instruction &inst, uint32_t host_arch, uint64_t offset,
+                                     std::span<const uint8_t> text, const LivenessAnalysis &,
+                                     TranslationContext &, const LaneLayout *, const LaneLayout *) {
+  const auto delta = static_s_add_pc_delta(inst);
+  if (!delta)
+    return ExpandResult::failed("s_add_pc_i64 requires a static inline or literal displacement");
+  if (offset > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) -
+                   static_cast<uint64_t>(inst.size())) {
+    return ExpandResult::failed("s_add_pc_i64 target overflows .text coordinates");
+  }
+  const int64_t next_pc = static_cast<int64_t>(offset) + inst.size();
+  if ((*delta > 0 && next_pc > std::numeric_limits<int64_t>::max() - *delta) ||
+      (*delta < 0 && next_pc < std::numeric_limits<int64_t>::min() - *delta)) {
+    return ExpandResult::failed("s_add_pc_i64 target overflows .text coordinates");
+  }
+  const int64_t target = next_pc + *delta;
+  if (target < 0 || target % static_cast<int64_t>(sizeof(uint32_t)) != 0 ||
+      static_cast<uint64_t>(target) >= text.size()) {
+    return ExpandResult::failed("s_add_pc_i64 target is outside aligned guest .text");
+  }
+  const int64_t branch_delta =
+      static_cast<int64_t>(inst.size()) - static_cast<int64_t>(sizeof(uint32_t)) + *delta;
+  if (branch_delta % static_cast<int64_t>(sizeof(uint32_t)) != 0 ||
+      branch_delta / static_cast<int64_t>(sizeof(uint32_t)) < std::numeric_limits<int16_t>::min() ||
+      branch_delta / static_cast<int64_t>(sizeof(uint32_t)) > std::numeric_limits<int16_t>::max()) {
+    return ExpandResult::failed("s_add_pc_i64 target exceeds the target s_branch range");
+  }
+
+  const auto branch_dwords =
+      static_cast<int16_t>(branch_delta / static_cast<int64_t>(sizeof(uint32_t)));
+  return ExpandResult::success(
+      {build_s_branch(branch_dwords, static_cast<rj_code_arch_t>(host_arch))});
+}
+
+std::vector<uint32_t> lower_s_get_shader_cycles_to_realtime(const Instruction &inst, uint32_t,
+                                                            uint64_t, std::span<const uint8_t>,
+                                                            const LivenessAnalysis &,
+                                                            const LaneLayout *,
+                                                            const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return {};
+  const auto src = std::bit_cast<gfx1250::Sop1MachineInst>(raw[0]);
+  if (src.sdst >= 127)
+    return {};
+
+  // RDNA4 has no per-shader cycle-read instruction. GET_REALTIME supplies the
+  // closest architectural contract: an asynchronous, monotonic 64-bit clock.
+  // Its tick rate is target-defined, so translated code must use differences,
+  // not assume gfx1250 shader-cycle units.
+  constexpr uint8_t kOpSSendmsgRtnB64 = 77;
+  constexpr uint8_t kSoppWaitKmcnt = 0x47;
+  constexpr uint8_t kMsgRtnGetRealtime = 0x83;
+  return {pack_sop1(kOpSSendmsgRtnB64, src.sdst, kMsgRtnGetRealtime), pack_sopp(kSoppWaitKmcnt, 0)};
+}
+
+ExpandResult lower_s_movrelsd_2_b32_to_rdna4(const Instruction &, uint32_t, uint64_t,
+                                             std::span<const uint8_t>, const LivenessAnalysis &,
+                                             TranslationContext &, const LaneLayout *,
+                                             const LaneLayout *) {
+  return ExpandResult::failed(
+      "s_movrelsd_2_b32 lowering requires a statically known preceding M0 value");
+}
+
+std::vector<uint32_t> lower_s_get_barrier_state_to_zero(const Instruction &inst, uint32_t host_arch,
+                                                        uint64_t, std::span<const uint8_t>,
+                                                        const LivenessAnalysis &,
+                                                        const LaneLayout *, const LaneLayout *) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return {};
+  const auto src = std::bit_cast<gfx1250::Sop1MachineInst>(raw[0]);
+  return {build_s_mov_b32(src.sdst, scalar_positive_inline_u32(0),
+                          static_cast<rj_code_arch_t>(host_arch))};
+}
+
+std::vector<uint32_t> lower_s_wakeup_barrier_to_nop(const Instruction &inst, uint32_t host_arch,
+                                                    uint64_t, std::span<const uint8_t>,
+                                                    const LivenessAnalysis &, const LaneLayout *,
+                                                    const LaneLayout *) {
+  if (!inst.raw_encoding() || inst.size() != static_cast<int>(sizeof(uint32_t)))
+    return {};
+  return {build_s_nop(0, static_cast<rj_code_arch_t>(host_arch))};
 }
 
 std::vector<uint32_t> lower_s_sendmsg_rtn_to_rdna4(const Instruction &inst, uint32_t, uint64_t,
@@ -12640,6 +12754,7 @@ constexpr uint16_t kEncSop2SMulU64 = 0x155;
 constexpr uint16_t kEncSopkMovk = 0x160;
 constexpr uint16_t kEncSopkGetreg = 0x171;
 constexpr uint16_t kEncSopkSetregImm32 = 0x173;
+constexpr uint16_t kEncSopkCall = 0x174;
 constexpr uint16_t kEncSop1 = 0x17D;
 constexpr uint16_t kEncSopc = 0x17E;
 constexpr uint16_t kEncSopp = 0x17F;
@@ -12684,11 +12799,17 @@ constexpr uint16_t kEncVimage = 0x1A0;
 constexpr uint16_t kOpSMovB64 = 1;
 constexpr uint16_t kOpSMovkI32 = 0;
 constexpr uint16_t kOpSMovB32 = 0;
+constexpr uint16_t kOpSGetShaderCyclesU64 = 6;
+constexpr uint16_t kOpSMovrelsd2B32 = 68;
 constexpr uint16_t kOpSGetPcI64 = 71;
 constexpr uint16_t kOpSSetPcI64 = 72;
 constexpr uint16_t kOpSSwapPcI64 = 73;
+constexpr uint16_t kOpSAddPcI64 = 75;
+constexpr uint16_t kOpSCallI64 = 20;
 constexpr uint16_t kOpSSendmsgRtnB32 = 0x4C;
 constexpr uint16_t kOpSSendmsgRtnB64 = 0x4D;
+constexpr uint16_t kOpSGetBarrierState = 80;
+constexpr uint16_t kOpSWakeupBarrier = 87;
 constexpr uint16_t kOpSCmpLgU64 = 17;
 constexpr uint16_t kOpSGetregB32 = 17;
 constexpr uint16_t kOpSSetregImm32B32 = 19;
@@ -13413,20 +13534,32 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(lower_gfx1250_grid_mode_s_getreg_to_zero), nullptr, nullptr},
     {kEncSopkSetregImm32, kOpSSetregImm32B32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(preserve_gfx1250_replay_mode_s_setreg_imm32), nullptr, nullptr},
+    {kEncSopkCall, kOpSCallI64, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(preserve_same_sopk_encoding), nullptr, nullptr},
     {kEncSop1, kOpSMovB32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_gfx1250_resource_s_mov_b32), nullptr, nullptr},
     {kEncSop1, kOpSMovB64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_mov_b64_literal64), nullptr, nullptr},
+    {kEncSop1, kOpSGetShaderCyclesU64, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_s_get_shader_cycles_to_realtime), nullptr, nullptr},
+    {kEncSop1, kOpSMovrelsd2B32, RuleAction::Expand, 0, 0, nullptr, lower_s_movrelsd_2_b32_to_rdna4,
+     nullptr, nullptr},
     {kEncSop1, kOpSGetPcI64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(preserve_same_sop1_encoding), nullptr, nullptr},
     {kEncSop1, kOpSSetPcI64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(preserve_same_sop1_encoding), nullptr, nullptr},
     {kEncSop1, kOpSSwapPcI64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(preserve_same_sop1_encoding), nullptr, nullptr},
+    {kEncSop1, kOpSAddPcI64, RuleAction::Expand, 0, 0, nullptr, lower_s_add_pc_to_rdna4, nullptr,
+     nullptr},
     {kEncSop1, kOpSSendmsgRtnB32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_sendmsg_rtn_to_rdna4), nullptr, nullptr},
     {kEncSop1, kOpSSendmsgRtnB64, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(lower_s_sendmsg_rtn_to_rdna4), nullptr, nullptr},
+    {kEncSop1, kOpSGetBarrierState, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_s_get_barrier_state_to_zero), nullptr, nullptr},
+    {kEncSop1, kOpSWakeupBarrier, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(lower_s_wakeup_barrier_to_nop), nullptr, nullptr},
     {kEncSopc, kOpSCmpLgU64, RuleAction::Expand, 0, 0, nullptr, lower_s_cmp_u64_literal64, nullptr,
      nullptr},
     {kEncSopp, kOpSClause, RuleAction::Expand, 0, 0, nullptr,

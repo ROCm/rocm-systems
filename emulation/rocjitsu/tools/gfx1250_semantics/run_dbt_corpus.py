@@ -6,6 +6,7 @@ import argparse
 import filecmp
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -22,8 +23,6 @@ EXPECTED_XFAILS = {
     "cluster_global_async_memory_ops": "EXPAND not yet implemented for cluster_load_b64",
     "ds_special_ops": "EXPAND not yet implemented for ds_atomic_async_barrier_arrive_b64",
     "monitor_load_ops": "EXPAND not yet implemented for global_load_monitor_b32",
-    "scalar_call_ops": "EXPAND not yet implemented for s_call_i64",
-    "scalar_control_ops": "EXPAND not yet implemented for s_get_shader_cycles_u64",
 }
 
 
@@ -150,9 +149,34 @@ def compare_outputs(corpus_dir, case, out_dir):
         expected = gold_dir / output_buffer["file"]
         if not produced.exists() or not expected.exists():
             missing.append(output_buffer["name"])
-        elif not filecmp.cmp(produced, expected, shallow=False):
+        elif not outputs_match(case, output_buffer, produced, expected):
             mismatches.append(output_buffer["name"])
     return reference_label, missing, mismatches
+
+
+def outputs_match(case, output_buffer, produced, expected):
+    if case["name"] != "scalar_control_ops" or output_buffer["name"] != "out_u64":
+        return filecmp.cmp(produced, expected, shallow=False)
+
+    produced_bytes = produced.read_bytes()
+    expected_bytes = expected.read_bytes()
+    if len(produced_bytes) != len(expected_bytes) or len(produced_bytes) != 12 * 8:
+        return False
+
+    # s_swap_pc returns the runtime-relocated address of its fallthrough. HSA
+    # loads the translated code object at a different address than the fixed
+    # KMD simulator mapping, while both kernel entries are 256-byte aligned.
+    # Compare the exact fallthrough residue and keep every other result exact.
+    pc_offset = 9 * 8
+    produced_pc = struct.unpack_from("<Q", produced_bytes, pc_offset)[0]
+    expected_pc = struct.unpack_from("<Q", expected_bytes, pc_offset)[0]
+    return (
+        produced_bytes[:pc_offset] == expected_bytes[:pc_offset]
+        and produced_pc != 0
+        and expected_pc != 0
+        and (produced_pc & 0xFF) == (expected_pc & 0xFF)
+        and produced_bytes[pc_offset + 8 :] == expected_bytes[pc_offset + 8 :]
+    )
 
 
 def run_case(args, case):
