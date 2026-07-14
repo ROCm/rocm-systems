@@ -34,7 +34,7 @@ void reset_state()
     g_dbg_guards.clear();
     for (auto& shard : g_shards)
     {
-        std::lock_guard<std::mutex> guard(shard.mu);
+        std::lock_guard<std::mutex> guard(shard.mutex);
         shard.snapshots.clear();
         shard.lru_order.clear();
         shard.lru_idx.clear();
@@ -47,7 +47,7 @@ void reset_state()
     g_n_callback_errors.store(0);
     g_n_user_scope_pushes.store(0);
     g_n_user_scope_pops.store(0);
-    g_n_userscope_inherits.store(0);
+    g_n_user_scope_inherits.store(0);
 }
 
 class RoctxRecordFnTest : public ::testing::Test
@@ -76,7 +76,7 @@ std::size_t pending_snapshots()
     std::size_t pending = 0;
     for (auto& shard : g_shards)
     {
-        std::lock_guard<std::mutex> guard(shard.mu);
+        std::lock_guard<std::mutex> guard(shard.mutex);
         pending += shard.snapshots.size();
     }
     return pending;
@@ -406,7 +406,7 @@ TEST_F(RoctxRecordFnTest, EmptyParentChainIsNoOp)
     ASSERT_TRUE(g_stack.empty());
     EXPECT_EQ(apply_userscope_overlay(), 0u);
     EXPECT_TRUE(g_stack.empty());
-    EXPECT_EQ(g_n_userscope_inherits.load(), 0u);
+    EXPECT_EQ(g_n_user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnTest, CopiesParentChain)
@@ -422,7 +422,7 @@ TEST_F(RoctxRecordFnTest, CopiesParentChain)
     EXPECT_EQ(g_stack[0].context, "c1");
     EXPECT_EQ(g_stack[1].marker, "P2");
     EXPECT_EQ(g_stack[1].context, "c2");
-    EXPECT_EQ(g_n_userscope_inherits.load(), 1u);
+    EXPECT_EQ(g_n_user_scope_inherits.load(), 1u);
 }
 
 TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
@@ -436,7 +436,7 @@ TEST_F(RoctxRecordFnTest, DedupesIdenticalPrefix)
 
     EXPECT_EQ(apply_userscope_overlay(), 0u);
     EXPECT_EQ(g_stack.size(), 2u);
-    EXPECT_EQ(g_n_userscope_inherits.load(), 0u);
+    EXPECT_EQ(g_n_user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, FwdBwdCounterSanity)
@@ -526,7 +526,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     EXPECT_TRUE(saw_torch_backend);
     ASSERT_GT(bwd_total, 0u);
     EXPECT_GT(bwd_under_scope, 0u);
-    EXPECT_GT(g_n_userscope_inherits.load(), 0u);
+    EXPECT_GT(g_n_user_scope_inherits.load(), 0u);
 }
 
 TEST_F(RoctxRecordFnRealOpsTest, ManyStepsCorrelation)
