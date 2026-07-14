@@ -25,7 +25,7 @@
 """
 Automated test suite for the SQTT instrumentation pass.
 
-Compiles test/markers/kernels/auto.hip with various env var configurations and verifies:
+Compiles test/markers/kernels/auto.cpp with various env var configurations and verifies:
 - IR patterns (readlane loops, ptrtoint, exec mask)
 - Assembly patterns (v_readlane_b32, s_ttracedata)
 - Funcmap entries in the .sqtt_funcmap ELF section
@@ -53,9 +53,9 @@ BUILD_DIR = os.environ.get("SQTT_BUILD_DIR", os.path.join(PROJECT_ROOT, "build")
 PASS_PLUGIN = os.environ.get(
     "SQTT_PASS_PLUGIN", os.path.join(BUILD_DIR, "lib", "SQTTInstrumentPass.so"))
 INCLUDE_DIR = os.path.join(PROJECT_ROOT, "include", "rocprof_trace_decoder", "cxx")
-TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.hip")
-ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.hip")
-MARKER_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "marker.hip")
+TEST_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "auto.cpp")
+ADDR_TRACE_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "addr_trace.cpp")
+MARKER_SOURCE = os.path.join(SCRIPT_DIR, "kernels", "marker.cpp")
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 
 # Add scripts/ to path for find_llvm_tool

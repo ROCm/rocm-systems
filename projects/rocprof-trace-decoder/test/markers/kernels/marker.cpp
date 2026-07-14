@@ -26,7 +26,7 @@
 //
 // Build (enabled + pass plugin for named markers):
 //   hipcc -DSQTT_ENABLED=1 -fpass-plugin=../../../build/lib/SQTTInstrumentPass.so \
-//         -I ../../include/ marker.hip -o marker
+//         -I ../../include/ marker.cpp -o marker
 
 #include <hip/hip_runtime.h>
 #include "markers.hpp"

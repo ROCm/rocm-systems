@@ -347,7 +347,7 @@ rocprofv3 --att -d trace -- ./heavy
 
 ### Automatic function instrumentation
 
-The `auto.hip` test contains a kernel calling device functions of varying size.
+The `auto.cpp` test contains a kernel calling device functions of varying size.
 Functions exceeding the threshold are automatically instrumented with entry/exit
 markers -- no source changes needed:
 
@@ -382,7 +382,7 @@ Build with automatic function instrumentation and capture a trace:
 ```bash
 SQTT_INSTRUMENT_FUNCTIONS=10 \
 hipcc -DSQTT_ENABLED=1 -fpass-plugin=build/lib/SQTTInstrumentPass.so \
-      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/auto.hip -o auto
+      -I include/rocprof_trace_decoder/cxx/ test/markers/kernels/auto.cpp -o auto
 
 rocprofv3 --att -d trace -- ./auto
 ```

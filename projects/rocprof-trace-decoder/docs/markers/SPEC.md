@@ -842,15 +842,15 @@ Example funcmap entries:
 
 ```
 W:64
-P:5:addr_trace_lds_store@test_auto.hip:45
+P:5:addr_trace_lds_store@test_auto.cpp:45
 R:5:extra_payload_count=66
-P:6:addr_trace_lds_load@test_auto.hip:49
+P:6:addr_trace_lds_load@test_auto.cpp:49
 R:6:extra_payload_count=66
-P:7:addr_trace_store@test_auto.hip:62
+P:7:addr_trace_store@test_auto.cpp:62
 R:7:extra_payload_count=130
-P:8:addr_trace_atomic@test_auto.hip:70
+P:8:addr_trace_atomic@test_auto.cpp:70
 R:8:extra_payload_count=130
-P:9:addr_trace_buffer_load@test_auto.hip:85
+P:9:addr_trace_buffer_load@test_auto.cpp:85
 R:9:extra_payload_count=69
 ```
 
