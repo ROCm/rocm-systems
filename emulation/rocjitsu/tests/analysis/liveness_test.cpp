@@ -6,6 +6,8 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -212,17 +214,32 @@ LivenessAnalysis analyze_scope(const std::vector<std::unique_ptr<BasicBlock>> &b
   return LivenessAnalysis(KernelBlockScope(scope));
 }
 
-uint32_t pack_sopc(uint32_t op, uint16_t ssrc0, uint16_t ssrc1) {
-  constexpr uint32_t kSopcEncodingPrefix = 0x17e;
-  return (kSopcEncodingPrefix << 23) | ((op & 0x7fu) << 16) | ((ssrc1 & 0xffu) << 8) |
-         (ssrc0 & 0xffu);
+// CFG/liveness tests care about decoded register effects, not the physical
+// field layout. Keep their compact fixture syntax while routing construction
+// through the same generated CDNA3 encoders used by production translation.
+uint32_t pack_sopp(uint16_t op, uint16_t simm16) {
+  return cdna3::build_sopp(op, {.simm16 = simm16})[0];
+}
+
+uint32_t pack_sop1(uint16_t op, uint16_t sdst, uint16_t ssrc0) {
+  return cdna3::build_sop1(
+      op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+}
+
+uint32_t pack_sop2(uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1) {
+  return cdna3::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                .sdst = static_cast<uint8_t>(sdst)})[0];
+}
+
+uint32_t pack_sopc(uint16_t op, uint16_t ssrc0, uint16_t ssrc1) {
+  return cdna3::build_sopc(
+      op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .ssrc1 = static_cast<uint8_t>(ssrc1)})[0];
 }
 
 uint32_t build_s_call_b64(uint16_t sdst, int16_t simm16) {
-  constexpr uint32_t kSopkEncodingPrefix = 0xb;
-  constexpr uint32_t kSCallB64Opcode = 0x15;
-  return (kSopkEncodingPrefix << 28) | (kSCallB64Opcode << 23) | ((sdst & 0x7fu) << 16) |
-         static_cast<uint16_t>(simm16);
+  return cdna3::build_sopk(cdna3::kSCallB64Sopk, {.simm16 = static_cast<uint16_t>(simm16),
+                                                  .sdst = static_cast<uint8_t>(sdst)})[0];
 }
 
 TEST(RegisterSetAnalysis, KeepsRegisterClassesSeparate) {

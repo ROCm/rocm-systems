@@ -8,7 +8,7 @@
 /// @details Provides helpers for encoding frequently-used instructions
 /// (s_branch, s_nop) in the DBT and DBI layers. The SOPP encoding
 /// format is identical across all AMDGPU ISA generations:
-///   bits[31:23] = 0x17F (SOPP encoding prefix)
+///   bits[31:23] = SOPP encoding selector
 ///   bits[22:16] = op (7-bit opcode)
 ///   bits[15:0]  = simm16 (16-bit signed/unsigned immediate)
 ///
@@ -26,14 +26,38 @@
 #include <vector>
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/opcodes.h"
 
 namespace rocjitsu {
 
 class Instruction;
 
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
-inline constexpr uint32_t kSoppEncodingPrefix = 0x17F;
-inline constexpr uint32_t kSop1EncodingPrefix = 0x17D;
+inline constexpr uint32_t kSoppEncodingPrefix = cdna4::encoding::kSopp;
+inline constexpr uint32_t kSop1EncodingPrefix = cdna4::encoding::kSop1;
+// SOP2 stores only a two-bit fixed prefix in MachineInst::encoding. Generated
+// encoding::kSop2 is instead the wider primary-decode selector (word0 >> 23),
+// so using it directly here would conflate two different representations.
 inline constexpr uint32_t kSop2EncodingPrefix = 0x2;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
@@ -58,6 +82,124 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
                                                   uint32_t ssrc1) {
   return (kSop2EncodingPrefix << 30) | ((op & 0x7Fu) << 23) | ((sdst & 0x7Fu) << 16) |
          ((ssrc1 & 0xFFu) << 8) | (ssrc0 & 0xFFu);
+}
+
+/// @brief Build a SOPP word using the generated layout for @p arch.
+[[nodiscard]] inline constexpr uint32_t build_sopp_encoding(rj_code_arch_t arch, uint16_t op,
+                                                            uint16_t simm16) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_sopp(op, {.simm16 = simm16})[0];
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sopp(op, {.simm16 = simm16})[0];
+  default:
+    return pack_sopp(op, simm16);
+  }
+}
+
+/// @brief Build a SOP1 word using the generated layout for @p arch.
+[[nodiscard]] inline constexpr uint32_t build_sop1_encoding(rj_code_arch_t arch, uint16_t op,
+                                                            uint16_t sdst, uint16_t ssrc0) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sop1(
+        op, {.ssrc0 = static_cast<uint8_t>(ssrc0), .sdst = static_cast<uint8_t>(sdst)})[0];
+  default:
+    return pack_sop1(op, sdst, ssrc0);
+  }
+}
+
+/// @brief Build a SOP2 word using the generated layout for @p arch.
+[[nodiscard]] inline constexpr uint32_t build_sop2_encoding(rj_code_arch_t arch, uint16_t op,
+                                                            uint16_t sdst, uint16_t ssrc0,
+                                                            uint16_t ssrc1) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                    .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                    .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                  .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                  .sdst = static_cast<uint8_t>(sdst)})[0];
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::build_sop2(op, {.ssrc0 = static_cast<uint8_t>(ssrc0),
+                                    .ssrc1 = static_cast<uint8_t>(ssrc1),
+                                    .sdst = static_cast<uint8_t>(sdst)})[0];
+  default:
+    return pack_sop2(op, sdst, ssrc0, ssrc1);
+  }
 }
 
 /// @brief Scalar source operand encoding for a non-negative inline integer.
@@ -101,65 +243,184 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 
 /// @brief Get the s_branch opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_branch(rj_code_arch_t arch) {
-  // GFX9 (CDNA1-4): opcode 2; GFX12 (RDNA3/3.5/4): opcode 32
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSBranchSopp;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSBranchSopp;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSBranchSopp;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSBranchSopp;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSBranchSopp;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSBranchSopp;
   case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSBranchSopp;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSBranchSopp;
   case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSBranchSopp;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return 32;
+    return gfx1250::kSBranchSopp;
   default:
-    return 2;
+    return cdna4::kSBranchSopp;
   }
 }
 
 /// @brief Get the s_endpgm opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
-  // GFX9 (CDNA1-4): opcode 1; GFX12 (RDNA3/3.5/4, gfx1250): opcode 48
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSEndpgmSopp;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSEndpgmSopp;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSEndpgmSopp;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSEndpgmSopp;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSEndpgmSopp;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSEndpgmSopp;
   case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSEndpgmSopp;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSEndpgmSopp;
   case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSEndpgmSopp;
   case ROCJITSU_CODE_ARCH_GFX1250:
-    return 48;
+    return gfx1250::kSEndpgmSopp;
   default:
-    return 1;
+    return cdna4::kSEndpgmSopp;
   }
 }
 /// @brief Get the s_nop opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_nop([[maybe_unused]] rj_code_arch_t arch) {
-  return 0; // s_nop is opcode 0 on all ISAs
+[[nodiscard]] inline constexpr uint32_t sopp_op_nop(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSNopSopp;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSNopSopp;
+  default:
+    return cdna4::kSNopSopp;
+  }
 }
 
 /// @brief Get the s_lshl_b32 opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sop2_op_lshl_b32(rj_code_arch_t arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return 8;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSLshlB32Sop2;
   case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSLshlB32Sop2;
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return 30;
+    return rdna2::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSLshlB32Sop2;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSLshlB32Sop2;
   default:
-    return 28;
+    return cdna4::kSLshlB32Sop2;
   }
 }
 
 /// @brief Get the s_lshr_b32 opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sop2_op_lshr_b32(rj_code_arch_t arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return 10;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSLshrB32Sop2;
   case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSLshrB32Sop2;
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return 32;
+    return rdna2::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSLshrB32Sop2;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSLshrB32Sop2;
   default:
-    return 30;
+    return cdna4::kSLshrB32Sop2;
+  }
+}
+
+/// @brief Get the s_delay_alu opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sopp_op_delay_alu(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSDelayAluSopp;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSDelayAluSopp;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSDelayAluSopp;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSDelayAluSopp;
+  default:
+    return rdna4::kSDelayAluSopp;
+  }
+}
+
+/// @brief Get the s_mov_b32 opcode for a target ISA.
+[[nodiscard]] inline constexpr uint32_t sop1_op_mov_b32(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return cdna1::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return cdna2::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return cdna3::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return cdna4::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSMovB32Sop1;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return gfx1250::kSMovB32Sop1;
+  default:
+    return cdna4::kSMovB32Sop1;
   }
 }
 
@@ -169,7 +430,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @param arch           Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_branch(int16_t offset_dwords, rj_code_arch_t arch) {
-  return pack_sopp(sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
+  return build_sopp_encoding(arch, sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
 
 /// @brief Patch an emitted direct PC-relative branch instruction in-place.
@@ -201,7 +462,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t
 build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
-  return pack_sopp(sopp_op_nop(arch), cycles);
+  return build_sopp_encoding(arch, sopp_op_nop(arch), cycles);
 }
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
@@ -209,31 +470,30 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @param arch    Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
-  return pack_sopp(sopp_op_endpgm(arch), 0);
+  return build_sopp_encoding(arch, sopp_op_endpgm(arch), 0);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t) {
-  constexpr uint8_t kSoppDelayAlu = 7;
-  return pack_sopp(kSoppDelayAlu, simm16);
+[[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch) {
+  return build_sopp_encoding(arch, sopp_op_delay_alu(arch), simm16);
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_mov_b32(uint16_t sdst, uint16_t ssrc0,
-                                                        rj_code_arch_t) {
-  return pack_sop1(0, sdst, ssrc0);
+                                                        rj_code_arch_t arch) {
+  return build_sop1_encoding(arch, sop1_op_mov_b32(arch), sdst, ssrc0);
 }
 
 /// @brief Encode s_lshl_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_lshl_b32(uint16_t sdst, uint16_t ssrc0,
                                                          uint16_t ssrc1, rj_code_arch_t arch) {
-  return pack_sop2(sop2_op_lshl_b32(arch), sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, sop2_op_lshl_b32(arch), sdst, ssrc0, ssrc1);
 }
 
 /// @brief Encode s_lshr_b32 for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_lshr_b32(uint16_t sdst, uint16_t ssrc0,
                                                          uint16_t ssrc1, rj_code_arch_t arch) {
-  return pack_sop2(sop2_op_lshr_b32(arch), sdst, ssrc0, ssrc1);
+  return build_sop2_encoding(arch, sop2_op_lshr_b32(arch), sdst, ssrc0, ssrc1);
 }
 
 } // namespace rocjitsu

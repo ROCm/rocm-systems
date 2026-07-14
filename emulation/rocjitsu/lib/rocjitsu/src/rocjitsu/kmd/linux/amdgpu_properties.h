@@ -8,8 +8,11 @@
 
 #include "util/bit.h"
 
+#include <charconv>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace rocjitsu::kmd {
 
@@ -79,6 +82,36 @@ inline std::string gfx_target_name(uint32_t gfx_target_version) {
   if (ip.minor < 16 && ip.stepping < 16)
     return "gfx" + std::to_string(ip.major) + kHexDigits[ip.minor] + kHexDigits[ip.stepping];
   return "gfx" + std::to_string(ip.major) + std::to_string(ip.minor) + std::to_string(ip.stepping);
+}
+
+inline std::optional<uint32_t> gfx_target_version_from_name(std::string_view name) {
+  constexpr std::string_view prefix = "gfx";
+  if (!name.starts_with(prefix) || name.size() < prefix.size() + 3)
+    return std::nullopt;
+
+  name.remove_prefix(prefix.size());
+  auto hex_nibble = [](char digit) -> std::optional<uint32_t> {
+    if (digit >= '0' && digit <= '9')
+      return static_cast<uint32_t>(digit - '0');
+    if (digit >= 'a' && digit <= 'f')
+      return static_cast<uint32_t>(digit - 'a' + 10);
+    if (digit >= 'A' && digit <= 'F')
+      return static_cast<uint32_t>(digit - 'A' + 10);
+    return std::nullopt;
+  };
+
+  const std::string_view major_text = name.substr(0, name.size() - 2);
+  uint32_t major = 0;
+  auto [ptr, err] =
+      std::from_chars(major_text.data(), major_text.data() + major_text.size(), major);
+  if (err != std::errc{} || ptr != major_text.data() + major_text.size())
+    return std::nullopt;
+
+  std::optional<uint32_t> minor = hex_nibble(name[name.size() - 2]);
+  std::optional<uint32_t> stepping = hex_nibble(name[name.size() - 1]);
+  if (!minor || !stepping)
+    return std::nullopt;
+  return major * 10000 + *minor * 100 + *stepping;
 }
 
 constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,

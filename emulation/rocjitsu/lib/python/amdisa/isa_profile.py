@@ -1033,6 +1033,13 @@ class CdnaProfile(_AmdgpuProfileBase):
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX940_SC0_SC1_NT
 
+    @property
+    def uses_true16_vop3_opsel(self) -> bool:
+        # CDNA VOP3 OP_SEL uses bits [0:2] for source half selection and
+        # bit [3] for destination half selection. Low-destination writes
+        # zero the upper half; see the CDNA ISA OP_SEL field description.
+        return True
+
 
 class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
