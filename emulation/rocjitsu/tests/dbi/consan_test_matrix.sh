@@ -9,6 +9,8 @@ rocm_dist="${ROCM_DIST_DIR:-}"
 parallel="${CTEST_PARALLEL_LEVEL:-8}"
 gpu_arch="${CONSAN_GPU_ARCH:-}"
 dry_run="${CONSAN_DRY_RUN:-0}"
+ctest_emulator="${CONSAN_CTEST_EMULATOR:-}"
+ctest_emulator_config="${CONSAN_CTEST_EMULATOR_CONFIG:-}"
 
 usage() {
   printf '%s\n' \
@@ -18,6 +20,8 @@ usage() {
     "  ROCJITSU_BUILD_DIR  IREE_BUILD_DIR  HIP_MOI_BUILD_DIR  ROCM_DIST_DIR" \
     "Optional: CTEST_PARALLEL_LEVEL (default 8)" \
     "          CONSAN_GPU_ARCH=gfx1201|gfx950 (auto-detected by default)" \
+    "          CONSAN_CTEST_EMULATOR=/path/to/rocjitsu" \
+    "          CONSAN_CTEST_EMULATOR_CONFIG=/path/to/gfx1201.json" \
     "          CONSAN_DRY_RUN=1 (list and validate selections without running)"
 }
 
@@ -62,6 +66,20 @@ case "${gpu_arch}" in
   gfx1201|gfx950) ;;
   *) printf 'unsupported CONSAN_GPU_ARCH: %s\n' "${gpu_arch}" >&2; exit 2 ;;
 esac
+
+ctest_command=(ctest)
+if [[ -n "${ctest_emulator}" || -n "${ctest_emulator_config}" ]]; then
+  if [[ ! -x "${ctest_emulator}" ]]; then
+    printf 'CONSAN_CTEST_EMULATOR is not executable: %s\n' "${ctest_emulator}" >&2
+    exit 2
+  fi
+  if [[ ! -f "${ctest_emulator_config}" ]]; then
+    printf 'CONSAN_CTEST_EMULATOR_CONFIG is not a file: %s\n' \
+      "${ctest_emulator_config}" >&2
+    exit 2
+  fi
+  ctest_command=("${ctest_emulator}" --config "${ctest_emulator_config}" -- ctest)
+fi
 
 tier1_guarded_regex() {
   case "${gpu_arch}" in
@@ -121,7 +139,7 @@ run_ctest() {
   shift 3
   if [[ "${dry_run}" == 1 ]]; then
     local listing
-    listing="$(env "$@" ctest --test-dir "${build_dir}" -N -R "${regex}")"
+    listing="$(env "$@" "${ctest_command[@]}" --test-dir "${build_dir}" -N -R "${regex}")"
     local count
     count="$(grep -c 'Test  *#' <<<"${listing}" || true)"
     printf '%s\n' "${listing}"
@@ -132,8 +150,8 @@ run_ctest() {
     printf 'dry-run selected %s tests from %s\n' "${count}" "${build_dir}"
     return 0
   fi
-  env "$@" ctest --test-dir "${build_dir}" -j "${parallel}" --timeout "${timeout}" \
-    --output-on-failure -R "${regex}"
+  env "$@" "${ctest_command[@]}" --test-dir "${build_dir}" -j "${parallel}" \
+    --timeout "${timeout}" --output-on-failure -R "${regex}"
 }
 
 run_iree_profile() {
