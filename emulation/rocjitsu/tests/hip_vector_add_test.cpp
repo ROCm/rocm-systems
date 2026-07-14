@@ -5,7 +5,7 @@
 /// @brief HIP vector_add kernel launch through real ROCR on simulated GPU.
 ///
 /// Compiled with hipcc (HIP language support for __global__ kernels). Requires
-/// LD_PRELOAD=librocjitsu_kmd.so.
+/// LD_PRELOAD=librocjitsu.so.
 
 #include <cmath>
 #include <cstdlib>

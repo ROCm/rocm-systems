@@ -64,28 +64,84 @@ static const uint32_t kNumThreads = 4096;
 
 typedef struct control_block {
     hsa_amd_memory_pool_t* pool;
+    MemoryAlignmentTest* test_obj;
 } cb_t;
+
+// Function to test memory allocations and verify pointer alignment
+// Performs all pool checks and allocations
+void MemoryAlignmentTest::TestPoolAllocationsAlignment(hsa_amd_memory_pool_t pool) {
+  hsa_status_t err;
+
+  // Get pool information
+  rocrtst::pool_info_t pool_i;
+  err = rocrtst::AcquirePoolInfo(pool, &pool_i);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  // Only proceed if allocation is allowed
+  if (!pool_i.alloc_allowed) {
+    return;
+  }
+
+  // Get the allocated alignment size
+  size_t alignment_size = pool_i.alloc_alignment;
+  EXPECT_TRUE(alignment_size);
+
+  // Verifies the alignment attribute is a power of 2
+  if (pool_i.size != 0) {
+    EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
+  }
+
+  // Test with multiple allocation sizes
+  const size_t test_sizes[] = {64, 256, 1024, 4096, 65536};
+  const int num_test_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
+
+  for (int i = 0; i < num_test_sizes; ++i) {
+    void* ptr = nullptr;
+    size_t alloc_size = test_sizes[i];
+
+    // Only attempt allocation if the pool has enough space
+    if (pool_i.size > 0 && alloc_size > pool_i.size) {
+      continue;
+    }
+
+    err = hsa_amd_memory_pool_allocate(pool, alloc_size, 0, &ptr);
+    if (err == HSA_STATUS_SUCCESS) {
+      uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+
+      if (verbosity() > 1) {
+        std::cout << "      Allocated " << alloc_size << " bytes at 0x"
+                  << std::hex << addr << std::dec;
+      }
+
+      // Verify the returned pointer is aligned
+      EXPECT_EQ(addr % alignment_size, 0)
+          << "Allocation of size " << alloc_size
+          << " returned pointer 0x" << std::hex << addr << std::dec
+          << " which is not aligned to " << alignment_size;
+
+      if (verbosity() > 1) {
+        if (addr % alignment_size == 0) {
+          std::cout << " - correctly aligned" << std::endl;
+        } else {
+          std::cout << " - MISALIGNED!" << std::endl;
+        }
+      }
+
+      // Free the allocated memory
+      err = hsa_amd_memory_pool_free(ptr);
+      EXPECT_EQ(err, HSA_STATUS_SUCCESS);
+    }
+  }
+}
 
 // Callback function which will call upon when need
 // to allocate memory from the pool in the thread.
 static void CallbackVerifyPoolAlignmendFunc(void *data) {
-  hsa_status_t err;
   cb_t *cb = reinterpret_cast<cb_t*>(data);
 
-  rocrtst::pool_info_t info;
-  memset(&info, 0, sizeof(rocrtst::pool_info_t));
-  err = rocrtst::AcquirePoolInfo(*(cb->pool), &info);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-  if (info.alloc_allowed) {
-    // Get the allocated alignment size
-    size_t alignment_size = info.alloc_alignment;
-    EXPECT_TRUE(alignment_size);
-    // Verifies the alignment attribute is a power of 2
-    if (info.size != 0) {
-      EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
-    }
-  }
+  // Call the member function through the test object pointer
+  // The member function does all pool checks and allocations internally
+  cb->test_obj->TestPoolAllocationsAlignment(*(cb->pool));
   return;
 }
 
@@ -99,8 +155,9 @@ MemoryAlignmentTest::MemoryAlignmentTest(void) :
   set_title("RocR Memory Alignment Test");
   set_description(" This test verifies that each memory pool of the agent that"
   " has HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED alloc memory, It is "
-  " aligned as specified by the HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT"
-  " and has the alignment attribute is a power of 2.");
+  " aligned as specified by the HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT,"
+  " the alignment attribute is a power of 2, and that actual memory allocations"
+  " return pointers aligned to the specified alignment value.");
 }
 
 MemoryAlignmentTest::~MemoryAlignmentTest(void) {
@@ -194,56 +251,6 @@ static void PrintAgentNameAndType(hsa_agent_t agent) {
 
 
 
-void MemoryAlignmentTest::MemoryPoolAlignment(hsa_agent_t agent,
-                                                hsa_amd_memory_pool_t pool) {
-  hsa_status_t err;
-
-  rocrtst::pool_info_t pool_i;
-  err = rocrtst::AcquirePoolInfo(pool, &pool_i);
-  ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-
-  if (verbosity() > 0) {
-    PrintAgentNameAndType(agent);
-  }
-
-  if (pool_i.alloc_allowed) {
-    // Get the allocated alignment size
-    size_t alignment_size = pool_i.alloc_alignment;
-    EXPECT_TRUE(alignment_size);
-    // Verifies the alignment attribute is a power of 2
-    if (pool_i.size != 0) {
-      EXPECT_TRUE((alignment_size&&(!(alignment_size&(alignment_size-1)))));
-    }
-
-    // verifies that alignment attribute is a power of 2 in different threads
-    rocrtst::test_group* tg_concurrent = rocrtst::TestGroupCreate(kNumThreads);
-    // The control blocks are used to pass data to the threads
-    uint32_t kk;
-    cb_t cb[kNumThreads];
-    for (kk = 0; kk < kNumThreads; kk++) {
-      cb[kk].pool = &pool;
-      rocrtst::TestGroupAdd(tg_concurrent, &CallbackVerifyPoolAlignmendFunc, &cb[kk], 1);
-    }
-
-    // Create threads for each test
-    rocrtst::TestGroupThreadCreate(tg_concurrent);
-
-    // Start to run tests
-    rocrtst::TestGroupStart(tg_concurrent);
-
-    // Wait all tests finish
-    rocrtst::TestGroupWait(tg_concurrent);
-
-    // Exit all tests
-    rocrtst::TestGroupExit(tg_concurrent);
-
-    // Destroy thread group and cleanup resources
-    rocrtst::TestGroupDestroy(tg_concurrent);
-  }
-  return;
-}
-
-
 void MemoryAlignmentTest::MemoryPoolAlignment(void) {
   hsa_status_t err;
   std::vector<std::shared_ptr<rocrtst::agent_pools_t>> agent_pools;
@@ -260,8 +267,37 @@ void MemoryAlignmentTest::MemoryPoolAlignment(void) {
     for (auto p : a->pools) {
       if (verbosity() > 0) {
         std::cout << "  Pool " << pool_idx++ << ":" << std::endl;
+        PrintAgentNameAndType(a->agent);
       }
-      MemoryPoolAlignment(a->agent, p);
+
+      // Test actual memory allocations in the main thread
+      TestPoolAllocationsAlignment(p);
+
+      // Verify alignment in different threads (concurrent stress test)
+      rocrtst::test_group* tg_concurrent = rocrtst::TestGroupCreate(kNumThreads);
+      // The control blocks are used to pass data to the threads
+      uint32_t kk;
+      cb_t cb[kNumThreads];
+      for (kk = 0; kk < kNumThreads; kk++) {
+        cb[kk].pool = &p;
+        cb[kk].test_obj = this;
+        rocrtst::TestGroupAdd(tg_concurrent, &CallbackVerifyPoolAlignmendFunc, &cb[kk], 1);
+      }
+
+      // Create threads for each test
+      rocrtst::TestGroupThreadCreate(tg_concurrent);
+
+      // Start to run tests
+      rocrtst::TestGroupStart(tg_concurrent);
+
+      // Wait all tests finish
+      rocrtst::TestGroupWait(tg_concurrent);
+
+      // Exit all tests
+      rocrtst::TestGroupExit(tg_concurrent);
+
+      // Destroy thread group and cleanup resources
+      rocrtst::TestGroupDestroy(tg_concurrent);
     }
   }
 

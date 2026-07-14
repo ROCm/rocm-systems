@@ -7,10 +7,7 @@
 include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
-if(NOT ROCPROFSYS_USE_PYTESTS)
-    # TODO: Will be the default once TheRock is switched to CTests
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest.cmake)
 
 # ------------------------------------------------------------------------------#
 #
@@ -28,7 +25,6 @@ set(ROCPROFSYS_PYTHON_VALIDATION_FILES
 )
 
 set(ROCPROFSYS_TEST_SCRIPTS
-    ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
     ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
     ${CMAKE_CURRENT_LIST_DIR}/run_rocprofiler_systems.py

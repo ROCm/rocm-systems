@@ -53,7 +53,7 @@ rocprofiler_add_option(
     ADVANCED)
 rocprofiler_add_option(
     ROCPROFILER_DISABLE_ATT_DISPATCH_EVENTS
-    "Disable ATT event and dispatch records in occupancy.json" ON ADVANCED)
+    "Disable ATT event and dispatch records in occupancy.json" OFF ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS

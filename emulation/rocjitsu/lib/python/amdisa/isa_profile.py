@@ -19,6 +19,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+# \NPI new ISA family: (1) sync shared/machine-readable-isa via download.py and \
+# add amdgpu_isa_<isa>.xml, (2) add its profile in this module, (3) regenerate \
+# per docs/codegen.md, (4) author the hand-written isa.h / insts.h / mma_exec.h \
+# / addr_calc.* under lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/<isa>/.
 _FLOAT_NAME_MAP: dict[float, str] = {
     -0.5: 'NEG_HALF',
     -1.0: 'NEG_ONE',
@@ -795,6 +799,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return self.wave_size
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        """Whether COMPUTE_PGM_RSRC1.WGP_MODE exists."""
+        return False
+
+    @property
     def has_acc_vgpr(self) -> bool:
         """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
         return False
@@ -1029,6 +1038,13 @@ class CdnaProfile(_AmdgpuProfileBase):
     def coherency_model(self) -> MemoryCoherencyModel:
         return MemoryCoherencyModel.GFX940_SC0_SC1_NT
 
+    @property
+    def uses_true16_vop3_opsel(self) -> bool:
+        # CDNA VOP3 OP_SEL uses bits [0:2] for source half selection and
+        # bit [3] for destination half selection. Low-destination writes
+        # zero the upper half; see the CDNA ISA OP_SEL field description.
+        return True
+
 
 class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
@@ -1174,6 +1190,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
         return 64  # RDNA supports Wave32 and Wave64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx10'
 
@@ -1286,6 +1306,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def wave_size_max(self) -> int:
         return 64
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return True
 
     @property
     def waitcnt_family(self) -> str:
@@ -1421,6 +1445,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return 64
 
     @property
+    def supports_wgp_mode(self) -> bool:
+        return True
+
+    @property
     def waitcnt_family(self) -> str:
         return 'gfx12'
 
@@ -1545,6 +1573,10 @@ class Gfx1250Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def supports_wgp_mode(self) -> bool:
+        return False
 
     @property
     def has_vopd3(self) -> bool:

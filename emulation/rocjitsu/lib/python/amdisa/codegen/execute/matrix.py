@@ -9,6 +9,7 @@ instructions: MFMA (matrix fused multiply-add), AccVGPR read/write.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
 from amdisa.gpuisa import Instruction
 
 # Input families that have specialized (compile-time M/N/K) MFMA kernels in the
@@ -145,8 +146,8 @@ def gen_mfma(
             'BF16': 'amdgpu::smfmac_read_bf16',
         }
         _SMFMAC_FP8_READ = {
-            'FP8': 'amdgpu::smfmac_read_fp8',
-            'BF8': 'amdgpu::smfmac_read_bf8',
+            'FP8': fp8_helper_name(arch_name, 'amdgpu::smfmac_read_fp8'),
+            'BF8': fp8_helper_name(arch_name, 'amdgpu::smfmac_read_bf8'),
         }
         L = []
         L.append(f'  auto &cu = wf.cu();')
@@ -329,7 +330,8 @@ def gen_mfma(
         else:
             L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
             L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
-        L.append(f'                 s2, const_acc);')
+        neg = 'inst_.blgp' if arch in ('cdna3', 'cdna4') else '0u'
+        L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
         if arch == 'gfx1250':
             # LLVM's gfx1250 IU WMMA convention overloads neg_lo: bit set means
@@ -515,8 +517,8 @@ def gen_mfma(
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
             return '\n'.join(L)
 
-        ea = _EXTRACT_A.get(input_type, 'amdgpu::extract_f32')
-        eb = _EXTRACT_B.get(input_type, 'amdgpu::extract_f32')
+        ea = fp8_helper_name(arch, _EXTRACT_A.get(input_type, 'amdgpu::extract_f32'))
+        eb = fp8_helper_name(arch, _EXTRACT_B.get(input_type, 'amdgpu::extract_f32'))
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
@@ -687,8 +689,9 @@ def gen_mfma(
             s1b = f'amdgpu::src_base(vb, {s1}.encoding_value_)'
             if N % 16 == 0 and input_type in _F8_FIXED and has_blgp:
                 a_fp8, b_fp8 = _f8_bools(input_type)
+                fnuz = ', true' if arch in FNUZ_FP8_ARCHES else ''
                 L.append(
-                    f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}>('
+                    f'  amdgpu::exec_f32_mfma_f8_spec<{M}, {N}, {K}, {a_fp8}, {b_fp8}{fnuz}>('
                     f'cu, dst, {s0b}, {s1b}, s2, const_acc, {cbsz}, {abid}, {blgp});'
                 )
             elif N % 16 == 0 and input_type in _MFMA_F32_SPEC and has_blgp:

@@ -5,6 +5,11 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
+    $<TARGET_OBJECTS:track-registry-tests>
+    $<TARGET_OBJECTS:packet-framing-tests>
+    $<TARGET_OBJECTS:perfetto-engine-tests>
+    $<TARGET_OBJECTS:perfetto-sinks-tests>
+    $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:output-format-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
@@ -14,6 +19,8 @@ set(UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
 )
 
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-amd-smi-provider-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)

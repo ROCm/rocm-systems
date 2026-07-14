@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 2)
+set(AIS_LIBRARY_MINOR 3)
 set(AIS_LIBRARY_PATCH 0)
 set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
 
@@ -235,6 +235,12 @@ option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
 option(AIS_INSTALL_TOOLS "Install tool programs" ON)
 
 #------------------
+# rocprofiler-register integration
+#------------------
+option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register API table registration" ON)
+
+
+#------------------
 # Test programs
 #------------------
 # Whether to install the relocatable unit-test assets (binaries + ctest files)
@@ -268,6 +274,18 @@ if(${hip_FOUND})
     message(STATUS "hip found @  ${hip_DIR} ")
 else()
     message(NOTICE "find_package did NOT find hip")
+endif()
+
+if(HIPFILE_ROCPROFILER_REGISTER AND AIS_BUILD_AMD_DETAIL)
+  find_package(
+    rocprofiler-register
+    REQUIRED
+    HINTS
+      $ENV{rocprofiler_register_ROOT}
+      $ENV{ROCPROFILER_REGISTER_ROOT}
+      ${CMAKE_INSTALL_PREFIX}
+    PATHS
+      ${ROCM_PATH})
 endif()
 
 # Find the cuFile library and headers on NVIDIA

@@ -10,14 +10,14 @@
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 #include "ipc_mem_handler.h"
 
 #include <cuda_runtime.h>
 
-using nccl_dda_ipc_detail::DdaIpcBarrierState;
-using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
-using nccl_dda_ipc_detail::kDdaNranks;
+using nccl_dda_detail::DdaIpcBarrierState;
+using nccl_dda_detail::ddaMaxNBlocksForScratch;
+using nccl_dda_detail::kDdaNranks;
 
 
 #define HIP_CALL(cmd)                                                                   \
@@ -53,6 +53,25 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
       comm->bootstrap == nullptr || comm->directMode || comm->MNNVL ||
       !ddaArchSupported) {
     return ncclSuccess;
+  }
+
+  // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
+  // comm->isAllCudaP2p is set via ncclTopoCheckP2p which on AMD/HIP returns true
+  // whenever ranks share a hostHash, regardless of actual P2P support (paths.cc).
+  // Use hipDeviceCanAccessPeer directly — the authoritative runtime check for IPC
+  // capability, and the same check used in init.cc for hasPeerAccess.
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = i + 1; j < comm->nRanks; j++) {
+      int canAccess = 0;
+      hipError_t err = hipDeviceCanAccessPeer(
+          &canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+      if (err != hipSuccess || !canAccess) {
+        INFO(NCCL_INIT,
+             "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
+             comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+        return ncclSuccess;
+      }
+    }
   }
 
   size_t bytes = DDA_IPC_BUFFER_SIZE;
@@ -154,9 +173,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   barrierState->barrierHost = barrierPair.second;
 
   comm->ddaIpcMemHandler = handler;
-  comm->ddaIpcScratch = scratch;
-  comm->ddaIpcScratchBytes = bytes;
-  comm->ddaIpcPeerPtrsDev = peerDev;
+  comm->ddaScratch = scratch;
+  comm->ddaScratchBytes = bytes;
+  comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
   INFO(
       NCCL_INIT,
@@ -174,14 +193,14 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
     comm->ddaIpcBarrierState = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcPeerPtrsDev));
-  comm->ddaIpcPeerPtrsDev = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
+  comm->ddaPeerPtrsDev = nullptr;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaIpcScratch));
-  comm->ddaIpcScratch = nullptr;
-  comm->ddaIpcScratchBytes = 0;
+  CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
+  comm->ddaScratch = nullptr;
+  comm->ddaScratchBytes = 0;
   return ncclSuccess;
 }

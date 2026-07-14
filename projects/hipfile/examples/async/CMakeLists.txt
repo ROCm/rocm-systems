@@ -2,11 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Async examples for the hipFile C API. Same style as examples/basics:
-# bypass ais_add_executable and wire dependencies in by hand. Shared helpers
-# come from the examples_common target defined in examples/common; the parent
-# CMakeLists adds examples/common before examples/async, so the target is in
-# scope by the time we reach this file.
+# Async examples for the hipFile C API. They build with the AIS infrastructure
+# (ais_add_executable) and link the shared helpers from the examples_common
+# target defined in examples/common; the parent CMakeLists adds examples/common
+# before examples/async, so the target is in scope here. examples_common is
+# PUBLIC-linked against hipfile and exports its own include dir, so
+# DEPS examples_common transitively supplies the library and headers.
+
+include(AISAddExecutable)
 
 set(ASYNC_EXAMPLES
     roundtrip-async
@@ -16,33 +19,12 @@ set(ASYNC_EXAMPLES
 )
 
 foreach(example ${ASYNC_EXAMPLES})
-    add_executable(${example} "${example}.cpp")
-    target_compile_features(${example} PRIVATE cxx_std_${AIS_CXX_STANDARD})
-    set_target_properties(${example} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${example} PRIVATE -Wall -Wextra)
-    # hipfile is instrumented when the sanitizers are on; an uninstrumented
-    # executable linked against it dies at load with undefined __asan_*/__tsan_*
-    # symbols. Instrument the example too so it pulls in the sanitizer runtime.
-    if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
-        ais_add_sanitizers(${example})
-    endif()
-
-    if(CMAKE_HIP_PLATFORM STREQUAL "amd")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_AMD__)
-    elseif(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
-        target_compile_definitions(${example} PRIVATE __HIP_PLATFORM_NVIDIA__)
-        target_include_directories(${example} SYSTEM PRIVATE ${HIP_INCLUDE_DIRS})
-        target_include_directories(
-            ${example}
-            SYSTEM
-            BEFORE
-            PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
-        )
-        target_link_libraries(${example} PRIVATE CUDA::cuda_driver CUDA::cudart)
-    endif()
-
-    target_include_directories(${example} SYSTEM PRIVATE ${HIPFILE_INCLUDE_PATH})
-    target_link_libraries(${example} PRIVATE examples_common)
+    ais_add_executable(
+        NAME ${example}
+        DEPS examples_common
+        SRCS "${example}.cpp"
+        SYSINCLS ${HIPFILE_INCLUDE_PATH}
+    )
 endforeach()
 
 # CTest wrappers: run each async example as a hipFile system test.

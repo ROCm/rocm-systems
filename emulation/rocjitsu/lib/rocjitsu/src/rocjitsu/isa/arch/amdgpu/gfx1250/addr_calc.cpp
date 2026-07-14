@@ -83,9 +83,35 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
   d.cu_path = wf.cu().full_path();
 }
 
+bool decode_flat_private_address(amdgpu::Wavefront &wf, uint64_t addr, uint64_t *translated) {
+  uint32_t lane_stride = wf.scratch_lane_size();
+  if (lane_stride == 0)
+    return false;
+
+  uint32_t wf_size = wf.wf_size();
+  assert(wf_size == 32 || wf_size == 64);
+  uint32_t lane_shift = wf_size == 64 ? 51 : 52;
+  uint64_t lane_mask = static_cast<uint64_t>(wf_size - 1) << lane_shift;
+  uint64_t scratch_base = wf.scratch_base();
+  uint64_t base_without_lane = scratch_base & ~lane_mask;
+  uint64_t addr_without_lane = addr & ~lane_mask;
+  if (addr_without_lane < base_without_lane)
+    return false;
+
+  uint64_t private_offset = addr_without_lane - base_without_lane;
+  if (private_offset > 0xFFFF'FFFFULL)
+    return false;
+
+  if (translated != nullptr) {
+    uint32_t encoded_lane = static_cast<uint32_t>((addr & lane_mask) >> lane_shift);
+    *translated = scratch_base + static_cast<uint64_t>(encoded_lane) * lane_stride + private_offset;
+  }
+  return true;
+}
+
 template <typename Inst>
 void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
-                                     amdgpu::VectorMemState &d) {
+                                     amdgpu::VectorMemState &d, bool decode_flat_private) {
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
@@ -106,10 +132,13 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
           (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
-    if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi) {
-      uint64_t lane_base = wf.scratch_base() + static_cast<uint64_t>(lane) * wf.scratch_lane_size();
-      addr = lane_base + (addr & 0xFFFFFFFFULL);
+    if (decode_flat_private) {
+      uint64_t translated = 0;
+      if (decode_flat_private_address(wf, addr, &translated))
+        addr = translated;
+    } else {
+      assert(!decode_flat_private_address(wf, addr, nullptr) &&
+             "gfx1250 global memory address must not use flat private scratch encoding");
     }
     d.per_lane_addr[lane] = addr;
   }
@@ -136,12 +165,12 @@ uint64_t smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &
 
 void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  flat_global_calculate_addresses(inst, wf, d);
+  flat_global_calculate_addresses(inst, wf, d, true);
 }
 
 void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  flat_global_calculate_addresses(inst, wf, d);
+  flat_global_calculate_addresses(inst, wf, d, false);
 }
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,

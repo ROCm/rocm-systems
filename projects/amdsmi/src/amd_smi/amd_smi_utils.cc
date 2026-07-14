@@ -640,7 +640,10 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   std::string empty = "";
   std::strncpy(version, empty.c_str(), len - 1);
   openFileAndModifyBuffer("/sys/module/amdgpu/version", version, static_cast<size_t>(len));
-  if (version[0] == '\0') return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+  if (version[0] == '\0') {
+    std::strncpy(version, "N/A", len - 1);
+    version[len - 1] = '\0';
+  }
 
   return status;
 }
