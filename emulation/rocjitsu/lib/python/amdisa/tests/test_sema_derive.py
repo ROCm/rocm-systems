@@ -140,6 +140,55 @@ class TestDeriveScalarUnary:
         cpp = lower_sema_block(block)
         assert 'write_scc' not in cpp
 
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_FF0_I32_B32', 'ff0'),
+            ('S_FF0_I32_B64', 'ff0'),
+            ('S_FF1_I32_B32', 'ff1'),
+            ('S_FF1_I32_B64', 'ff1'),
+            ('S_FLBIT_I32_B32', 'flbit'),
+            ('S_FLBIT_I32_B64', 'flbit'),
+            ('S_FLBIT_I32', 'flbit_i32'),
+            ('S_FLBIT_I32_I64', 'flbit_i32_i64'),
+            ('S_CTZ_I32_B32', 'ctz'),
+            ('S_CTZ_I32_B64', 'ctz'),
+            ('S_CLZ_I32_U32', 'clz'),
+            ('S_CLZ_I32_U64', 'clz64'),
+            ('S_CLS_I32', 'cls'),
+            ('S_CLS_I32_I64', 'cls'),
+        ],
+    )
+    def test_scalar_scan_preserves_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'none'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' not in cpp
+
+    @pytest.mark.parametrize(
+        'name,operation',
+        [
+            ('S_NOT_B32', 'not'),
+            ('S_BCNT0_I32_B32', 'bcnt0'),
+            ('S_BCNT1_I32_B32', 'bcnt1'),
+        ],
+    )
+    def test_scalar_bit_count_writes_scc(self, name, operation):
+        sem = derive_semantics(name, 'ENC_SOP1')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_unary'
+        assert sem.operation == operation
+        assert sem.sets_scc == 'nonzero'
+
+        block = derive_sema_block(sem)
+        cpp = lower_sema_block(block)
+        assert 'write_scc' in cpp
+
     @pytest.mark.parametrize('name', ['S_CLZ_I32_U32', 'S_CLZ_I32_U64'])
     def test_clz_zero_returns_all_ones(self, name):
         sem = derive_semantics(name, 'ENC_SOP1')
