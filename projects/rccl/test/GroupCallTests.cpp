@@ -346,10 +346,11 @@ namespace RcclUnitTesting
   }
 
   // Group of broadcasts each rooted at a different rank. With >=2 distinct roots
-  // and NCCL_ALLGATHERV_ENABLE=1 (default) the task producer fuses them into a single
+  // and NCCL_ALLGATHERV_ENABLE=1 the task producer fuses them into a single
   // ncclFuncAllGatherV ring kernel. Sizes vary per root to exercise AllGatherV's
-  // variable-length partitioning. To test the individual-broadcast fallback path,
-  // run with NCCL_ALLGATHERV_ENABLE=0 in the environment before launching the test.
+  // variable-length partitioning. AllGatherV fusion is disabled by default
+  // (NCCL_ALLGATHERV_ENABLE=0); without the env var this test exercises the
+  // individual-broadcast fallback path.
   TEST(GroupCall, MultiRootBroadcast)
   {
     TestBed testBed;
@@ -362,6 +363,9 @@ namespace RcclUnitTesting
     for (int totalRanks : testBed.ev.GetNumGpusList())
     for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
     {
+      // Fusion requires >=2 distinct roots; skip single-GPU.
+      if (totalRanks < 2) continue;
+
       int const numProcesses = isMultiProcess ? totalRanks : 1;
       const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
 
@@ -495,6 +499,53 @@ namespace RcclUnitTesting
       testBed.ValidateResults(isCorrect);
       testBed.DeallocateMem();
 
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Group call that mixes a broadcast (distinct root, AllGatherV path) with an AllReduce
+  // (collSorter path) in the same ncclGroupStart/ncclGroupEnd. Exercises the case where
+  // both collTaskAppend branches run in one planning cycle and the resulting plan must
+  // launch both the AllGatherV ring kernel and the AllReduce kernel correctly.
+  TEST(GroupCall, MixedBroadcastAndAllReduce)
+  {
+    TestBed testBed;
+
+    ncclDataType_t const dataType      = ncclFloat;
+    bool           const inPlace       = false;
+    bool           const useManagedMem = false;
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      if (totalRanks < 2) continue;
+
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+
+      // collIdx 0: Broadcast rooted at rank 1 (enters bcastQueue / AllGatherV path)
+      // collIdx 1: Broadcast rooted at rank 0 (second distinct root -> BcastPeers==2, fuses)
+      // collIdx 2: AllReduce (enters collSorter path)
+      int const numCollPerGroup = 3;
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        TEST_INFO("%s %d-ranks GroupCall MixedBroadcastAndAllReduce", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      OptionalColArgs bcastOpts0, bcastOpts1;
+      bcastOpts0.root = 1;
+      bcastOpts1.root = 0;
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType, 524288, 524288, bcastOpts0, /*collIdx=*/0);
+      testBed.SetCollectiveArgs(ncclCollBroadcast, dataType, 262144, 262144, bcastOpts1, /*collIdx=*/1);
+      testBed.SetCollectiveArgs(ncclCollAllReduce,  dataType, 262144, 262144, OptionalColArgs(), /*collIdx=*/2);
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
       testBed.DestroyComms();
     }
     testBed.Finalize();
