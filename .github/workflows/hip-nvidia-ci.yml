@@ -5,61 +5,15 @@
 name: HIP NVIDIA CI
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-  push:
-    branches:
-      - develop
-      - release/therock-*
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
-
 jobs:
-  nvidia-clr-build-setup:
-    name: "Setup"
-    runs-on: ubuntu-24.04
-    env:
-      BASE_REF: HEAD^
-    outputs:
-      should_build: ${{ steps.check_paths.outputs.should_build }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          fetch-depth: 2
-
-      - name: Check if relevant paths changed
-        id: check_paths
-        run: |
-          SHOULD_BUILD=false
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SHOULD_BUILD=true;
-          else
-            CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
-            echo "Changed files:"
-            echo "${CHANGED_FILES}"
-            if echo "${CHANGED_FILES}" | grep -qE '^projects/(clr|hip|hip-tests|hipother)/|^\.github/workflows/hip-nvidia-ci\.yml'; then
-              SHOULD_BUILD=true
-            else
-              echo "No changes in clr/hip/hip-tests/hipother — skipping NVIDIA build"
-            fi
-          fi
-          echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
-
   nvidia-clr-build:
     name: "Build clr + hip-tests (NVIDIA)"
-    needs: nvidia-clr-build-setup
-    if: ${{ needs.nvidia-clr-build-setup.outputs.should_build == 'true' }}
     runs-on: azure-linux-scale-rocm
     container:
       # CUDA 13.2.0 devel Ubuntu 24.04
@@ -133,7 +87,7 @@ jobs:
   nvidia-clr-build-ci-summary:
     name: "HIP NVIDIA CI Summary"
     if: always()
-    needs: [nvidia-clr-build-setup, nvidia-clr-build]
+    needs: [nvidia-clr-build]
     runs-on: ubuntu-24.04
     steps:
       - name: Check results

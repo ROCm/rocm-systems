@@ -1,0 +1,91 @@
+name: Component CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches:
+      - develop
+      - release/therock-*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: "Configure CI"
+    runs-on: ubuntu-24.04
+    env:
+      BASE_REF: HEAD^
+    outputs:
+      nvidia: ${{ steps.configure.outputs.nvidia }}
+      wsl: ${{ steps.configure.outputs.wsl }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed components
+        id: configure
+        run: |
+          NVIDIA=false
+          WSL=false
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            NVIDIA=true
+            WSL=true
+          else
+            CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
+            echo "Changed files:"
+            echo "${CHANGED_FILES}"
+
+            if echo "${CHANGED_FILES}" | grep -qE '^projects/(clr|hip|hip-tests|hipother)/|^\.github/workflows/(component-ci|hip-nvidia-ci)\.yml'; then
+              NVIDIA=true
+            fi
+
+            if echo "${CHANGED_FILES}" | grep -qE '^projects/(rocr-runtime|clr|hip|hip-tests)/|^\.github/workflows/(component-ci|rocr-runtime-wsl)\.yml|^shared/amdgpu-windows-interop/wkmi'; then
+              WSL=true
+            fi
+          fi
+
+          echo "nvidia=${NVIDIA}" >> "${GITHUB_OUTPUT}"
+          echo "wsl=${WSL}" >> "${GITHUB_OUTPUT}"
+
+  nvidia:
+    name: "NVIDIA"
+    needs: changes
+    if: ${{ needs.changes.outputs.nvidia == 'true' }}
+    uses: ./.github/workflows/hip-nvidia-ci.yml
+
+  wsl:
+    name: "WSL"
+    needs: changes
+    if: ${{ needs.changes.outputs.wsl == 'true' }}
+    uses: ./.github/workflows/rocr-runtime-wsl.yml
+
+  component-ci-summary:
+    name: "Component CI Summary"
+    if: always()
+    needs: [changes, nvidia, wsl]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result != "success" and .result != "skipped")) | keys | join(",")'
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi
