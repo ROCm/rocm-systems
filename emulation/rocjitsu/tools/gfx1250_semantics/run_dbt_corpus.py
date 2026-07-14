@@ -22,8 +22,6 @@ EXPECTED_XFAILS = {
     "cluster_global_async_memory_ops": "EXPAND not yet implemented for cluster_load_b64",
     "ds_special_ops": "EXPAND not yet implemented for ds_atomic_async_barrier_arrive_b64",
     "monitor_load_ops": "EXPAND not yet implemented for global_load_monitor_b32",
-    "pk_bf16_ops": "EXPAND not yet implemented for v_pk_mul_bf16",
-    "pk_min3_max3_ops": "EXPAND not yet implemented for v_pk_min3_i16",
     "scalar_call_ops": "EXPAND not yet implemented for s_call_i64",
     "scalar_control_ops": "EXPAND not yet implemented for s_get_shader_cycles_u64",
 }
