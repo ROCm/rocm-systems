@@ -57,6 +57,8 @@ CDNA_WORKLOADS = [
     "path",
 ]
 
+_GFX115X_WORKLOADS = ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"]
+
 WORKLOADS_BY_ARCH = {
     "MI100": CDNA_WORKLOADS + ["vcopy"],
     "MI200": CDNA_WORKLOADS
@@ -76,7 +78,8 @@ WORKLOADS_BY_ARCH = {
     "MI300A_A1": CDNA_WORKLOADS,
     "MI300X_A1": CDNA_WORKLOADS,
     "MI350": ["no_roof", "vcopy", "vcopy_iteration_multiplexing"],
-    "RDNA35_HALO": ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"],
+    "RDNA35_HALO": _GFX115X_WORKLOADS,
+    "RDNA35_POINT_2": _GFX115X_WORKLOADS,
 }
 
 # All workloads exit 0 except these.
@@ -106,7 +109,7 @@ def test_analyze_workload(
     binary_handler_analyze_rocprof_compute, arch, workload_type, expected_code
 ):
     workload_dir = common.setup_workload_dir(
-        f"tests/workloads/{workload_type}/{arch}",
+        common.workload_fixture_path(workload_type, arch),
         param_id=f"{arch}_{workload_type}",
     )
 
