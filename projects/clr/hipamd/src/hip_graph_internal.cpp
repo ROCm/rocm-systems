@@ -1261,18 +1261,10 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
 
   ComputeCompletionSignalFlags();
 
-  // Collapse needs the completion flags just computed, so it can't be checked in
-  // the loop above. A collapsed graph serializes by design, so undo the tags. The
-  // decision is memoized in ShouldCollapseToSingleStream(), reused by BuildSyncPlan.
-  if (cleared > 0 && ShouldCollapseToSingleStream()) {
-    for (auto& seg : segments_) {
-      if (seg.clear_head_barrier) {
-        seg.clear_head_barrier = false;
-        static_cast<GraphKernelNode*>(seg.first_node)->SetAnyOrderOverlapHead(false);
-      }
-    }
-    cleared = 0;
-  }
+  // EXPERIMENTAL (uncommitted, Navi48 eval): the collapse-to-single-stream undo
+  // has been removed, so any-order tags now survive onto the collapsed queue.
+  // Ordering still holds because the level-major, idx-order enqueue keeps the
+  // barrier=1 first-of-level heads ahead of the tagged overflow heads.
 
   if (anyorder_enabled_) {
     auto poolIt = max_streams_dev_.find(captureDeviceId_);

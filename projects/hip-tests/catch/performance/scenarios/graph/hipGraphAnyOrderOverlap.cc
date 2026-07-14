@@ -258,6 +258,136 @@ TEST_CASE("Performance_Graph_AnyOrderOverlap_DetectorSelfTest") {
   HIP_CHECK(hipFree(buf));
 }
 
+// Correctness under COLLAPSE: many short oversubscribed chains of tiny kernels
+// trip ShouldCollapseToSingleStream(), folding the graph onto one stream. With
+// the collapse-undo removed, the oversubscribed heads keep their cleared barrier
+// bit on that single queue. This validates ordering still holds on the collapsed
+// path (barrier=1 first-of-level heads fence the tagged overflow heads). Watch
+// the "[hipGraph] Single-stream gate: ... -> collapse" log (AMD_LOG_LEVEL=5) to
+// confirm the graph actually collapsed.
+TEST_CASE("Performance_Graph_AnyOrderOverlap_CollapseChains") {
+  INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
+  const int N = kGridBlocks * kBlock;
+  constexpr int kCollapseChainLen = 2;  // short -> low slack -> collapse
+  constexpr int kCollapseBurn = 0;      // tiny work -> collapse
+
+  std::vector<int*> val(kBranches, nullptr);
+  for (int b = 0; b < kBranches; ++b) HIP_CHECK(hipMalloc(&val[b], N * sizeof(int)));
+  int* err = nullptr;
+  HIP_CHECK(hipMalloc(&err, sizeof(int)));
+
+  std::vector<int> expected(static_cast<size_t>(kBranches) * kCollapseChainLen);
+  int nArg = N, burnArg = kCollapseBurn;
+
+  hipGraph_t graph{};
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  for (int b = 0; b < kBranches; ++b) {
+    hipGraphNode_t prev = nullptr;
+    for (int k = 0; k < kCollapseChainLen; ++k) {
+      const int idx = b * kCollapseChainLen + k;
+      expected[idx] = k;
+      std::vector<void*> args = {&val[b], &nArg, &expected[idx], &err, &burnArg};
+      std::vector<hipGraphNode_t> deps;
+      if (prev != nullptr) deps.push_back(prev);
+      prev = AddKernel(graph, deps, reinterpret_cast<void*>(chainStep), args);
+    }
+  }
+
+  hipGraphExec_t exec{};
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  int order_violations = 0, value_violations = 0;
+  std::vector<int> host_val(N);
+  for (int r = 0; r < kReps; ++r) {
+    for (int b = 0; b < kBranches; ++b) HIP_CHECK(hipMemsetAsync(val[b], 0, N * sizeof(int), stream));
+    HIP_CHECK(hipMemsetAsync(err, 0, sizeof(int), stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    int host_err = 0;
+    HIP_CHECK(hipMemcpy(&host_err, err, sizeof(int), hipMemcpyDeviceToHost));
+    if (host_err != 0) ++order_violations;
+    for (int b = 0; b < kBranches; ++b) {
+      HIP_CHECK(hipMemcpy(host_val.data(), val[b], N * sizeof(int), hipMemcpyDeviceToHost));
+      for (int i = 0; i < N; ++i) {
+        if (host_val[i] != kCollapseChainLen) { ++value_violations; break; }
+      }
+    }
+  }
+  INFO("ordering_violations=" << order_violations << " value_violations=" << value_violations);
+  REQUIRE(order_violations == 0);
+  REQUIRE(value_violations == 0);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(err));
+  for (auto* p : val) HIP_CHECK(hipFree(p));
+}
+
+// Performance (informational) under COLLAPSE: same short/tiny oversubscribed
+// graph as _CollapseChains but with the busy kernel, timing steady-state launch.
+// Compare flag ON vs OFF (separate processes) to see whether keeping the any-order
+// tags on the collapsed single stream buys anything on capable HW (Navi48/MI450).
+TEST_CASE("Performance_Graph_AnyOrderOverlap_CollapsePerf") {
+  INFO("DEBUG_HIP_GRAPH_ANYORDER_OVERLAP=" << FlagState());
+  constexpr int kTimedLaunches = 200;
+  constexpr int kCollapseChainLen = 2;
+  constexpr int kCollapseBusyIters = 2000;  // small -> low slack -> collapse
+  const int N = kGridBlocks * kBlock;
+
+  std::vector<float*> bufs(kBranches, nullptr);
+  for (int b = 0; b < kBranches; ++b) {
+    HIP_CHECK(hipMalloc(&bufs[b], N * sizeof(float)));
+    HIP_CHECK(hipMemset(bufs[b], 0, N * sizeof(float)));
+  }
+  int nArg = N, itersArg = kCollapseBusyIters;
+
+  hipGraph_t graph{};
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  for (int b = 0; b < kBranches; ++b) {
+    hipGraphNode_t prev = nullptr;
+    for (int k = 0; k < kCollapseChainLen; ++k) {
+      std::vector<void*> args = {&bufs[b], &nArg, &itersArg};
+      std::vector<hipGraphNode_t> deps;
+      if (prev != nullptr) deps.push_back(prev);
+      prev = AddKernel(graph, deps, reinterpret_cast<void*>(busy), args);
+    }
+  }
+
+  hipGraphExec_t exec{};
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  for (int i = 0; i < 5; ++i) HIP_CHECK(hipGraphLaunch(exec, stream));  // warmup
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  hipEvent_t start{}, stop{};
+  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventRecord(start, stream));
+  for (int i = 0; i < kTimedLaunches; ++i) HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipEventRecord(stop, stream));
+  HIP_CHECK(hipEventSynchronize(stop));
+
+  float ms = 0.0f;
+  HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+  const double avg_us = static_cast<double>(ms) * 1000.0 / kTimedLaunches;
+  WARN("[AnyOrderOverlap-Collapse] flag=" << FlagState() << " avg_launch=" << avg_us
+       << " us over " << kTimedLaunches << " launches (branches=" << kBranches
+       << ", chain_len=" << kCollapseChainLen << ")");
+
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  for (auto* p : bufs) HIP_CHECK(hipFree(p));
+}
+
 // Performance (informational): steady-state launch time for the oversubscribed
 // chain graph. Compare across two runs with the flag ON vs OFF (separate
 // processes). No hard assert -- timing is machine/load dependent.
