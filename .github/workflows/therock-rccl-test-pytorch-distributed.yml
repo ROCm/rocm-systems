@@ -77,10 +77,10 @@ jobs:
       - name: Install PyTorch and test dependencies
         timeout-minutes: 15
         run: |
-          pip install --pre \
+          python -m pip install --pre \
             "torch[device-gfx942]" \
             --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
-          pip install \
+          python -m pip install \
             pytest \
             pytest-timeout \
             "expecttest>=0.3.0" \
