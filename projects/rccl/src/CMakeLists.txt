@@ -32,8 +32,15 @@ set(SRC_FILES
   dda_reduce_scatter_ipc.cu
   dda_all_gather_ipc.cu
   dda_alltoall_ipc.cu
+  dda_all_reduce_fabric.cu
+  dda_reduce_scatter_fabric.cu
+  dda_all_gather_fabric.cu
+  dda_alltoall_fabric.cu
   device_buffer.cc
   enqueue.cc
+  fabric_gpu_barrier.cu
+  fabric_init.cu
+  fabric_mem_handler.cc
   group.cc
   ipc_gpu_barrier.cu
   ipc_init.cu
@@ -103,6 +110,10 @@ set(SRC_FILES
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
   include/algorithms/alltoall/alltoall_dda.h
+  include/algorithms/all_reduce/all_reduce_dda_fabric.h
+  include/algorithms/reduce_scatter/reduce_scatter_dda_fabric.h
+  include/algorithms/all_gather/all_gather_dda_fabric.h
+  include/algorithms/alltoall/alltoall_dda_fabric.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -124,16 +135,20 @@ set(SRC_FILES
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
-  include/dda_all_reduce_ipc.h
-  include/dda_reduce_scatter_ipc.h
-  include/dda_all_gather_ipc.h
-  include/dda_alltoall_ipc.h
+  include/dda_all_reduce.h
+  include/dda_reduce_scatter.h
+  include/dda_all_gather.h
+  include/dda_alltoall.h
+  include/dda_init_detail.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
   include/env.h
   include/device_buffer.h
   include/enqueue.h
+  include/fabric_init.h
+  include/fabric_gpu_barrier.h
+  include/fabric_mem_handler.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
@@ -150,7 +165,6 @@ set(SRC_FILES
   include/info.h
   include/ipc_gpu_barrier.h
   include/ipc_init.h
-  include/ipc_init_detail.h
   include/ipc_mem_handler.h
   include/ipcsocket.h
   include/mem_manager.h
@@ -679,7 +693,11 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_alltoall_fabric.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
