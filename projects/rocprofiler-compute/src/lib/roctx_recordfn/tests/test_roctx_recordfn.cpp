@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+using namespace roctx_recordfn::detail;
+
 namespace
 {
 
