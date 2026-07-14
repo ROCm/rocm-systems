@@ -942,6 +942,12 @@ contract:
   Contract_DriverPitchedMemory_RejectsInvalidArgs:
     <<: *level_0
     tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_Memcpy2DUnaligned_HostToDevice_RoundTripsBytes:
+    <<: *level_0
+    tags: [driver_pitched_memory]
+  Contract_DriverPitchedMemory_Memcpy2DUnaligned_NullInner_IsRejected:
+    <<: *level_0
+    tags: [driver_pitched_memory]
   Contract_ArrayMemory_MallocArray_ReturnsUsableArray:
     <<: *level_0
     tags: [array_memory]
