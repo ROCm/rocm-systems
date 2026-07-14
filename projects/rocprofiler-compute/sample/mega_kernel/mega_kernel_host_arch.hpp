@@ -54,7 +54,7 @@ arch_description(int arch_type)
         case 4: return "RX 9060 series (RDNA4/gfx1200)";
         case 5: return "RX 9070 XT/9070 (RDNA4/gfx1201)";
         case 6:
-            return "Strix/Strix Halo/Krackan (RDNA3.5/gfx1150,gfx1151,gfx1152)";
+            return "Strix/Strix Halo/Krackan (RDNA3.5/gfx115x APU)";
         default: return "Unknown Architecture";
     }
 }
