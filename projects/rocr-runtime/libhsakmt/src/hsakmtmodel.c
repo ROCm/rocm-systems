@@ -30,7 +30,6 @@
 #include "libhsakmt.h"
 #include "hsakmt/hsakmttypes.h"
 #include "hsakmt/hsakmtmodeliface.h"
-#define __USE_GNU
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
