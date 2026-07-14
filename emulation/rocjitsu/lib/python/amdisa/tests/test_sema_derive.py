@@ -901,12 +901,26 @@ class TestDeriveVectorUnary:
             'fp8_f32',
             opsel='inst_.opsel',
             fp8_format_select='inst_.clamp',
+            arch_name='gfx1250',
         )
 
         assert 'inst_.clamp' in cpp
         assert 'util::f32_to_fp8_e5m3_rne(s0)' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne(s0)' in cpp
+        assert 'util::f32_to_fp8_e4m3_rne_nan_overflow(s0)' in cpp
         assert 'inst_.opsel' in cpp
+
+    @pytest.mark.parametrize('arch_name', ['cdna4', 'rdna4', 'gfx1250'])
+    def test_ocp_cvt_pk_fp8_f32_uses_nan_overflow_encoder(self, arch_name):
+        cpp = gen_vector_cvt_pk(
+            ['vdst'],
+            ['src0', 'src1'],
+            'vector_cvt_pk',
+            'fp8_f32',
+            arch_name=arch_name,
+        )
+
+        assert 'util::f32_to_fp8_e4m3_rne_nan_overflow(s0)' in cpp
+        assert 'util::f32_to_fp8_e4m3_rne_nan_overflow(s1)' in cpp
 
     def test_gfx1250_cvt_sr_fp8_clamp_selects_e5m3_encoder(self):
         ctx = SimpleNamespace(

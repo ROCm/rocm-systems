@@ -303,6 +303,12 @@ TEST(Fp8E4M3, RneExp15) {
   // Values above 448 saturate to 0x7E (max finite, not NaN 0x7F)
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(449.0f), 0x7E);
   EXPECT_EQ(util::f32_to_fp8_e4m3_rne(1000.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_nan_overflow(464.0f), 0x7E);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_nan_overflow(
+                std::nextafter(464.0f, std::numeric_limits<float>::infinity())),
+            0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_nan_overflow(768.0f), 0x7F);
+  EXPECT_EQ(util::f32_to_fp8_e4m3_rne_nan_overflow(-768.0f), 0xFF);
 }
 
 TEST(Fp8E4M3, SrExp15) {

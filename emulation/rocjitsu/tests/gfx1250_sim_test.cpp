@@ -3439,6 +3439,73 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchPacksWorkitemIdsInV0) {
   EXPECT_EQ(lane31_values, expected_lane31);
 }
 
+TEST(Gfx1250SimulationTest, PackedWorkitemIdsDoNotDependOnComponentCount) {
+  for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
+    Gfx1250Sim sim;
+    const uint32_t code[] = {S_ENDPGM_GFX12};
+    uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2,
+                                              false, false, false, 0, 0, 0, 0,
+                                              component_count);
+
+    test::AqlQueue queue(sim.memory, sim.cp());
+    hsa_kernel_dispatch_packet_t pkt{};
+    pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    pkt.setup = 2;
+    pkt.workgroup_size_x = 2;
+    pkt.workgroup_size_y = 2;
+    pkt.workgroup_size_z = 1;
+    pkt.grid_size_x = 2;
+    pkt.grid_size_y = 2;
+    pkt.grid_size_z = 1;
+    pkt.kernel_object = kernel_object;
+    queue.submit(pkt);
+    step_until_xcd_halted(sim);
+
+    auto *wf = sim.cu()->wf(0);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vbase = wf->vgpr_alloc().base;
+    EXPECT_EQ(sim.cu()->read_vgpr(vbase, 0), 0u) << "component count " << component_count;
+    EXPECT_EQ(sim.cu()->read_vgpr(vbase, 1), 1u) << "component count " << component_count;
+    EXPECT_EQ(sim.cu()->read_vgpr(vbase, 2), 1u << 10)
+        << "component count " << component_count;
+    EXPECT_EQ(sim.cu()->read_vgpr(vbase, 3), 1u | (1u << 10))
+        << "component count " << component_count;
+  }
+}
+
+TEST(Gfx1250SimulationTest, PackedWorkitemIdsIncludeThreeDimensionalCoordinates) {
+  Gfx1250Sim sim;
+  const uint32_t code[] = {S_ENDPGM_GFX12};
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  hsa_kernel_dispatch_packet_t pkt{};
+  pkt.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  pkt.setup = 3;
+  pkt.workgroup_size_x = 2;
+  pkt.workgroup_size_y = 2;
+  pkt.workgroup_size_z = 2;
+  pkt.grid_size_x = 2;
+  pkt.grid_size_y = 2;
+  pkt.grid_size_z = 2;
+  pkt.kernel_object = kernel_object;
+  queue.submit(pkt);
+  step_until_xcd_halted(sim);
+
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  for (uint32_t z = 0; z < 2; ++z) {
+    for (uint32_t y = 0; y < 2; ++y) {
+      for (uint32_t x = 0; x < 2; ++x) {
+        const uint32_t lane = x + 2 * y + 4 * z;
+        EXPECT_EQ(sim.cu()->read_vgpr(vbase, lane), x | (y << 10) | (z << 20));
+      }
+    }
+  }
+}
+
 TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
   Gfx1250Sim sim;
   const uint32_t code[] = {S_ENDPGM_GFX12};

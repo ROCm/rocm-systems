@@ -799,6 +799,10 @@ def gen_vector_cvt_pk(
                     else 'util::f32_to_bf8_e5m2_rne'
                 ),
             )
+            if op == 'fp8_f32' and arch_name in {'cdna4', 'rdna4', 'gfx1250'}:
+                # AMD OCP v_cvt_pk_fp8_f32 produces signed NaN on overflow;
+                # the general util conversion intentionally saturates instead.
+                conv = 'util::f32_to_fp8_e4m3_rne_nan_overflow'
             conv_e5m3 = (
                 'util::f32_to_fp8_e5m3_rne'
                 if op.startswith('fp8_') and fp8_format_select is not None

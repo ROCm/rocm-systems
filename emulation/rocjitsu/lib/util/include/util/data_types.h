@@ -477,6 +477,18 @@ inline uint8_t f32_to_fp8_e4m3_rne(float val) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
+// AMD v_cvt_pk_fp8_f32 uses the otherwise-reserved E4M3FN NaN encoding when
+// finite RNE conversion overflows. The generic software conversion above has
+// a deliberate saturating contract, so keep this hardware-instruction policy
+// separate. 464 is the exact tie between max-finite 448 and the NaN encoding;
+// ties-to-even retains 448, while the next representable value overflows.
+inline uint8_t f32_to_fp8_e4m3_rne_nan_overflow(float val) {
+  const uint32_t sign = (std::bit_cast<uint32_t>(val) >> 24) & 0x80;
+  if (std::isinf(val) || std::fabs(val) > 464.0f)
+    return static_cast<uint8_t>(sign | 0x7F);
+  return f32_to_fp8_e4m3_rne(val);
+}
+
 inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
   if (std::isnan(val))
     return static_cast<uint8_t>((std::bit_cast<uint32_t>(val) >> 24) & 0x80) | 0x7F;

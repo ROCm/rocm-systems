@@ -42,6 +42,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -993,7 +994,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
     cu->write_vgpr(v3, lane, 0xBEEF0007u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decoder->decode(words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
@@ -1321,6 +1322,50 @@ TEST(Rdna4True16Vop3Test, RcpF16WritesSelectedHighDestinationHalf) {
 
     cu->reset_all_wf();
   }
+}
+
+TEST(Rdna4True16Vop3Test, CvtPkFp8F32ProducesSignedNanOnOverflow) {
+  amdgpu::GpuMemory gpu_mem("rdna4_cvt_pk_fp8_overflow_mem");
+  amdgpu::L2Cache l2("rdna4_cvt_pk_fp8_overflow_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create("rdna4", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x7);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(768.0f));
+  cu->write_vgpr(
+      vb + 1, 1,
+      std::bit_cast<uint32_t>(std::nextafter(464.0f, std::numeric_limits<float>::infinity())));
+  cu->write_vgpr(vb + 1, 2, std::bit_cast<uint32_t>(464.0f));
+  cu->write_sgpr(sb, std::bit_cast<uint32_t>(-768.0f));
+  for (uint32_t lane = 0; lane < 3; ++lane)
+    cu->write_vgpr(vb + 2, lane, 0xA5A50000u);
+
+  // v_cvt_pk_fp8_f32 v2, v1, s0 -- the same instruction form emitted by IREE.
+  const uint32_t words[] = {0xD7690002U, 0x02000101U};
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_pk_fp8_f32");
+  cu->execute_instruction(inst.get(), *wf);
+
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xA5A5FF7Fu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 2), 0xA5A5FF7Eu);
+
+  cu->reset_all_wf();
 }
 
 TEST(Rdna4True16Vop3Test, CvtF32F16AppliesAbsToSelectedSourceHalf) {
@@ -1853,7 +1898,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
     cu->write_vgpr(v8, lane, 0x55550014u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decoder->decode(words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);

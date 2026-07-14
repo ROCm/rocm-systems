@@ -300,9 +300,11 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
   //   0 = v0 only (workitem_id_x)
   //   1 = v0 + v1 (workitem_id_x, workitem_id_y)
   //   2 = v0 + v1 + v2 (workitem_id_x, workitem_id_y, workitem_id_z)
-  // On packed-TID targets (CDNA3/4 and gfx1250): v0[9:0]=X,
+  // On packed-TID targets (CDNA3/4, RDNA4, and gfx1250): v0[9:0]=X,
   // v0[19:10]=Y, v0[29:20]=Z. v1/v2 are not written. Kernel extracts
-  // components via bit masks.
+  // components via bit masks. TIDIG_COMP_CNT still describes which logical
+  // components the kernel requests; it does not disable the packed v0 launch
+  // value when zero.
   uint32_t vbase = wf->vgpr_alloc().base;
   uint32_t workitem_base = wf_index_in_wg * cu->wf_size();
   uint32_t wg_x = pkt.workgroup_size_x > 0 ? pkt.workgroup_size_x : 1;
@@ -313,7 +315,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
     uint32_t id_x = flat_id % wg_x;
     uint32_t id_y = (flat_id / wg_x) % wg_y;
     uint32_t id_z = flat_id / wg_xy;
-    if (packed_tid_ && pkt.enable_vgpr_workitem_id > 0) {
+    if (packed_tid_) {
       uint32_t packed = (id_x & 0x3FFu) | ((id_y & 0x3FFu) << 10) | ((id_z & 0x3FFu) << 20);
       cu->write_vgpr(vbase, lane, packed);
     } else {
