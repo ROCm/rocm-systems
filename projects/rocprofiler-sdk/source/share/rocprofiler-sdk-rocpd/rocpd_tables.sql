@@ -227,12 +227,12 @@ CREATE TABLE IF NOT EXISTS
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "event_id" INTEGER,
-        "sample_id" INTEGER,
+        "sample_id" INTEGER, -- NULL for PMC, non-NULL for SPM (timestamped streaming counters)
         "pmc_id" INTEGER NOT NULL,
         "value" REAL DEFAULT 0.0,
-        "xcc" INTEGER,
-        "shader_engine" INTEGER,
-        "instance" INTEGER,
+        "xcc" INTEGER,          -- SPM only: XCC index
+        "shader_engine" INTEGER, -- SPM only: shader engine index
+        "instance" INTEGER,      -- SPM only: counter instance index
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,
