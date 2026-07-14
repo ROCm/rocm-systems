@@ -1532,7 +1532,6 @@ main(int argc, char** argv)
     }
 
     std::unordered_set<object_t*>    objects   = {};
-    std::unordered_set<module_t*>    modules   = {};
     std::unordered_set<procedure_t*> functions = {};
 
     //----------------------------------------------------------------------------------//
@@ -1573,7 +1572,6 @@ main(int argc, char** argv)
             if(itr->getModule())
             {
                 functions.emplace(itr);
-                modules.emplace(itr->getModule());
                 if(itr->getModule()->getObject())
                     objects.emplace(itr->getModule()->getObject());
             }
