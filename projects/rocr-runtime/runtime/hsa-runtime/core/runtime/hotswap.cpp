@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <mutex>
@@ -123,6 +124,119 @@ bool IsVerboseLoggingEnabled() {
       fprintf(stderr, __VA_ARGS__);                                                                \
     }                                                                                              \
   } while (false)
+
+#ifdef ENABLE_HOTSWAP_PROFILE
+// -- HotSwap ROCR-side profiling (opt-in via HSA_HOTSWAP_PROFILE) -------------
+//
+// Coarse wall-clock timing for the runtime-side of hotswap: the time spent
+// querying ISA/agent info and, most importantly, the time spent inside the
+// COMGR rewrite call itself, tagged by rewrite kind (b0a0 vs entry
+// trampolines). Aggregated across all code objects loaded in the process and
+// dumped to stderr at exit. This measures the load-time overhead that enabling
+// hotswap adds; run the same workload with HSA_HOTSWAP_DISABLE=1 to get the
+// zero-overhead baseline for comparison. For the per-strategy breakdown
+// (s_clause / trampoline / ds2addr / wmma / ...) build COMGR with
+// HOTSWAP_PROFILE=1 instead.
+bool IsHotswapProfilingEnabled() {
+  static const bool enabled = IsEnvFlagEnabled("HSA_HOTSWAP_PROFILE");
+  return enabled;
+}
+
+uint64_t ProfNowNs() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+class HotswapProfiler {
+ public:
+  static HotswapProfiler& Get() {
+    static HotswapProfiler instance;
+    return instance;
+  }
+
+  bool enabled() const { return enabled_; }
+
+  void Record(const char* name, uint64_t nanos) {
+    if (!enabled_) return;
+    std::scoped_lock lock(mutex_);
+    Entry& e = entries_[name];
+    if (e.calls == 0) order_.push_back(name);
+    e.total_nanos += nanos;
+    e.calls += 1;
+    if (nanos < e.min_nanos) e.min_nanos = nanos;
+    if (nanos > e.max_nanos) e.max_nanos = nanos;
+  }
+
+  ~HotswapProfiler() { Dump(); }
+
+ private:
+  struct Entry {
+    uint64_t total_nanos = 0;
+    uint64_t calls = 0;
+    uint64_t min_nanos = UINT64_MAX;
+    uint64_t max_nanos = 0;
+  };
+
+  HotswapProfiler() : enabled_(IsHotswapProfilingEnabled()) {}
+
+  void Dump() {
+    if (!enabled_ || order_.empty()) return;
+    fprintf(stderr, "\n=== HotSwap ROCR rewrite profile (HSA_HOTSWAP_PROFILE) ===\n");
+    fprintf(stderr, "%-24s %8s %12s %11s %11s %11s\n", "name", "calls", "total_us",
+            "avg_us", "min_us", "max_us");
+    for (const std::string& name : order_) {
+      const Entry& e = entries_[name];
+      const double total_us = e.total_nanos / 1000.0;
+      const double avg_us = e.calls ? total_us / e.calls : 0.0;
+      const double min_us = e.min_nanos == UINT64_MAX ? 0.0 : e.min_nanos / 1000.0;
+      const double max_us = e.max_nanos / 1000.0;
+      fprintf(stderr, "%-24s %8llu %12.1f %11.3f %11.3f %11.3f\n", name.c_str(),
+              static_cast<unsigned long long>(e.calls), total_us, avg_us, min_us, max_us);
+    }
+    fprintf(stderr, "=========================================================\n");
+  }
+
+  bool enabled_;
+  std::mutex mutex_;
+  std::vector<std::string> order_;
+  std::unordered_map<std::string, Entry> entries_;
+};
+
+void ProfRecord(const char* name, uint64_t start_ns) {
+  HotswapProfiler& p = HotswapProfiler::Get();
+  if (p.enabled()) p.Record(name, ProfNowNs() - start_ns);
+}
+
+// RAII wall-clock recorder: times the enclosing scope (including early
+// returns) and records it under \p name on destruction.
+class ScopedProf {
+ public:
+  explicit ScopedProf(const char* name)
+      : name_(name), start_ns_(HotswapProfiler::Get().enabled() ? ProfNowNs() : 0) {}
+  ScopedProf(const ScopedProf&) = delete;
+  ScopedProf& operator=(const ScopedProf&) = delete;
+  ~ScopedProf() {
+    HotswapProfiler& p = HotswapProfiler::Get();
+    if (p.enabled()) p.Record(name_, ProfNowNs() - start_ns_);
+  }
+
+ private:
+  const char* name_;
+  uint64_t start_ns_;
+};
+#else  // !ENABLE_HOTSWAP_PROFILE
+// Profiling compiled out; these no-op shims keep the call sites in
+// TryRetargetCodeObject / RetargetCodeObject valid with zero overhead.
+inline uint64_t ProfNowNs() { return 0; }
+inline void ProfRecord(const char* /*name*/, uint64_t /*start_ns*/) {}
+class ScopedProf {
+ public:
+  explicit ScopedProf(const char* /*name*/) {}
+  ScopedProf(const ScopedProf&) = delete;
+  ScopedProf& operator=(const ScopedProf&) = delete;
+};
+#endif  // ENABLE_HOTSWAP_PROFILE
 
 struct ComgrData {
   uint64_t handle;
@@ -424,6 +538,7 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
 
   ComgrData output = {};
   int status = kComgrStatusSuccess;
+  const uint64_t rewrite_start = ProfNowNs();
   const uint64_t rewrite_flags =
       (request_entry_trampolines ? kComgrHotswapRewriteFlagEntryTrampolines : 0) |
       (request_strict_mode ? kComgrHotswapRewriteFlagStrictMode : 0);
@@ -441,6 +556,9 @@ bool RetargetCodeObject(const void* elf_data, size_t elf_size, const char* sourc
   } else {
     status = api->hotswap_rewrite(input, source_isa, target_isa, &output);
   }
+  ProfRecord(request_entry_trampolines ? "comgr_rewrite:trampoline"
+                                       : "comgr_rewrite:b0a0",
+             rewrite_start);
   api->release_data(input);
   if (status != kComgrStatusSuccess) {
     HOTSWAP_LOG("hotswap: COMGR rewrite failed for %s -> %s (rc=%d)\n", source_isa, target_isa,
@@ -489,8 +607,14 @@ RetargetCodeObjectResult TryRetargetCodeObject(const CodeObjectView& code_object
     return {};
   }
 
+  // Only eligible code objects reach here; time the runtime-side work
+  // (ISA queries + the COMGR rewrite) that enabling hotswap adds per load.
+  ScopedProf total_prof("retarget_total");
+
+  const uint64_t isa_query_start = ProfNowNs();
   const std::string source_isa = GetCodeObjectIsaName(code_object.data, code_object.size);
   const std::string target_isa = GetAgentIsaName(agent);
+  ProfRecord("isa_query", isa_query_start);
   const std::optional<RewriteDecision> decision =
       DecideHotswapRewrite(gfx, source_isa, target_isa, options);
   if (!decision) {

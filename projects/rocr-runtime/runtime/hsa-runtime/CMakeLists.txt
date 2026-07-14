@@ -290,6 +290,12 @@ add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/blit_shaders )
 add_dependencies( ${CORE_RUNTIME_TARGET} amd_blit_shaders_v2)
 
+option(ENABLE_HOTSWAP_PROFILE "Compile in HotSwap load-time profiling instrumentation" OFF)
+
+if(ENABLE_HOTSWAP_PROFILE)
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE ENABLE_HOTSWAP_PROFILE)
+endif()
+
 option(PC_SAMPLING_SUPPORT "Enable PC Sampling Support" ON)
 
 if (${PC_SAMPLING_SUPPORT})
