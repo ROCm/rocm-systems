@@ -193,6 +193,14 @@ get_parameter_types(procedure_t* func)
     }
     return _param_names;
 }
+
+// True if any regex in _res matches _name.
+bool
+regex_match_any(const std::string& _name, const regexvec_t& _res)
+{
+    return std::any_of(_res.begin(), _res.end(),
+                       [&](const auto& _re) { return std::regex_search(_name, _re); });
+}
 }  // namespace
 
 //======================================================================================//
@@ -939,11 +947,7 @@ filter_objects(std::vector<object_t*>* app_objects)
             {
                 if(!mod) continue;
                 auto _module_name = std::string{ get_name(mod) };
-                if(!file_include.empty() &&
-                   std::any_of(file_include.begin(), file_include.end(),
-                               [&](const auto& re) {
-                                   return std::regex_search(_module_name, re);
-                               }))
+                if(regex_match_any(_module_name, file_include))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -953,11 +957,7 @@ filter_objects(std::vector<object_t*>* app_objects)
                     break;
                 }
 
-                if(!file_restrict.empty() &&
-                   std::any_of(file_restrict.begin(), file_restrict.end(),
-                               [&](const auto& re) {
-                                   return std::regex_search(_module_name, re);
-                               }))
+                if(regex_match_any(_module_name, file_restrict))
                 {
                     _included_module = true;
                     verbprintf(2,
@@ -1083,50 +1083,28 @@ filter_modules(std::vector<module_t*>* app_modules)
         }
 
         // -ME: skip if module matches an exclude regex
-        for(const auto& re : file_exclude)
+        if(regex_match_any(_module_name, file_exclude))
         {
-            if(std::regex_search(_module_name, re))
-            {
-                _is_excluded = true;
-                verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
-                           _module_name.c_str());
-                break;
-            }
+            _is_excluded = true;
+            verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
+                       _module_name.c_str());
         }
 
         // -MR: skip if restrict is specified and module does NOT match
-        if(!_is_excluded && !file_restrict.empty())
+        if(!_is_excluded && !file_restrict.empty() &&
+           !regex_match_any(_module_name, file_restrict))
         {
-            bool _matched = false;
-            for(const auto& re : file_restrict)
-            {
-                if(std::regex_search(_module_name, re))
-                {
-                    _matched = true;
-                    break;
-                }
-            }
-            if(!_matched)
-            {
-                _is_excluded = true;
-                verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
-                           _module_name.c_str());
-            }
+            _is_excluded = true;
+            verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
+                       _module_name.c_str());
         }
 
         // -MI: if module matches an include regex, force it through
-        if(_is_excluded)
+        if(_is_excluded && regex_match_any(_module_name, file_include))
         {
-            for(const auto& re : file_include)
-            {
-                if(std::regex_search(_module_name, re))
-                {
-                    _is_excluded = false;
-                    verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",
-                               _module_name.c_str());
-                    break;
-                }
-            }
+            _is_excluded = false;
+            verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",
+                       _module_name.c_str());
         }
 
         if(_is_excluded)
