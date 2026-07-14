@@ -745,6 +745,23 @@
         {"name": "CollTraceUtils.getSizeMb", "description": "CollTrace utils get size MB", "test_filter": "CollTraceUtilsTest.getSizeMbTest"}
       ]
     },
+    "asymmetric_visibility": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
+      ]
+    },
     "debug_tests": {
       "is_gtest": true,
       "binary": "rccl-UnitTests",
@@ -831,6 +848,34 @@
           "name": "CommMPITests_TrafficClass",
           "description": "CommMPITests traffic class (ncclCommInitRankConfig)",
           "test_filter": "TrafficClassMPITest.*"
+        },
+        {
+          "name": "CommMPITests_CtaConfigOverride",
+          "description": "ncclConfig_t minCTAs/maxCTAs override accepted and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.ConfigOverrideAppliesMinMaxCTAs"
+        },
+        {
+          "name": "CommMPITests_CtaDefaultNoClamp",
+          "description": "Default config (no min/maxCTAs): the maxCTAs cap in connect.cc is a no-op and does not reduce nChannels",
+          "test_filter": "CtaConfigMPITest.DefaultConfigDoesNotClampChannels"
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobs",
+          "description": "NCCL_MIN_CTAS/NCCL_MAX_CTAS env knobs override config and honored end-to-end",
+          "test_filter": "CtaConfigMPITest.EnvKnobsApplyMinMaxCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "2",
+            "NCCL_MAX_CTAS": "4"
+          }
+        },
+        {
+          "name": "CommMPITests_CtaEnvKnobsNegative",
+          "description": "Non-positive NCCL_MIN_CTAS/NCCL_MAX_CTAS are rejected and left at default",
+          "test_filter": "CtaConfigMPITest.EnvKnobsIgnoreNonPositiveCTAs",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "0",
+            "NCCL_MAX_CTAS": "0"
+          }
         }
       ]
     },
@@ -3104,6 +3149,12 @@
       "name": "Unit Tests - Fixtures (Debug)",
       "description": "Non-MPI unit tests accessing internal symbols (Debug only)",
       "config": "unit_tests_fixtures_debug",
+      "enabled": true
+    },
+    {
+      "name": "Asymmetric Visibility",
+      "description": "Comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
+      "config": "asymmetric_visibility",
       "enabled": true
     },
     {

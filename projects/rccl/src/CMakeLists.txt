@@ -141,6 +141,8 @@ set(SRC_FILES
   include/gin.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
+  include/gin/gin_host_rocshmem_gda.h
+  include/gin/gin_rocshmem_gda_factory.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -206,6 +208,9 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+  include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -444,6 +449,13 @@ list(TRANSFORM SRC_FILES PREPEND "src/")
 
 # Conditional source files based on build options
 #==================================================================================================
+if(ENABLE_ROCSHMEM_GIN)
+  list(APPEND SRC_FILES
+    src/gin/gin_plugin_rocshmem_gda.cc
+    src/gin/gin_rocshmem_gda_factory.cc
+  )
+endif()
+
 if(USE_AMDSMI)
   set(SMI_SOURCES
     src/include/amdsmi_wrap.h
@@ -746,6 +758,9 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
+if(ENABLE_ROCSHMEM_GIN)
+  target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM_GIN)
+endif()
 # Uncached (fine-grained) VMM/cuMem allocation type. Available natively on
 # HIP >= 7.12.60540 and via the ROCm 7.0.2.x backport range [7.0.51831, 7.0.60000).
 if(HIP_VMM_UNCACHED_MEMORY_AVAILABLE AND
@@ -759,7 +774,10 @@ else()
 endif()
 
 # ==== rocSHMEM integration (optional) ====
-if (ENABLE_ROCSHMEM)
+# ENABLE_ROCSHMEM: full rocshmem (device + host), links librocshmem.a into librccl.so
+# ENABLE_ROCSHMEM_GIN: GIN host code only (no device deps), rocshmem host symbols
+#   resolved at runtime from the executable that links librocshmem.a
+if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   add_rocshmem_targets()
   # Ensure rocSHMEM is fully built/installed before compiling rccl
   if (TARGET rocshmem_ext)
@@ -770,6 +788,17 @@ if (ENABLE_ROCSHMEM)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
+  if (ROCSHMEM_SOURCE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
+    if (ROCSHMEM_BUILD_DIR)
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_BUILD_DIR})
+    else()
+      target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/build/include/rocshmem)
+    endif()
+  endif()
+endif()
+if (ENABLE_ROCSHMEM)
   # Moved to where rocSHMEM target_links
   ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
@@ -1073,18 +1102,12 @@ endif()
 # interface and breaks install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
-  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE ${IBVERBS})
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
-  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
-  # librocshmem.a objects are only defined by the RDC device-link step.
-  # --hip-link tells amdclang++ to perform that step as part of the final
-  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
-  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
-  # so the device-link covers every arch RCCL is built for.
-  # RCCL's own device code (already embedded in device_build/common.o by the
-  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
-  # therefore unaffected by this device-link step.
+  # --hip-link tells amdclang++ to perform the RDC device-link step as part
+  # of the final librccl.so link.
+  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE hsakmt)
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
     string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
@@ -1092,6 +1115,12 @@ if(ENABLE_ROCSHMEM)
   endforeach()
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+elseif(ENABLE_ROCSHMEM_GIN)
+  # GIN-only: rocshmem device symbols (QueuePair methods for GDA backend)
+  # are left unresolved in librccl.so and resolved from the executable
+  # that links librocshmem.a. This avoids duplicating rocshmem device state
+  # (__constant__ memory) across librccl.so and the executable.
+  target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
 ## Set RCCL link options

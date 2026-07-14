@@ -10,6 +10,7 @@
     "cts.gfx1100.fpsan.fpsan_atomic_test",
     "cts.gfx1100.fpsan.fpsan_classify_test",
     "cts.gfx1100.fpsan.fpsan_hip_device_test",
+    "cts.gfx1100.fpsan.fpsan_cvt_test",
     "cts.gfx1100.fpsan.fpsan_wave_test",
     "cts.gfx1100.fpsan.fpsan_amdgcn_math_test",
     "cts.gfx1100.fpsan.fpsan_amdgcn_ldexp_test",

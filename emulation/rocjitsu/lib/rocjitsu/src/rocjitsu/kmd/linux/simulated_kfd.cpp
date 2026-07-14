@@ -190,6 +190,21 @@ bool SimulatedKfd::is_doorbell_range(const void *addr, size_t length) const {
   return query_base < end && query_end > base;
 }
 
+bool SimulatedKfd::ensure_fd_created() {
+  if (fd_.load(std::memory_order_acquire) >= 0)
+    return true;
+  int new_fd = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
+  if (new_fd < 0)
+    return false;
+  int expected = -1;
+  // CAS so only one racing opener publishes the backing memfd; a loser closes
+  // its own memfd and adopts the winner's, avoiding a double create / fd leak.
+  if (!fd_.compare_exchange_strong(expected, new_fd, std::memory_order_acq_rel,
+                                   std::memory_order_acquire))
+    syscall(SYS_close, new_fd);
+  return true;
+}
+
 int SimulatedKfd::open() {
   static std::once_flag raise_nofile_flag;
   std::call_once(raise_nofile_flag, [] {
@@ -200,16 +215,17 @@ int SimulatedKfd::open() {
     }
   });
 
-  if (fd_ < 0) {
-    fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
-    if (fd_ < 0)
-      return -1;
-  }
-
+  // Hold process_mutex_ across fd creation, process selection/retain, and the
+  // returned fd load so a racing dup2 (which invalidates fd_ via
+  // invalidate_primary_fd, also under process_mutex_) cannot clear fd_ between
+  // publishing it and returning it. Either open() completes and returns a valid
+  // fd, or invalidation wins first and ensure_fd_created() re-mints one below.
   std::lock_guard<std::mutex> lk(process_mutex_);
+  if (!ensure_fd_created())
+    return -1;
   if (!daemon_mode_ && local_process_id_ != 0 && processes_.contains(local_process_id_)) {
     processes_[local_process_id_]->retain_open();
-    return fd_;
+    return fd_.load(std::memory_order_acquire);
   }
   uint32_t pid = next_process_id_++;
   auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
@@ -278,7 +294,7 @@ int SimulatedKfd::open() {
     g.cps_initialized = true;
   }
 
-  return fd_;
+  return fd_.load(std::memory_order_acquire);
 }
 
 void SimulatedKfd::set_process_client_pid(uint32_t process_id, pid_t client_pid) {
@@ -294,15 +310,15 @@ void SimulatedKfd::set_process_client_pid(uint32_t process_id, pid_t client_pid)
 }
 
 uint32_t SimulatedKfd::open_process(pid_t client_pid) {
-  if (fd_ < 0) {
-    fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
-    if (fd_ < 0)
-      return 0;
-  }
-
   uint32_t pid;
   {
     std::lock_guard<std::mutex> lk(process_mutex_);
+    // Create the backing fd under process_mutex_ so both entry points
+    // (open()/open_process()) serialize fd creation and never publish two
+    // different memfds; ensure_fd_created() itself CASes so it is also safe from
+    // any lock-free caller.
+    if (!ensure_fd_created())
+      return 0;
     // Client-PID process reuse (and its matching retain) is a daemon-mode
     // feature: multiple client opens of the same PID share one process and
     // balance against multiple close()/release_open() calls. Gating reuse on
@@ -383,13 +399,31 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
   return pid;
 }
 
-void SimulatedKfd::retain_local_open() {
+LinuxKfd::PrimaryInvalidation SimulatedKfd::invalidate_primary_fd(int fd) {
+  if (fd < 0)
+    return PrimaryInvalidation::kNotPrimary;
+  // Serialize with open()/open_process(), which hold process_mutex_ across fd
+  // creation and the returned-fd load, so this cannot clear fd_ mid-open.
+  std::lock_guard<std::mutex> lk(process_mutex_);
+  int expected = fd;
+  // The local primary fd holds one counted open reference, so on a successful
+  // clear the caller must drop it (kClearedDropRef). Report kNotPrimary if a
+  // concurrent overwrite already cleared fd_, so the caller does not double
+  // release.
+  if (fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
+    return PrimaryInvalidation::kClearedDropRef;
+  return PrimaryInvalidation::kNotPrimary;
+}
+
+bool SimulatedKfd::retain_local_open() {
   std::lock_guard<std::mutex> lk(process_mutex_);
   if (local_process_id_ == 0)
-    return;
+    return false;
   auto it = processes_.find(local_process_id_);
-  if (it != processes_.end())
-    it->second->retain_open();
+  if (it == processes_.end())
+    return false;
+  it->second->retain_open();
+  return true;
 }
 
 uint32_t SimulatedKfd::local_open_ref_count() const {
