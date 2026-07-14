@@ -1,20 +1,19 @@
-/* CLASS = W */
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+/* CLASS = B */
 /*
   c  This file is generated automatically by the setparams utility.
   c  It sets the number of processors and the class_npb of the NPB
   c  in this directory. Do not modify it by hand.
  */
-
-/* full problem size */
-#define ISIZ1 25
-#define ISIZ2 25
-#define ISIZ3 25
-/* number of iterations and how often to print the norm */
-#define ITMAX_DEFAULT   150
-#define INORM_DEFAULT   150
-#define DT_DEFAULT      1.5e-3
+#define NA              50000
+#define NONZER          13
+#define NITER           50
+#define SHIFT           60.0
+#define RCOND           1.0e-1
 #define CONVERTDOUBLE   FALSE
-#define COMPILETIME     "07 Mar 2022"
+#define COMPILETIME     "01 Mar 2022"
 #define NPBVERSION      "4.1"
 #define LIBVERSION      "201511"
 #define COMPILERVERSION "11.1.0"
