@@ -20,8 +20,11 @@ $WORKSPACE_ROOT/
 |-- TheRock/build/                 # in-tree build (the other alternative)
 |-- hip-moi/
 |-- hip-moi-build/
+|-- hip-moi-build-gfx1201-rocjitsu/ # gfx1201 guest build
 |-- iree/
 |-- iree-build/
+|-- iree-build-gfx1201-rocjitsu/    # gfx1201 guest build
+|-- rocjitsu-build-gfx1201-emu/     # gfx1201 emulator build
 `-- rocjitsu-test-corpus/
 ```
 
@@ -50,6 +53,11 @@ export IREE_SOURCE_DIR="$WORKSPACE_ROOT/iree"
 export IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build"
 export ROCJITSU_TEST_CORPUS_DIR="$WORKSPACE_ROOT/rocjitsu-test-corpus"
 export RJ_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+export GFX1201_ROCJITSU_BUILD_DIR="$WORKSPACE_ROOT/rocjitsu-build-gfx1201-emu"
+export GFX1201_HIP_MOI_BUILD_DIR="$WORKSPACE_ROOT/hip-moi-build-gfx1201-rocjitsu"
+export GFX1201_IREE_BUILD_DIR="$WORKSPACE_ROOT/iree-build-gfx1201-rocjitsu"
+export GFX1201_EMULATOR="$GFX1201_ROCJITSU_BUILD_DIR/tools/rocjitsu/rocjitsu"
+export GFX1201_EMULATOR_CONFIG="$ROCJITSU_SOURCE_DIR/configs/gfx1201_r9700.json"
 ```
 
 Override any individual variable after this block if a build directory uses a
@@ -398,6 +406,46 @@ Known local result:
 It requires `ROCJITSU_BUILD_DIR`, `IREE_BUILD_DIR`, `HIP_MOI_BUILD_DIR`, and
 `ROCM_DIST_DIR`; pass `tier0`, `tier1`, `tier2`, or `all`. See `USAGE.md` for
 the exact invocation and the meaning of each tier.
+
+On a gfx950 host, qualify actual gfx1201 guest code through Rocjitsu by
+overriding the three build directories and asking the matrix to wrap each
+CTest process. Setting `CONSAN_GPU_ARCH` explicitly is required: the native
+agent enumerator correctly reports the host's gfx950, not the emulated guest.
+
+```sh
+export ROCJITSU_BUILD_DIR="$GFX1201_ROCJITSU_BUILD_DIR"
+export HIP_MOI_BUILD_DIR="$GFX1201_HIP_MOI_BUILD_DIR"
+export IREE_BUILD_DIR="$GFX1201_IREE_BUILD_DIR"
+export RJ_HOOK="$ROCJITSU_BUILD_DIR/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_dbi_hooks.so"
+export CONSAN_GPU_ARCH=gfx1201
+export CONSAN_CTEST_EMULATOR="$GFX1201_EMULATOR"
+export CONSAN_CTEST_EMULATOR_CONFIG="$GFX1201_EMULATOR_CONFIG"
+
+revision="$(git rev-parse HEAD)"
+evidence="$WORKSPACE_ROOT/consan-gfx1201-emulator-$revision.log"
+set -o pipefail
+CTEST_PARALLEL_LEVEL=8 \
+  "$ROCJITSU_SOURCE_DIR/tests/dbi/consan_test_matrix.sh" all \
+  2>&1 | tee "$evidence"
+```
+
+The emulator-aware tier1 runs hip-moi twice: once with `HSA_TOOLS_LIB`
+explicitly cleared as an independent guest baseline and once with the
+documented SuperCollider/`lds`-trap profile. The broad IREE profiles run one
+after another. To establish a broad no-hook emulator baseline independently
+of ConSan, use the same CTest wrapper with an empty hook:
+
+```sh
+HSA_TOOLS_LIB= \
+"$GFX1201_EMULATOR" --config "$GFX1201_EMULATOR_CONFIG" -- \
+ctest --test-dir "$GFX1201_IREE_BUILD_DIR" \
+  -R '^iree/tests/e2e/.*(rocm_hip|rocm-rocm)' \
+  --parallel 8 --timeout 60 --output-on-failure
+```
+
+These commands exercise gfx1201 binaries on the gfx950 host; they are not a
+claim that `rocm_agent_enumerator` exposes a physical gfx1201. Keep their
+evidence separate from the physical-machine snapshot below.
 
 To close the cross-workspace gfx1201 regression gate after integrating the
 shared gfx950 changes, run the complete matrix from a clean gfx1201 checkout
