@@ -746,6 +746,17 @@ void append_rdna4_vgpr_msb_entry_reset(std::vector<uint32_t> &words) {
   words.push_back(0);
 }
 
+void append_rdna4_gfx1250_m0_entry_init(std::vector<uint32_t> &words) {
+  // GFX12 block memory operations interpret M0 as their dword participation
+  // mask. A fresh gfx1250 wave enters with the block mode enabled, while RDNA4
+  // leaves M0 undefined. Recreate the guest entry state once so later guest
+  // writes to M0 continue to control block operations normally.
+  append_salu_write(
+      words,
+      build_s_mov_b32(rdna4::OPR_SDST_M0, rdna4::OPR_SSRC_NEG_INT_MIN, ROCJITSU_CODE_ARCH_RDNA4),
+      ROCJITSU_CODE_ARCH_RDNA4);
+}
+
 [[nodiscard]] std::vector<uint32_t>
 build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
                             int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr) {
@@ -758,6 +769,9 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - GFX1250 hardware initializes VGPR_MSB mode to zero for a fresh kernel
   //   wave. RDNA4 exposes the equivalent through MODE[19:12], which can persist
   //   across translated dispatches unless each kernel resets it at entry.
+  // - GFX1250 initializes M0 to select all dwords of global/scratch block
+  //   operations. RDNA4 leaves M0 undefined, so translated kernels must restore
+  //   the guest entry value before their first instruction.
   // - RDNA1-RDNA3 still have descriptor-controlled workgroup-id SGPR setup for
   //   the cases translated here, so no prologue is needed for those targets.
   // - RDNA4 provides the current workgroup-grid payload through TTMP registers
@@ -780,6 +794,8 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
       (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4))
     append_rdna4_workgroup_grid_prologue(words, src, host_arch, rdna4_grid_x_sgpr,
                                          rdna4_grid_yz_sgpr);
+  if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+    append_rdna4_gfx1250_m0_entry_init(words);
   if (is_gfx1250_arch(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     append_rdna4_vgpr_msb_entry_reset(words);
 

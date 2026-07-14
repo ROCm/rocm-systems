@@ -1338,6 +1338,8 @@ constexpr uint16_t hwreg_gfx1250_grid_mode_for_test() {
 }
 
 constexpr uint8_t kNullSgprForTest = 124;
+constexpr uint16_t kRdna4M0ForTest = 125;
+constexpr uint16_t kInlineMinusOneForTest = 193;
 constexpr uint32_t kGfx1250PrivateBorrowedVgprCountForTest = 38u;
 constexpr uint32_t kGfx1250HighBankShadowLowSaveVgprCountForTest = 33u;
 
@@ -3463,6 +3465,8 @@ TEST(BinaryTranslator, Gfx1250Rdna4EntryStubMaterializesWorkgroupIdSgprs) {
       build_s_lshr_b32(13, 13, shift16, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_lshr_b32(14, 16, shift16, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      build_s_mov_b32(kRdna4M0ForTest, kInlineMinusOneForTest, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       rdna4_vgpr_msb_reset_setreg_for_test(),
       0,
@@ -16769,6 +16773,32 @@ TEST(KernelDescriptorTranslator, Gfx1250DescriptorsAreWave32Only) {
   EXPECT_TRUE(translations[0].supported);
 }
 
+TEST(KernelDescriptorTranslator, Gfx1250ToRdna4InitializesBlockMemoryM0) {
+  auto image = rocjitsu::make_minimal_amdgpu_elf_with_descriptor_after_text();
+  auto *ehdr = reinterpret_cast<rocjitsu::Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<rocjitsu::Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+
+  rocjitsu::KernelDescriptorTranslator translator(ROCJITSU_CODE_ARCH_GFX1250,
+                                                  ROCJITSU_CODE_ARCH_RDNA4);
+  const auto translations = translator.translate_image(
+      image, shdrs[1].sh_offset, shdrs[1].sh_size, rocjitsu::KernelDescriptorTranslationOptions{});
+  ASSERT_EQ(translations.size(), 1u);
+
+  const std::vector<uint32_t> expected = {
+      rocjitsu::build_s_mov_b32(rocjitsu::kRdna4M0ForTest, rocjitsu::kInlineMinusOneForTest,
+                                ROCJITSU_CODE_ARCH_RDNA4),
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
+      0xB9803B01u,
+      0,
+  };
+  ASSERT_GE(translations[0].prologue_words.size(), expected.size());
+  const auto suffix = std::span(translations[0].prologue_words).last(expected.size());
+  EXPECT_TRUE(std::ranges::equal(suffix, expected))
+      << "gfx1250 block operations require M0=-1 at translated kernel entry";
+  EXPECT_EQ(expected[0], 0xBEFD00C1u) << "RDNA4 s_mov_b32 m0, -1 encoding changed";
+  EXPECT_TRUE(translations[0].supported);
+}
+
 TEST(CodeObjectPatcher, Gfx1250ToRdna4PatchSetsWave32DescriptorBit) {
   using namespace rocr::llvm::amdhsa;
   using KD = kernel_descriptor_t;
@@ -16846,6 +16876,10 @@ TEST(KernelDescriptorTranslator, Gfx1250ToRdna4MaterializesKernargPreload) {
   expected.push_back(
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
   expected.push_back(rocjitsu::build_s_mov_b32(30, 108 + 7, ROCJITSU_CODE_ARCH_RDNA4));
+  expected.push_back(
+      rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
+  expected.push_back(rocjitsu::build_s_mov_b32(
+      rocjitsu::kRdna4M0ForTest, rocjitsu::kInlineMinusOneForTest, ROCJITSU_CODE_ARCH_RDNA4));
   expected.push_back(
       rocjitsu::build_s_delay_alu(rocjitsu::kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4));
   expected.push_back(0xB9803B01u);
