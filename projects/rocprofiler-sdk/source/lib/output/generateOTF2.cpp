@@ -344,15 +344,15 @@ create_attribute_list()
 {
     auto* _val = OTF2_AttributeList_New();
 
-    const auto* _name       = sdk::perfetto_category<Tp>::name;
-    auto        _hash       = get_hash_id(_name);
-    auto        _attr_value = OTF2_AttributeValue{};
-    _attr_value.stringRef   = _hash;
+    const auto* _name = sdk::perfetto_category<Tp>::name;
+    auto        _hash = get_hash_id(_name);
+
+    auto _attr_value      = OTF2_AttributeValue{};
+    _attr_value.stringRef = _hash;
     OTF2_AttributeList_AddAttribute(_val, 0, OTF2_TYPE_STRING, _attr_value);
 
     return _val;
 }
-
 }  // namespace
 
 void
