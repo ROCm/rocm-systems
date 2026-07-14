@@ -9398,6 +9398,57 @@ ExpandResult expand_v_cvt_sr_fp8_f32_e5m3_vop3(const Instruction &inst, uint32_t
   return ExpandResult::success(std::move(words));
 }
 
+void append_extract_f8_byte(std::vector<uint32_t> &words, uint8_t byte, uint16_t src0,
+                            uint8_t byte_index, std::optional<uint32_t> literal_word) {
+  constexpr uint8_t kOpMovB32 = 1;
+  constexpr uint8_t kOpLshrrevB32 = 25;
+  constexpr uint8_t kOpAndB32 = 27;
+
+  append_vop1(words, kOpMovB32, byte, src0, literal_word);
+  if (byte_index != 0) {
+    append_wait_valu_vgpr(words);
+    append_vop2(words, kOpLshrrevB32, byte,
+                scalar_positive_inline_u32(static_cast<uint16_t>(byte_index * 8u)), byte);
+  }
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpAndB32, byte, 255, byte, 0xFFu);
+}
+
+void append_preserve_gfx1250_f8_nan(std::vector<uint32_t> &words, uint8_t result, uint8_t byte,
+                                    uint8_t canonical, uint8_t predicate, bool bf8,
+                                    bool before_f16_narrowing) {
+  constexpr uint8_t kOpLshlrevB32 = 24;
+  constexpr uint8_t kOpAndB32 = 27;
+  constexpr uint8_t kOpOrB32 = 28;
+  constexpr uint16_t kOpCmpEqU32 = 74;
+  constexpr uint16_t kOpCmpGtU32 = 76;
+  constexpr uint16_t kOpCndmaskB32 = 257;
+  constexpr uint8_t kSoppWaitAlu = 8;
+
+  // RDNA4 canonicalizes both positive OCP FP8/BF8 NaNs to a negative quiet
+  // NaN. Gfx1250 preserves the source sign. Its f16 decode also retains one
+  // payload bit, so seed that bit in the f32 value before the final narrow.
+  append_vop2(words, kOpAndB32, canonical, 255, byte, 0x80u);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpLshlrevB32, canonical, scalar_positive_inline_u32(24), canonical);
+  append_wait_valu_vgpr(words);
+  append_vop2(words, kOpOrB32, canonical, 255, canonical,
+              before_f16_narrowing ? 0x7FC02000u : 0x7FC00000u);
+
+  append_vop2(words, kOpAndB32, byte, 255, byte, 0x7Fu);
+  append_wait_valu_vgpr(words);
+  if (bf8) {
+    // E5M2 encodes infinity at magnitude 0x7c and NaNs at 0x7d..0x7f.
+    append_vop3(words, kOpCmpGtU32, predicate, vgpr_src(byte), 255, 0, 0x7Cu);
+  } else {
+    // OCP E4M3FN has a single NaN magnitude, 0x7f.
+    append_vop3(words, kOpCmpEqU32, predicate, vgpr_src(byte), 255, 0, 0x7Fu);
+  }
+  words.push_back(pack_sopp(kSoppWaitAlu, kWaitAluDepctrVaSdst0));
+  append_wait_valu_vgpr(words);
+  append_vop3(words, kOpCndmaskB32, result, vgpr_src(result), vgpr_src(canonical), predicate);
+}
+
 std::vector<uint32_t> lower_v_cvt_f16_f8(uint8_t vdst, uint16_t src0, uint8_t opsel,
                                          std::optional<uint32_t> literal_word, bool bf8,
                                          const Instruction &inst,
@@ -9407,22 +9458,27 @@ std::vector<uint32_t> lower_v_cvt_f16_f8(uint8_t vdst, uint16_t src0, uint8_t op
 
   std::vector<uint8_t> avoid{vdst};
   add_avoid_src_vgpr(avoid, src0);
-  const auto tmp_opt = find_free_vgpr_run_avoiding(inst, liveness, 1, avoid);
-  if (!tmp_opt || *tmp_opt > 255u)
+  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, 3, avoid);
+  const auto predicate = liveness.find_free_sgpr(&inst);
+  if (!tmp_base || *tmp_base > 253u || !predicate || *predicate > 105u)
     return {};
-  const auto tmp = static_cast<uint8_t>(*tmp_opt);
+  const auto byte = static_cast<uint8_t>(*tmp_base);
+  const auto tmp = static_cast<uint8_t>(*tmp_base + 1u);
+  const auto canonical = static_cast<uint8_t>(*tmp_base + 2u);
+  const uint8_t byte_index = static_cast<uint8_t>(((opsel & 0x1u) << 1u) | ((opsel & 0x2u) >> 1u));
 
   constexpr uint16_t kOpCvtF32Fp8 = 492;
   constexpr uint16_t kOpCvtF32Bf8 = 493;
   constexpr uint8_t kOpCvtF16F32 = 10;
   std::vector<uint32_t> words;
-  words.reserve(literal_word ? 5 : 4);
+  words.reserve(28);
+  append_extract_f8_byte(words, byte, src0, byte_index, literal_word);
   const auto [decode_w0, decode_w1] =
-      build_vop3_mod(bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, tmp, src0, 0, 0, 0, opsel);
+      build_vop3_mod(bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, tmp, vgpr_src(byte), 0, 0, 0, 0);
   words.push_back(decode_w0);
   words.push_back(decode_w1);
-  if (literal_word && src0 == 255)
-    words.push_back(*literal_word);
+  append_preserve_gfx1250_f8_nan(words, tmp, byte, canonical, static_cast<uint8_t>(*predicate), bf8,
+                                 /*before_f16_narrowing=*/true);
   append_wait_valu_vgpr(words);
   append_vop1(words, kOpCvtF16F32, vdst, static_cast<uint16_t>(256u + tmp));
   return words;
@@ -9566,11 +9622,14 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f8(uint8_t vdst, uint16_t src0, bool sr
 
   std::vector<uint8_t> avoid{vdst};
   add_avoid_src_vgpr(avoid, src0);
-  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, 2, avoid);
-  if (!tmp_base || *tmp_base > 254u)
+  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, 4, avoid);
+  const auto predicate = liveness.find_free_sgpr(&inst);
+  if (!tmp_base || *tmp_base > 252u || !predicate || *predicate > 105u)
     return {};
   const auto lo = static_cast<uint8_t>(*tmp_base);
   const auto hi = static_cast<uint8_t>(*tmp_base + 1u);
+  const auto byte = static_cast<uint8_t>(*tmp_base + 2u);
+  const auto canonical = static_cast<uint8_t>(*tmp_base + 3u);
 
   constexpr uint16_t kOpCvtF32Fp8 = 492;
   constexpr uint16_t kOpCvtF32Bf8 = 493;
@@ -9578,17 +9637,19 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f8(uint8_t vdst, uint16_t src0, bool sr
   constexpr uint8_t kOpAndB32 = 27;
   constexpr uint8_t kOpLshlrevB32 = 24;
   constexpr uint8_t kOpOrB32 = 28;
-  // VOP3 OPSEL encodes byte selection as {half, byte-within-half}: byte 1 is
-  // 0b10 and byte 2 is 0b01, rather than the linear byte index.
-  const uint8_t first_opsel = src_high ? 1u : 0u;
-  const uint8_t second_opsel = src_high ? 3u : 2u;
+  const uint8_t first_byte = src_high ? 2u : 0u;
+  const uint8_t second_byte = static_cast<uint8_t>(first_byte + 1u);
 
   std::vector<uint32_t> words;
-  words.reserve(literal_word ? 14 : 12);
-  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, lo, src0, 0, 0, first_opsel,
-                  literal_word);
-  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, hi, src0, 0, 0, second_opsel,
-                  literal_word);
+  words.reserve(60);
+  append_extract_f8_byte(words, byte, src0, first_byte, literal_word);
+  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, lo, vgpr_src(byte), 0, 0, 0);
+  append_preserve_gfx1250_f8_nan(words, lo, byte, canonical, static_cast<uint8_t>(*predicate), bf8,
+                                 /*before_f16_narrowing=*/true);
+  append_extract_f8_byte(words, byte, src0, second_byte, literal_word);
+  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, hi, vgpr_src(byte), 0, 0, 0);
+  append_preserve_gfx1250_f8_nan(words, hi, byte, canonical, static_cast<uint8_t>(*predicate), bf8,
+                                 /*before_f16_narrowing=*/true);
   append_wait_valu_vgpr(words);
   append_vop1(words, kOpCvtF16F32, lo, vgpr_src(lo));
   append_vop1(words, kOpCvtF16F32, hi, vgpr_src(hi));
@@ -9598,6 +9659,108 @@ std::vector<uint32_t> lower_v_cvt_pk_f16_f8(uint8_t vdst, uint16_t src0, bool sr
   append_wait_valu_vgpr(words);
   append_vop2(words, kOpOrB32, vdst, vgpr_src(lo), hi);
   return words;
+}
+
+std::vector<uint32_t> lower_v_cvt_pk_f32_f8(uint8_t vdst, uint16_t src0, bool src_high,
+                                            std::optional<uint32_t> literal_word, bool bf8,
+                                            const Instruction &inst,
+                                            const LivenessAnalysis &liveness) {
+  if (vdst >= 255 || src0 == 254)
+    return {};
+
+  std::vector<uint8_t> avoid{vdst, static_cast<uint8_t>(vdst + 1u)};
+  add_avoid_src_vgpr(avoid, src0);
+  const auto tmp_base = find_free_vgpr_run_avoiding(inst, liveness, 4, avoid);
+  const auto predicate = liveness.find_free_sgpr(&inst);
+  if (!tmp_base || *tmp_base > 252u || !predicate || *predicate > 105u)
+    return {};
+  const auto lo = static_cast<uint8_t>(*tmp_base);
+  const auto hi = static_cast<uint8_t>(*tmp_base + 1u);
+  const auto byte = static_cast<uint8_t>(*tmp_base + 2u);
+  const auto canonical = static_cast<uint8_t>(*tmp_base + 3u);
+  const uint8_t first_byte = src_high ? 2u : 0u;
+  const uint8_t second_byte = static_cast<uint8_t>(first_byte + 1u);
+
+  constexpr uint16_t kOpCvtF32Fp8 = 492;
+  constexpr uint16_t kOpCvtF32Bf8 = 493;
+  constexpr uint8_t kOpMovB32 = 1;
+  std::vector<uint32_t> words;
+  words.reserve(56);
+  append_extract_f8_byte(words, byte, src0, first_byte, literal_word);
+  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, lo, vgpr_src(byte), 0, 0, 0);
+  append_preserve_gfx1250_f8_nan(words, lo, byte, canonical, static_cast<uint8_t>(*predicate), bf8,
+                                 /*before_f16_narrowing=*/false);
+  append_extract_f8_byte(words, byte, src0, second_byte, literal_word);
+  append_vop3_mod(words, bf8 ? kOpCvtF32Bf8 : kOpCvtF32Fp8, hi, vgpr_src(byte), 0, 0, 0);
+  append_preserve_gfx1250_f8_nan(words, hi, byte, canonical, static_cast<uint8_t>(*predicate), bf8,
+                                 /*before_f16_narrowing=*/false);
+  append_wait_valu_vgpr(words);
+  append_vop1(words, kOpMovB32, vdst, vgpr_src(lo));
+  append_vop1(words, kOpMovB32, static_cast<uint8_t>(vdst + 1u), vgpr_src(hi));
+  return words;
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_f8_vop1(const Instruction &inst,
+                                                  const LivenessAnalysis &liveness, bool bf8) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop1MachineInst))
+    return {};
+  const auto src = std::bit_cast<gfx1250::Vop1MachineInst>(raw[0]);
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return {};
+  }
+  return lower_v_cvt_pk_f32_f8(static_cast<uint8_t>(src.vdst), static_cast<uint16_t>(src.src0),
+                               false, literal_word, bf8, inst, liveness);
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_fp8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
+                                                   const LivenessAnalysis &liveness,
+                                                   const LaneLayout *, const LaneLayout *) {
+  return expand_v_cvt_pk_f32_f8_vop1(inst, liveness, /*bf8=*/false);
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_bf8_vop1(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
+                                                   const LivenessAnalysis &liveness,
+                                                   const LaneLayout *, const LaneLayout *) {
+  return expand_v_cvt_pk_f32_f8_vop1(inst, liveness, /*bf8=*/true);
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_f8_vop3(const Instruction &inst,
+                                                  const LivenessAnalysis &liveness, bool bf8) {
+  const auto *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(gfx1250::Vop3MachineInst))
+    return {};
+  gfx1250::Vop3MachineInst src{};
+  std::memcpy(&src, raw, sizeof(src));
+  if (src.abs != 0 || src.clamp != 0 || src.omod != 0 || src.neg != 0 || (src.opsel & ~0x1u) != 0)
+    return {};
+  std::optional<uint32_t> literal_word;
+  if (src.src0 == 255) {
+    literal_word = simm32_literal_word(inst, 0);
+    if (!literal_word)
+      return {};
+  }
+  return lower_v_cvt_pk_f32_f8(static_cast<uint8_t>(src.vdst), static_cast<uint16_t>(src.src0),
+                               (src.opsel & 0x1u) != 0, literal_word, bf8, inst, liveness);
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_fp8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
+                                                   const LivenessAnalysis &liveness,
+                                                   const LaneLayout *, const LaneLayout *) {
+  return expand_v_cvt_pk_f32_f8_vop3(inst, liveness, /*bf8=*/false);
+}
+
+std::vector<uint32_t> expand_v_cvt_pk_f32_bf8_vop3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
+                                                   const LivenessAnalysis &liveness,
+                                                   const LaneLayout *, const LaneLayout *) {
+  return expand_v_cvt_pk_f32_f8_vop3(inst, liveness, /*bf8=*/true);
 }
 
 std::vector<uint32_t> expand_v_cvt_pk_f16_fp8_vop1(const Instruction &inst, uint32_t, uint64_t,
@@ -11689,6 +11852,8 @@ constexpr uint16_t kOpVAddNcU64E32 = 40;
 constexpr uint16_t kOpVSubNcU64Vop3 = 297;
 constexpr uint16_t kOpVSubNcU64E32 = 41;
 constexpr uint16_t kOpVAddF16E32 = 50;
+constexpr uint16_t kOpVCvtPkF32Fp8E32 = 110;
+constexpr uint16_t kOpVCvtPkF32Bf8E32 = 111;
 constexpr uint16_t kOpVCvtF32Bf16E32 = 114;
 constexpr uint16_t kOpVCvtPkF16Fp8E32 = 117;
 constexpr uint16_t kOpVCvtPkF16Bf8E32 = 118;
@@ -11710,6 +11875,8 @@ constexpr uint16_t kOpVWmmaScaleF32_16x16x128F8f6f4 = 0x35;
 constexpr uint16_t kOpVWmmaScale16F32_16x16x128F8f6f4 = 0x3A;
 constexpr uint16_t kOpVCvtF32Bf16Vop3 = 498;
 constexpr uint16_t kOpVCvtF32Fp8Vop3 = 492;
+constexpr uint16_t kOpVCvtPkF32Fp8Vop3 = 494;
+constexpr uint16_t kOpVCvtPkF32Bf8Vop3 = 495;
 constexpr uint16_t kOpVCvtPkF16Fp8Vop3 = 501;
 constexpr uint16_t kOpVCvtPkF16Bf8Vop3 = 502;
 constexpr uint16_t kOpVCvtF16Fp8Vop3 = 503;
@@ -11862,8 +12029,12 @@ constexpr uint16_t kOpDsLoadTr8B64 = 0xFD;
         RJ_GFX1250_EXPAND(expand_v_cvt_pk_bf16_f32_vop3), nullptr, nullptr                         \
   }
 
+#define RJ_VOP3_CVT_PK_F32_F8_DECODE_RULES(ENC)                                                    \
+  RJ_VOP3_EXPAND_RULE(ENC, kOpVCvtPkF32Fp8Vop3, expand_v_cvt_pk_f32_fp8_vop3),                     \
+      RJ_VOP3_EXPAND_RULE(ENC, kOpVCvtPkF32Bf8Vop3, expand_v_cvt_pk_f32_bf8_vop3)
+
 #define RJ_VOP3_CVT_F32_BF16_RULE(ENC)                                                             \
-  {                                                                                                \
+  RJ_VOP3_CVT_PK_F32_F8_DECODE_RULES(ENC), {                                                       \
     ENC, kOpVCvtF32Bf16Vop3, RuleAction::Expand, 0, 0, nullptr,                                    \
         RJ_GFX1250_EXPAND(expand_v_cvt_f32_bf16_vop3), nullptr, nullptr                            \
   }
@@ -11997,6 +12168,10 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_0, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    {kEncVop1_0, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
+    {kEncVop1_0, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_bf8_vop1), nullptr, nullptr},
     {kEncVop1_0, kOpVCvtF32Bf16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_bf16_vop1), nullptr, nullptr},
     {kEncVop1_0, kOpVCvtPkF16Fp8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12013,6 +12188,10 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_1, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    {kEncVop1_1, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
+    {kEncVop1_1, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_bf8_vop1), nullptr, nullptr},
     {kEncVop1_1, kOpVCvtF32Bf16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_bf16_vop1), nullptr, nullptr},
     {kEncVop1_1, kOpVCvtPkF16Fp8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12029,6 +12208,10 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_2, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    {kEncVop1_2, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
+    {kEncVop1_2, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_bf8_vop1), nullptr, nullptr},
     {kEncVop1_2, kOpVCvtF32Bf16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_bf16_vop1), nullptr, nullptr},
     {kEncVop1_2, kOpVCvtPkF16Fp8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12045,6 +12228,10 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
      RJ_GFX1250_EXPAND(expand_v_mov_b16), nullptr, nullptr},
     {kEncVop1_3, kOpVMovB64Vop1, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_mov_b64), nullptr, nullptr},
+    {kEncVop1_3, kOpVCvtPkF32Fp8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_fp8_vop1), nullptr, nullptr},
+    {kEncVop1_3, kOpVCvtPkF32Bf8E32, RuleAction::Expand, 0, 0, nullptr,
+     RJ_GFX1250_EXPAND(expand_v_cvt_pk_f32_bf8_vop1), nullptr, nullptr},
     {kEncVop1_3, kOpVCvtF32Bf16E32, RuleAction::Expand, 0, 0, nullptr,
      RJ_GFX1250_EXPAND(expand_v_cvt_f32_bf16_vop1), nullptr, nullptr},
     {kEncVop1_3, kOpVCvtPkF16Fp8E32, RuleAction::Expand, 0, 0, nullptr,
@@ -12548,6 +12735,7 @@ const TranslationRule kExpandRules_gfx1250_to_rdna4[] = {
 #undef RJ_VOP3_CVT_PK_F16_F32_RULE
 #undef RJ_VOP3_CVT_F32_BF16_RULE
 #undef RJ_VOP3_CVT_F32_FP8_RULE
+#undef RJ_VOP3_CVT_PK_F32_F8_DECODE_RULES
 #undef RJ_VOP3_CVT_F16_FP8_RULE
 #undef RJ_VOP3_CVT_F16_BF8_RULE
 #undef RJ_VOP3_CVT_F16_F8_DECODE_RULES

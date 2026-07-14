@@ -9274,6 +9274,7 @@ TEST(BinaryTranslator, Gfx1250VCvtF32Fp8E5M3LowersClampSelectorToIntegerSequence
 
 TEST(BinaryTranslator, Gfx1250VCvtF16Fp8Vop1LowersThroughF32Scratch) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kF32NaNWithF16Payload = 0x7FC02000u;
   constexpr std::array<uint32_t, 2> text_words = {0x7E02EF01u, kGfx1250SEndpgm};
 
   auto image =
@@ -9297,19 +9298,23 @@ TEST(BinaryTranslator, Gfx1250VCvtF16Fp8Vop1LowersThroughF32Scratch) {
   for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
     rdna4::Vop3MachineInst candidate{};
     std::memcpy(&candidate, cave_words.data() + i, sizeof(candidate));
-    if (candidate.encoding == 0x35u && candidate.op == 492u && candidate.src0 == 257u) {
+    if (candidate.encoding == 0x35u && candidate.op == 492u) {
       decode = candidate;
       break;
     }
   }
   ASSERT_TRUE(decode.has_value());
   EXPECT_EQ(decode->opsel, 0u);
+  EXPECT_NE(decode->src0, 257u) << "the selected byte must be copied before aliasing writes";
   EXPECT_TRUE(find_vop1_for_test(cave_words, 10u, 1u, static_cast<uint16_t>(256u + decode->vdst))
                   .has_value());
+  EXPECT_NE(std::ranges::find(cave_words, kF32NaNWithF16Payload), cave_words.end());
+  EXPECT_TRUE(section_contains_vop3_opcode(translations, 257u));
 }
 
-TEST(BinaryTranslator, Gfx1250VCvtF16Bf8Vop3PreservesByteSelectorThroughF32Scratch) {
+TEST(BinaryTranslator, Gfx1250VCvtF16Bf8Vop3ExtractsSelectedByteBeforeF32Decode) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kF32NaNWithF16Payload = 0x7FC02000u;
   gfx1250::Vop3MachineInst inst{};
   inst.vdst = 2;
   inst.op = 504;
@@ -9342,15 +9347,18 @@ TEST(BinaryTranslator, Gfx1250VCvtF16Bf8Vop3PreservesByteSelectorThroughF32Scrat
   for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
     rdna4::Vop3MachineInst candidate{};
     std::memcpy(&candidate, cave_words.data() + i, sizeof(candidate));
-    if (candidate.encoding == 0x35u && candidate.op == 493u && candidate.src0 == 259u) {
+    if (candidate.encoding == 0x35u && candidate.op == 493u) {
       decode = candidate;
       break;
     }
   }
   ASSERT_TRUE(decode.has_value());
-  EXPECT_EQ(decode->opsel, 2u);
+  EXPECT_EQ(decode->opsel, 0u);
+  EXPECT_NE(decode->src0, 259u);
   EXPECT_TRUE(find_vop1_for_test(cave_words, 10u, 2u, static_cast<uint16_t>(256u + decode->vdst))
                   .has_value());
+  EXPECT_NE(std::ranges::find(cave_words, kF32NaNWithF16Payload), cave_words.end());
+  EXPECT_TRUE(section_contains_vop3_opcode(translations, 257u));
 }
 
 TEST(BinaryTranslator, Gfx1250VCvtPkFp8F16LowersThroughTwoF32Sources) {
@@ -9396,6 +9404,7 @@ TEST(BinaryTranslator, Gfx1250VCvtPkFp8F16LowersThroughTwoF32Sources) {
 
 TEST(BinaryTranslator, Gfx1250VCvtPkF16Fp8Vop1DecodesBothBytesBeforePackingHalves) {
   constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kF32NaNWithF16Payload = 0x7FC02000u;
   constexpr std::array<uint32_t, 2> text_words = {0x7E02EB01u, kGfx1250SEndpgm};
 
   auto image =
@@ -9419,12 +9428,14 @@ TEST(BinaryTranslator, Gfx1250VCvtPkF16Fp8Vop1DecodesBothBytesBeforePackingHalve
   for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
     rdna4::Vop3MachineInst candidate{};
     std::memcpy(&candidate, cave_words.data() + i, sizeof(candidate));
-    if (candidate.encoding == 0x35u && candidate.op == 492u && candidate.src0 == 257u)
+    if (candidate.encoding == 0x35u && candidate.op == 492u)
       decodes.push_back(candidate);
   }
   ASSERT_EQ(decodes.size(), 2u);
   EXPECT_EQ(decodes[0].opsel, 0u);
-  EXPECT_EQ(decodes[1].opsel, 2u);
+  EXPECT_EQ(decodes[1].opsel, 0u);
+  EXPECT_NE(decodes[0].src0, 257u);
+  EXPECT_NE(decodes[1].src0, 257u);
   EXPECT_TRUE(find_vop1_for_test(cave_words, 10u, static_cast<uint8_t>(decodes[0].vdst),
                                  static_cast<uint16_t>(256u + decodes[0].vdst))
                   .has_value());
@@ -9434,6 +9445,47 @@ TEST(BinaryTranslator, Gfx1250VCvtPkF16Fp8Vop1DecodesBothBytesBeforePackingHalve
   EXPECT_TRUE(find_vop2_for_test(cave_words, 28u, 1u, static_cast<uint16_t>(256u + decodes[0].vdst),
                                  decodes[1].vdst)
                   .has_value());
+  EXPECT_NE(std::ranges::find(cave_words, kF32NaNWithF16Payload), cave_words.end());
+  EXPECT_TRUE(section_contains_vop3_opcode(translations, 257u));
+}
+
+TEST(BinaryTranslator, Gfx1250VCvtPkF32Fp8CanonicalizesNaNsAfterByteDecode) {
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kF32QuietNaN = 0x7FC00000u;
+  gfx1250::Vop1MachineInst inst{};
+  inst.vdst = 1;
+  inst.op = gfx1250::kVCvtPkF32Fp8Vop1;
+  inst.encoding = 0x3F;
+  inst.src0 = 256 + 3;
+  const std::array<uint32_t, 2> text_words = {std::bit_cast<uint32_t>(inst), kGfx1250SEndpgm};
+
+  auto image =
+      make_minimal_amdgpu_elf_with_descriptor_and_text(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  AmdGpuCodeObject co(image.data(), image.size());
+  ASSERT_TRUE(co.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  auto result = translator.translate(co);
+  ASSERT_FALSE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *translations = find_section(translated, ".rj_translations");
+  ASSERT_NE(translations, nullptr);
+  const auto cave_words = section_words_for_test(*translations);
+
+  size_t scalar_decodes = 0;
+  for (size_t i = 0; i + 1u < cave_words.size(); ++i) {
+    rdna4::Vop3MachineInst candidate{};
+    std::memcpy(&candidate, cave_words.data() + i, sizeof(candidate));
+    if (candidate.encoding == 0x35u && candidate.op == rdna4::kVCvtF32Fp8Vop3)
+      ++scalar_decodes;
+  }
+  EXPECT_EQ(scalar_decodes, 2u);
+  EXPECT_NE(std::ranges::find(cave_words, kF32QuietNaN), cave_words.end());
+  EXPECT_TRUE(section_contains_vop3_opcode(translations, rdna4::kVCndmaskB32Vop3));
 }
 
 TEST(BinaryTranslator, Gfx1250VCvtSrFp8F16LowersThroughF32StochasticConvert) {
