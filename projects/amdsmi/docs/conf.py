@@ -48,16 +48,14 @@ release = version
 
 # Theme-related settings
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {"flavor": "rocm", "use_download_button": True}
 html_title = f"AMD SMI {version}"
 html_static_path = ["static"]
 html_css_files = ["amdsmi_docs.css"]
-# Publish the curated llms.txt index at the docs site root and let
-# rocm-docs-core generate llms-full.txt after each build (the llms.txt standard,
+# Generate llms.txt and llms-full.txt after each build (the llms.txt standard,
 # https://llmstxt.org/). See the rocm-docs-core guide:
 # https://rocm.docs.amd.com/projects/rocm-docs-core/en/latest/user_guide/llms.html
-html_extra_path = ["llms.txt"]
-rocm_docs_generate_llms_full = True
+rocm_docs_generate_llms = True
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "extension"))

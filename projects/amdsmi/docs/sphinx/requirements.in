@@ -1,2 +1,2 @@
-rocm-docs-core[api_reference]==1.35.0
+rocm-docs-core[api_reference,llms]==1.36.0
 sphinxcontrib-mermaid
