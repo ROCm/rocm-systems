@@ -187,10 +187,10 @@ generate_hiprtc_mcin("${HIPRTC_GEN_MCIN}" "${HIPRTC_GEN_PREPROCESSED}")
 # be preprocessed with ASAN enabled too.
 set(HIPRTC_ASAN_OPTIONS "")
 if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
-  # The --offload-arch below is ONLY a vehicle to enable
+  # The --offload-arch below is only a vehicle to enable
   # __has_feature(address_sanitizer) during preprocessing. clang silently ignores
-  # -fsanitize=address unless the offload arch supports it (the preprocessing
-  # defaults to gfx906, which does not).
+  # -fsanitize=address unless the offload arch supports it. The preprocessing
+  # defaults to gfx906, which does not support asan.
   set(HIPRTC_ASAN_OPTIONS -fsanitize=address --offload-arch=gfx90a:xnack+)
 endif()
 
