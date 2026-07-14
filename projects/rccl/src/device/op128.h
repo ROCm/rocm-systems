@@ -50,6 +50,16 @@ inline __device__ void storeShmem128(uint64_t* shmemAsmPtr, uint64_t v0, uint64_
   *(shmemAsmPtr+1) = v1;
 }
 
+// Warp-collective async copy helpers used by the LL128 always-shmem staging mode.
+// All lanes of the warp must call together; the copy of `bytes` bytes is
+// distributed across the lanes internally. `asyncWait` blocks until all async
+// copies previously issued by the calling warp have completed and their results
+// are safe to consume.
+// NOTE: bodies are provided separately.
+inline __device__ void asyncLoadGlobalToShmem(uint64_t* shmemDst, const uint64_t* globalSrc, int bytes);
+inline __device__ void asyncStoreShmemToGlobal(uint64_t* globalDst, const uint64_t* shmemSrc, int bytes);
+inline __device__ void asyncWait();
+
 template<typename T>
 inline __device__ void loadShmemMisaligned128(T *ptr, uint64_t &v0, uint64_t &v1) {
   union {

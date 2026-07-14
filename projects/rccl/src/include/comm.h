@@ -656,6 +656,7 @@ struct ncclComm {
   int nNodes;
   int rcclUseOneSlice; // RCCL: true if this comm is using one slice per primitive
   int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap fence is disabled
+  int ll128AlwaysShmem; // RCCL: true to always stage LL128 local buffer traffic through shared memory
   int localRank;
   int localRanks;
   int maxLocalRanks;

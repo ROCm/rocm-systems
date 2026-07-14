@@ -32,6 +32,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   const bool flagThread;
   const int group;
   const int threadsPerBlock;
+  const bool alwaysShmem;
   Fan fan;
   T *userBufs[3];
   struct ncclConnInfo* recvConn = NULL;
@@ -140,7 +141,27 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for(int g=0; g < WordPerThread/2; g++) {
       ix[g] = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
     }
-    if(reinterpret_cast<uintptr_t>(src)%16 == 0) {
+    if(alwaysShmem) {
+      // Always-shmem mode: stage the smallest 16 byte aligned region subsuming
+      // the buffer into shmem via an async global->shmem copy (regardless of
+      // alignment), then read regs from shmem preserving the same pre-shuffled
+      // layout as the aligned case since Finish() will be applied regardless.
+      int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
+      uint64_t *src8 = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(src) & -uintptr_t(16));
+      uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+      asyncLoadGlobalToShmem(shm8, src8, misalignment + eltN*(int)sizeof(T));
+      asyncWait();
+      __syncwarp();
+      T *shm = (T*)shm8 + misalignment/sizeof(T);
+      #pragma unroll
+      for(int g=0; g < WordPerThread/2; g++) {
+        if(!flagThread || g%2==0) {
+          if(ix[g]*EltPer16B < eltN)
+            loadShmemMisaligned128(shm + ix[g]*EltPer16B, regs[2*g+0], regs[2*g+1]);
+        }
+      }
+    }
+    else if(reinterpret_cast<uintptr_t>(src)%16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
        * Flag threads load half as much data which gets shuffled to the even
        * registers during Finish. The point of splitting into two phases is to
@@ -203,28 +224,44 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       if (flagThread) regs[2*g-1] = regs[2*g];
     }
 
-    // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst)%16;
     uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
     constexpr int LineElems = NCCL_LL128_LINEELEMS;
     constexpr int LineSkip = 2*WARP_SIZE/LineElems;
-    #pragma unroll
-    for(int g=0; g < WordPerThread/2; g++) {
-      int ix = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
-      if (!flagThread || g%2==0) {
-        if(misalignment == 0 && (ix+1)*EltPer16B <= eltN)
-          store128((uint64_t*)(dst + ix*EltPer16B), regs[2*g+0], regs[2*g+1]);
-        else
+    if(alwaysShmem) {
+      // Always-shmem mode: write every element to shmem in the de-shuffled
+      // layout, then push the contiguous slice to global via an async
+      // shmem->global copy (regardless of alignment).
+      #pragma unroll
+      for(int g=0; g < WordPerThread/2; g++) {
+        int ix = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
+        if (!flagThread || g%2==0)
           storeShmem128(shm8+2*ix, regs[2*g+0], regs[2*g+1]);
       }
+      __syncwarp();
+      asyncStoreShmemToGlobal((uint64_t*)dst, shm8, eltN*(int)sizeof(T));
+      asyncWait();
     }
-    __syncwarp();
-    // Write rest from shmem to dst. No need to coalesce stores to 16-bytes,
-    // the hardware keeps up fine.
-    T *shm = (T*)ncclScratchForWarp(warpInBlock);
-    int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
-    for(int i=skip+wid; i < eltN; i += WARP_SIZE)
-      dst[i] = shm[i];
+    else {
+      // Write to dst if 4-byte aligned, shmem otherwise.
+      #pragma unroll
+      for(int g=0; g < WordPerThread/2; g++) {
+        int ix = g*WARP_SIZE - LineSkip*(g/2) + wid - (g%2)*(wid/(LineElems/2));
+        if (!flagThread || g%2==0) {
+          if(misalignment == 0 && (ix+1)*EltPer16B <= eltN)
+            store128((uint64_t*)(dst + ix*EltPer16B), regs[2*g+0], regs[2*g+1]);
+          else
+            storeShmem128(shm8+2*ix, regs[2*g+0], regs[2*g+1]);
+        }
+      }
+      __syncwarp();
+      // Write rest from shmem to dst. No need to coalesce stores to 16-bytes,
+      // the hardware keeps up fine.
+      T *shm = (T*)ncclScratchForWarp(warpInBlock);
+      int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
+      for(int i=skip+wid; i < eltN; i += WARP_SIZE)
+        dst[i] = shm[i];
+    }
   }
 
   #define WARP_MASK 0xffffffff
@@ -441,7 +478,8 @@ public:
     stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS/sizeof(uint64_t)),
     warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), 
     flagThread((tid % (NCCL_LL128_LINEELEMS/2)) == (NCCL_LL128_LINEELEMS/2 - 1)),
-    group(group), threadsPerBlock(blockDim.x){
+    group(group), threadsPerBlock(blockDim.x),
+    alwaysShmem(ncclShmem.comm.ll128AlwaysShmem != 0){
 #ifdef ENABLE_WARP_SPEED
     auto *channel = ncclShmem.warpComm
         ? &ncclShmem.warpChannel[warpInBlock]

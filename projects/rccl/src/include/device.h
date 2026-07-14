@@ -597,6 +597,7 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap post-peer fence is disabled (comm-global)
+  int ll128AlwaysShmem; // RCCL: true to always stage LL128 local buffer traffic through shared memory
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 

@@ -189,6 +189,10 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 // RCCL_GFX9_CHEAP_FENCE_OFF: 0 = arch-tuned, non-zero = force cheap fence off (__threadfence_system)
 RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
+// RCCL_LL128_ALWAYS_SHMEM: non-zero routes all LL128 local buffer traffic through shared memory
+// using the async global<->shmem copy helpers, regardless of alignment.
+RCCL_PARAM(Ll128AlwaysShmem, "LL128_ALWAYS_SHMEM", 0);
+
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
@@ -838,6 +842,7 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.isAllNvlink = comm->isAllNvlink;
   tmpCommAndChans.comm.p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   tmpCommAndChans.comm.gfx9CheapFenceOff = comm->gfx9CheapFenceOff;
+  tmpCommAndChans.comm.ll128AlwaysShmem = comm->ll128AlwaysShmem;
   for (int p=0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
   }
@@ -1713,6 +1718,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
   #endif
   INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm->gfx9CheapFenceOff ? "OFF" : "ON");
+  comm->ll128AlwaysShmem = rcclParamLl128AlwaysShmem() ? 1 : 0;
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
     comm->rcclUseOneSlice = nNodes == 1;
