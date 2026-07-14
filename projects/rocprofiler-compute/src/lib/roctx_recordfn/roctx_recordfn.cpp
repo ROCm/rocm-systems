@@ -149,6 +149,21 @@ void encode_marker_segment(const std::string& name, std::string& out)
     }
 }
 
+// Appends the frames to out as a '/'-separated list, using select_field to
+// render each frame's chosen field.
+template<typename SelectField>
+void append_joined_frames(const std::vector<StackEntry>& stack, std::string& out, SelectField select_field)
+{
+    bool first = true;
+    for (const auto& entry : stack)
+    {
+        if (!first)
+            out += '/';
+        select_field(entry, out);
+        first = false;
+    }
+}
+
 // Renders the stack as "marker1/.../markerN:context1/.../contextN". Marker names
 // are percent-encoded so an embedded '/' is not read as the frame separator.
 std::string build_marker_string(const std::vector<StackEntry>& stack)
@@ -167,23 +182,14 @@ std::string build_marker_string(const std::vector<StackEntry>& stack)
     std::string out;
     out.reserve(marker_len + ctx_len + 1);
 
-    bool first = true;
-    for (const auto& entry : stack)
-    {
-        if (!first)
-            out += '/';
-        encode_marker_segment(entry.marker, out);
-        first = false;
-    }
+    append_joined_frames(stack,
+                         out,
+                         [](const StackEntry& entry, std::string& dst)
+                         { encode_marker_segment(entry.marker, dst); });
     out += ':';
-    first = true;
-    for (const auto& entry : stack)
-    {
-        if (!first)
-            out += '/';
-        out += entry.context;
-        first = false;
-    }
+    append_joined_frames(stack,
+                         out,
+                         [](const StackEntry& entry, std::string& dst) { dst += entry.context; });
     return out;
 }
 
@@ -292,6 +298,28 @@ std::size_t apply_userscope_overlay()
     return pushed;
 }
 
+// Pops the ROCTX range, leaf frame, and snapshot frames recorded in
+// observer_ctx. When count_pop is true, the ROCTX pop is added to g_n_pops.
+void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool count_pop)
+{
+    if (observer_ctx.pushed_roctx_range)
+    {
+        roctxRangePop();
+        if (count_pop)
+        {
+            g_n_pops.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    if (observer_ctx.pushed_leaf && !g_stack.empty())
+    {
+        g_stack.pop_back();
+    }
+    for (std::size_t i = 0; i < observer_ctx.pushed_snapshot_frames && !g_stack.empty(); ++i)
+    {
+        g_stack.pop_back();
+    }
+}
+
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
 {
     std::unique_ptr<RoctxObserverContext> observer_ctx;
@@ -363,18 +391,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
         {
             if (observer_ctx)
             {
-                if (observer_ctx->pushed_roctx_range)
-                {
-                    roctxRangePop();
-                }
-                if (observer_ctx->pushed_leaf && !g_stack.empty())
-                {
-                    g_stack.pop_back();
-                }
-                for (std::size_t i = 0; i < observer_ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
-                {
-                    g_stack.pop_back();
-                }
+                unwind_observer_context(*observer_ctx, /*count_pop=*/false);
             }
         }
         catch (...)
@@ -394,19 +411,7 @@ void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ct
     auto* observer_ctx = static_cast<RoctxObserverContext*>(obs_ctx);
     try
     {
-        if (observer_ctx->pushed_roctx_range)
-        {
-            roctxRangePop();
-            g_n_pops.fetch_add(1, std::memory_order_relaxed);
-        }
-        if (observer_ctx->pushed_leaf && !g_stack.empty())
-        {
-            g_stack.pop_back();
-        }
-        for (std::size_t i = 0; i < observer_ctx->pushed_snapshot_frames && !g_stack.empty(); ++i)
-        {
-            g_stack.pop_back();
-        }
+        unwind_observer_context(*observer_ctx, /*count_pop=*/true);
     }
     catch (...)
     {
