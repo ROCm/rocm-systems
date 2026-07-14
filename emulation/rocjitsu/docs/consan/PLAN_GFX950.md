@@ -663,7 +663,9 @@ Full gfx950 support means:
   finite; an instruction-specific helper now implements that contract without
   changing the general saturating conversion. Focused C++ tests pass 5/5,
   generator tests pass 334/334, and the complete small-float module passes
-  22/22. The no-hook and four instrumented 209-test sweeps now resume serially.
+  22/22. The complete no-hook emulator baseline then passes 209/209 in 174.07
+  seconds (181.78 seconds including its wrapper). The four instrumented
+  209-test sweeps now continue serially.
 
 ## DAG Overview
 
