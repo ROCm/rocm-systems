@@ -144,9 +144,13 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     this->tracepool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
     this->tracepool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
     this->tracepool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
+    this->tracepool.fill_fn         = ext.hsa_amd_memory_fill_fn;
     this->tracepool.gpu_agent       = agent.get_hsa_agent();
     this->tracepool.cpu_pool_       = agent.cpu_pool();
     this->tracepool.gpu_pool_       = agent.gpu_pool();
+    // AIPROFSDK-102 phase 2 REPRO (do not merge): kernarg (host-accessible) pool
+    // backs the SQTT output buffer -> reproduces the gfx942 Mode1 reset / nil fault.
+    this->tracepool.kernarg_pool_   = agent.kernarg_pool();
 
     uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);

@@ -43,6 +43,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -274,16 +275,12 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
     control_packet_copy->populate_before();
     control_packet_copy->populate_after();
 
-    // Warmup the async copy so we dont wait too long for the flip.
+    // AIPROFSDK-102 phase 2 REPRO (do not merge): drain is a plain CPU memcpy from the
+    // host-accessible (kernarg) SQTT buffer; warm the staging pages with a memcpy.
     if(params.num_buffers > 1)
     {
         auto& buffer = queue->cpu_buffers;
-        copy_data_sync(buffer.at(0),
-                       buffer.at(1),
-                       queue->near_cpu,
-                       queue->hsa_agent,
-                       MIN_BUFFER_SIZE,
-                       nullptr);
+        std::memcpy(buffer.at(0), buffer.at(1), MIN_BUFFER_SIZE);
     }
 
     // Submit the start packets without waiting: the producer thread (multi-buffer
@@ -317,7 +314,7 @@ ThreadTracerAgent::start_thread_trace(std::shared_ptr<std::atomic<int>> _flag)
         producer_data.producer_running = worker_flag;
         producer_data.start_pkt_signal = shared_signal;
         producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = copy_data_sync;
+        producer_data.copy_data_fn     = copy_data_memcpy;
         producer_data.shared           = worker_data;
         producer_data.buffer_packet    = std::move(buffer_packet);
         producer_data.shader_engine_id = shader_engine_id;

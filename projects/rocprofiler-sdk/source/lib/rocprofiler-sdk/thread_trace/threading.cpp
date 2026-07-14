@@ -33,6 +33,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <thread>
 
 namespace rocprofiler
@@ -102,6 +103,21 @@ copy_data_sync(void*         dst,
     auto status = copy_fn(dst, dst_agent, src, src_agent, size, 0, nullptr, signal.sig);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to copy: " << status;
     signal_wait(signal.sig);
+}
+
+// AIPROFSDK-102 phase 2 REPRO (do not merge): the SQTT buffer lives in
+// host-accessible (kernarg) memory, so the CPU reads it directly. Wait for the
+// buffer-swap packet, then memcpy.
+void
+copy_data_memcpy(void*         dst,
+                 const void*   src,
+                 hsa_agent_t /*dst_agent*/,
+                 hsa_agent_t /*src_agent*/,
+                 size_t        size,
+                 hsa_signal_t* dependency)
+{
+    if(dependency) signal_wait(*dependency);
+    std::memcpy(dst, src, size);
 }
 
 // Worker thread body. One instance per slot; each owns a single slot index.

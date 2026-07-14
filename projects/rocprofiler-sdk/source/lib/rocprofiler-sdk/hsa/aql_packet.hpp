@@ -184,10 +184,17 @@ struct TraceMemoryPool
     hsa_agent_t                             gpu_agent;
     hsa_amd_memory_pool_t                   cpu_pool_;
     hsa_amd_memory_pool_t                   gpu_pool_;
+    // AIPROFSDK-102 phase 2 REPRO (do not merge): the SQTT output buffer is
+    // allocated from fine-grained, host-accessible (kernarg) memory so the CPU can
+    // read the trace directly. On gfx942 this triggers a GPU Mode1 reset under
+    // high-bandwidth detailed tracing and a (nil) memory fault for multi-GB
+    // buffers. Kept only to reproduce those failures for the KFD team.
+    hsa_amd_memory_pool_t                   kernarg_pool_ = {.handle = 0};
     decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
     decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
     decltype(hsa_amd_memory_pool_free)*     free_fn;
     decltype(hsa_memory_copy)*              api_copy_fn;
+    decltype(hsa_amd_memory_fill)*          fill_fn = nullptr;
 
     aqlprofile_handle_t handle;
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };

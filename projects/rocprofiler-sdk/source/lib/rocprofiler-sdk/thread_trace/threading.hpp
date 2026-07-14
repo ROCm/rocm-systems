@@ -46,6 +46,16 @@ copy_data_sync(void*         dst,
                size_t        size,
                hsa_signal_t* dependency);
 
+/// AIPROFSDK-102 phase 2 REPRO (do not merge): host-memory drain paired with the
+/// kernarg SQTT buffer. Waits on the buffer-swap dependency then CPU-memcpys.
+void
+copy_data_memcpy(void*         dst,
+                 const void*   src,
+                 hsa_agent_t   dst_agent,
+                 hsa_agent_t   src_agent,
+                 size_t        size,
+                 hsa_signal_t* dependency);
+
 typedef decltype(copy_data_sync) copy_data_t;
 
 /// Shared state coordinating the single producer and N worker threads.

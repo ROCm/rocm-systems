@@ -30,6 +30,7 @@
 #include <fmt/core.h>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #define CHECK_HSA(fn, message)                                                                     \
@@ -166,10 +167,23 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     }
     else
     {
+        // AIPROFSDK-102 phase 2 REPRO (do not merge): route the SQTT output buffer to
+        // fine-grained, host-accessible (kernarg) memory. On gfx942 this reproduces a
+        // GPU Mode1 reset under high-bandwidth detailed tracing, and a memory access
+        // fault on (nil) for multi-GB buffers (kernarg pool cannot back the allocation).
+        if(pool.kernarg_pool_.handle == 0) return HSA_STATUS_ERROR;
+
         // Return page aligned data to avoid cache flush overlap
         status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
+            pool.kernarg_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
+        if(status != HSA_STATUS_SUCCESS) return status;
+
         *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
+
+        status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+        if(status != HSA_STATUS_SUCCESS) return status;
+
+        if(pool.fill_fn) status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
     }
     return status;
 }
@@ -187,11 +201,14 @@ hsa_status_t
 TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
 {
     if(!data) return HSA_STATUS_ERROR;
-    auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
-    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
+    // AIPROFSDK-102 phase 2 REPRO (do not merge): host-accessible SQTT buffer, so the
+    // drain path uses a CPU memcpy instead of hsa_memory_copy.
+    if(size == 0) return HSA_STATUS_SUCCESS;
+    if(dst == nullptr || src == nullptr) return HSA_STATUS_ERROR;
 
-    return pool.api_copy_fn(dst, src, size);
+    std::memcpy(dst, src, size);
+    return HSA_STATUS_SUCCESS;
 }
 
 TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tracepool,
