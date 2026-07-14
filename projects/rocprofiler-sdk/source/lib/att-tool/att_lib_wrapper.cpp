@@ -89,7 +89,11 @@ ATTFileMgr::addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, ui
 
     auto status = rocprofiler_thread_trace_decoder_codeobj_load(
         decoder, id, load_addr, memsize, buffer.data(), buffer.size());
-    ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Unable to load codeobj: " << filepath;
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << "Unable to load codeobj: " << filepath;
+        return;
+    }
 
     codeobjs_to_delete.push_back(id);
     table->addDecoder(buffer.data(), buffer.size(), id, load_addr, memsize);

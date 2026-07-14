@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -39,6 +40,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -238,23 +240,38 @@ public:
         input_isa.resize(isa_size);
         THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa.data()));
 
-        THROW_COMGR(amd_comgr_create_disassembly_info(
-            input_isa.data(),
-            &DisassemblyInstance::memory_callback,
-            &DisassemblyInstance::inst_callback,
-            [](uint64_t, void*) {},
-            &info));
+        if(auto status = amd_comgr_create_disassembly_info(
+               input_isa.data(),
+               &DisassemblyInstance::memory_callback,
+               &DisassemblyInstance::inst_callback,
+               [](uint64_t, void*) {},
+               &info);
+           status != AMD_COMGR_STATUS_SUCCESS)
+        {
+            info = {};
+            static std::atomic<bool> warning_shown{false};
+            if(!warning_shown.exchange(true))
+            {
+                const char* reason = "";
+                amd_comgr_status_string(status, &reason);
+                std::cerr << "rocprofiler-sdk: COMGR failed to create disassembly info for "
+                          << input_isa.data() << ": " << reason
+                          << "; code object metadata will be kept without instruction disassembly\n";
+            }
+        }
 
         if(input_isa.find("gfx1250") != std::string::npos) gfxip = 1250;
     }
     ~DisassemblyInstance()
     {
-        amd_comgr_release_data(data);
-        amd_comgr_destroy_disassembly_info(info);
+        if(data.handle != 0) amd_comgr_release_data(data);
+        if(info.handle != 0) amd_comgr_destroy_disassembly_info(info);
     }
 
     std::pair<std::string, size_t> ReadInstruction(uint64_t faddr)
     {
+        if(info.handle == 0) throw std::runtime_error("No COMGR disassembly info available");
+
         uint64_t size_read;
         uint64_t addr_in_buffer = reinterpret_cast<uint64_t>(buffer.data()) + faddr;
 
