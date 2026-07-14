@@ -285,7 +285,7 @@ __device__ void QueuePairIONIC::ring_doorbell_single(uint32_t pos) {
   __atomic_store_n(&sq.dbreg[8 * __lane_id()], sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
 }
 
-__device__ void QueuePairIONIC::quiet_single() {
+__device__ __noinline__ void QueuePairIONIC::quiet_single() {
   quiet_internal_ccqe_single(sq.pos);
 }
 

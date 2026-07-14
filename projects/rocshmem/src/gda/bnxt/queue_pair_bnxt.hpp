@@ -65,26 +65,30 @@ public:
 
 public:
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                               uintptr_t raddr, uint32_t rkey, size_t size,
-                               const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__
+  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                    uintptr_t raddr, uint32_t rkey, size_t size,
+                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                                      uintptr_t raddr, uint32_t rkey, size_t size,
-                                      PostOpt<Options...> = {});
+  __device__ __noinline__
+  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                           uintptr_t raddr, uint32_t rkey, size_t size,
+                           PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t swap_add, uint64_t compare,
-                                           const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__
+  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                uint64_t swap_add, uint64_t compare,
+                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t swap_add, uint64_t compare,
-                                                  PostOpt<Options...> = {});
+  __device__ __noinline__
+  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                       uint64_t swap_add, uint64_t compare,
+                                       PostOpt<Options...> = {});
 
-  __device__ void quiet_single();
+  __device__ __noinline__ void quiet_single();
 
 private:
   __device__ void ring_doorbell(uint32_t slot_idx);
@@ -182,7 +186,7 @@ __device__ void QueuePairBNXT::write_rma_wqe(
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, typename... Options>
-__device__ void QueuePairBNXT::post_wqe_rma(
+__device__ __noinline__ void QueuePairBNXT::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   using PostOptions = PostOpt<Options...>;
@@ -221,7 +225,7 @@ __device__ void QueuePairBNXT::post_wqe_rma(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, typename... Options>
-__device__ void QueuePairBNXT::post_wqe_rma_single(
+__device__ __noinline__ void QueuePairBNXT::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
   using PostOptions = PostOpt<Options...>;
   if constexpr (PostOptions::ThreadSafe) {
@@ -314,7 +318,7 @@ __device__ uint64_t* QueuePairBNXT::write_amo_wqe(
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
+__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
@@ -361,7 +365,7 @@ __device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairBNXT::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
+__device__ __noinline__ QueuePairBNXT::amo_ret_t<Fetch> QueuePairBNXT::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare, PostOpt<Options...>) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   using PostOptions = PostOpt<Options...>;

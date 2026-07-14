@@ -218,7 +218,7 @@ __device__ void QueuePairBNXT::poll_cq_until(uint32_t requested_available_slots)
   } while (available_slots < requested_available_slots);
 }
 
-__device__ void QueuePairBNXT::quiet_single() {
+__device__ __noinline__ void QueuePairBNXT::quiet_single() {
   poll_cq_until(sq.depth);
 }
 

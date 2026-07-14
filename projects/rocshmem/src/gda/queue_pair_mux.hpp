@@ -95,26 +95,30 @@ public:
 
 public:
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                               uintptr_t raddr, uint32_t rkey, size_t size,
-                               const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__
+  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                    uintptr_t raddr, uint32_t rkey, size_t size,
+                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                                      uintptr_t raddr, uint32_t rkey, size_t size,
-                                      PostOpt<Options...> = {});
+  __device__ __forceinline__
+  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                           uintptr_t raddr, uint32_t rkey, size_t size,
+                           PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                           uint64_t swap_add, uint64_t compare,
-                                           const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__
+  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                uint64_t swap_add, uint64_t compare,
+                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                                  uint64_t swap_add, uint64_t compare,
-                                                  PostOpt<Options...> = {});
+  __device__ __forceinline__
+  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                       uint64_t swap_add, uint64_t compare,
+                                       PostOpt<Options...> = {});
 
-  __device__ void quiet_single();
+  __device__ __forceinline__ void quiet_single();
 
   /**
    * @brief Register buffer for use as local address in rocSHMEM routines
@@ -152,7 +156,7 @@ public:
    * @return LKey for addr or std::numeric_limits<uint32_t>::max() if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ uint32_t get_lkey(uintptr_t addr);
+  __device__ __forceinline__ uint32_t get_lkey(uintptr_t addr);
 
   /**
    * @brief Retrieve RKey for address.
@@ -162,7 +166,7 @@ public:
    * @return RKey for addr or std::numeric_limits<uint32_t>::max() if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ uint32_t get_rkey(uintptr_t addr);
+  __device__ __forceinline__ uint32_t get_rkey(uintptr_t addr);
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -173,7 +177,7 @@ public:
    * @return True if size bytes of data can be inlined into a WQE with OpCode Op, else false.
    */
   template <OpCode Op>
-  static __device__ constexpr bool can_inline(size_t size);
+  static __device__ __forceinline__ constexpr bool can_inline(size_t size);
 
   /**
    * @brief Convert value to Endianness of selected provider, byteswapping if necessary.
@@ -187,7 +191,7 @@ public:
   __host__ T to_provider_endianness(T val);
 
   template <typename T>
-  __device__ T to_provider_endianness(T val);
+  __device__ __forceinline__ T to_provider_endianness(T val);
 
 private:
   union QueuePairUnion {
@@ -285,7 +289,7 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
 }
 
 template <QueuePairMux::OpCode Op, typename... Options>
-__device__ void QueuePairMux::post_wqe_rma(
+__device__ __forceinline__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   switch (constmem.gda_provider) {
@@ -311,7 +315,7 @@ __device__ void QueuePairMux::post_wqe_rma(
 }
 
 template <QueuePairMux::OpCode Op, typename... Options>
-__device__ void QueuePairMux::post_wqe_rma_single(
+__device__ __forceinline__ void QueuePairMux::post_wqe_rma_single(
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
     PostOpt<Options...> options) {
   switch (constmem.gda_provider) {
@@ -337,7 +341,7 @@ __device__ void QueuePairMux::post_wqe_rma_single(
 }
 
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
+__device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
@@ -364,7 +368,7 @@ __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
 }
 
 template <QueuePairMux::OpCode Op, AMOFetchType Fetch, typename... Options>
-__device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
+__device__ __forceinline__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
     uintptr_t raddr, uint32_t rkey, uint64_t swap_add, uint64_t compare,
     PostOpt<Options...> options) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
@@ -390,8 +394,68 @@ __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
   }
 }
 
+__device__ __forceinline__ void QueuePairMux::quiet_single() {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.quiet_single();
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.quiet_single();
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.quiet_single();
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
+__device__ __forceinline__ uint32_t QueuePairMux::get_lkey(uintptr_t addr) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.get_lkey(addr);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.get_lkey(addr);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.get_lkey(addr);
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
+__device__ __forceinline__ uint32_t QueuePairMux::get_rkey(uintptr_t addr) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.get_rkey(addr);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.get_rkey(addr);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.get_rkey(addr);
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
 template <QueuePairMux::OpCode Op>
-__device__ constexpr bool QueuePairMux::can_inline(size_t size) {
+__device__ __forceinline__ constexpr bool QueuePairMux::can_inline(size_t size) {
   /*
    * We don't know which GDA provider will be selected at runtime,
    * so we define QueuePairTraits<QueuePairMux>::InlineThreshold
@@ -465,7 +529,7 @@ __host__ T QueuePairMux::to_provider_endianness(T val) {
 }
 
 template <typename T>
-__device__ T QueuePairMux::to_provider_endianness(T val) {
+__device__ __forceinline__ T QueuePairMux::to_provider_endianness(T val) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
