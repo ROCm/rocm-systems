@@ -28,7 +28,6 @@
 #include <fstream>
 #include <cstring>
 #include <cstdio>
-#include <cstdlib>
 #include <stdexcept>
 #include <cctype>
 
@@ -118,7 +117,7 @@ static const std::string getBusId(int deviceId) {
 }
 
 SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
-                     const hsa_agent_t& localAgent, uint32_t engineId, uint32_t maxCopyChunkBytes)
+                     const hsa_agent_t& localAgent, uint32_t engineId)
     : remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
@@ -172,7 +171,6 @@ SdmaQueue::SdmaQueue([[maybe_unused]] int localDeviceId, int remoteDeviceId,
       .committedWptr = committedWptr_,
       .cachedHwReadIndex = (uint64_t)*(queue_.Queue_read_ptr_aql),
       .maxWritePtr = (uint64_t)*(queue_.Queue_write_ptr_aql),
-      .maxCopyChunkBytes = maxCopyChunkBytes,
   };
 
   ANVIL_CHECK_HIP_ERROR(
@@ -359,26 +357,6 @@ hsa_agent_t AnvilLib::getHipGpuAgent(int hipDeviceId) const {
   return gpuAgentsByHipDev_[static_cast<size_t>(hipDeviceId)];
 }
 
-void AnvilLib::initSdmaMaxCopyChunkBytes() {
-  static constexpr uint32_t kDefaultXgmiChunkBytes = 4096;
-  const char* envNames[] = {"NCCL_GIN_ANVIL_SDMA_MAX_COPY_CHUNK", "ANVIL_SDMA_MAX_COPY_CHUNK"};
-  for (const char* name : envNames) {
-    const char* e = std::getenv(name);
-    if (!e || !e[0]) continue;
-    char* end = nullptr;
-    const unsigned long v = std::strtoul(e, &end, 10);
-    if (end == e) continue;
-    sdmaMaxCopyChunkBytes_ = static_cast<uint32_t>(v);
-    LOG_TRACE("anvil: SDMA max copy chunk %u bytes (from %s)", sdmaMaxCopyChunkBytes_, name);
-    return;
-  }
-  sdmaMaxCopyChunkBytes_ = numSdmaXgmiEngines_ > 0 ? kDefaultXgmiChunkBytes : 0;
-  if (sdmaMaxCopyChunkBytes_ > 0) {
-    LOG_TRACE("anvil: SDMA max copy chunk %u bytes (default for xGMI engines)",
-              sdmaMaxCopyChunkBytes_);
-  }
-}
-
 void AnvilLib::querySdmaEngineCounts() {
   hsa_agent_t agent{};
   for (const hsa_agent_t& hipAgent : gpuAgentsByHipDev_) {
@@ -429,7 +407,6 @@ void AnvilLib::init() {
 
     buildGpuAgentMap();
     querySdmaEngineCounts();
-    initSdmaMaxCopyChunkBytes();
 
     SetUpKFD();
     s_kfd_opened = true;
@@ -440,8 +417,7 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
                                      int* channelIdx) {
   auto& vec = sdma_channels_[dstDeviceId];
   vec.emplace_back(std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId,
-                                               getHipGpuAgent(srcDeviceId), engineId,
-                                               sdmaMaxCopyChunkBytes_));
+                                               getHipGpuAgent(srcDeviceId), engineId));
   if (channelIdx != nullptr) {
     *channelIdx = static_cast<int>(vec.size() - 1);
   }
