@@ -180,11 +180,10 @@ getCachedBackends()
     return backends;
 }
 
-ssize_t
-hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
-try {
-    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+static shared_ptr<Backend>
+selectBackend(const vector<shared_ptr<Backend>> &backends, const shared_ptr<IFile> &file,
+              const shared_ptr<IBuffer> &buffer, size_t size, hoff_t file_offset, hoff_t buffer_offset)
+{
     int                      score{-1};
     std::shared_ptr<Backend> backend{};
 
@@ -204,6 +203,17 @@ try {
             throw std::runtime_error("All backends refused IO request");
         }
     }
+
+    return backend;
+}
+
+ssize_t
+hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
+          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+try {
+    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+
+    std::shared_ptr<Backend> backend{selectBackend(backends, file, buffer, size, file_offset, buffer_offset)};
 
     return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
@@ -455,7 +465,8 @@ catch (...) {
 
 static hipFileError_t
 hipFileIOAsync(IoType io_type, hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *file_offset_p,
-               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream)
+               hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, hipStream_t hipStream,
+               const vector<shared_ptr<Backend>> &backends)
 try {
     if (Context<DriverState>::get()->getRefCount() == 0) {
         ensureDriverInit();
@@ -466,8 +477,12 @@ try {
 
     auto [file, buffer, stream] =
         Context<DriverState>::get()->getFileBufferAndStream(fh, buffer_base, hipStream);
-    Fallback().async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
-                        stream);
+
+    std::shared_ptr<Backend> backend{
+        selectBackend(backends, file, buffer, *size_p, *file_offset_p, *buffer_offset_p)};
+
+    backend->async_io(io_type, file, buffer, size_p, file_offset_p, buffer_offset_p, bytes_transferred_p,
+                      stream);
 
     return {hipFileSuccess, hipSuccess};
 }
@@ -493,7 +508,7 @@ hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t *
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Read, fh, buffer_base, size_p, file_offset_p, buffer_offset_p, bytes_read_p,
-                          stream);
+                          stream, getCachedBackends());
 }
 catch (...) {
     return handle_exception();
@@ -505,7 +520,7 @@ hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *size_p, hoff_t 
 try {
     hipFileInit();
     return hipFileIOAsync(IoType::Write, fh, buffer_base, size_p, file_offset_p, buffer_offset_p,
-                          bytes_written_p, stream);
+                          bytes_written_p, stream, getCachedBackends());
 }
 catch (...) {
     return handle_exception();
