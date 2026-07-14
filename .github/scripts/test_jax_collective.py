@@ -3,7 +3,7 @@
 
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
-  2. Verifying that LD_LIBRARY_PATH overrides JAX's bundled RCCL
+  2. Prepending its directory to LD_LIBRARY_PATH so JAX loads it
   3. Cloning the matching JAX test sources (sparse checkout)
   4. Running pytest on pmap_test.py and shard_map_test.py
 
@@ -46,6 +46,7 @@ XLA_ENV = {
     "XLA_FLAGS": (
         "--xla_gpu_force_compilation_parallelism=1 "
         "--xla_gpu_enable_nccl_comm_splitting=false "
+        # Empty value disables all command buffer types (HIP graphs) on ROCm.
         "--xla_gpu_enable_command_buffer= "
         "--xla_gpu_enable_cublaslt=false"
     ),

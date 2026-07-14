@@ -76,6 +76,9 @@ jobs:
 
       - name: Install JAX and test dependencies
         timeout-minutes: 15
+        # Intentionally installs latest nightly wheels against pinned test sources.
+        # The 10 smoke tests use stable pmap/shard_map APIs that are compatible
+        # across JAX versions. This lets us catch RCCL regressions with current JAX.
         run: |
           uv pip install --prerelease=allow \
             jax-rocm7-plugin jax-rocm7-pjrt jax \
