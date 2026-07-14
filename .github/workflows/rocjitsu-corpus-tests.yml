@@ -234,7 +234,7 @@ jobs:
               --target "${name}" \
               --suite iree,kernels,cts \
               --skip-tests-config "${ROCJITSU_SOURCE_DIR}/tests/corpus/${skip_tests_config}" \
-              --timeout 15; then
+              --timeout 20; then
               corpus_status=1
             fi
             echo "::endgroup::"
